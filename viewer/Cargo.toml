@@ -10,4 +10,8 @@ description.workspace = true
 
 [dependencies]
 ssplayer-wgpu = { path = "../core" }
-winit = "0.31.0-beta.2"
+ssruntime = { workspace = true }
+winit = "0.30.5"
+wgpu = "29.0.3"
+image = "0.25.10"
+pollster = "0.4.0"
