@@ -752,7 +752,7 @@ impl SSInternalPlayer {
             device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
                 label: Some(label),
                 layout: Some(&pipeline_layout),
-                vertex: wgpu::VertexState { module: &shader, entry_point: Some("vs_main"), buffers: &[Vertex::desc()], compilation_options: Default::default() },
+                vertex: wgpu::VertexState { module: &shader, entry_point: Some("vs_main"), buffers: &[Some(Vertex::desc())], compilation_options: Default::default() },
                 fragment: Some(wgpu::FragmentState { module: &shader, entry_point: Some(entry), targets: &[Some(wgpu::ColorTargetState { format: config.color_format, blend, write_mask })], compilation_options: Default::default() }),
                 primitive: wgpu::PrimitiveState {
                     topology: wgpu::PrimitiveTopology::TriangleList,
@@ -1127,7 +1127,7 @@ impl SSInternalPlayer {
         let pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
             label: Some("SpriteStudio SS Pipeline"),
             layout: Some(&self.ss_pipeline_layout),
-            vertex: wgpu::VertexState { module: &self.ss_shader_module, entry_point: Some("vs_main"), buffers: &[Vertex::desc()], compilation_options: Default::default() },
+            vertex: wgpu::VertexState { module: &self.ss_shader_module, entry_point: Some("vs_main"), buffers: &[Some(Vertex::desc())], compilation_options: Default::default() },
             fragment: Some(wgpu::FragmentState {
                 module: &self.ss_shader_module,
                 entry_point: Some(entry),

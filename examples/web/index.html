@@ -1,0 +1,53 @@
+<!doctype html>
+<html lang="ja">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>ssplayer-wgpu — WebGPU demo</title>
+  <style>
+    :root { color-scheme: light dark; }
+    body { font: 15px/1.6 system-ui, sans-serif; margin: 0; padding: 2rem; max-width: 720px; margin-inline: auto; }
+    h1 { font-size: 1.3rem; }
+    .stage { width: 360px; height: 360px; max-width: 100%; margin: 1rem 0; border: 1px solid color-mix(in srgb, currentColor 20%, transparent); border-radius: 8px; background:
+      repeating-conic-gradient(#8883 0% 25%, transparent 0% 50%) 50% / 24px 24px; }
+    label { font-weight: 600; }
+    select { font: inherit; padding: 0.3em 0.5em; }
+    code { background: color-mix(in srgb, currentColor 12%, transparent); padding: 0.1em 0.4em; border-radius: 4px; }
+    .hint { opacity: 0.7; font-size: 0.9em; }
+  </style>
+</head>
+<body>
+  <h1>ssplayer-wgpu — WebGPU demo</h1>
+  <p>SpriteStudio 7 の <code>.ssab</code>（テクスチャ埋め込み）を <strong>WebGPU</strong> で再生します。
+     ホストからのテクスチャ供給は不要（埋め込みをプレイヤーがデコード）。</p>
+
+  <p>
+    <label for="pick">アニメーション:</label>
+    <select id="pick"></select>
+    <span class="hint">— 横スクロール無しの単体パックのみ</span>
+  </p>
+
+  <!-- The custom element creates its own <canvas> and drives requestAnimationFrame. -->
+  <ss-player-webgpu id="player" class="stage" src="assets/Basic.ssab"></ss-player-webgpu>
+
+  <p class="hint">
+    WebGPU 対応ブラウザ（Chrome / Edge 113+ など）＋ <code>http://localhost</code> 配信が必要です。
+    ビルド: <code>./build.sh</code> → <code>python3 -m http.server</code> で本ディレクトリを配信。
+  </p>
+
+  <script type="module">
+    import './ss-player-webgpu.js';
+
+    // Standalone single-pack animations from tests/overall (no external instance refs).
+    const PACKS = ['Basic', 'PartsColor', 'BlendMode', 'Mask', 'Shape', 'Mesh', 'Effect', 'Shader'];
+    const pick = document.getElementById('pick');
+    const player = document.getElementById('player');
+    for (const p of PACKS) {
+      const o = document.createElement('option');
+      o.value = p; o.textContent = p;
+      pick.appendChild(o);
+    }
+    pick.addEventListener('change', () => player.loadSrc(`assets/${pick.value}.ssab`));
+  </script>
+</body>
+</html>

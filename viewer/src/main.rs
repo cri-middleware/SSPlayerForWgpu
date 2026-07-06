@@ -113,7 +113,7 @@ impl AppState {
         }
 
         self.queue.submit(std::iter::once(encoder.finish()));
-        output.present();
+        self.queue.present(output);
 
         Ok(())
     }
@@ -188,7 +188,8 @@ impl ApplicationHandler for App {
         let surface = instance.create_surface(window.clone()).expect("Failed to create surface");
 
         // Keep compatible_surface: None to prevent an AppKit deadlock on macOS.
-        let adapter = pollster::block_on(instance.request_adapter(&wgpu::RequestAdapterOptions { power_preference: wgpu::PowerPreference::default(), compatible_surface: None, force_fallback_adapter: false })).expect("Failed to request adapter");
+        let adapter = pollster::block_on(instance.request_adapter(&wgpu::RequestAdapterOptions { power_preference: wgpu::PowerPreference::default(), compatible_surface: None, force_fallback_adapter: false, apply_limit_buckets: false }))
+            .expect("Failed to request adapter");
         println!("[DIAG] Adapter: {:?}", adapter.get_info().name);
 
         let (device, queue) =
@@ -206,6 +207,7 @@ impl ApplicationHandler for App {
             height: size.height.max(1),
             present_mode: wgpu::PresentMode::Fifo,
             alpha_mode: capabilities.alpha_modes[0],
+            color_space: wgpu::SurfaceColorSpace::default(),
             view_formats: vec![],
             desired_maximum_frame_latency: 2,
         };

@@ -10,8 +10,12 @@ mod frame;
 mod internal;
 mod mask;
 mod player;
+#[cfg(feature = "web")]
+mod web;
 
 pub use frame::FrameView;
 pub use internal::{BatchInfo, IDENTITY_TRANSFORM, RendererConfig, SSInternalPlayer, Vertex};
 pub use mask::{GeomKind, MaskOp, MaskWriter, PartMaskFlags, StencilTest, plan_writers};
 pub use player::{SSPlayer, SSPlayerConfig};
+#[cfg(feature = "web")]
+pub use web::SsPlayerWeb;

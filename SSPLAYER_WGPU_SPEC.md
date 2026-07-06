@@ -18,7 +18,7 @@
 - **提供3面（ssruntime と同型）**: `rs`(rlib) / `js`(wasm-bindgen・`<ss-player>`互換) / `ffi`(cbindgen・DX12/Vulkan/Metal)。
 - **データ所有契約**: `.ssab` は Player 所有→ssruntime へ borrow ／ FrameData・SoA は ssruntime 所有→Player が borrow（§1.1）。
 - **ssab は embedded / reference 両対応**（テクスチャ埋め込み／外部参照）。
-- **進捗**: **P0**（3層リファクタ＋借用モデル）✅ ／ **P4**（インスタンス §7.1・エフェクト §7.2）✅ ／ **P3**（マスク・Shape）✅ ／ **P2**（色パリティ: varg・全12ブレンド・premul 厳密化）✅ ／ **P6**（統合シェーダ ss_shader 全13種）✅。対応バッチ = Normal / Mesh / Shape / Instance / Effect / Mask。次は P1（WebGPU/js）/ P5（ネイティブ ffi）。詳細は §12。
+- **進捗**: **P0**（3層リファクタ＋借用モデル）✅ ／ **P4**（インスタンス §7.1・エフェクト §7.2）✅ ／ **P3**（マスク・Shape）✅ ／ **P2**（色パリティ: varg・全12ブレンド・premul 厳密化）✅ ／ **P6**（統合シェーダ ss_shader 全13種）✅ ／ **P1**（ssab embedded/reference 両対応・**WebGPU/js**）✅ ブラウザ実機確認済。対応バッチ = Normal / Mesh / Shape / Instance / Effect / Mask。次は P5（ネイティブ ffi）。wgpu 30。詳細は §12。
 
 ---
 
@@ -489,7 +489,7 @@ void        ss_player_resize(ss_player_t, uint32_t w, uint32_t h);
 | Phase | 内容 | 完了条件 |
 |---|---|---|
 | **P0（初手）3層リファクタ＋借用モデル Rust API** ✅ | 現 `core`（Player/Renderer）を単一クレート内の `internal`(SSInternalPlayer) / `player`(SSPlayer) モジュールへ再編。**SSPlayer を借用モデル（`&Device`/`&Queue` を借りる §9）に確定**。データ所有契約（§1.1）を配線。viewer が wgpu 一式を所有し SSPlayer を駆動 | 現状の描画（Normal/Mesh/4blend）が3層＋借用モデルで従来通り動く。**これが ① rs 面の土台**（完了） |
-| P1 ssab 両対応 + WebGPU（② js） | **ssab の embedded/reference 両ロード（§8.1）✅ 実装済**（`feature embedded`＋`pending_textures`、ヘッドレスで reference と一致検証）。残り: `core` に `web` feature（wasm-bindgen）、`examples/web` で `<ss-player>` 互換 Web Component、canvas 表示 | embedded ssab がブラウザで WebGPU 描画される |
+| **P1 ssab 両対応 + WebGPU（② js）** ✅ | **ssab embedded/reference 両ロード（§8.1）** ＋ **WebGPU/js**：`core` の `web` feature（wasm-bindgen、`core/src/web.rs` の `SsPlayerWeb` が canvas から wgpu を所有し借用モデル SSPlayer を駆動）、`examples/web` の `<ss-player-webgpu>` カスタム要素＋build.sh。別 crate は作らず単一クレート。**wasm ビルド要件**: `web` feature が `ssruntime/std` を有効化（cargo は依存の全 crate-type を build するため、ssruntime の no_std cdylib/staticlib が wasm でアロケータ/パニック不足になる。std ならその衝突が消える。`ssruntime/panic-handler` は core の std と `panic_impl` 重複で不可）。release wasm-opt 用に `[package.metadata.wasm-pack.profile.release]` の SIMD 等フラグを core にも付与 | **ブラウザ実機で WebGPU 描画確認済**（release wasm 537KB） |
 | **P2 描画パリティ①** ✅ | varg 追加（PartColor blend 由来）、BlendType 全12種のパイプラインマトリクス、premul 厳密化（upload premul ＋ 逆/再premul シェーダ ＋ premul ブレンド係数） | PartsColor / BlendMode / Basic / Effect を PNG 目視で確認。既存フィクスチャのピクセル数は不変。WebGL 版と色・ブレンド一致 |
 | **P3 マスク** ✅ | stencil 付きターゲット（config opt-in）、MaskPlanner 移植（`core/src/mask.rs`）、write/test パイプライン、pure マスク色スキップ、インスタンス継承、**Shape 幾何のマスク writer ＋ Shape content 描画**、白フォールバック初期化（§6） | マスク/Shape アニメが描画（Mask.ssab / Shape.ssab をヘッドレス GPU readback ＋ 実機で確認） |
 | **P4 エフェクト/インスタンス** ✅ | **P0 の次に先行実施**。①内部を `begin_frame`/`append_batch`/`append_effect`/`end_frame` の累積 API＋transform へ（Stage 1）②インスタンス木＝子ごと独立 Context（Stage 2, §7.1）③エフェクト＝EffectSlot/EffectDrawPlan（Stage 3, §7.2） | エフェクト/インスタンスが描画される（実機確認済） |

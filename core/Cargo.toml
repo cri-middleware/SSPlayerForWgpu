@@ -8,19 +8,53 @@ repository.workspace = true
 homepage.workspace = true
 description.workspace = true
 
+# cdylib for the WebGPU/WASM target (wasm-bindgen); rlib for the viewer/tests.
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+# Enable exactly the wasm features rustc emits (`+simd128` from `.cargo/config.toml`
+# plus its wasm32 defaults) so release `wasm-opt` validation passes. Do NOT use
+# `--all-features`: on newer wasm-opt it enables experimental *output* proposals
+# that browsers reject at instantiation. Mirrors libs/ssruntime/Cargo.toml.
+[package.metadata.wasm-pack.profile.release]
+wasm-opt = [
+    "-Oz",
+    "--enable-simd",
+    "--enable-bulk-memory",
+    "--enable-mutable-globals",
+    "--enable-sign-ext",
+    "--enable-nontrapping-float-to-int",
+    "--enable-multivalue",
+    "--enable-reference-types",
+]
+
 [features]
 default = ["embedded"]
 # Decode embedded-mode ssab textures (PNG atlases) inside the player via the
 # `image` crate (SPEC §8.1). Turn off for lean WASM builds that decode textures
 # host-side (e.g. the browser's `createImageBitmap`) and supply them by hash.
 embedded = ["dep:image"]
+# WebGPU / JS bindings (SPEC §12 P1, the "js" face): a wasm-bindgen wrapper that
+# owns wgpu created from an HTML canvas and drives the borrow-model SSPlayer.
+# Pulls `embedded` so a single self-contained .ssab renders with no host texture
+# supply. Build with `--target wasm32-unknown-unknown` + wasm-bindgen.
+# `ssruntime/std` makes the runtime use std on wasm so the standard allocator +
+# panic handler satisfy its cdylib/staticlib artifacts (cargo builds every
+# crate-type of a dep). core already uses std for wgpu, so there is no conflict —
+# unlike `ssruntime/panic-handler`, which would duplicate std's `panic_impl`.
+web = ["dep:wasm-bindgen", "dep:wasm-bindgen-futures", "dep:js-sys", "dep:web-sys", "dep:console_error_panic_hook", "wasm-bindgen/std", "embedded", "ssruntime/std"]
 
 [dependencies]
-wgpu = "29.0.3"
+wgpu = { workspace = true }
 ssruntime = { workspace = true }
 ssab = { workspace = true }
 bytemuck = { version = "1.25.0", features = ["derive"] }
 image = { version = "0.25.10", optional = true, default-features = false, features = ["png"] }
+wasm-bindgen = { workspace = true, optional = true }
+wasm-bindgen-futures = { workspace = true, optional = true }
+js-sys = { workspace = true, optional = true }
+web-sys = { workspace = true, optional = true, features = ["HtmlCanvasElement", "Window", "Document"] }
+console_error_panic_hook = { workspace = true, optional = true }
 
 [dev-dependencies]
 pollster = "0.4.0"
