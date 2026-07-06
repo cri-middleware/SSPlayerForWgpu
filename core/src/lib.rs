@@ -8,8 +8,10 @@
 
 mod frame;
 mod internal;
+mod mask;
 mod player;
 
 pub use frame::FrameView;
 pub use internal::{BatchInfo, IDENTITY_TRANSFORM, RendererConfig, SSInternalPlayer, Vertex};
+pub use mask::{GeomKind, MaskOp, MaskWriter, PartMaskFlags, StencilTest, plan_writers};
 pub use player::{SSPlayer, SSPlayerConfig};

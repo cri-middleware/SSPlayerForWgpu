@@ -225,8 +225,8 @@ FlatBuffers 側から読む: `draw_order`（`[ushort]` parts インデックス�
 | `Mesh` | スキニング済みメッシュ | ✅ 実装済 | — |
 | `Instance` | サブアニメのインスタンススロット | ✅ 実装済（§7.1） | — |
 | `Effect` | パーティクル矩形（`EffectDrawPlan`） | ✅ 実装済（§7.2） | — |
-| `Shape` | 手続き的シェイプ（テクスチャ無し、shape_* SoA） | ❌ | 中 |
-| `Mask` | ステンシル書き込み専用（色出力なし） | ❌ | 高 |
+| `Shape` | 手続き的シェイプ（テクスチャ無し、shape_* SoA） | ✅ 実装済（三角形ファン＋PartColor bilinear、白フォールバック） | — |
+| `Mask` | ステンシル書き込み専用（色出力なし） | ✅ 実装済（§6） | — |
 | `Text` | ビットマップフォントグリフ | ❌ | 低（旧版も未実装） |
 | `Nines` | 9パッチ | ❌ | 低（旧版も未実装） |
 
@@ -302,17 +302,20 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
 
 ---
 
-## §6 マスク（ステンシル）
+## §6 マスク（ステンシル）✅ 実装済（`core/src/mask.rs` ＋ `internal.rs`/`player.rs`）
 
-- **`MaskPlanner`（WebGL 版 core・エンジン非依存）の rank 昇順スコープ replay ロジックを Rust に移植**（`core/src/` の mask モジュール）。ライタごとに rank / OP(INCR|INVERT) / cutout閾値 / clipping フラグを持つ。
-- **wgpu では stencil op もパイプラインに焼く**：write 用（INCR/INVERT/DECR）と test 用（NOTEQUAL/EQUAL, `stencilMask=0`）で別パイプライン。`stencilReference` のみ `set_stencil_reference` で動的。
+- **`MaskPlanner`（WebGL 版 core・エンジン非依存）の rank 昇順スコープ replay ロジックを Rust に移植**（`core/src/mask.rs`：`plan_writers`/`MaskWriter`/`PartMaskFlags`/`StencilTest`/`MaskOp`）。ライタごとに rank / OP(INCR|INVERT) / cutout閾値 / clipping フラグを持つ。**ライタの texture は所属 DrawBatch から取る**（pure Mask batch は `tex=0`→閾値 -1＝カットアウト無しで全ジオメトリ、clipping は content の実 texture）。
+- **wgpu では stencil op もパイプラインに焼く**：write 用（IncrementClamp/DecrementClamp/Invert）と test 用（NotEqual/Equal, `stencil write_mask=0`）で別パイプライン。ステンシル ref は常に 0（ops/compare をパイプラインに焼くため動的変更不要）。content パイプラインは `blend×stencil_test(None/Inside/Outside)` のマトリクス、カットアウト閾値は mask-write 頂点の `color[0]` に載せ `fs_mask` が discard。
 - 手順（`40_components/40_mask.ja.md` 準拠）:
-  1. pure マスクを事前書き込み（コンテンツ描画前に全ステンシル書き込み、colorMask off）。
-  2. コンテンツを rank 昇順で描画しつつ、`syncMasksTo(rank)` で clipping ライタ追加 / pure ライタ除去。
-  3. マスク対象は polarity 判定（`visibleInsideMask` flag 0x01 → `NOTEQUAL,0` / それ以外 `EQUAL,0`）。**polarity がバッチ内で変わるためパーツ毎描画（バッチ化しない）**。
-- インスタンス子の再帰前に stencilTest を立てておけば子アニメ全体がクリップされる（screen-space）。
-- **サーフェス/描画ターゲットに stencil 付きデプスバッファを確保する**必要がある（現プロトは `depth_stencil: None`。マスク実装時に `Depth24PlusStencil8` 等を追加）。
-- 既知の限界: INCR と INVERT 混在の重なりマスクは単一ステンシル値で近似（厳密解は coverage-bitmap 方式）。
+  1. pure マスクを事前書き込み（コンテンツ描画前に全ステンシル書き込み、`ColorWrites::empty()`）。
+  2. コンテンツを rank 昇順で描画しつつ、`sync_masks_to(rank)` で clipping ライタ追加 / pure ライタ除去。
+  3. マスク対象は polarity 判定（`visible_inside_mask` → `NotEqual,0`(内側) / `Equal,0`(外側)）。**polarity がバッチ内で変わるためパーツ毎描画（バッチ化しない）**。
+  4. **pure マスク（`PartTypeMask`/`draw_as_mask`）は色を描かない**：runtime は pure マスクにも content batch を発行するので、`render_node` で `pure_mask()` パーツの描画をスキップ（§3-3）。
+- **インスタンス継承**（§7.1 木の再帰に `inherited_stencil` を伝播）：被マスク対象がインスタンスなら子アニメ全体を親ステンシルでクリップ（screen-space・単段、`40_mask.ja.md §3-2-2`）。
+- **サーフェス/描画ターゲットに stencil 付きデプスバッファを確保する**必要がある。`SSPlayerConfig.stencil_format: Option<TextureFormat>` で opt-in（viewer は `Depth24PlusStencil8` を確保し render pass に attach、`None` なら従来どおりマスク無効で回帰なし）。
+- **白フォールバックテクスチャは必ず白で初期化**：1x1 テクスチャは `create_texture` だけでは透明黒（ゼロ初期化）で、Shape/テクスチャ欠落 content が `tex*color=0` で不可視になる。`new()` は借用モデルで queue を持たないため、`end_frame` 初回に `queue.write_texture([255;4])` で遅延初期化（`white_ready` フラグ）。
+- 既知の限界: INCR と INVERT 混在の重なりマスクは単一ステンシル値で近似（厳密解は coverage-bitmap 方式）。子アニメ内部定義のマスクは非適用（WebGL 版と同一）。エフェクト被マスクは content パイプライン流用で対応済。
+- 検証: `core/tests/mask.rs`（planner probe、Mask.ssab の writer/Shape-mask 分類）＋ `core/tests/render.rs`（ヘッドレス GPU offscreen readback：masking on/off の差分・Shape content の描画量で回帰検出）。
 
 ---
 
@@ -353,7 +356,7 @@ Godot / Unity のネイティブプレイヤー実績と C-API 契約から、�
 - **hash → `{texture, width, height}`** の Map（`core/src/internal.rs`）。textureHash は atlas 識別子（fnv1a）。
 - **premultiply を必ず適用**（SS 必須）。ネイティブは RGBA デコード後に自前で premul、または premul 済みテクスチャを供給。ブラウザは `UNPACK_PREMULTIPLY_ALPHA` 相当をアップロード経路で担保。
 - フィルタ/wrap: `ClampToEdge`（NPOT 対応）＋ `Linear`、mipmap なし。
-- **texture_hash 0 / 未ロード → 1x1 白テクスチャ**にフォールバック（純カラー Shape 対応）。
+- **texture_hash 0 / 未ロード → 1x1 白テクスチャ**にフォールバック（Shape content・純カラー対応）。**この白テクスチャは必ず白(255,255,255,255)で初期化すること**（`create_texture` だけだと透明黒で `tex*color=0` になり Shape が不可視）。`new()` は queue を持たないため `end_frame` 初回に `write_texture` で遅延初期化（§6）。
 
 ### 8.1 ssab の2形態に両対応（embedded / reference）
 
@@ -485,10 +488,10 @@ void        ss_player_resize(ss_player_t, uint32_t w, uint32_t h);
 | **P0（初手）3層リファクタ＋借用モデル Rust API** ✅ | 現 `core`（Player/Renderer）を単一クレート内の `internal`(SSInternalPlayer) / `player`(SSPlayer) モジュールへ再編。**SSPlayer を借用モデル（`&Device`/`&Queue` を借りる §9）に確定**。データ所有契約（§1.1）を配線。viewer が wgpu 一式を所有し SSPlayer を駆動 | 現状の描画（Normal/Mesh/4blend）が3層＋借用モデルで従来通り動く。**これが ① rs 面の土台**（完了） |
 | P1 ssab 両対応 + WebGPU（② js） | ssab の embedded/reference 両ロード（§8.1）。`core` に `web` feature（wasm-bindgen）。`examples/web` で `<ss-player>` 互換 Web Component、canvas 表示 | embedded ssab がブラウザで WebGPU 描画される |
 | P2 描画パリティ① | varg 追加（カラーブレンド率）、BlendType 全12種のパイプラインマトリクス、premul 厳密化 | WebGL 版と色・ブレンドが一致 |
-| P3 マスク | stencil 付きターゲット、MaskPlanner 移植、write/test パイプライン | マスクアニメが WebGL 版と一致 |
+| **P3 マスク** ✅ | stencil 付きターゲット（config opt-in）、MaskPlanner 移植（`core/src/mask.rs`）、write/test パイプライン、pure マスク色スキップ、インスタンス継承、**Shape 幾何のマスク writer ＋ Shape content 描画**、白フォールバック初期化（§6） | マスク/Shape アニメが描画（Mask.ssab / Shape.ssab をヘッドレス GPU readback ＋ 実機で確認） |
 | **P4 エフェクト/インスタンス** ✅ | **P0 の次に先行実施**。①内部を `begin_frame`/`append_batch`/`append_effect`/`end_frame` の累積 API＋transform へ（Stage 1）②インスタンス木＝子ごと独立 Context（Stage 2, §7.1）③エフェクト＝EffectSlot/EffectDrawPlan（Stage 3, §7.2） | エフェクト/インスタンスが描画される（実機確認済） |
 | P5 ネイティブ C-API + C++ viewer（③ ffi） | `core` の `ffi` feature ＋ cbindgen、`examples/viewer-dx12-cpp`・`viewer-metal-cpp` | DX12/Metal 実機で同一ライブラリが描画 |
-| P6 Shape / 追加ブレンド / 統合シェーダ13種 | 残バッチ種別 | フル機能パリティ |
+| P6 追加ブレンド / 統合シェーダ13種 | 残バッチ種別（Shape は P3 で対応済。BlendType 全12種・varg・ss_shader が残り） | フル機能パリティ |
 | （任意）Bevy アダプタ | `ssplayer-wgpu-bevy`（借用モデルの一利用例）。コアに依存を入れず別立て | Bevy の render graph で SSPlayer が描画 |
 | （後回し）Text / Nines | 旧版も未実装 | 必要時 |
 
@@ -500,6 +503,7 @@ void        ss_player_resize(ss_player_t, uint32_t w, uint32_t h);
 |---|---|
 | Rust 描画（開発） | `viewer/`（winit+wgpu、`tests/overall/overall/` 再生。横=ssab切替/縦=アニメ切替） |
 | インスタンス/エフェクト（ヘッドレス） | `core/tests/instance.rs`（probe。frame 推移・quad 生成を GUI 抜きで確認） |
+| マスク/Shape（ヘッドレス） | `core/tests/mask.rs`（planner probe：writer 分類・Shape-mask）＋ `core/tests/render.rs`（GPU offscreen readback：masking on/off 差分・Shape content 描画量。adapter 無ければ skip。PNG 保存で目視も可） |
 | WebGPU（主） | `examples/web/`（ブラウザで `<ss-player-webgpu>`）。初回起動計測（取得→wasm初期化→初フレーム ms） |
 | DX12（副） | `examples/viewer-dx12-cpp/`（Windows 実機、backend=DX12 強制） |
 | Metal（副） | `examples/viewer-metal-cpp/`（macOS 実機、backend=Metal 強制） |

@@ -7,6 +7,25 @@ use winit::event::WindowEvent;
 use winit::event_loop::{ActiveEventLoop, EventLoop};
 use winit::window::{Window, WindowAttributes};
 
+/// Depth/stencil format the host attaches so the player can rasterise masks
+/// (SPEC §6). The depth aspect is unused (compare Always, no write).
+const STENCIL_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Depth24PlusStencil8;
+
+/// (Re)create the depth/stencil render target at the given size.
+fn create_stencil_view(device: &Device, width: u32, height: u32) -> wgpu::TextureView {
+    let texture = device.create_texture(&wgpu::TextureDescriptor {
+        label: Some("SpriteStudio Stencil"),
+        size: wgpu::Extent3d { width: width.max(1), height: height.max(1), depth_or_array_layers: 1 },
+        mip_level_count: 1,
+        sample_count: 1,
+        dimension: wgpu::TextureDimension::D2,
+        format: STENCIL_FORMAT,
+        usage: wgpu::TextureUsages::RENDER_ATTACHMENT,
+        view_formats: &[],
+    });
+    texture.create_view(&wgpu::TextureViewDescriptor::default())
+}
+
 /// The viewer is a host: it owns the whole wgpu stack (instance/device/queue/
 /// surface) and drives the borrow-model [`SSPlayer`] each frame.
 struct AppState {
@@ -15,6 +34,8 @@ struct AppState {
     queue: Queue,
     surface: Surface<'static>,
     config: SurfaceConfiguration,
+    /// Depth/stencil view attached to every render pass, resized with the window.
+    stencil_view: wgpu::TextureView,
 
     player: SSPlayer,
     ssab_paths: Vec<PathBuf>,
@@ -34,6 +55,7 @@ impl AppState {
             self.config.width = new_size.width;
             self.config.height = new_size.height;
             self.surface.configure(&self.device, &self.config);
+            self.stencil_view = create_stencil_view(&self.device, new_size.width, new_size.height);
         }
     }
 
@@ -73,7 +95,11 @@ impl AppState {
                     ops: wgpu::Operations { load: wgpu::LoadOp::Clear(wgpu::Color { r: 0.08, g: 0.08, b: 0.12, a: 1.0 }), store: wgpu::StoreOp::Store },
                     depth_slice: None,
                 })],
-                depth_stencil_attachment: None,
+                depth_stencil_attachment: Some(wgpu::RenderPassDepthStencilAttachment {
+                    view: &self.stencil_view,
+                    depth_ops: Some(wgpu::Operations { load: wgpu::LoadOp::Clear(1.0), store: wgpu::StoreOp::Store }),
+                    stencil_ops: Some(wgpu::Operations { load: wgpu::LoadOp::Clear(0), store: wgpu::StoreOp::Store }),
+                }),
                 timestamp_writes: None,
                 occlusion_query_set: None,
                 multiview_mask: None,
@@ -185,7 +211,9 @@ impl ApplicationHandler for App {
         };
         surface.configure(&device, &config);
 
-        let mut player = SSPlayer::new(&device, &SSPlayerConfig { color_format: format });
+        let stencil_view = create_stencil_view(&device, config.width, config.height);
+
+        let mut player = SSPlayer::new(&device, &SSPlayerConfig { color_format: format, stencil_format: Some(STENCIL_FORMAT) });
 
         // Host responsibility (reference-mode ssab): decode atlas PNGs and hand
         // the RGBA to the player keyed by fnv1a hash of the file stem.
@@ -234,7 +262,7 @@ impl ApplicationHandler for App {
             }
         }
 
-        let state = AppState { window, device, queue, surface, config, player, ssab_paths, current_ssab_idx, current_anim_idx: 0, anim_names, last_update: std::time::Instant::now(), is_paused: false, y_down: false, logged_first_draw: false };
+        let state = AppState { window, device, queue, surface, config, stencil_view, player, ssab_paths, current_ssab_idx, current_anim_idx: 0, anim_names, last_update: std::time::Instant::now(), is_paused: false, y_down: false, logged_first_draw: false };
 
         state.print_status();
         self.state = Some(state);

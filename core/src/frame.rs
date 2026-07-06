@@ -33,4 +33,13 @@ pub struct FrameView<'a> {
     pub mesh_indices: &'a [i32],
     /// Prefix-sum of length parts+1 for mesh index ranges.
     pub mesh_index_offsets: &'a [u32],
+    /// Shape vertices (local xy), `part_index * SHAPE_VERTICES_STRIDE` (=24);
+    /// each part's live vertex count is in `shape_vertex_counts`. Used to
+    /// rasterise Shape mask writers and Shape content (SPEC §6).
+    pub shape_vertices: &'a [f32],
+    /// Per-part shape vertex box coordinates (fx, fy in 0..1), same stride as
+    /// `shape_vertices`. Used to bilinearly interpolate the shape's fill color.
+    pub shape_vertex_box_coords: &'a [f32],
+    /// Per-part shape vertex count (0 when the part is not a shape).
+    pub shape_vertex_counts: &'a [i32],
 }

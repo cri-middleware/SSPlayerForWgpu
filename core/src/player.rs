@@ -12,6 +12,7 @@
 
 use crate::frame::FrameView;
 use crate::internal::{BatchInfo, RendererConfig, SSInternalPlayer};
+use crate::mask::{GeomKind, MaskOp, MaskWriter, PartMaskFlags, StencilTest, plan_writers};
 use ssab::ssab::ss::format::{PartType, root_as_ss_anime_binary_unchecked};
 use ssruntime::error::SSRuntimeError;
 use ssruntime::runtime::framedata::ss::runtime::{DrawBatchKind, root_as_frame_data_unchecked};
@@ -29,6 +30,11 @@ const MAX_INSTANCE_DEPTH: u32 = 12;
 pub struct SSPlayerConfig {
     /// Target color format. Forwarded to the renderer so pipelines match.
     pub color_format: wgpu::TextureFormat,
+    /// Depth/stencil format of the host's render target, or `None` to run
+    /// without masking (SPEC §6). When `Some`, the host must attach a matching
+    /// depth/stencil buffer to every render pass, and mask batches are
+    /// rasterised into the stencil buffer.
+    pub stencil_format: Option<wgpu::TextureFormat>,
 }
 
 /// One node in the playback tree: a runtime context plus its instance children
@@ -40,6 +46,9 @@ struct PlaybackNode {
     /// Effect slots keyed by part index. Effects reuse this node's context
     /// (no separate context, unlike instances).
     effects: HashMap<usize, EffectSlot<'static>>,
+    /// Static per-part mask flags, indexed by part index. Read once from ssab
+    /// `PartData` at build time (SPEC §6). Empty when the pack has no ssab data.
+    mask_flags: Vec<PartMaskFlags>,
 }
 
 struct InstanceChild {
@@ -65,7 +74,7 @@ pub struct SSPlayer {
 impl SSPlayer {
     /// Create a player against a borrowed `device`. The device is not retained.
     pub fn new(device: &wgpu::Device, config: &SSPlayerConfig) -> Self {
-        let internal = SSInternalPlayer::new(device, &RendererConfig { color_format: config.color_format });
+        let internal = SSInternalPlayer::new(device, &RendererConfig { color_format: config.color_format, stencil_format: config.stencil_format });
         Self { internal, resources: HashMap::new(), main_pack: None, root: None, current_animation: None, last_root_frame: 0.0 }
     }
 
@@ -160,7 +169,7 @@ impl SSPlayer {
             // instance slots can persist/re-arm their children correctly.
             let looped = frame_no + 0.5 < self.last_root_frame;
             self.last_root_frame = frame_no;
-            render_node(root, &mut self.internal, &IDENTITY, frame_no, delta_secs, looped);
+            render_node(root, &mut self.internal, &IDENTITY, frame_no, delta_secs, looped, StencilTest::None);
         }
 
         self.internal.end_frame(device, queue);
@@ -201,12 +210,27 @@ fn build_node(resources: &HashMap<String, Arc<SsabResource>>, pack: &str, anime:
 
     let mut instances = HashMap::new();
     let mut effects = HashMap::new();
+    let mut mask_flags = Vec::new();
     if let Some(ssab_bytes) = context.get_ssab_data() {
         let ab = unsafe { root_as_ss_anime_binary_unchecked(ssab_bytes) };
         // The pack's part list is shared across its animations; part index i
         // matches the FrameData part index used by draw_order/SoA.
-        for (i, part) in ab.parts().iter().enumerate() {
-            match part.part_type_type() {
+        let parts = ab.parts();
+        mask_flags = vec![PartMaskFlags::default(); parts.len()];
+        for (i, part) in parts.iter().enumerate() {
+            let part_type = part.part_type_type();
+
+            // Static mask flags (SPEC §6 / mask doc §1). Geometry kind picks the
+            // writer builder; Shape/Text/Nines can't write coverage yet (P6).
+            let geom = match part_type {
+                PartType::PartTypeNormal | PartType::PartTypeMask => GeomKind::Quad,
+                PartType::PartTypeMesh => GeomKind::Mesh,
+                PartType::PartTypeShape => GeomKind::Shape,
+                _ => GeomKind::Unsupported,
+            };
+            mask_flags[i] = PartMaskFlags { is_mask_part: part_type == PartType::PartTypeMask, mask_write: part.mask_write(), mask_influence: part.mask_influence(), visible_inside_mask: part.visible_inside_mask(), draw_as_mask: part.draw_as_mask(), geom };
+
+            match part_type {
                 PartType::PartTypeInstance => {
                     if let Some(inst) = part.part_type_as_part_type_instance()
                         && let Some(child) = build_node(resources, inst.ref_anime_pack(), inst.ref_anime_name(), depth + 1)
@@ -226,32 +250,126 @@ fn build_node(resources: &HashMap<String, Arc<SsabResource>>, pack: &str, anime:
         }
     }
 
-    Some(PlaybackNode { context, instances, effects })
+    Some(PlaybackNode { context, instances, effects, mask_flags })
+}
+
+/// `DrawBatch.flags` bit set when a content batch is a masked target
+/// (mirrors `FLAG_MASK_INFLUENCE` in the runtime).
+const FLAG_MASK_INFLUENCE: u8 = 0x01;
+
+/// Advance the mask cursor to `up_to_rank`, appending stencil writes for every
+/// planned writer whose rank is below it (mask doc §2-1, WebGL `syncMasksTo`):
+/// a pure mask's backward scope has ended → remove it (Decr/Invert); a clipping
+/// writer's forward scope has begun → add it (Incr/Invert). Monotonic in
+/// `cursor`; ops are baked per pipeline, so ref is always 0.
+fn sync_masks_to(internal: &mut SSInternalPlayer, frame: &FrameView, transform: &[f32; 16], writers: &[MaskWriter], cursor: &mut usize, up_to_rank: usize) {
+    while *cursor < writers.len() && writers[*cursor].rank < up_to_rank {
+        let w = &writers[*cursor];
+        let op = if w.is_clipping {
+            if w.op_invert { MaskOp::Invert } else { MaskOp::Incr }
+        } else if w.op_invert {
+            MaskOp::Invert
+        } else {
+            MaskOp::Decr
+        };
+        internal.append_mask_writer(frame, transform, w, op);
+        *cursor += 1;
+    }
 }
 
 /// Recursively append a node's geometry to the renderer, driving instance slots
 /// and composing transforms. The node's context must already be advanced to
 /// `frame_no` (root by `update`, children by the parent's `InstanceSlot::step`).
-fn render_node(node: &mut PlaybackNode, internal: &mut SSInternalPlayer, transform: &[f32; 16], frame_no: f32, delta_secs: f32, node_looped: bool) {
+///
+/// Masking (SPEC §6): when the renderer has a stencil buffer and this is the
+/// root scope (`inherited_stencil == None`), pure masks are pre-written and the
+/// coverage is scoped-replayed as content is drawn in rank order; masked content
+/// is tested per part by its polarity. When `inherited_stencil` is set, this
+/// node is a sub-animation clipped by a parent mask (screen-space, single level,
+/// mask doc §3-2-2): it runs no masks of its own and every content batch is
+/// tested with the inherited polarity.
+fn render_node(node: &mut PlaybackNode, internal: &mut SSInternalPlayer, transform: &[f32; 16], frame_no: f32, delta_secs: f32, node_looped: bool, inherited_stencil: StencilTest) {
     let frame_data = match node.context.get_frame_data(frame_no) {
         Ok(bytes) => unsafe { std::slice::from_raw_parts(bytes.as_ptr(), bytes.len()) },
         Err(_) => return,
     };
     let frame = frame_view(&mut node.context, frame_data);
 
+    // Own masking runs only at the root scope; a masked sub-animation inherits.
+    let masking = internal.stencil_enabled() && inherited_stencil == StencilTest::None;
+    let writers = if masking { plan_writers(&frame, &node.mask_flags) } else { Vec::new() };
+
+    // Pre-write pure masks so they are active for lower-rank content (§2-1).
+    for w in &writers {
+        if !w.is_clipping {
+            let op = if w.op_invert { MaskOp::Invert } else { MaskOp::Incr };
+            internal.append_mask_writer(&frame, transform, w, op);
+        }
+    }
+    let mut cursor = 0usize;
+
     let fd = unsafe { root_as_frame_data_unchecked(frame.frame_data) };
     let draw_order = fd.draw_order();
     for batch in fd.draw_batches() {
         let start_rank = batch.start_rank() as usize;
         let count = batch.count() as usize;
-        match batch.kind() {
-            DrawBatchKind::Normal | DrawBatchKind::Mesh => {
-                let info = BatchInfo { start_rank, count, texture_hash: batch.texture_hash(), blend_type: batch.blend_type(), kind: batch.kind() };
-                internal.append_batch(&frame, transform, &info);
+        let kind = batch.kind();
+        let masked_target = masking && (batch.flags() & FLAG_MASK_INFLUENCE) != 0;
+        match kind {
+            DrawBatchKind::Normal | DrawBatchKind::Mesh | DrawBatchKind::Shape => {
+                // Pure masks (PartTypeMask / draw_as_mask) contribute coverage but
+                // never draw their own colour (mask doc §3-3). The runtime still
+                // emits a content batch for them, so skip it here.
+                let is_pure = |pi: usize| node.mask_flags.get(pi).map(|f| f.pure_mask()).unwrap_or(false);
+                let has_pure = (start_rank..start_rank + count).any(|r| is_pure(draw_order.get(r) as usize));
+
+                if masked_target {
+                    // Polarity and active coverage vary per part → draw one at a time.
+                    for rank in start_rank..start_rank + count {
+                        let part_idx = draw_order.get(rank) as usize;
+                        sync_masks_to(internal, &frame, transform, &writers, &mut cursor, rank);
+                        if is_pure(part_idx) {
+                            continue;
+                        }
+                        let stencil = node.mask_flags.get(part_idx).map(|f| f.polarity()).unwrap_or(StencilTest::None);
+                        let info = BatchInfo { start_rank: rank, count: 1, texture_hash: batch.texture_hash(), blend_type: batch.blend_type(), kind, stencil };
+                        internal.append_batch(&frame, transform, &info);
+                    }
+                } else if has_pure {
+                    // Non-masked batch that still contains a pure mask: draw the
+                    // non-mask parts individually, skipping the mask's own colour.
+                    for rank in start_rank..start_rank + count {
+                        let part_idx = draw_order.get(rank) as usize;
+                        if is_pure(part_idx) {
+                            continue;
+                        }
+                        let info = BatchInfo { start_rank: rank, count: 1, texture_hash: batch.texture_hash(), blend_type: batch.blend_type(), kind, stencil: inherited_stencil };
+                        internal.append_batch(&frame, transform, &info);
+                    }
+                } else {
+                    let info = BatchInfo { start_rank, count, texture_hash: batch.texture_hash(), blend_type: batch.blend_type(), kind, stencil: inherited_stencil };
+                    internal.append_batch(&frame, transform, &info);
+                }
             }
             DrawBatchKind::Instance => {
                 for rank in start_rank..start_rank + count {
                     let part_idx = draw_order.get(rank) as usize;
+
+                    // Decide the stencil this child sub-animation inherits: our own
+                    // mask (if the instance part is a masked target), else propagate
+                    // whatever we inherited (screen-space clip continues down).
+                    let child_inherited = if masking {
+                        let f = node.mask_flags.get(part_idx).copied().unwrap_or_default();
+                        if f.mask_influence {
+                            sync_masks_to(internal, &frame, transform, &writers, &mut cursor, rank);
+                            f.polarity()
+                        } else {
+                            StencilTest::None
+                        }
+                    } else {
+                        inherited_stencil
+                    };
+
                     let Some(child) = node.instances.get_mut(&part_idx) else { continue };
 
                     let ev = node.context.get_active_event_instance(part_idx as u32);
@@ -270,11 +388,20 @@ fn render_node(node: &mut PlaybackNode, internal: &mut SSInternalPlayer, transfo
                         // Compose the instance part's world matrix onto the parent transform.
                         let m: [f32; 16] = frame.world_matrices[part_idx * 16..part_idx * 16 + 16].try_into().unwrap();
                         let child_transform = mat4_mul(transform, &m);
-                        render_node(&mut child.node, internal, &child_transform, child_frame_no, delta_secs, result.child_looped);
+                        render_node(&mut child.node, internal, &child_transform, child_frame_no, delta_secs, result.child_looped, child_inherited);
                     }
                 }
             }
             DrawBatchKind::Effect => {
+                // A masked effect (or one inside an inherited-masked subtree) tests
+                // against the screen-space stencil; sync coverage once at its rank.
+                let eff_stencil = if masked_target {
+                    let part_idx = draw_order.get(start_rank) as usize;
+                    sync_masks_to(internal, &frame, transform, &writers, &mut cursor, start_rank);
+                    node.mask_flags.get(part_idx).map(|f| f.polarity()).unwrap_or(StencilTest::None)
+                } else {
+                    inherited_stencil
+                };
                 for rank in start_rank..start_rank + count {
                     let part_idx = draw_order.get(rank) as usize;
                     let Some(slot) = node.effects.get_mut(&part_idx) else { continue };
@@ -290,11 +417,12 @@ fn render_node(node: &mut PlaybackNode, internal: &mut SSInternalPlayer, transfo
                         let plan = unsafe { std::slice::from_raw_parts(r.draw_plan_buf, r.draw_plan_len) };
                         let m: [f32; 16] = frame.world_matrices[part_idx * 16..part_idx * 16 + 16].try_into().unwrap();
                         let eff_transform = mat4_mul(transform, &m);
-                        internal.append_effect(plan, &eff_transform);
+                        internal.append_effect(plan, &eff_transform, eff_stencil);
                     }
                 }
             }
-            // Shape / Mask / Text / Nines: not yet handled.
+            // Mask batches emit no colour (coverage is handled by the writer
+            // pre-write / scoped replay above). Text / Nines: not yet handled.
             _ => {}
         }
     }
@@ -313,6 +441,9 @@ fn frame_view<'a>(ctx: &mut Context<'static>, frame_data: &'a [u8]) -> FrameView
         mesh_uvs: unsafe { slice_f32(ctx.get_mesh_uvs_ptr(), ctx.get_mesh_uvs_len()) },
         mesh_indices: unsafe { slice_i32(ctx.get_mesh_indices_ptr(), ctx.get_mesh_indices_len()) },
         mesh_index_offsets: unsafe { slice_u32(ctx.get_mesh_index_offsets_ptr(), ctx.get_mesh_index_offsets_len()) },
+        shape_vertices: unsafe { slice_f32(ctx.get_shape_vertices_ptr(), ctx.get_shape_vertices_len()) },
+        shape_vertex_box_coords: unsafe { slice_f32(ctx.get_shape_vertex_box_coords_ptr(), ctx.get_shape_vertex_box_coords_len()) },
+        shape_vertex_counts: unsafe { slice_i32(ctx.get_shape_vertex_counts_ptr(), ctx.get_shape_vertex_counts_len()) },
     }
 }
 
