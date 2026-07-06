@@ -359,18 +359,20 @@ Godot / Unity のネイティブプレイヤー実績と C-API 契約から、�
 - フィルタ/wrap: `ClampToEdge`（NPOT 対応）＋ `Linear`、mipmap なし。
 - **texture_hash 0 / 未ロード → 1x1 白テクスチャ**にフォールバック（Shape content・純カラー対応）。**この白テクスチャは必ず白(255,255,255,255)で初期化すること**（`create_texture` だけだと透明黒で `tex*color=0` になり Shape が不可視）。`new()` は queue を持たないため `end_frame` 初回に `write_texture` で遅延初期化（§6）。
 
-### 8.1 ssab の2形態に両対応（embedded / reference）
+### 8.1 ssab の2形態に両対応（embedded / reference）— ✅ 実装済
 
 ssconverter は `.ssab` を2形態で出力しうるので、SSPlayer はどちらでもロードできる必要がある。
 
 | 形態 | 内容 | Player の扱い |
 |---|---|---|
-| **embedded** | テクスチャ（atlas PNG）を `.ssab` に埋め込み | `load_ssab` 時に **Player が埋め込みバイト列を列挙 → デコード → premul → upload_texture** まで自動で行う（自己完結、単一ファイル配布に最適・広告向け） |
-| **reference** | テクスチャは外部ファイルを名前/hash で参照 | Player は hash だけ把握。**実バイトはホストが供給**（`upload_texture(hash, rgba, w, h)`）。ロード経路（ファイル/URL/バンドル）はホストの責務 |
+| **embedded** ✅ | テクスチャ（atlas PNG）を `.ssab` に埋め込み | `add_ssab` 時に **Player が cellmap を列挙 → 埋め込みバイト列をデコード**（CPU、`image`）、次の `update` で **premul → upload_texture** まで自動（自己完結、単一ファイル配布に最適・広告向け） |
+| **reference** ✅ | テクスチャは外部ファイルを名前/hash で参照 | Player は hash だけ把握。**実バイトはホストが供給**（`upload_texture(hash, rgba, w, h)`）。ロード経路（ファイル/URL/バンドル）はホストの責務 |
 
+- **ハッシュ対応（重要）**: `DrawBatch.texture_hash = CellMap.name_hash`（`framedata.rs:104`）。埋め込みバイト列は `embedded_assets`（key = `CellMap.image_path_hash`）にある。→ embedded ロードは **cellmap 毎に `embedded_assets[image_path_hash]` をデコードし、`name_hash` で upload** する（2つのハッシュを取り違えない）。
 - **統一供給 API**: 最終的にはどちらも `upload_texture(hash, premul済みRGBA, w, h)` に集約される。embedded は Player 内部でこの呼び出しを行い、reference はホストが行う。ブラウザの `TexImageSource` 供給・ネイティブの RGBA 供給と対称。
-- `SSPlayerConfig` で「embedded を自動ロードするか」「PNG デコーダをどこに置くか（Player 内蔵 `image` クレート or ホスト供給コールバック）」を選べるようにする。WASM サイズを抑えたいブラウザでは、デコードをブラウザ（`createImageBitmap`）に委ねる選択肢も残す。
-- **要調査**: 埋め込みテクスチャの列挙 API（ssab/ssruntime 側で cellmap エントリ → 埋め込みバイト列を引く経路）の正確な形。`libs/ssab/SCHEMA.md` と `SsabResource` を確認。
+- **借用モデルとの整合**: `add_ssab`/`load_ssab` は device/queue を借りないので、デコードは load 時（CPU）、GPU upload は次の `update`（queue 貸与時）に `pending_textures` を flush。
+- **feature `embedded`（default on）**: Player 内蔵 `image`（PNG のみ）でデコード。WASM サイズを抑える場合は `--no-default-features` で切り、デコードをブラウザ（`createImageBitmap`）に委ねてホスト供給に一本化。
+- **検証**: `render.rs::render_embedded_ssab`（埋め込み `Basic.ssab` をテクスチャ無供給でロード → reference レンダーとピクセル完全一致 14378/14378）。埋め込みフィクスチャは `tests/overall/overall_emb/`（`ssconverter-cli --embedded` 生成）。
 
 ---
 
@@ -433,7 +435,7 @@ impl SSPlayer {
 
 **外部インスタンス解決**: `add_ssab(pack_name, data)` で全 pack を pack 名キーで登録 → インスタンスは `ref_anime_pack()` 文字列で resolve（§7.1）。
 
-> **現状と将来**: `new` は device のみ（`Result` 不要）、エラーは当面 `SSRuntimeError` を流用。将来 `SSPlayerError`（`thiserror`）でラップし FFI 整数コード / JS `JsError` へ変換。ssab の **embedded 自動テクスチャロード**（§8.1）と **seek** は未実装（reference-mode ＋ viewer での目視が現状）。
+> **現状と将来**: `new` は device のみ（`Result` 不要）、エラーは当面 `SSRuntimeError` を流用。将来 `SSPlayerError`（`thiserror`）でラップし FFI 整数コード / JS `JsError` へ変換。ssab の **embedded 自動テクスチャロード**（§8.1）は ✅ 実装済（`add_ssab` でデコード → `update` で upload）。**seek** は未実装。
 
 ### 9.3 各ホストからの駆動（rs / js / ffi 共通の型）
 
@@ -487,7 +489,7 @@ void        ss_player_resize(ss_player_t, uint32_t w, uint32_t h);
 | Phase | 内容 | 完了条件 |
 |---|---|---|
 | **P0（初手）3層リファクタ＋借用モデル Rust API** ✅ | 現 `core`（Player/Renderer）を単一クレート内の `internal`(SSInternalPlayer) / `player`(SSPlayer) モジュールへ再編。**SSPlayer を借用モデル（`&Device`/`&Queue` を借りる §9）に確定**。データ所有契約（§1.1）を配線。viewer が wgpu 一式を所有し SSPlayer を駆動 | 現状の描画（Normal/Mesh/4blend）が3層＋借用モデルで従来通り動く。**これが ① rs 面の土台**（完了） |
-| P1 ssab 両対応 + WebGPU（② js） | ssab の embedded/reference 両ロード（§8.1）。`core` に `web` feature（wasm-bindgen）。`examples/web` で `<ss-player>` 互換 Web Component、canvas 表示 | embedded ssab がブラウザで WebGPU 描画される |
+| P1 ssab 両対応 + WebGPU（② js） | **ssab の embedded/reference 両ロード（§8.1）✅ 実装済**（`feature embedded`＋`pending_textures`、ヘッドレスで reference と一致検証）。残り: `core` に `web` feature（wasm-bindgen）、`examples/web` で `<ss-player>` 互換 Web Component、canvas 表示 | embedded ssab がブラウザで WebGPU 描画される |
 | **P2 描画パリティ①** ✅ | varg 追加（PartColor blend 由来）、BlendType 全12種のパイプラインマトリクス、premul 厳密化（upload premul ＋ 逆/再premul シェーダ ＋ premul ブレンド係数） | PartsColor / BlendMode / Basic / Effect を PNG 目視で確認。既存フィクスチャのピクセル数は不変。WebGL 版と色・ブレンド一致 |
 | **P3 マスク** ✅ | stencil 付きターゲット（config opt-in）、MaskPlanner 移植（`core/src/mask.rs`）、write/test パイプライン、pure マスク色スキップ、インスタンス継承、**Shape 幾何のマスク writer ＋ Shape content 描画**、白フォールバック初期化（§6） | マスク/Shape アニメが描画（Mask.ssab / Shape.ssab をヘッドレス GPU readback ＋ 実機で確認） |
 | **P4 エフェクト/インスタンス** ✅ | **P0 の次に先行実施**。①内部を `begin_frame`/`append_batch`/`append_effect`/`end_frame` の累積 API＋transform へ（Stage 1）②インスタンス木＝子ごと独立 Context（Stage 2, §7.1）③エフェクト＝EffectSlot/EffectDrawPlan（Stage 3, §7.2） | エフェクト/インスタンスが描画される（実機確認済） |

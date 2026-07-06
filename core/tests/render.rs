@@ -32,8 +32,8 @@ fn load_textures(player: &mut SSPlayer, device: &wgpu::Device, queue: &wgpu::Que
     }
 }
 
-/// Build a player (with or without a stencil buffer), render one frame of
-/// `Mask.ssab` at frame `advance_frames`, and return the RGBA readback.
+/// Build a reference-mode player (host-supplied textures, with/without a stencil
+/// buffer), render `Mask.ssab`/etc. at frame `advance_frames`, return the readback.
 fn render_ssab(device: &wgpu::Device, queue: &wgpu::Queue, stencil: bool, pack: &str, advance_frames: u32) -> Vec<u8> {
     let mut player = SSPlayer::new(device, &SSPlayerConfig { color_format: COLOR_FORMAT, stencil_format: stencil.then_some(STENCIL_FORMAT) });
     load_textures(&mut player, device, queue, Path::new(asset_dir()));
@@ -44,6 +44,11 @@ fn render_ssab(device: &wgpu::Device, queue: &wgpu::Queue, stencil: bool, pack: 
     player.play(&anim).unwrap();
     player.set_viewport(queue, W as f32, H as f32, false);
 
+    render_to_rgba(device, queue, &mut player, stencil, advance_frames)
+}
+
+/// Advance an already-loaded, already-playing player and read back one frame.
+fn render_to_rgba(device: &wgpu::Device, queue: &wgpu::Queue, player: &mut SSPlayer, stencil: bool, advance_frames: u32) -> Vec<u8> {
     for _ in 0..advance_frames {
         player.update(device, queue, 1.0 / 60.0);
     }
@@ -203,4 +208,43 @@ fn render_integration_shaders() {
     // plain textures with no effect. Guard: stencil on/off must be pixel-identical.
     let with_stencil = render_ssab(&device, &queue, true, "Shader", 15);
     assert_eq!(plain, with_stencil, "Shader.ssab differs with a stencil buffer — shaders skipped by the masked path (no-writer gating regressed)");
+}
+
+#[test]
+fn render_embedded_ssab() {
+    let instance = wgpu::Instance::new(wgpu::InstanceDescriptor::new_without_display_handle());
+    let adapter = match pollster::block_on(instance.request_adapter(&wgpu::RequestAdapterOptions { power_preference: wgpu::PowerPreference::default(), compatible_surface: None, force_fallback_adapter: false })) {
+        Ok(a) => a,
+        Err(_) => {
+            eprintln!("no GPU adapter available, skipping headless render test");
+            return;
+        }
+    };
+    let (device, queue) = pollster::block_on(adapter.request_device(&wgpu::DeviceDescriptor::default())).expect("request_device");
+
+    // Embedded-mode ssab (SPEC §8.1): the atlas PNG is baked into the .ssab, so the
+    // player decodes + uploads it itself — the host supplies NO textures. The
+    // result must match the reference-mode render (same pack, host-supplied atlas).
+    // The embedded fixture needs a separate conversion; skip if it wasn't produced:
+    //   ssconverter-cli --embedded --out-dir tests/overall/overall_emb tests/overall/overall.sspj
+    let emb_dir = concat!(env!("CARGO_MANIFEST_DIR"), "/../../tests/overall/overall_emb");
+    let emb_path = format!("{emb_dir}/Basic.ssab");
+    let Ok(bytes) = std::fs::read(&emb_path) else {
+        eprintln!("embedded fixture missing ({emb_path}); run ssconverter-cli --embedded to generate it. skipping.");
+        return;
+    };
+
+    let reference = render_ssab(&device, &queue, false, "Basic", 10);
+
+    let mut player = SSPlayer::new(&device, &SSPlayerConfig { color_format: COLOR_FORMAT, stencil_format: None });
+    player.load_ssab("Basic", &bytes).unwrap(); // no load_textures — embedded supplies them
+    let anim = player.animation_names().unwrap()[0].clone();
+    player.play(&anim).unwrap();
+    player.set_viewport(&queue, W as f32, H as f32, false);
+    let embedded = render_to_rgba(&device, &queue, &mut player, false, 10);
+
+    let drawn = drawn_pixels(&embedded);
+    eprintln!("Basic.ssab embedded drawn pixels: {drawn} (reference {})", drawn_pixels(&reference));
+    assert!(drawn > 5_000, "embedded Basic.ssab drew too little ({drawn}) — embedded atlas not decoded/uploaded");
+    assert_eq!(embedded, reference, "embedded render differs from reference — texture hash/premul mismatch");
 }

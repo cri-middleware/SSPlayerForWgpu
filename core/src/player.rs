@@ -69,13 +69,17 @@ pub struct SSPlayer {
     /// Root frame_no from the previous `update`, used to detect the loop edge
     /// that instance slots need (`parent_looped`).
     last_root_frame: f32,
+    /// Embedded-mode textures decoded at `add_ssab` (CPU), awaiting GPU upload on
+    /// the next `update` (the borrow model means load has no `Device`/`Queue`).
+    /// Each entry is `(cellmap name_hash, straight-alpha RGBA, width, height)`.
+    pending_textures: Vec<(u32, Vec<u8>, u32, u32)>,
 }
 
 impl SSPlayer {
     /// Create a player against a borrowed `device`. The device is not retained.
     pub fn new(device: &wgpu::Device, config: &SSPlayerConfig) -> Self {
         let internal = SSInternalPlayer::new(device, &RendererConfig { color_format: config.color_format, stencil_format: config.stencil_format });
-        Self { internal, resources: HashMap::new(), main_pack: None, root: None, current_animation: None, last_root_frame: 0.0 }
+        Self { internal, resources: HashMap::new(), main_pack: None, root: None, current_animation: None, last_root_frame: 0.0, pending_textures: Vec::new() }
     }
 
     /// Register an `.ssab` pack under `pack_name` (used to resolve external
@@ -87,8 +91,48 @@ impl SSPlayer {
             return Err(SSRuntimeError::NotLoaded);
         }
         self.resources.insert(pack_name.to_string(), resource);
+        // Embedded ssab (SPEC §8.1): decode the atlas PNGs the pack carries and
+        // queue them for GPU upload on the next `update`. Reference ssab has no
+        // embedded_assets, so this is a no-op and the host supplies textures via
+        // `upload_texture`. Both modes funnel into the same renderer texture map.
+        self.decode_embedded_textures(data);
         Ok(())
     }
+
+    /// Decode a pack's embedded atlas textures (SPEC §8.1) into `pending_textures`
+    /// for upload on the next `update`. Each `CellMap` names its texture by
+    /// `name_hash` (what `DrawBatch.texture_hash` carries) and points at its bytes
+    /// via `image_path_hash` (the `embedded_assets` key). No-op without the
+    /// `embedded` feature (host decodes texture-side instead).
+    #[cfg(feature = "embedded")]
+    fn decode_embedded_textures(&mut self, data: &[u8]) {
+        let ab = unsafe { root_as_ss_anime_binary_unchecked(data) };
+        let (Some(cellmaps), Some(assets)) = (ab.cellmaps(), ab.embedded_assets()) else {
+            return;
+        };
+        // image_path_hash -> raw PNG bytes.
+        let mut bytes_by_hash: HashMap<u32, &[u8]> = HashMap::new();
+        for asset in assets {
+            if let Some(bytes) = asset.data() {
+                bytes_by_hash.insert(asset.name_hash(), bytes.bytes());
+            }
+        }
+        for cm in cellmaps {
+            let Some(png) = bytes_by_hash.get(&cm.image_path_hash()) else {
+                continue;
+            };
+            let Ok(img) = image::load_from_memory(png) else {
+                continue;
+            };
+            let rgba = img.to_rgba8();
+            let (w, h) = rgba.dimensions();
+            // Keyed by the cellmap name_hash — the hash the renderer looks up.
+            self.pending_textures.push((cm.name_hash(), rgba.into_raw(), w, h));
+        }
+    }
+
+    #[cfg(not(feature = "embedded"))]
+    fn decode_embedded_textures(&mut self, _data: &[u8]) {}
 
     /// Register `pack_name` and make it the main pack to play from.
     pub fn load_ssab(&mut self, pack_name: &str, data: &[u8]) -> Result<(), SSRuntimeError> {
@@ -159,6 +203,12 @@ impl SSPlayer {
 
     /// Advance the tree by `delta_secs` and build GPU buffers for the frame.
     pub fn update(&mut self, device: &wgpu::Device, queue: &wgpu::Queue, delta_secs: f32) {
+        // Flush any embedded textures decoded at load time (§8.1); the first
+        // `update` is the earliest point the borrow model lends a Queue.
+        for (hash, rgba, w, h) in self.pending_textures.drain(..) {
+            self.internal.upload_texture(device, queue, hash, &rgba, w, h);
+        }
+
         self.internal.begin_frame();
 
         if let Some(root) = &mut self.root {

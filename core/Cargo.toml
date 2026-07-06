@@ -8,12 +8,20 @@ repository.workspace = true
 homepage.workspace = true
 description.workspace = true
 
+[features]
+default = ["embedded"]
+# Decode embedded-mode ssab textures (PNG atlases) inside the player via the
+# `image` crate (SPEC §8.1). Turn off for lean WASM builds that decode textures
+# host-side (e.g. the browser's `createImageBitmap`) and supply them by hash.
+embedded = ["dep:image"]
+
 [dependencies]
 wgpu = "29.0.3"
 ssruntime = { workspace = true }
 ssab = { workspace = true }
 bytemuck = { version = "1.25.0", features = ["derive"] }
+image = { version = "0.25.10", optional = true, default-features = false, features = ["png"] }
 
 [dev-dependencies]
 pollster = "0.4.0"
-image = "0.25.10"
+image = { version = "0.25.10", default-features = false, features = ["png"] }
