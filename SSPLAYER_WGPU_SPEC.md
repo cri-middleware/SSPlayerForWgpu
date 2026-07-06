@@ -18,7 +18,7 @@
 - **提供3面（ssruntime と同型）**: `rs`(rlib) / `js`(wasm-bindgen・`<ss-player>`互換) / `ffi`(cbindgen・DX12/Vulkan/Metal)。
 - **データ所有契約**: `.ssab` は Player 所有→ssruntime へ borrow ／ FrameData・SoA は ssruntime 所有→Player が borrow（§1.1）。
 - **ssab は embedded / reference 両対応**（テクスチャ埋め込み／外部参照）。
-- **進捗**: **P0**（3層リファクタ＋借用モデル）✅ ／ **P4**（インスタンス §7.1・エフェクト §7.2）✅ ／ **P3**（マスク・Shape）✅ ／ **P2**（色パリティ: varg・全12ブレンド・premul 厳密化）✅。対応バッチ = Normal / Mesh / Shape / Instance / Effect / Mask。次は P1（WebGPU/js）/ P5（ネイティブ ffi）。詳細は §12。
+- **進捗**: **P0**（3層リファクタ＋借用モデル）✅ ／ **P4**（インスタンス §7.1・エフェクト §7.2）✅ ／ **P3**（マスク・Shape）✅ ／ **P2**（色パリティ: varg・全12ブレンド・premul 厳密化）✅ ／ **P6**（統合シェーダ ss_shader 全13種）✅。対応バッチ = Normal / Mesh / Shape / Instance / Effect / Mask。次は P1（WebGPU/js）/ P5（ネイティブ ffi）。詳細は §12。
 
 ---
 
@@ -260,6 +260,7 @@ Normal パーツは builder が index を出さないので、5頂点（TL,TR,BL
 
 ```
 パイプライン ≈ BlendType(12) × 用途{parts, effect, mask-write, mask-test, ss-shader×13}
+> **✅ 実装済**: parts/effect（P2, 12ブレンド×stencil3）＋ mask-write/test（P3）＋ ss-shader 13種（P6, `(id_hash,blend)` 毎に遅延生成）。
 ```
 
 現実には必要な組合せだけ遅延生成 or 起動時生成。去重は「同一パイプラインなら再バインドしない」（現プロトの `_lastBlend` 相当）。
@@ -491,7 +492,7 @@ void        ss_player_resize(ss_player_t, uint32_t w, uint32_t h);
 | **P3 マスク** ✅ | stencil 付きターゲット（config opt-in）、MaskPlanner 移植（`core/src/mask.rs`）、write/test パイプライン、pure マスク色スキップ、インスタンス継承、**Shape 幾何のマスク writer ＋ Shape content 描画**、白フォールバック初期化（§6） | マスク/Shape アニメが描画（Mask.ssab / Shape.ssab をヘッドレス GPU readback ＋ 実機で確認） |
 | **P4 エフェクト/インスタンス** ✅ | **P0 の次に先行実施**。①内部を `begin_frame`/`append_batch`/`append_effect`/`end_frame` の累積 API＋transform へ（Stage 1）②インスタンス木＝子ごと独立 Context（Stage 2, §7.1）③エフェクト＝EffectSlot/EffectDrawPlan（Stage 3, §7.2） | エフェクト/インスタンスが描画される（実機確認済） |
 | P5 ネイティブ C-API + C++ viewer（③ ffi） | `core` の `ffi` feature ＋ cbindgen、`examples/viewer-dx12-cpp`・`viewer-metal-cpp` | DX12/Metal 実機で同一ライブラリが描画 |
-| P6 統合シェーダ13種 | Shape は P3・BlendType 全12種/varg は P2 で対応済。ss_shader（統合シェーダ13種）が残り | フル機能パリティ |
+| **P6 統合シェーダ13種** ✅ | ss_shader 全13種（sepia/hsb/step/pix/noise/bmask/outline/blur/wave/move/scatter/circle/spot）を WGSL 移植（`internal.rs` `SS_SHADER_WGSL`）。パーツ属性 SHDR を per-part ディスパッチ：`(id_hash, blend)` 毎に**遅延生成**するシェーダパイプライン＋group(2) の動的オフセット uniform（param0..7 / cell_rect / pixel_size）。各シェーダは straight-alpha の Pixel を計算し `ss_finish`（＝P2 の PartsColor tail）で合成（blur のみ例外）。`ssTex` は逆premul＋`textureSampleLevel`（ループ/discard 後のサンプル可）。**制限（WebGL v1 同）**: map0/map1 未対応・shader×マスク非結合・Normal パーツのみ | Shader.ssab をヘッドレス GPU＋PNG 目視（13種の効果を確認）。shader 無しアニメはコスト0 |
 | （任意）Bevy アダプタ | `ssplayer-wgpu-bevy`（借用モデルの一利用例）。コアに依存を入れず別立て | Bevy の render graph で SSPlayer が描画 |
 | （後回し）Text / Nines | 旧版も未実装 | 必要時 |
 
@@ -504,6 +505,7 @@ void        ss_player_resize(ss_player_t, uint32_t w, uint32_t h);
 | Rust 描画（開発） | `viewer/`（winit+wgpu、`tests/overall/overall/` 再生。横=ssab切替/縦=アニメ切替） |
 | インスタンス/エフェクト（ヘッドレス） | `core/tests/instance.rs`（probe。frame 推移・quad 生成を GUI 抜きで確認） |
 | マスク/Shape（ヘッドレス） | `core/tests/mask.rs`（planner probe：writer 分類・Shape-mask）＋ `core/tests/render.rs`（GPU offscreen readback：masking on/off 差分・Shape content 描画量。adapter 無ければ skip。PNG 保存で目視も可） |
+| 統合シェーダ（ヘッドレス） | `core/tests/render.rs::render_integration_shaders`（Shader.ssab を描画し、SS WGSL コンパイル＋per-part ディスパッチ＋params で描画量が出ることを確認。adapter 無ければ skip） |
 | WebGPU（主） | `examples/web/`（ブラウザで `<ss-player-webgpu>`）。初回起動計測（取得→wasm初期化→初フレーム ms） |
 | DX12（副） | `examples/viewer-dx12-cpp/`（Windows 実機、backend=DX12 強制） |
 | Metal（副） | `examples/viewer-metal-cpp/`（macOS 実機、backend=Metal 強制） |
@@ -523,7 +525,7 @@ void        ss_player_resize(ss_player_t, uint32_t w, uint32_t h);
 - **テクスチャ供給**: embedded（Player がデコード）/ reference（ホスト供給）の両対応（§8.1）。埋め込みテクスチャ列挙 API の正確な形は `libs/ssab/SCHEMA.md` / `SsabResource` で要確認。
 - **データ所有契約（§1.1）**: ssab は Player 所有→ssruntime へ borrow、FrameData/SoA は ssruntime 所有→Player が borrow。ssab を Context より先に破棄しない／FrameData 借用をフレーム跨ぎで保持しない。
 - **エフェクト blend はコマンド毎**（batch.blend_type ではない）点を実装で取り違えない。
-- **ss_shader 統合シェーダ13種**の param マッピングは WebGL 版 `SSShaderLib.ts` を参照。
+- **ss_shader 統合シェーダ13種** ✅ 実装済（`internal.rs` `SS_SHADER_WGSL`、WebGL `SSShaderLib.ts` を WGSL 移植）。残課題: map0/map1 セカンダリテクスチャ・shader×マスク結合・GLSL 版との厳密ピクセル一致検証。
 
 ---
 

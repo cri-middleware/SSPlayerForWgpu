@@ -10,7 +10,7 @@ use crate::mask::{MaskOp, MaskWriter, StencilTest};
 use std::collections::HashMap;
 
 use ssruntime::runtime::effect_draw_plan::ss::runtime::root_as_effect_draw_plan_unchecked;
-use ssruntime::runtime::framedata::ss::runtime::{BlendType, DrawBatchKind, root_as_frame_data_unchecked};
+use ssruntime::runtime::framedata::ss::runtime::{BlendType, DrawBatchKind, PartAttributeShader, root_as_frame_data_unchecked};
 
 /// Per-vertex data uploaded to the GPU: world position, normalized UV, RGBA, and
 /// the PartsColor blend control `varg` (`[rate, isMix, isMul, isAddSub]`, SPEC
@@ -73,13 +73,26 @@ pub struct BatchInfo {
     pub stencil: StencilTest,
 }
 
+/// An integration-shader (`ss-*`) draw: resolves to a lazily-built shader
+/// pipeline and binds the part's params at `slot` in the dynamic-offset buffer.
+#[derive(Clone, Copy, Debug)]
+struct ShaderDraw {
+    id_hash: u32,
+    blend_idx: usize,
+    /// Index of this part's 256-byte block in the shader-params buffer.
+    slot: u32,
+}
+
 #[derive(Clone, Debug)]
 struct BatchDrawCall {
-    /// Index into the flat `pipelines` vec.
+    /// Index into the flat `pipelines` vec (ignored when `shader` is `Some`).
     pipeline_idx: usize,
     texture_hash: u32,
     index_start: u32,
     index_count: u32,
+    /// `Some` for `ss-*` integration-shader parts (SPEC §6): use the shader
+    /// pipeline for `(id_hash, blend)` and bind group(2) at `slot`.
+    shader: Option<ShaderDraw>,
 }
 
 struct TextureEntry {
@@ -103,6 +116,9 @@ pub struct SSInternalPlayer {
     mask_base: usize,
     /// Whether masking (stencil) is enabled by config.
     stencil_enabled: bool,
+    /// Target formats (kept for lazily building shader pipelines in `end_frame`).
+    color_format: wgpu::TextureFormat,
+    stencil_format: Option<wgpu::TextureFormat>,
 
     uniform_buffer: wgpu::Buffer,
     uniform_bind_group: wgpu::BindGroup,
@@ -125,6 +141,23 @@ pub struct SSInternalPlayer {
     indices: Vec<u32>,
 
     textures: HashMap<u32, TextureEntry>,
+
+    // --- Integration shaders (`ss-*`, SPEC §6). Only touched when a frame has
+    // shader parts; shader-free animations never build any of this. ---
+    /// Compiled module holding all 13 `fs_ss_*` fragment entries + the shared
+    /// vertex stage; shader pipelines are derived from it lazily.
+    ss_shader_module: wgpu::ShaderModule,
+    /// Pipeline layout for shader pipelines: [globals, texture, ss-params].
+    ss_pipeline_layout: wgpu::PipelineLayout,
+    /// group(2) layout: one dynamic-offset uniform (the per-part `SsParams`).
+    ss_params_bind_group_layout: wgpu::BindGroupLayout,
+    /// Lazily-built shader pipelines, keyed by `(id_hash, blend_idx)`.
+    ss_pipelines: HashMap<(u32, usize), wgpu::RenderPipeline>,
+    /// Per-frame params blocks (one 256-byte / `SHADER_PARAM_STRIDE_F32`-float
+    /// slot per shader draw), uploaded to `ss_params_buffer` in `end_frame`.
+    ss_params: Vec<f32>,
+    ss_params_buffer: Option<wgpu::Buffer>,
+    ss_params_bind_group: Option<wgpu::BindGroup>,
 }
 
 /// Column-major 4x4 identity. Used as the root transform (children compose their
@@ -146,6 +179,27 @@ fn bilerp_color(c: &[[f32; 4]; 4], fx: f32, fy: f32) -> [f32; 4] {
         out[i] = top * (1.0 - fy) + bot * fy;
     }
     out
+}
+
+/// Min/max of a Normal part's 4 corner UVs (normalized by `tex_size`), as
+/// `[minU, minV, maxU, maxV]` — the cell UV rect an integration shader receives
+/// as `cell_rect` (ss-circle / ss-spot). Falls back to the full `[0,0,1,1]` when
+/// the part has no UV data.
+fn quad_uv_bounds(frame: &FrameView, part_idx: usize, tex_size: Option<(f32, f32)>) -> [f32; 4] {
+    let luv = &frame.local_uvs;
+    if (part_idx + 1) * 10 > luv.len() {
+        return [0.0, 0.0, 1.0, 1.0];
+    }
+    let l_uv = &luv[part_idx * 10..(part_idx + 1) * 10];
+    let (mut min_u, mut min_v, mut max_u, mut max_v) = (f32::INFINITY, f32::INFINITY, f32::NEG_INFINITY, f32::NEG_INFINITY);
+    for k in 0..4 {
+        let (u, v) = if let Some(s) = tex_size { (l_uv[k * 2] / s.0, l_uv[k * 2 + 1] / s.1) } else { (l_uv[k * 2], l_uv[k * 2 + 1]) };
+        min_u = min_u.min(u);
+        min_v = min_v.min(v);
+        max_u = max_u.max(u);
+        max_v = max_v.max(v);
+    }
+    [min_u, min_v, max_u, max_v]
 }
 
 /// The 12 `BlendType`s in schema discriminant order (SPEC §4.3). Pipelines are
@@ -272,6 +326,347 @@ fn fs_mask(in: VertexOutput) -> @location(0) vec4<f32> {
 }
 "#;
 
+/// Bytes per shader-param slot in the dynamic-offset uniform buffer. Dynamic
+/// uniform offsets must be a multiple of `min_uniform_buffer_offset_alignment`
+/// (256 on all backends we target), so each part's params occupy one 256-byte
+/// slot even though only the first 64 bytes are used.
+const SHADER_PARAM_STRIDE: usize = 256;
+/// f32 count of one slot (`SHADER_PARAM_STRIDE / 4`).
+const SHADER_PARAM_STRIDE_F32: usize = SHADER_PARAM_STRIDE / 4;
+
+/// id_hash (SDK `PartAttributeShader.id_hash()`, `fnv1a_hash_str("ss-*")`) ->
+/// WGSL fragment entry point. The 13 SpriteStudio integration shaders (SPEC §6,
+/// ports of the WebGL `SSShaderLib.ts`). Hashes are the SDK's precomputed values.
+const SS_SHADER_ENTRIES: [(u32, &str); 13] = [
+    (0x36629dfc, "fs_ss_sepia"),
+    (0x8a5c3037, "fs_ss_hsb"),
+    (0x1b721788, "fs_ss_step"),
+    (0xc488a527, "fs_ss_pix"),
+    (0x80d6d514, "fs_ss_noise"),
+    (0x64e07450, "fs_ss_bmask"),
+    (0x8f8307d4, "fs_ss_outline"),
+    (0xb59c8d1b, "fs_ss_blur"),
+    (0xe1df9a2b, "fs_ss_wave"),
+    (0xe1c1ee07, "fs_ss_move"),
+    (0x45e35578, "fs_ss_scatter"),
+    (0x9b90e282, "fs_ss_circle"),
+    (0x7140896a, "fs_ss_spot"),
+];
+
+/// WGSL entry point for an integration-shader `id_hash`, or `None` when it is not
+/// a built-in `ss-*` (the caller then draws the part with the plain shader).
+fn ss_shader_entry(id_hash: u32) -> Option<&'static str> {
+    SS_SHADER_ENTRIES.iter().find(|(h, _)| *h == id_hash).map(|(_, e)| *e)
+}
+
+/// The 13 SpriteStudio integration shaders (統合シェーダ), ported from the WebGL
+/// `SSShaderLib.ts` (itself the SS6-SDK GLSL). Each entry computes a straight-
+/// alpha `Pixel`, then `ss_finish` applies the same PartsColor composite as
+/// `fs_main` (varg mix/mul/add-sub) and re-premultiplies — except `ss-blur`,
+/// which multiplies by the part colour directly (mirrors the SS6 reference).
+///
+/// `ssTex` un-premultiplies (textures are premultiplied, §5.2) and samples at LOD
+/// 0 via `textureSampleLevel` so sampling is legal inside loops / after `discard`
+/// (WGSL forbids implicit-derivative `textureSample` in non-uniform control flow).
+/// Per-part uniforms live in group(2): `param_a`=param0..3, `param_b`=param4..7,
+/// `cell_rect`=(minU,minV,maxU,maxV) over the quad's corners, `pixel_size`=1/texel.
+const SS_SHADER_WGSL: &str = r#"
+struct VertexInput {
+    @location(0) position: vec3<f32>,
+    @location(1) uv: vec2<f32>,
+    @location(2) color: vec4<f32>,
+    @location(3) varg: vec4<f32>,
+}
+struct VertexOutput {
+    @builtin(position) clip_position: vec4<f32>,
+    @location(0) uv: vec2<f32>,
+    @location(1) color: vec4<f32>,
+    @location(2) varg: vec4<f32>,
+}
+struct Globals { proj: mat4x4<f32> }
+@group(0) @binding(0) var<uniform> globals: Globals;
+
+@vertex
+fn vs_main(model: VertexInput) -> VertexOutput {
+    var out: VertexOutput;
+    var pos = globals.proj * vec4<f32>(model.position, 1.0);
+    out.clip_position = vec4<f32>(pos.x, pos.y, 0.5, 1.0);
+    out.uv = model.uv;
+    out.color = model.color;
+    out.varg = model.varg;
+    return out;
+}
+
+@group(1) @binding(0) var t_diffuse: texture_2d<f32>;
+@group(1) @binding(1) var s_diffuse: sampler;
+
+struct SsParams {
+    param_a: vec4<f32>,    // param0..3
+    param_b: vec4<f32>,    // param4..7
+    cell_rect: vec4<f32>,  // minU, minV, maxU, maxV
+    pixel_size: vec4<f32>, // 1/texW, 1/texH, 0, 0
+}
+@group(2) @binding(0) var<uniform> ss: SsParams;
+
+const PI: f32 = 3.141592653589793;
+
+fn ssTex(uv: vec2<f32>) -> vec4<f32> {
+    let c = textureSampleLevel(t_diffuse, s_diffuse, uv, 0.0);
+    return vec4<f32>(c.rgb / max(c.a, 0.0001), c.a);
+}
+
+// PartColor composite (straight space) + re-premultiply — same math as fs_main.
+fn ss_finish(pixel: vec4<f32>, color: vec4<f32>, varg: vec4<f32>) -> vec4<f32> {
+    let rate = varg.x;
+    let p = pixel.rgb;
+    let mix_c = mix(p, color.rgb, rate);
+    let mul_c = p * mix(vec3<f32>(1.0), color.rgb, rate);
+    let add_c = p + color.rgb * rate * sign(varg.w);
+    let rgb = mix_c * varg.y + mul_c * varg.z + add_c * abs(varg.w);
+    let a = pixel.a * color.a;
+    return vec4<f32>(rgb * a, a);
+}
+
+fn ss_rand(p: vec2<f32>) -> f32 {
+    return fract(sin(dot(p, vec2<f32>(12.9898, 78.233))) * 43758.5453);
+}
+
+fn ss_rgb_to_hsb(color: vec4<f32>) -> vec4<f32> {
+    let k = vec4<f32>(0.0, -1.0 / 3.0, 2.0 / 3.0, -1.0);
+    let p = mix(vec4<f32>(color.bg, k.wz), vec4<f32>(color.gb, k.xy), step(color.b, color.g));
+    let q = mix(vec4<f32>(p.xyw, color.r), vec4<f32>(color.r, p.yzx), step(p.x, color.r));
+    let d = q.x - min(q.w, q.y);
+    let e = 1.0e-10;
+    return vec4<f32>(abs(q.z + (q.w - q.y) / (6.0 * d + e)), d / (q.x + e), q.x, color.a);
+}
+fn ss_hsb_to_rgb(hsb: vec4<f32>) -> vec4<f32> {
+    let k = vec4<f32>(1.0, 2.0 / 3.0, 1.0 / 3.0, 3.0);
+    let p = abs(fract(hsb.xxx + k.xyz) * 6.0 - k.www);
+    return vec4<f32>(hsb.z * mix(k.xxx, clamp(p - k.xxx, vec3<f32>(0.0), vec3<f32>(1.0)), hsb.y), hsb.w);
+}
+
+@fragment
+fn fs_ss_sepia(in: VertexOutput) -> @location(0) vec4<f32> {
+    let f_power = ss.param_a.x;
+    let pixel = ssTex(in.uv);
+    let gray = dot(pixel.rgb, vec3<f32>(0.298912, 0.586611, 0.114478));
+    let gray_rgb = vec3<f32>(gray);
+    let sepia_rgb = gray_rgb * vec3<f32>(1.07, 0.74, 0.43);
+    let toned = mix(sepia_rgb, gray_rgb, step(f_power, 0.0));
+    let mixed_rgb = mix(pixel.rgb, toned, abs(f_power));
+    return ss_finish(vec4<f32>(mixed_rgb, pixel.a), in.color, in.varg);
+}
+
+@fragment
+fn fs_ss_hsb(in: VertexOutput) -> @location(0) vec4<f32> {
+    let f_hue = ss.param_a.x;
+    let f_sat = ss.param_a.y;
+    let f_bri = ss.param_a.z;
+    let pixel = ssTex(in.uv);
+    var hsb = ss_rgb_to_hsb(pixel);
+    hsb.x = hsb.x + f_hue;
+    hsb.y = clamp(hsb.y + f_sat, 0.0, 1.0);
+    hsb.z = clamp(hsb.z + f_bri, 0.0, 1.0);
+    if (hsb.x < 0.0) { hsb.x = hsb.x + 1.0; }
+    if (hsb.x > 1.0) { hsb.x = hsb.x - 1.0; }
+    let shifted = ss_hsb_to_rgb(hsb);
+    return ss_finish(vec4<f32>(shifted.rgb, shifted.a), in.color, in.varg);
+}
+
+@fragment
+fn fs_ss_step(in: VertexOutput) -> @location(0) vec4<f32> {
+    let f_threshold = ss.param_a.x;
+    let f_stage = ss.param_a.y;
+    let f_color = ss.param_a.z;
+    let pixel = ssTex(in.uv);
+    let d = 1.0 + 255.0 * abs(f_stage);
+    let e = 1.0e-10;
+    let t = abs(f_threshold);
+    let b = abs(step(f_threshold, 0.0) - max(pixel.r, max(pixel.g, pixel.b)));
+    let r = clamp(floor((b - t) / (t + e) * 256.0 / d) * d / 256.0, 0.0, 1.0);
+    let c = step(t, b) * r;
+    let v = mix(vec3<f32>(c), pixel.rgb * c, f_color);
+    return ss_finish(vec4<f32>(v, pixel.a), in.color, in.varg);
+}
+
+@fragment
+fn fs_ss_pix(in: VertexOutput) -> @location(0) vec4<f32> {
+    let f_power = ss.param_a.x;
+    let px = ss.pixel_size.xy;
+    let v = 1.0 + 96.0 * f_power;
+    let step_uv = vec2<f32>(v * px.x, v * px.y);
+    let coord = floor(in.uv / step_uv) * step_uv;
+    return ss_finish(ssTex(coord), in.color, in.varg);
+}
+
+@fragment
+fn fs_ss_noise(in: VertexOutput) -> @location(0) vec4<f32> {
+    let f_power = ss.param_a.x;
+    let f_color = ss.param_a.y;
+    let f_phase = ss.param_a.z;
+    let px = ss.pixel_size.xy;
+    let u = floor(in.uv / px) * px;
+    let pixel = ssTex(in.uv);
+    let t = u + vec2<f32>(f_phase);
+    var c = vec3<f32>(0.0);
+    c.r = ss_rand(t);
+    c.g = mix(c.r, ss_rand(t * c.r), f_color);
+    c.b = mix(c.g, ss_rand(t * c.g), f_color);
+    let rgb = clamp(mix(pixel.rgb, c, f_power), vec3<f32>(0.0), vec3<f32>(1.0));
+    return ss_finish(vec4<f32>(rgb, pixel.a), in.color, in.varg);
+}
+
+@fragment
+fn fs_ss_bmask(in: VertexOutput) -> @location(0) vec4<f32> {
+    let f_brightness = ss.param_a.x;
+    let pixel = ssTex(in.uv);
+    let b = abs(step(f_brightness, 0.0) - max(pixel.r, max(pixel.g, pixel.b)));
+    if (b <= abs(f_brightness)) { discard; }
+    return ss_finish(pixel, in.color, in.varg);
+}
+
+@fragment
+fn fs_ss_outline(in: VertexOutput) -> @location(0) vec4<f32> {
+    let f_ratio = abs(ss.param_a.x);
+    let e = 1.0e-5;
+    let px = ss.pixel_size.xy;
+    var lo = 0.0;
+    lo = lo + step(ssTex(in.uv + vec2<f32>(-px.x, 0.0)).a, f_ratio);
+    lo = lo + step(ssTex(in.uv + vec2<f32>(px.x, 0.0)).a, f_ratio);
+    lo = lo + step(ssTex(in.uv + vec2<f32>(0.0, -px.y)).a, f_ratio);
+    lo = lo + step(ssTex(in.uv + vec2<f32>(0.0, px.y)).a, f_ratio);
+    let center = ssTex(in.uv);
+    let hi = step(f_ratio + e, center.a);
+    let v = min(hi * lo, 1.0);
+    if (v <= 0.0) { discard; }
+    return ss_finish(vec4<f32>(vec3<f32>(v), v), in.color, in.varg);
+}
+
+@fragment
+fn fs_ss_blur(in: VertexOutput) -> @location(0) vec4<f32> {
+    let f_focus = ss.param_a.x;
+    let px = ss.pixel_size.xy;
+    let d = vec2<f32>(f_focus * px.x * 16.0, f_focus * px.y * 16.0);
+    let tc = in.uv;
+    var sum = ssTex(tc);
+    sum = sum + ssTex(vec2<f32>(tc.x + d.x, tc.y + d.y));
+    sum = sum + ssTex(vec2<f32>(tc.x + d.x, tc.y));
+    sum = sum + ssTex(vec2<f32>(tc.x, tc.y + d.y));
+    sum = sum + ssTex(vec2<f32>(tc.x - d.x, tc.y - d.y));
+    sum = sum + ssTex(vec2<f32>(tc.x + d.x, tc.y - d.y));
+    sum = sum + ssTex(vec2<f32>(tc.x - d.x, tc.y + d.y));
+    sum = sum + ssTex(vec2<f32>(tc.x - d.x, tc.y));
+    sum = sum + ssTex(vec2<f32>(tc.x, tc.y - d.y));
+    let pixel = sum / 9.0;
+    // ss-blur skips the PartColor composite: straight multiply by part colour.
+    let c = pixel * in.color;
+    return vec4<f32>(c.rgb * c.a, c.a);
+}
+
+@fragment
+fn fs_ss_wave(in: VertexOutput) -> @location(0) vec4<f32> {
+    let f_width = ss.param_a.x;
+    let f_height = ss.param_a.y;
+    let f_phase = ss.param_a.z;
+    let coord = in.uv;
+    let px = ss.pixel_size.xy;
+    let l = 384.0 * f_height * 0.5;
+    let s = l * sin(coord.y * 384.0 * f_width * 0.5 + PI * 2.0 * f_phase) * px.x;
+    return ss_finish(ssTex(vec2<f32>(coord.x + s, coord.y)), in.color, in.varg);
+}
+
+@fragment
+fn fs_ss_move(in: VertexOutput) -> @location(0) vec4<f32> {
+    let f_distance = ss.param_a.x;
+    let f_direction = ss.param_a.y;
+    let f_power = ss.param_a.z;
+    var coord = in.uv;
+    let px = ss.pixel_size.xy;
+    var i_count = i32(floor(abs(f_distance) * 96.0));
+    if (i_count > 128) { i_count = 128; }
+    let vel = vec2<f32>(sin(f_direction * PI) * px.x, cos(f_direction * PI) * px.y) * sign(f_distance);
+    coord = coord + vel * f32(i_count);
+    coord = coord - vel;
+    var pixel = ssTex(coord);
+    for (var i: i32 = 1; i < 128; i = i + 1) {
+        if (i >= i_count) { break; }
+        coord = coord - vel;
+        pixel = mix(ssTex(coord), pixel, 0.96 * abs(f_power));
+    }
+    return ss_finish(pixel, in.color, in.varg);
+}
+
+@fragment
+fn fs_ss_scatter(in: VertexOutput) -> @location(0) vec4<f32> {
+    let f_power = ss.param_a.x;
+    let f_ratio = ss.param_a.y;
+    let f_phase = ss.param_a.z;
+    let coord = in.uv;
+    let px = ss.pixel_size.xy;
+    let u = floor(coord / px) * px;
+    let t = u + vec2<f32>(f_phase);
+    let r = ss_rand(t) * PI * 2.0 - PI;
+    let r2 = step(ss_rand(t * r), f_ratio);
+    let v = vec2<f32>(sin(r), cos(r)) * px * 96.0 * f_power * r2;
+    return ss_finish(ssTex(coord + v), in.color, in.varg);
+}
+
+@fragment
+fn fs_ss_circle(in: VertexOutput) -> @location(0) vec4<f32> {
+    let f_phase = ss.param_a.x;
+    let f_direction = ss.param_a.y;
+    let e = 1.0e-10;
+    let px = ss.pixel_size.xy;
+    let uv1 = vec2<f32>(px.x + e, px.y + e);
+    let lt_uv = ss.cell_rect.xy;
+    let rb_uv = ss.cell_rect.zw;
+    let center_uv = (lt_uv + rb_uv) * 0.5;
+    let tx = in.uv / uv1;
+    let c = center_uv / uv1;
+    let lt = lt_uv / uv1;
+    let rb = rb_uv / uv1;
+    let dd = rb - lt;
+    let v = tx - c;
+    let r = min(abs(rb.x - c.x), abs(rb.y - c.y)) + e;
+    let dis = length(v);
+    if (dis > r) { discard; }
+    let nv = select(vec2<f32>(1.0, 0.0), v / dis, dis > e);
+    let uu = 1.0 - dis / r;
+    var vv = (atan2(nv.y, nv.x) / PI + 1.0) * 0.5 + f_phase;
+    if (vv < 0.0) { vv = vv + 1.0; }
+    if (vv > 1.0) { vv = vv - 1.0; }
+    if (f_direction <= 0.0) { vv = 1.0 - vv; }
+    let st = dd * vec2<f32>(uu, vv) * uv1;
+    return ss_finish(ssTex(lt_uv + st), in.color, in.varg);
+}
+
+@fragment
+fn fs_ss_spot(in: VertexOutput) -> @location(0) vec4<f32> {
+    let f_power = ss.param_a.x;
+    let f_decay = ss.param_a.y;
+    let f_color = ss.param_a.z;
+    let e = 1.0e-10;
+    let p = abs(f_power);
+    let d_abs = abs(f_decay);
+    let px = ss.pixel_size.xy;
+    let uv1 = vec2<f32>(px.x + e, px.y + e);
+    let lt_uv = ss.cell_rect.xy;
+    let rb_uv = ss.cell_rect.zw;
+    let center_uv = (lt_uv + rb_uv) * 0.5;
+    let c = center_uv / uv1;
+    let rb = rb_uv / uv1;
+    let l = min(abs(rb.x - c.x), abs(rb.y - c.y)) + e;
+    let t = in.uv / uv1;
+    let v = c - t;
+    var f_r = max(p / (length(v / l) + e) - p, 0.0);
+    let f_l = max(p - length(v / l), 0.0);
+    f_r = clamp(mix(f_r, f_l, d_abs), 0.0, 1.0);
+    let sampled = ssTex(in.uv).rgb;
+    let pixel = vec4<f32>(mix(vec3<f32>(1.0), sampled, f_color), f_r);
+    return ss_finish(pixel, in.color, in.varg);
+}
+"#;
+
 impl SSInternalPlayer {
     /// Build pipelines and GPU resources from the borrowed `device`.
     pub fn new(device: &wgpu::Device, config: &RendererConfig) -> Self {
@@ -316,6 +711,24 @@ impl SSInternalPlayer {
         });
 
         let pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor { label: Some("SpriteStudio Pipeline Layout"), bind_group_layouts: &[Some(&uniform_bind_group_layout), Some(&texture_bind_group_layout)], immediate_size: 0 });
+
+        // Integration-shader (`ss-*`) resources (SPEC §6). The module is compiled
+        // now; the pipelines are built lazily per (id_hash, blend) on first use.
+        let ss_shader_module = device.create_shader_module(wgpu::ShaderModuleDescriptor { label: Some("SpriteStudio SS Shaders"), source: wgpu::ShaderSource::Wgsl(SS_SHADER_WGSL.into()) });
+        let ss_params_bind_group_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+            label: Some("SpriteStudio SS Params Layout"),
+            entries: &[wgpu::BindGroupLayoutEntry {
+                binding: 0,
+                visibility: wgpu::ShaderStages::FRAGMENT,
+                ty: wgpu::BindingType::Buffer { ty: wgpu::BufferBindingType::Uniform, has_dynamic_offset: true, min_binding_size: wgpu::BufferSize::new(64) },
+                count: None,
+            }],
+        });
+        let ss_pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+            label: Some("SpriteStudio SS Pipeline Layout"),
+            bind_group_layouts: &[Some(&uniform_bind_group_layout), Some(&texture_bind_group_layout), Some(&ss_params_bind_group_layout)],
+            immediate_size: 0,
+        });
 
         let stencil_enabled = config.stencil_format.is_some();
 
@@ -414,6 +827,8 @@ impl SSInternalPlayer {
             content_stride,
             mask_base,
             stencil_enabled,
+            color_format: config.color_format,
+            stencil_format: config.stencil_format,
             uniform_buffer,
             uniform_bind_group,
             texture_bind_group_layout,
@@ -427,6 +842,13 @@ impl SSInternalPlayer {
             vertices: Vec::new(),
             indices: Vec::new(),
             textures: HashMap::new(),
+            ss_shader_module,
+            ss_pipeline_layout,
+            ss_params_bind_group_layout,
+            ss_pipelines: HashMap::new(),
+            ss_params: Vec::new(),
+            ss_params_buffer: None,
+            ss_params_bind_group: None,
         }
     }
 
@@ -505,6 +927,7 @@ impl SSInternalPlayer {
         self.vertices.clear();
         self.indices.clear();
         self.draw_calls.clear();
+        self.ss_params.clear();
     }
 
     /// Append one Normal/Mesh DrawBatch's geometry into the frame accumulation,
@@ -534,6 +957,22 @@ impl SSInternalPlayer {
 
         match kind {
             DrawBatchKind::Normal => {
+                // Integration-shader dispatch (SPEC §6): when the frame carries
+                // `SHDR` attributes and this non-masked batch has ≥1 shader part,
+                // draw per-part so each shader part gets its own pipeline + params.
+                // Masked parts (stencil != None) use the plain path (shader × mask
+                // is not combined in v1, matching WebGL).
+                let shaders = frame_data.shaders();
+                let has_shader = |rank: usize| -> Option<PartAttributeShader> {
+                    let si = parts.get(draw_order.get(rank) as usize).shader();
+                    if si < 0 {
+                        return None;
+                    }
+                    let attr = *shaders?.get(si as usize);
+                    ss_shader_entry(attr.id_hash()).map(|_| attr)
+                };
+                let shader_dispatch = stencil == StencilTest::None && (start_rank..start_rank + count).any(|r| has_shader(r).is_some());
+
                 for rank in start_rank..start_rank + count {
                     let part_idx = draw_order.get(rank) as usize;
                     let part = parts.get(part_idx);
@@ -556,7 +995,27 @@ impl SSInternalPlayer {
                         })
                         .unwrap_or_else(|| ([[1.0, 1.0, 1.0, part.alpha()]; 4], [VARG_MODULATE; 4]));
 
+                    if !shader_dispatch {
+                        self.push_quad_part(frame, transform, part_idx, tex_size, &colors_arr, &vargs_arr);
+                        continue;
+                    }
+
+                    // Per-part draw call so shader / non-shader parts don't merge.
+                    let call_start = self.indices.len() as u32;
                     self.push_quad_part(frame, transform, part_idx, tex_size, &colors_arr, &vargs_arr);
+                    let call_end = self.indices.len() as u32;
+                    if call_end == call_start {
+                        continue;
+                    }
+                    let shader = has_shader(rank).map(|attr| {
+                        let slot = self.push_shader_params(&attr, frame, part_idx, tex_size);
+                        ShaderDraw { id_hash: attr.id_hash(), blend_idx: blend_index(blend_type), slot }
+                    });
+                    self.draw_calls.push(BatchDrawCall { pipeline_idx, texture_hash, index_start: call_start, index_count: call_end - call_start, shader });
+                }
+                if shader_dispatch {
+                    // Per-part draw calls already emitted; skip the aggregate push.
+                    return;
                 }
             }
             DrawBatchKind::Mesh => {
@@ -619,8 +1078,77 @@ impl SSInternalPlayer {
 
         let index_end = self.indices.len() as u32;
         if index_end > index_start {
-            self.draw_calls.push(BatchDrawCall { pipeline_idx, texture_hash, index_start, index_count: index_end - index_start });
+            self.draw_calls.push(BatchDrawCall { pipeline_idx, texture_hash, index_start, index_count: index_end - index_start, shader: None });
         }
+    }
+
+    /// Append one part's integration-shader (`ss-*`) params as a 256-byte slot in
+    /// `ss_params` and return its slot index (the dynamic uniform offset unit).
+    /// `cell_rect` is the min/max of the quad's 4 normalized corner UVs (for
+    /// ss-circle / ss-spot); `pixel_size` is 1/texel (for the neighbour-sampling
+    /// shaders). MUST be called after the part's quad is built.
+    fn push_shader_params(&mut self, attr: &PartAttributeShader, frame: &FrameView, part_idx: usize, tex_size: Option<(f32, f32)>) -> u32 {
+        let slot = (self.ss_params.len() / SHADER_PARAM_STRIDE_F32) as u32;
+        let cell = quad_uv_bounds(frame, part_idx, tex_size);
+        let (tw, th) = tex_size.unwrap_or((1.0, 1.0));
+        let px = if tw > 0.0 { 1.0 / tw } else { 0.0 };
+        let py = if th > 0.0 { 1.0 / th } else { 0.0 };
+
+        let mut block = [0.0f32; SHADER_PARAM_STRIDE_F32];
+        block[0] = attr.param0();
+        block[1] = attr.param1();
+        block[2] = attr.param2();
+        block[3] = attr.param3();
+        block[4] = attr.param4();
+        block[5] = attr.param5();
+        block[6] = attr.param6();
+        block[7] = attr.param7();
+        block[8..12].copy_from_slice(&cell);
+        block[12] = px;
+        block[13] = py;
+        self.ss_params.extend_from_slice(&block);
+        slot
+    }
+
+    /// Lazily build (and cache) the shader pipeline for `(id_hash, blend_idx)`.
+    /// No-op if `id_hash` is not a built-in `ss-*` shader. Stencil-test variants
+    /// are unnecessary: shader parts are never masked (v1), so the pipeline uses
+    /// a keep/Always depth-stencil state when the target has one.
+    fn ensure_shader_pipeline(&mut self, device: &wgpu::Device, id_hash: u32, blend_idx: usize) {
+        if self.ss_pipelines.contains_key(&(id_hash, blend_idx)) {
+            return;
+        }
+        let Some(entry) = ss_shader_entry(id_hash) else {
+            return;
+        };
+        let blend = blend_state(BLEND_ORDER[blend_idx.min(BLEND_ORDER.len() - 1)]);
+        let depth_stencil =
+            self.stencil_format.map(|format| wgpu::DepthStencilState { format, depth_write_enabled: Some(false), depth_compare: Some(wgpu::CompareFunction::Always), stencil: wgpu::StencilState::default(), bias: wgpu::DepthBiasState::default() });
+        let pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+            label: Some("SpriteStudio SS Pipeline"),
+            layout: Some(&self.ss_pipeline_layout),
+            vertex: wgpu::VertexState { module: &self.ss_shader_module, entry_point: Some("vs_main"), buffers: &[Vertex::desc()], compilation_options: Default::default() },
+            fragment: Some(wgpu::FragmentState {
+                module: &self.ss_shader_module,
+                entry_point: Some(entry),
+                targets: &[Some(wgpu::ColorTargetState { format: self.color_format, blend: Some(blend), write_mask: wgpu::ColorWrites::ALL })],
+                compilation_options: Default::default(),
+            }),
+            primitive: wgpu::PrimitiveState {
+                topology: wgpu::PrimitiveTopology::TriangleList,
+                strip_index_format: None,
+                front_face: wgpu::FrontFace::Ccw,
+                cull_mode: None,
+                polygon_mode: wgpu::PolygonMode::Fill,
+                unclipped_depth: false,
+                conservative: false,
+            },
+            depth_stencil,
+            multisample: wgpu::MultisampleState::default(),
+            multiview_mask: None,
+            cache: None,
+        });
+        self.ss_pipelines.insert((id_hash, blend_idx), pipeline);
     }
 
     /// Append one mask writer's geometry into the frame accumulation, routed to
@@ -657,7 +1185,7 @@ impl SSInternalPlayer {
 
         let index_end = self.indices.len() as u32;
         if index_end > index_start {
-            self.draw_calls.push(BatchDrawCall { pipeline_idx: self.mask_idx(op), texture_hash: writer.texture_hash, index_start, index_count: index_end - index_start });
+            self.draw_calls.push(BatchDrawCall { pipeline_idx: self.mask_idx(op), texture_hash: writer.texture_hash, index_start, index_count: index_end - index_start, shader: None });
         }
     }
 
@@ -871,7 +1399,7 @@ impl SSInternalPlayer {
 
             let index_end = self.indices.len() as u32;
             if index_end > index_start {
-                self.draw_calls.push(BatchDrawCall { pipeline_idx, texture_hash, index_start, index_count: index_end - index_start });
+                self.draw_calls.push(BatchDrawCall { pipeline_idx, texture_hash, index_start, index_count: index_end - index_start, shader: None });
             }
         }
     }
@@ -904,6 +1432,35 @@ impl SSInternalPlayer {
         if let Some(ref buffer) = self.index_buffer {
             queue.write_buffer(buffer, 0, bytemuck::cast_slice(&self.indices));
         }
+
+        // Integration shaders (SPEC §6): build any missing (id_hash, blend)
+        // pipeline lazily, then upload this frame's per-part params. Nothing here
+        // runs for shader-free frames (`ss_params` stays empty).
+        if !self.ss_params.is_empty() {
+            let needed: Vec<(u32, usize)> = self.draw_calls.iter().filter_map(|c| c.shader.map(|s| (s.id_hash, s.blend_idx))).collect();
+            for (id_hash, blend_idx) in needed {
+                self.ensure_shader_pipeline(device, id_hash, blend_idx);
+            }
+
+            let bytes: &[u8] = bytemuck::cast_slice(&self.ss_params);
+            let needed_size = bytes.len() as u64;
+            let current = self.ss_params_buffer.as_ref().map(|b| b.size()).unwrap_or(0);
+            if current < needed_size {
+                let new_size = (needed_size * 2).max(SHADER_PARAM_STRIDE as u64);
+                let buffer = device.create_buffer(&wgpu::BufferDescriptor { label: Some("SpriteStudio SS Params Buffer"), size: new_size, usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST, mapped_at_creation: false });
+                // The binding window is one `SsParams` (64 B); the dynamic offset picks the slot.
+                let bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
+                    label: Some("SpriteStudio SS Params Bind Group"),
+                    layout: &self.ss_params_bind_group_layout,
+                    entries: &[wgpu::BindGroupEntry { binding: 0, resource: wgpu::BindingResource::Buffer(wgpu::BufferBinding { buffer: &buffer, offset: 0, size: wgpu::BufferSize::new(64) }) }],
+                });
+                self.ss_params_buffer = Some(buffer);
+                self.ss_params_bind_group = Some(bind_group);
+            }
+            if let Some(ref buffer) = self.ss_params_buffer {
+                queue.write_buffer(buffer, 0, bytes);
+            }
+        }
     }
 
     /// Record draw commands into a RenderPass opened by the host.
@@ -927,11 +1484,26 @@ impl SSInternalPlayer {
         }
 
         for call in &self.draw_calls {
-            rpass.set_pipeline(&self.pipelines[call.pipeline_idx]);
-
             // Missing texture -> 1x1 white fallback (SPEC §8).
-            let bind_group = self.textures.get(&call.texture_hash).map(|e| &e.bind_group).unwrap_or(&self.white_bind_group);
-            rpass.set_bind_group(1, bind_group, &[]);
+            let texture = self.textures.get(&call.texture_hash).map(|e| &e.bind_group).unwrap_or(&self.white_bind_group);
+
+            match call.shader {
+                // Integration-shader part (SPEC §6): shader pipeline + group(2)
+                // params at the part's dynamic offset. Skip if the pipeline failed
+                // to build (unknown id_hash filtered earlier, so normally present).
+                Some(sd) => {
+                    let (Some(pipeline), Some(params_bg)) = (self.ss_pipelines.get(&(sd.id_hash, sd.blend_idx)), self.ss_params_bind_group.as_ref()) else {
+                        continue;
+                    };
+                    rpass.set_pipeline(pipeline);
+                    rpass.set_bind_group(1, texture, &[]);
+                    rpass.set_bind_group(2, params_bg, &[sd.slot * SHADER_PARAM_STRIDE as u32]);
+                }
+                None => {
+                    rpass.set_pipeline(&self.pipelines[call.pipeline_idx]);
+                    rpass.set_bind_group(1, texture, &[]);
+                }
+            }
             rpass.draw_indexed(call.index_start..call.index_start + call.index_count, 0, 0..1);
         }
 

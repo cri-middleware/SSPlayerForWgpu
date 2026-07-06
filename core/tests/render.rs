@@ -174,3 +174,33 @@ fn render_shape_content_visible() {
     assert!(plain > 15_000, "Shape.ssab drew too little (plain={plain}) — Shape content not filled");
     assert!(masked > 10_000, "Shape.ssab drew too little (masking={masked}) — visible parts hidden by the pure mask");
 }
+
+#[test]
+fn render_integration_shaders() {
+    let instance = wgpu::Instance::new(wgpu::InstanceDescriptor::new_without_display_handle());
+    let adapter = match pollster::block_on(instance.request_adapter(&wgpu::RequestAdapterOptions { power_preference: wgpu::PowerPreference::default(), compatible_surface: None, force_fallback_adapter: false })) {
+        Ok(a) => a,
+        Err(_) => {
+            eprintln!("no GPU adapter available, skipping headless render test");
+            return;
+        }
+    };
+    let (device, queue) = pollster::block_on(adapter.request_device(&wgpu::DeviceDescriptor::default())).expect("request_device");
+
+    // Shader.ssab is the integration-shader (`ss-*`) showcase: a grid of parts,
+    // each with a different SHDR attribute (pixelate, noise, outline, circle, …).
+    // Building the player compiles the SS WGSL module (naga-validated), and the
+    // per-part shader dispatch + params must produce output. A too-low count means
+    // the shader pipelines / dynamic params plumbing broke and parts vanished.
+    let plain = render_ssab(&device, &queue, false, "Shader", 15);
+    let drawn = drawn_pixels(&plain);
+    eprintln!("Shader.ssab drawn pixels: {drawn}");
+    assert!(drawn > 15_000, "Shader.ssab drew too little ({drawn}) — integration-shader dispatch broke");
+
+    // The viewer runs with a stencil buffer. Shader parts carry the
+    // mask_influence opt-in, so a stencil-enabled renderer must NOT route them
+    // through the masked path when no mask writers exist — otherwise they draw as
+    // plain textures with no effect. Guard: stencil on/off must be pixel-identical.
+    let with_stencil = render_ssab(&device, &queue, true, "Shader", 15);
+    assert_eq!(plain, with_stencil, "Shader.ssab differs with a stencil buffer — shaders skipped by the masked path (no-writer gating regressed)");
+}

@@ -314,7 +314,11 @@ fn render_node(node: &mut PlaybackNode, internal: &mut SSInternalPlayer, transfo
         let start_rank = batch.start_rank() as usize;
         let count = batch.count() as usize;
         let kind = batch.kind();
-        let masked_target = masking && (batch.flags() & FLAG_MASK_INFLUENCE) != 0;
+        // A masked target only clips when writers are actually active this frame
+        // (WebGL gates the masked path on maskWriterCount > 0). With no writers the
+        // mask_influence opt-in is inert, so the content draws normally — crucially
+        // via the stencil=None path, which is where shader dispatch happens.
+        let masked_target = masking && !writers.is_empty() && (batch.flags() & FLAG_MASK_INFLUENCE) != 0;
         match kind {
             DrawBatchKind::Normal | DrawBatchKind::Mesh | DrawBatchKind::Shape => {
                 // Pure masks (PartTypeMask / draw_as_mask) contribute coverage but
@@ -358,7 +362,7 @@ fn render_node(node: &mut PlaybackNode, internal: &mut SSInternalPlayer, transfo
                     // Decide the stencil this child sub-animation inherits: our own
                     // mask (if the instance part is a masked target), else propagate
                     // whatever we inherited (screen-space clip continues down).
-                    let child_inherited = if masking {
+                    let child_inherited = if masking && !writers.is_empty() {
                         let f = node.mask_flags.get(part_idx).copied().unwrap_or_default();
                         if f.mask_influence {
                             sync_masks_to(internal, &frame, transform, &writers, &mut cursor, rank);
