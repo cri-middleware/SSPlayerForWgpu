@@ -95,7 +95,9 @@ impl AppState {
     fn load_ssab_file(&mut self, path: &Path) {
         println!("Loading SSAB: {:?}", path);
         let bytes = std::fs::read(path).expect("Failed to read SSAB file");
-        self.player.load_ssab(&bytes).expect("Failed to load SSAB in Player");
+        // Pack name = file stem (external instance refs are resolved by pack name).
+        let pack = path.file_stem().and_then(|s| s.to_str()).unwrap_or_default();
+        self.player.load_ssab(pack, &bytes).expect("Failed to load SSAB in Player");
 
         let anims = self.player.animation_names().unwrap_or_default();
         println!("Animations found: {:?}", anims);
@@ -125,6 +127,7 @@ impl AppState {
         } else {
             println!("  Animation:        None");
         }
+        println!("  Instance nodes:   {}", self.player.instance_node_count());
         println!("  Playback:         {}", if self.is_paused { "Paused" } else { "Playing" });
         println!("  Y-Axis Mode:      {}", if self.y_down { "Y-Down (flipped)" } else { "Y-Up (standard)" });
         println!("----------------------------------------------------");
@@ -200,6 +203,16 @@ impl ApplicationHandler for App {
         }
         ssab_paths.sort();
 
+        // Register every pack up front so external instance references (which
+        // point at other .ssab files by pack name) can be resolved.
+        for path in &ssab_paths {
+            if let (Ok(bytes), Some(pack)) = (std::fs::read(path), path.file_stem().and_then(|s| s.to_str()))
+                && let Err(e) = player.add_ssab(pack, &bytes)
+            {
+                eprintln!("Failed to register {:?}: {:?}", path, e);
+            }
+        }
+
         let mut current_ssab_idx = 0;
         let mut anim_names = Vec::new();
 
@@ -212,7 +225,8 @@ impl ApplicationHandler for App {
             let path = &ssab_paths[current_ssab_idx];
             println!("Loading initial SSAB: {:?}", path);
             let bytes = std::fs::read(path).expect("Failed to read SSAB file");
-            player.load_ssab(&bytes).expect("Failed to load SSAB in Player");
+            let pack = path.file_stem().and_then(|s| s.to_str()).unwrap_or_default();
+            player.load_ssab(pack, &bytes).expect("Failed to load SSAB in Player");
 
             anim_names = player.animation_names().unwrap_or_default();
             if !anim_names.is_empty() {

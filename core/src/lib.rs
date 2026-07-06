@@ -11,5 +11,5 @@ mod internal;
 mod player;
 
 pub use frame::FrameView;
-pub use internal::{RendererConfig, SSInternalPlayer, Vertex};
+pub use internal::{BatchInfo, IDENTITY_TRANSFORM, RendererConfig, SSInternalPlayer, Vertex};
 pub use player::{SSPlayer, SSPlayerConfig};

@@ -40,6 +40,17 @@ pub struct RendererConfig {
     pub color_format: wgpu::TextureFormat,
 }
 
+/// The fields of one `DrawBatch` the renderer needs, extracted by the caller so
+/// the operation layer keeps ownership of batch iteration.
+#[derive(Clone, Copy, Debug)]
+pub struct BatchInfo {
+    pub start_rank: usize,
+    pub count: usize,
+    pub texture_hash: u32,
+    pub blend_type: BlendType,
+    pub kind: DrawBatchKind,
+}
+
 #[derive(Clone, Debug)]
 struct BatchDrawCall {
     pipeline_idx: usize,
@@ -68,7 +79,21 @@ pub struct SSInternalPlayer {
     index_buffer: Option<wgpu::Buffer>,
     draw_calls: Vec<BatchDrawCall>,
 
+    // Per-frame CPU accumulation (Unity-style flatten): every node/batch appends
+    // here between begin_frame and end_frame, then it is uploaded once.
+    vertices: Vec<Vertex>,
+    indices: Vec<u32>,
+
     textures: HashMap<u32, TextureEntry>,
+}
+
+/// Column-major 4x4 identity. Used as the root transform (children compose their
+/// parent instance part's world matrix onto this).
+pub const IDENTITY_TRANSFORM: [f32; 16] = [1.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 1.0];
+
+/// Apply a column-major 4x4 transform to a point.
+fn apply_transform(t: &[f32; 16], x: f32, y: f32, z: f32) -> (f32, f32, f32) {
+    (t[0] * x + t[4] * y + t[8] * z + t[12], t[1] * x + t[5] * y + t[9] * z + t[13], t[2] * x + t[6] * y + t[10] * z + t[14])
 }
 
 const WGSL_SHADER: &str = r#"
@@ -208,7 +233,7 @@ impl SSInternalPlayer {
 
         let pipelines = [create_pipeline("SpriteStudio Pipeline Mix", blend_mix), create_pipeline("SpriteStudio Pipeline Add", blend_add), create_pipeline("SpriteStudio Pipeline Sub", blend_sub), create_pipeline("SpriteStudio Pipeline Mul", blend_mul)];
 
-        Self { pipelines, uniform_buffer, uniform_bind_group, texture_bind_group_layout, sampler, vertex_buffer: None, index_buffer: None, draw_calls: Vec::new(), textures: HashMap::new() }
+        Self { pipelines, uniform_buffer, uniform_bind_group, texture_bind_group_layout, sampler, vertex_buffer: None, index_buffer: None, draw_calls: Vec::new(), vertices: Vec::new(), indices: Vec::new(), textures: HashMap::new() }
     }
 
     /// Update the projection matrix to the target's pixel dimensions.
@@ -246,18 +271,26 @@ impl SSInternalPlayer {
         self.textures.insert(hash, TextureEntry { bind_group, size: (width as f32, height as f32) });
     }
 
-    /// Convert a FrameView (a borrow of runtime-owned data) into wgpu
-    /// vertices/indices and build per-batch draw calls. Owns no target.
-    pub fn prepare(&mut self, device: &wgpu::Device, queue: &wgpu::Queue, frame: &FrameView) {
+    /// Reset per-frame accumulation. Call once before appending any batches.
+    pub fn begin_frame(&mut self) {
+        self.vertices.clear();
+        self.indices.clear();
         self.draw_calls.clear();
+    }
 
+    /// Append one Normal/Mesh DrawBatch's geometry into the frame accumulation,
+    /// pre-multiplying every vertex by `transform` (identity for the root; the
+    /// composed parent instance world matrix for instance children). `frame` is
+    /// re-parsed for its draw_order/parts/parts_color; the batch fields are
+    /// passed in so the caller (SSPlayer) drives batch iteration and can
+    /// interleave instance recursion at the right rank.
+    pub fn append_batch(&mut self, frame: &FrameView, transform: &[f32; 16], batch: &BatchInfo) {
+        let BatchInfo { start_rank, count, texture_hash, blend_type, kind } = *batch;
         if frame.frame_data.is_empty() {
             return;
         }
         let frame_data = unsafe { root_as_frame_data_unchecked(frame.frame_data) };
-
         let draw_order = frame_data.draw_order();
-        let draw_batches = frame_data.draw_batches();
         let parts = frame_data.parts();
         let parts_color = frame_data.parts_color();
 
@@ -268,155 +301,147 @@ impl SSInternalPlayer {
             return;
         }
 
-        let mesh_vertices_x = frame.mesh_vertices_x;
-        let mesh_vertices_y = frame.mesh_vertices_y;
-        let mesh_vertex_offsets = frame.mesh_vertex_offsets;
-        let mesh_uvs = frame.mesh_uvs;
-        let mesh_indices = frame.mesh_indices;
-        let mesh_index_offsets = frame.mesh_index_offsets;
+        let pipeline_idx = match blend_type {
+            BlendType::Mix => 0,
+            BlendType::Add => 1,
+            BlendType::Sub => 2,
+            BlendType::Mul => 3,
+            _ => 0,
+        };
+        let tex_size = self.textures.get(&texture_hash).map(|t| t.size);
+        let index_start = self.indices.len() as u32;
 
-        let mut vertices: Vec<Vertex> = Vec::new();
-        let mut indices: Vec<u32> = Vec::new();
+        match kind {
+            DrawBatchKind::Normal => {
+                for rank in start_rank..start_rank + count {
+                    let part_idx = draw_order.get(rank) as usize;
+                    let part = parts.get(part_idx);
 
-        for batch in draw_batches {
-            let start_rank = batch.start_rank() as usize;
-            let count = batch.count() as usize;
-            let texture_hash = batch.texture_hash();
-            let blend_type = batch.blend_type();
-            let kind = batch.kind();
+                    let base_vert_idx = self.vertices.len() as u32;
+                    let m = &world_matrices[part_idx * 16..(part_idx + 1) * 16];
+                    let lv = &local_vertices[part_idx * 10..(part_idx + 1) * 10];
+                    let l_uv = &local_uvs[part_idx * 10..(part_idx + 1) * 10];
 
-            let pipeline_idx = match blend_type {
-                BlendType::Mix => 0,
-                BlendType::Add => 1,
-                BlendType::Sub => 2,
-                BlendType::Mul => 3,
-                _ => 0,
-            };
+                    let part_color_idx = part.part_color();
+                    let colors_arr = parts_color
+                        .filter(|_| part_color_idx >= 0)
+                        .map(|pc_vec| {
+                            let pc = pc_vec.get(part_color_idx as usize);
+                            let c_lt = pc.lt().rgba();
+                            let c_rt = pc.rt().rgba();
+                            let c_lb = pc.lb().rgba();
+                            let c_rb = pc.rb().rgba();
+                            [
+                                [c_lt.r() as f32 / 255.0, c_lt.g() as f32 / 255.0, c_lt.b() as f32 / 255.0, c_lt.a() as f32 / 255.0],
+                                [c_rt.r() as f32 / 255.0, c_rt.g() as f32 / 255.0, c_rt.b() as f32 / 255.0, c_rt.a() as f32 / 255.0],
+                                [c_lb.r() as f32 / 255.0, c_lb.g() as f32 / 255.0, c_lb.b() as f32 / 255.0, c_lb.a() as f32 / 255.0],
+                                [c_rb.r() as f32 / 255.0, c_rb.g() as f32 / 255.0, c_rb.b() as f32 / 255.0, c_rb.a() as f32 / 255.0],
+                            ]
+                        })
+                        .unwrap_or_else(|| {
+                            let a = part.alpha();
+                            [[1.0, 1.0, 1.0, a]; 4]
+                        });
 
-            let tex_size = self.textures.get(&texture_hash).map(|t| t.size);
+                    for k in 0..4 {
+                        let lx = lv[k * 2];
+                        let ly = lv[k * 2 + 1];
 
-            let index_start = indices.len() as u32;
+                        let wx = m[0] * lx + m[4] * ly + m[12];
+                        let wy = m[1] * lx + m[5] * ly + m[13];
+                        let wz = m[2] * lx + m[6] * ly + m[14];
+                        let (fx, fy, fz) = apply_transform(transform, wx, wy, wz);
 
-            match kind {
-                DrawBatchKind::Normal => {
-                    for rank in start_rank..start_rank + count {
-                        let part_idx = draw_order.get(rank) as usize;
-                        let part = parts.get(part_idx);
+                        let (tu, tv) = if let Some(size) = tex_size { (l_uv[k * 2] / size.0, l_uv[k * 2 + 1] / size.1) } else { (l_uv[k * 2], l_uv[k * 2 + 1]) };
 
-                        let base_vert_idx = vertices.len() as u32;
-                        let m = &world_matrices[part_idx * 16..(part_idx + 1) * 16];
-                        let lv = &local_vertices[part_idx * 10..(part_idx + 1) * 10];
-                        let l_uv = &local_uvs[part_idx * 10..(part_idx + 1) * 10];
+                        self.vertices.push(Vertex { position: [fx, fy, fz], uv: [tu, tv], color: colors_arr[k] });
+                    }
 
-                        let part_color_idx = part.part_color();
-                        let colors_arr = parts_color
-                            .filter(|_| part_color_idx >= 0)
-                            .map(|pc_vec| {
-                                let pc = pc_vec.get(part_color_idx as usize);
-                                let c_lt = pc.lt().rgba();
-                                let c_rt = pc.rt().rgba();
-                                let c_lb = pc.lb().rgba();
-                                let c_rb = pc.rb().rgba();
-                                [
-                                    [c_lt.r() as f32 / 255.0, c_lt.g() as f32 / 255.0, c_lt.b() as f32 / 255.0, c_lt.a() as f32 / 255.0],
-                                    [c_rt.r() as f32 / 255.0, c_rt.g() as f32 / 255.0, c_rt.b() as f32 / 255.0, c_rt.a() as f32 / 255.0],
-                                    [c_lb.r() as f32 / 255.0, c_lb.g() as f32 / 255.0, c_lb.b() as f32 / 255.0, c_lb.a() as f32 / 255.0],
-                                    [c_rb.r() as f32 / 255.0, c_rb.g() as f32 / 255.0, c_rb.b() as f32 / 255.0, c_rb.a() as f32 / 255.0],
-                                ]
-                            })
-                            .unwrap_or_else(|| {
-                                let a = part.alpha();
-                                [[1.0, 1.0, 1.0, a]; 4]
-                            });
+                    self.indices.push(base_vert_idx);
+                    self.indices.push(base_vert_idx + 1);
+                    self.indices.push(base_vert_idx + 2);
+                    self.indices.push(base_vert_idx + 2);
+                    self.indices.push(base_vert_idx + 1);
+                    self.indices.push(base_vert_idx + 3);
+                }
+            }
+            DrawBatchKind::Mesh => {
+                let mesh_vertices_x = frame.mesh_vertices_x;
+                let mesh_vertices_y = frame.mesh_vertices_y;
+                let mesh_vertex_offsets = frame.mesh_vertex_offsets;
+                let mesh_uvs = frame.mesh_uvs;
+                let mesh_indices = frame.mesh_indices;
+                let mesh_index_offsets = frame.mesh_index_offsets;
 
-                        for k in 0..4 {
-                            let lx = lv[k * 2];
-                            let ly = lv[k * 2 + 1];
+                for rank in start_rank..start_rank + count {
+                    let part_idx = draw_order.get(rank) as usize;
+                    let part = parts.get(part_idx);
 
-                            let wx = m[0] * lx + m[4] * ly + m[12];
-                            let wy = m[1] * lx + m[5] * ly + m[13];
-                            let wz = m[2] * lx + m[6] * ly + m[14];
+                    if mesh_vertex_offsets.is_empty() || part_idx >= mesh_vertex_offsets.len() - 1 {
+                        continue;
+                    }
 
-                            let (tu, tv) = if let Some(size) = tex_size { (l_uv[k * 2] / size.0, l_uv[k * 2 + 1] / size.1) } else { (l_uv[k * 2], l_uv[k * 2 + 1]) };
+                    let start_vert = mesh_vertex_offsets[part_idx] as usize;
+                    let end_vert = mesh_vertex_offsets[part_idx + 1] as usize;
+                    if end_vert <= start_vert {
+                        continue;
+                    }
 
-                            vertices.push(Vertex { position: [wx, wy, wz], uv: [tu, tv], color: colors_arr[k] });
-                        }
+                    let base_vert_idx = self.vertices.len() as u32;
 
-                        indices.push(base_vert_idx);
-                        indices.push(base_vert_idx + 1);
-                        indices.push(base_vert_idx + 2);
-                        indices.push(base_vert_idx + 2);
-                        indices.push(base_vert_idx + 1);
-                        indices.push(base_vert_idx + 3);
+                    let part_color_idx = part.part_color();
+                    let mesh_color = parts_color
+                        .filter(|_| part_color_idx >= 0)
+                        .map(|pc_vec| {
+                            let pc = pc_vec.get(part_color_idx as usize);
+                            let c_lt = pc.lt().rgba();
+                            [c_lt.r() as f32 / 255.0, c_lt.g() as f32 / 255.0, c_lt.b() as f32 / 255.0, c_lt.a() as f32 / 255.0]
+                        })
+                        .unwrap_or_else(|| [1.0, 1.0, 1.0, part.alpha()]);
+
+                    for k in start_vert..end_vert {
+                        let wx = mesh_vertices_x[k];
+                        let wy = mesh_vertices_y[k];
+                        let wz = part.position_z();
+                        let (fx, fy, fz) = apply_transform(transform, wx, wy, wz);
+
+                        let (tu, tv) = if let Some(size) = tex_size { (mesh_uvs[k * 2] / size.0, mesh_uvs[k * 2 + 1] / size.1) } else { (mesh_uvs[k * 2], mesh_uvs[k * 2 + 1]) };
+
+                        self.vertices.push(Vertex { position: [fx, fy, fz], uv: [tu, tv], color: mesh_color });
+                    }
+
+                    let start_idx = mesh_index_offsets[part_idx] as usize;
+                    let end_idx = mesh_index_offsets[part_idx + 1] as usize;
+                    for &rel_idx in &mesh_indices[start_idx..end_idx] {
+                        self.indices.push(base_vert_idx + rel_idx as u32);
                     }
                 }
-                DrawBatchKind::Mesh => {
-                    for rank in start_rank..start_rank + count {
-                        let part_idx = draw_order.get(rank) as usize;
-                        let part = parts.get(part_idx);
-
-                        if mesh_vertex_offsets.is_empty() || part_idx >= mesh_vertex_offsets.len() - 1 {
-                            continue;
-                        }
-
-                        let start_vert = mesh_vertex_offsets[part_idx] as usize;
-                        let end_vert = mesh_vertex_offsets[part_idx + 1] as usize;
-                        if end_vert <= start_vert {
-                            continue;
-                        }
-
-                        let base_vert_idx = vertices.len() as u32;
-
-                        let part_color_idx = part.part_color();
-                        let mesh_color = parts_color
-                            .filter(|_| part_color_idx >= 0)
-                            .map(|pc_vec| {
-                                let pc = pc_vec.get(part_color_idx as usize);
-                                let c_lt = pc.lt().rgba();
-                                [c_lt.r() as f32 / 255.0, c_lt.g() as f32 / 255.0, c_lt.b() as f32 / 255.0, c_lt.a() as f32 / 255.0]
-                            })
-                            .unwrap_or_else(|| [1.0, 1.0, 1.0, part.alpha()]);
-
-                        for k in start_vert..end_vert {
-                            let wx = mesh_vertices_x[k];
-                            let wy = mesh_vertices_y[k];
-                            let wz = part.position_z();
-
-                            let (tu, tv) = if let Some(size) = tex_size { (mesh_uvs[k * 2] / size.0, mesh_uvs[k * 2 + 1] / size.1) } else { (mesh_uvs[k * 2], mesh_uvs[k * 2 + 1]) };
-
-                            vertices.push(Vertex { position: [wx, wy, wz], uv: [tu, tv], color: mesh_color });
-                        }
-
-                        let start_idx = mesh_index_offsets[part_idx] as usize;
-                        let end_idx = mesh_index_offsets[part_idx + 1] as usize;
-                        for &rel_idx in &mesh_indices[start_idx..end_idx] {
-                            indices.push(base_vert_idx + rel_idx as u32);
-                        }
-                    }
-                }
-                _ => {}
             }
-
-            let index_end = indices.len() as u32;
-            if index_end > index_start {
-                self.draw_calls.push(BatchDrawCall { pipeline_idx, texture_hash, index_start, index_count: index_end - index_start });
-            }
+            _ => {}
         }
 
-        if vertices.is_empty() || indices.is_empty() {
+        let index_end = self.indices.len() as u32;
+        if index_end > index_start {
+            self.draw_calls.push(BatchDrawCall { pipeline_idx, texture_hash, index_start, index_count: index_end - index_start });
+        }
+    }
+
+    /// Upload the accumulated geometry to the GPU. Call once after all batches.
+    pub fn end_frame(&mut self, device: &wgpu::Device, queue: &wgpu::Queue) {
+        if self.vertices.is_empty() || self.indices.is_empty() {
             return;
         }
 
-        let vertex_bytes = bytemuck::cast_slice(&vertices);
-        self.ensure_vertex_buffer(device, vertex_bytes.len());
+        let vertex_len = std::mem::size_of_val(self.vertices.as_slice());
+        self.ensure_vertex_buffer(device, vertex_len);
         if let Some(ref buffer) = self.vertex_buffer {
-            queue.write_buffer(buffer, 0, vertex_bytes);
+            queue.write_buffer(buffer, 0, bytemuck::cast_slice(&self.vertices));
         }
 
-        let index_bytes = bytemuck::cast_slice(&indices);
-        self.ensure_index_buffer(device, index_bytes.len());
+        let index_len = std::mem::size_of_val(self.indices.as_slice());
+        self.ensure_index_buffer(device, index_len);
         if let Some(ref buffer) = self.index_buffer {
-            queue.write_buffer(buffer, 0, index_bytes);
+            queue.write_buffer(buffer, 0, bytemuck::cast_slice(&self.indices));
         }
     }
 
