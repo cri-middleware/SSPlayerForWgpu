@@ -10,6 +10,5 @@ description.workspace = true
 
 [dependencies]
 wgpu = "29.0.3"
-ssab = { workspace = true }
 ssruntime = { workspace = true }
 bytemuck = { version = "1.25.0", features = ["derive"] }

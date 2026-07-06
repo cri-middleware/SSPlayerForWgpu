@@ -1,5 +1,16 @@
-use crate::player::Player;
+//! Layer 2 (rendering / "body"): SSInternalPlayer.
+//!
+//! Turns the runtime's FrameData / DrawBatch / SoA buffers into wgpu vertices,
+//! indices and draw commands. Borrow model: it never owns the `Device`, `Queue`
+//! or the render target — the host (SSPlayer / viewer / Bevy) owns those and
+//! lends them by reference.
 
+use crate::frame::FrameView;
+use std::collections::HashMap;
+
+use ssruntime::runtime::framedata::ss::runtime::{BlendType, DrawBatchKind, root_as_frame_data_unchecked};
+
+/// Per-vertex data uploaded to the GPU: world position, normalized UV, and RGBA.
 #[repr(C)]
 #[derive(Copy, Clone, Debug, bytemuck::Pod, bytemuck::Zeroable)]
 pub struct Vertex {
@@ -22,24 +33,42 @@ impl Vertex {
     }
 }
 
-#[derive(Clone, Debug)]
-pub struct BatchDrawCall {
-    pub pipeline_idx: usize,
-    pub texture_hash: u32,
-    pub index_start: u32,
-    pub index_count: u32,
+/// Construction config for SSInternalPlayer, matched to the host's render target.
+#[derive(Clone, Copy, Debug)]
+pub struct RendererConfig {
+    /// Target color format. Pipelines are baked against this.
+    pub color_format: wgpu::TextureFormat,
 }
 
-pub struct Renderer {
+#[derive(Clone, Debug)]
+struct BatchDrawCall {
+    pipeline_idx: usize,
+    texture_hash: u32,
+    index_start: u32,
+    index_count: u32,
+}
+
+struct TextureEntry {
+    bind_group: wgpu::BindGroup,
+    size: (f32, f32),
+}
+
+/// Layer 2 (rendering): FrameData/DrawBatch/SoA -> wgpu draw commands.
+///
+/// Borrow model: owns neither the `Device`/`Queue` nor the render target. It
+/// only holds GPU resources (textures, pipelines, vertex/index buffers).
+pub struct SSInternalPlayer {
     pipelines: [wgpu::RenderPipeline; 4],
     uniform_buffer: wgpu::Buffer,
     uniform_bind_group: wgpu::BindGroup,
-    pub texture_bind_group_layout: wgpu::BindGroupLayout,
+    texture_bind_group_layout: wgpu::BindGroupLayout,
     sampler: wgpu::Sampler,
 
     vertex_buffer: Option<wgpu::Buffer>,
     index_buffer: Option<wgpu::Buffer>,
     draw_calls: Vec<BatchDrawCall>,
+
+    textures: HashMap<u32, TextureEntry>,
 }
 
 const WGSL_SHADER: &str = r#"
@@ -84,11 +113,12 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
 }
 "#;
 
-impl Renderer {
-    pub fn new(device: &wgpu::Device, texture_format: wgpu::TextureFormat) -> Self {
+impl SSInternalPlayer {
+    /// Build pipelines and GPU resources from the borrowed `device`.
+    pub fn new(device: &wgpu::Device, config: &RendererConfig) -> Self {
         let shader = device.create_shader_module(wgpu::ShaderModuleDescriptor { label: Some("SpriteStudio Shader"), source: wgpu::ShaderSource::Wgsl(WGSL_SHADER.into()) });
 
-        // Uniform Buffer Setup
+        // Uniform buffer setup.
         let uniform_buffer = device.create_buffer(&wgpu::BufferDescriptor {
             label: Some("SpriteStudio Globals UB"),
             size: 64, // 16 * 4 bytes for mat4x4
@@ -104,7 +134,7 @@ impl Renderer {
         let uniform_bind_group =
             device.create_bind_group(&wgpu::BindGroupDescriptor { label: Some("SpriteStudio Uniform Bind Group"), layout: &uniform_bind_group_layout, entries: &[wgpu::BindGroupEntry { binding: 0, resource: uniform_buffer.as_entire_binding() }] });
 
-        // Texture Bind Group Layout
+        // Texture bind group layout.
         let texture_bind_group_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
             label: Some("SpriteStudio Texture Bind Group Layout"),
             entries: &[
@@ -128,7 +158,7 @@ impl Renderer {
 
         let pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor { label: Some("SpriteStudio Pipeline Layout"), bind_group_layouts: &[Some(&uniform_bind_group_layout), Some(&texture_bind_group_layout)], immediate_size: 0 });
 
-        // Define blend states for 4 modes
+        // Blend states for the 4 supported modes.
         let blend_mix = wgpu::BlendState {
             color: wgpu::BlendComponent { src_factor: wgpu::BlendFactor::SrcAlpha, dst_factor: wgpu::BlendFactor::OneMinusSrcAlpha, operation: wgpu::BlendOperation::Add },
             alpha: wgpu::BlendComponent { src_factor: wgpu::BlendFactor::One, dst_factor: wgpu::BlendFactor::OneMinusSrcAlpha, operation: wgpu::BlendOperation::Add },
@@ -157,7 +187,7 @@ impl Renderer {
                 fragment: Some(wgpu::FragmentState {
                     module: &shader,
                     entry_point: Some("fs_main"),
-                    targets: &[Some(wgpu::ColorTargetState { format: texture_format, blend: Some(blend), write_mask: wgpu::ColorWrites::ALL })],
+                    targets: &[Some(wgpu::ColorTargetState { format: config.color_format, blend: Some(blend), write_mask: wgpu::ColorWrites::ALL })],
                     compilation_options: Default::default(),
                 }),
                 primitive: wgpu::PrimitiveState {
@@ -178,77 +208,72 @@ impl Renderer {
 
         let pipelines = [create_pipeline("SpriteStudio Pipeline Mix", blend_mix), create_pipeline("SpriteStudio Pipeline Add", blend_add), create_pipeline("SpriteStudio Pipeline Sub", blend_sub), create_pipeline("SpriteStudio Pipeline Mul", blend_mul)];
 
-        Self { pipelines, uniform_buffer, uniform_bind_group, texture_bind_group_layout, sampler, vertex_buffer: None, index_buffer: None, draw_calls: Vec::new() }
+        Self { pipelines, uniform_buffer, uniform_bind_group, texture_bind_group_layout, sampler, vertex_buffer: None, index_buffer: None, draw_calls: Vec::new(), textures: HashMap::new() }
     }
 
+    /// Update the projection matrix to the target's pixel dimensions.
     pub fn update_projection(&self, queue: &wgpu::Queue, width: f32, height: f32, y_down: bool) {
         let scale_y = if y_down { -2.0 / height } else { 2.0 / height };
         let matrix = [2.0 / width, 0.0, 0.0, 0.0, 0.0, scale_y, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 1.0];
         queue.write_buffer(&self.uniform_buffer, 0, bytemuck::cast_slice(&matrix));
     }
 
-    pub fn prepare(&mut self, device: &wgpu::Device, queue: &wgpu::Queue, player: &mut Player, get_texture_size: impl Fn(u32) -> Option<(f32, f32)>) {
+    /// Provide a texture (SPEC §8). `hash` is the fnv1a hash of the cellmap image
+    /// path. Both embedded and reference paths funnel into this single API.
+    pub fn upload_texture(&mut self, device: &wgpu::Device, queue: &wgpu::Queue, hash: u32, rgba: &[u8], width: u32, height: u32) {
+        let size = wgpu::Extent3d { width, height, depth_or_array_layers: 1 };
+
+        let texture = device.create_texture(&wgpu::TextureDescriptor {
+            label: Some("SpriteStudio Texture"),
+            size,
+            mip_level_count: 1,
+            sample_count: 1,
+            dimension: wgpu::TextureDimension::D2,
+            format: wgpu::TextureFormat::Rgba8Unorm,
+            usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
+            view_formats: &[],
+        });
+
+        queue.write_texture(
+            wgpu::TexelCopyTextureInfo { texture: &texture, mip_level: 0, origin: wgpu::Origin3d::ZERO, aspect: wgpu::TextureAspect::All },
+            rgba,
+            wgpu::TexelCopyBufferLayout { offset: 0, bytes_per_row: Some(4 * width), rows_per_image: Some(height) },
+            size,
+        );
+
+        let view = texture.create_view(&wgpu::TextureViewDescriptor::default());
+        let bind_group = self.create_texture_bind_group(device, &view);
+        self.textures.insert(hash, TextureEntry { bind_group, size: (width as f32, height as f32) });
+    }
+
+    /// Convert a FrameView (a borrow of runtime-owned data) into wgpu
+    /// vertices/indices and build per-batch draw calls. Owns no target.
+    pub fn prepare(&mut self, device: &wgpu::Device, queue: &wgpu::Queue, frame: &FrameView) {
         self.draw_calls.clear();
 
-        let frame_no = player.get_frame_no();
-        let context = &mut player.runtime_context;
-
-        let frame_data_bytes = match context.get_frame_data(frame_no) {
-            Ok(bytes) => unsafe { std::slice::from_raw_parts(bytes.as_ptr(), bytes.len()) },
-            Err(_) => return,
-        };
-
-        let frame_data = unsafe { ssruntime::runtime::framedata::ss::runtime::root_as_frame_data_unchecked(frame_data_bytes) };
+        if frame.frame_data.is_empty() {
+            return;
+        }
+        let frame_data = unsafe { root_as_frame_data_unchecked(frame.frame_data) };
 
         let draw_order = frame_data.draw_order();
         let draw_batches = frame_data.draw_batches();
         let parts = frame_data.parts();
         let parts_color = frame_data.parts_color();
 
-        let world_matrices_len = context.get_world_matrices_len();
-        let world_matrices_ptr = context.get_world_matrices_ptr();
-        if world_matrices_ptr.is_null() || world_matrices_len == 0 {
+        let world_matrices = frame.world_matrices;
+        let local_vertices = frame.local_vertices;
+        let local_uvs = frame.local_uvs;
+        if world_matrices.is_empty() || local_vertices.is_empty() || local_uvs.is_empty() {
             return;
         }
-        let world_matrices = unsafe { std::slice::from_raw_parts(world_matrices_ptr, world_matrices_len) };
 
-        let local_vertices_len = context.get_local_vertices_len();
-        let local_vertices_ptr = context.get_local_vertices_ptr();
-        if local_vertices_ptr.is_null() || local_vertices_len == 0 {
-            return;
-        }
-        let local_vertices = unsafe { std::slice::from_raw_parts(local_vertices_ptr, local_vertices_len) };
-
-        let local_uvs_len = context.get_local_uvs_len();
-        let local_uvs_ptr = context.get_local_uvs_ptr();
-        if local_uvs_ptr.is_null() || local_uvs_len == 0 {
-            return;
-        }
-        let local_uvs = unsafe { std::slice::from_raw_parts(local_uvs_ptr, local_uvs_len) };
-
-        let mesh_vertices_x_len = context.get_mesh_vertices_x_len();
-        let mesh_vertices_x_ptr = context.get_mesh_vertices_x_ptr();
-        let mesh_vertices_x = if mesh_vertices_x_ptr.is_null() || mesh_vertices_x_len == 0 { &[] } else { unsafe { std::slice::from_raw_parts(mesh_vertices_x_ptr, mesh_vertices_x_len) } };
-
-        let mesh_vertices_y_len = context.get_mesh_vertices_y_len();
-        let mesh_vertices_y_ptr = context.get_mesh_vertices_y_ptr();
-        let mesh_vertices_y = if mesh_vertices_y_ptr.is_null() || mesh_vertices_y_len == 0 { &[] } else { unsafe { std::slice::from_raw_parts(mesh_vertices_y_ptr, mesh_vertices_y_len) } };
-
-        let mesh_vertex_offsets_len = context.get_mesh_vertex_offsets_len();
-        let mesh_vertex_offsets_ptr = context.get_mesh_vertex_offsets_ptr();
-        let mesh_vertex_offsets = if mesh_vertex_offsets_ptr.is_null() || mesh_vertex_offsets_len == 0 { &[] } else { unsafe { std::slice::from_raw_parts(mesh_vertex_offsets_ptr, mesh_vertex_offsets_len) } };
-
-        let mesh_uvs_len = context.get_mesh_uvs_len();
-        let mesh_uvs_ptr = context.get_mesh_uvs_ptr();
-        let mesh_uvs = if mesh_uvs_ptr.is_null() || mesh_uvs_len == 0 { &[] } else { unsafe { std::slice::from_raw_parts(mesh_uvs_ptr, mesh_uvs_len) } };
-
-        let mesh_indices_len = context.get_mesh_indices_len();
-        let mesh_indices_ptr = context.get_mesh_indices_ptr();
-        let mesh_indices = if mesh_indices_ptr.is_null() || mesh_indices_len == 0 { &[] } else { unsafe { std::slice::from_raw_parts(mesh_indices_ptr, mesh_indices_len) } };
-
-        let mesh_index_offsets_len = context.get_mesh_index_offsets_len();
-        let mesh_index_offsets_ptr = context.get_mesh_index_offsets_ptr();
-        let mesh_index_offsets = if mesh_index_offsets_ptr.is_null() || mesh_index_offsets_len == 0 { &[] } else { unsafe { std::slice::from_raw_parts(mesh_index_offsets_ptr, mesh_index_offsets_len) } };
+        let mesh_vertices_x = frame.mesh_vertices_x;
+        let mesh_vertices_y = frame.mesh_vertices_y;
+        let mesh_vertex_offsets = frame.mesh_vertex_offsets;
+        let mesh_uvs = frame.mesh_uvs;
+        let mesh_indices = frame.mesh_indices;
+        let mesh_index_offsets = frame.mesh_index_offsets;
 
         let mut vertices: Vec<Vertex> = Vec::new();
         let mut indices: Vec<u32> = Vec::new();
@@ -261,17 +286,19 @@ impl Renderer {
             let kind = batch.kind();
 
             let pipeline_idx = match blend_type {
-                ssruntime::runtime::framedata::ss::runtime::BlendType::Mix => 0,
-                ssruntime::runtime::framedata::ss::runtime::BlendType::Add => 1,
-                ssruntime::runtime::framedata::ss::runtime::BlendType::Sub => 2,
-                ssruntime::runtime::framedata::ss::runtime::BlendType::Mul => 3,
+                BlendType::Mix => 0,
+                BlendType::Add => 1,
+                BlendType::Sub => 2,
+                BlendType::Mul => 3,
                 _ => 0,
             };
+
+            let tex_size = self.textures.get(&texture_hash).map(|t| t.size);
 
             let index_start = indices.len() as u32;
 
             match kind {
-                ssruntime::runtime::framedata::ss::runtime::DrawBatchKind::Normal => {
+                DrawBatchKind::Normal => {
                     for rank in start_rank..start_rank + count {
                         let part_idx = draw_order.get(rank) as usize;
                         let part = parts.get(part_idx);
@@ -310,11 +337,7 @@ impl Renderer {
                             let wy = m[1] * lx + m[5] * ly + m[13];
                             let wz = m[2] * lx + m[6] * ly + m[14];
 
-                            let (tu, tv) = if let Some(tex_size) = get_texture_size(texture_hash) {
-                                (l_uv[k * 2] / tex_size.0, l_uv[k * 2 + 1] / tex_size.1)
-                            } else {
-                                (l_uv[k * 2], l_uv[k * 2 + 1])
-                            };
+                            let (tu, tv) = if let Some(size) = tex_size { (l_uv[k * 2] / size.0, l_uv[k * 2 + 1] / size.1) } else { (l_uv[k * 2], l_uv[k * 2 + 1]) };
 
                             vertices.push(Vertex { position: [wx, wy, wz], uv: [tu, tv], color: colors_arr[k] });
                         }
@@ -327,12 +350,12 @@ impl Renderer {
                         indices.push(base_vert_idx + 3);
                     }
                 }
-                ssruntime::runtime::framedata::ss::runtime::DrawBatchKind::Mesh => {
+                DrawBatchKind::Mesh => {
                     for rank in start_rank..start_rank + count {
                         let part_idx = draw_order.get(rank) as usize;
                         let part = parts.get(part_idx);
 
-                        if part_idx >= mesh_vertex_offsets.len() - 1 {
+                        if mesh_vertex_offsets.is_empty() || part_idx >= mesh_vertex_offsets.len() - 1 {
                             continue;
                         }
 
@@ -359,7 +382,7 @@ impl Renderer {
                             let wy = mesh_vertices_y[k];
                             let wz = part.position_z();
 
-                            let (tu, tv) = if let Some(tex_size) = get_texture_size(texture_hash) { (mesh_uvs[k * 2] / tex_size.0, mesh_uvs[k * 2 + 1] / tex_size.1) } else { (mesh_uvs[k * 2], mesh_uvs[k * 2 + 1]) };
+                            let (tu, tv) = if let Some(size) = tex_size { (mesh_uvs[k * 2] / size.0, mesh_uvs[k * 2 + 1] / size.1) } else { (mesh_uvs[k * 2], mesh_uvs[k * 2 + 1]) };
 
                             vertices.push(Vertex { position: [wx, wy, wz], uv: [tu, tv], color: mesh_color });
                         }
@@ -397,18 +420,16 @@ impl Renderer {
         }
     }
 
-    pub fn render<'a>(&'a self, rpass: &mut wgpu::RenderPass<'a>, get_texture_bind_group: impl Fn(u32) -> Option<&'a wgpu::BindGroup>) -> usize {
+    /// Record draw commands into a RenderPass opened by the host.
+    /// Returns the number of draw calls issued.
+    pub fn draw<'a>(&'a self, rpass: &mut wgpu::RenderPass<'a>) -> usize {
         if self.draw_calls.is_empty() {
             return 0;
         }
 
-        let v_buf = match &self.vertex_buffer {
-            Some(b) => b,
-            None => return 0,
-        };
-        let i_buf = match &self.index_buffer {
-            Some(b) => b,
-            None => return 0,
+        let (v_buf, i_buf) = match (&self.vertex_buffer, &self.index_buffer) {
+            (Some(v), Some(i)) => (v, i),
+            _ => return 0,
         };
 
         rpass.set_vertex_buffer(0, v_buf.slice(..));
@@ -416,11 +437,10 @@ impl Renderer {
         rpass.set_bind_group(0, &self.uniform_bind_group, &[]);
 
         for call in &self.draw_calls {
-            let pipeline = &self.pipelines[call.pipeline_idx];
-            rpass.set_pipeline(pipeline);
+            rpass.set_pipeline(&self.pipelines[call.pipeline_idx]);
 
-            if let Some(tex_bg) = get_texture_bind_group(call.texture_hash) {
-                rpass.set_bind_group(1, tex_bg, &[]);
+            if let Some(entry) = self.textures.get(&call.texture_hash) {
+                rpass.set_bind_group(1, &entry.bind_group, &[]);
                 rpass.draw_indexed(call.index_start..call.index_start + call.index_count, 0, 0..1);
             }
         }
@@ -428,7 +448,7 @@ impl Renderer {
         self.draw_calls.len()
     }
 
-    pub fn create_texture_bind_group(&self, device: &wgpu::Device, view: &wgpu::TextureView) -> wgpu::BindGroup {
+    fn create_texture_bind_group(&self, device: &wgpu::Device, view: &wgpu::TextureView) -> wgpu::BindGroup {
         device.create_bind_group(&wgpu::BindGroupDescriptor {
             label: Some("SpriteStudio Texture Bind Group"),
             layout: &self.texture_bind_group_layout,
