@@ -18,7 +18,7 @@
 - **提供3面（ssruntime と同型）**: `rs`(rlib) / `js`(wasm-bindgen・`<ss-player>`互換) / `ffi`(cbindgen・DX12/Vulkan/Metal)。
 - **データ所有契約**: `.ssab` は Player 所有→ssruntime へ borrow ／ FrameData・SoA は ssruntime 所有→Player が borrow（§1.1）。
 - **ssab は embedded / reference 両対応**（テクスチャ埋め込み／外部参照）。
-- **初手（P0）**: 現プロト（`core/`）を単一クレート内の `internal`/`player` モジュールへ3層リファクタ＋借用モデル確定。
+- **進捗**: **P0**（3層リファクタ＋借用モデル）✅ ／ **P4**（インスタンス §7.1・エフェクト §7.2）✅ 実機確認済。対応バッチ = Normal / Mesh / Instance / Effect。次は P2（色パリティ）/ P3（マスク）。詳細は §12。
 
 ---
 
@@ -219,14 +219,14 @@ FlatBuffers 側から読む: `draw_order`（`[ushort]` parts インデックス�
 
 ### 4.2 DrawBatchKind（全8種）と実装状況
 
-| kind | ジオメトリソース | 現プロト | 優先 |
+| kind | ジオメトリソース | 実装 | 優先 |
 |---|---|---|---|
 | `Normal` | vertex + cell（標準スプライト矩形） | ✅ 実装済 | — |
 | `Mesh` | スキニング済みメッシュ | ✅ 実装済 | — |
+| `Instance` | サブアニメのインスタンススロット | ✅ 実装済（§7.1） | — |
+| `Effect` | パーティクル矩形（`EffectDrawPlan`） | ✅ 実装済（§7.2） | — |
 | `Shape` | 手続き的シェイプ（テクスチャ無し、shape_* SoA） | ❌ | 中 |
 | `Mask` | ステンシル書き込み専用（色出力なし） | ❌ | 高 |
-| `Effect` | パーティクル矩形（`EffectDrawPlan`） | ❌ | 高 |
-| `Instance` | サブアニメのインスタンススロット | ❌ | 中 |
 | `Text` | ビットマップフォントグリフ | ❌ | 低（旧版も未実装） |
 | `Nines` | 9パッチ | ❌ | 低（旧版も未実装） |
 
@@ -329,11 +329,22 @@ Godot / Unity のネイティブプレイヤー実績と C-API 契約から、�
 - **wgpu の実装型は Unity 型**: 子はローカル空間で頂点/メッシュを中間バッファに事前ビルド → 親がその頂点を world 行列で変換して累積バッファへ merge（子の完了を依存に持つ）。Godot 型（子が自分の CanvasItem に先に描き親が RID 再ペアレント）は wgpu に retained scene graph が無いため移植不可。Context 独立を活かした `get_frame_data` の並列化も可能。
 - ExternalInstance は参照先 ssab を SSPlayer が別途ロードし、その Context を子ノードとして木に接ぐ。
 
-### 7.2 エフェクト（別 Context を持たない）
+**実装メモ（✅ 実装済・`core/src/player.rs`）**
 
-- エフェクトは**別 Context 不要**（親 Context の frame_no/delta で駆動するシミュレータのため上書き問題が無い）。EffectSlot を再生ノードが part_index で保持。
-- `ss_effect_slot_step` → `EffectDrawPlan`（`effect_draw_plan.fbs`）。`commands`（エミッタ毎に `cellmap_hash`/`quad_count`/`particle_offset`/`blend` 0=Mix 1=Add）、`vert_stride`(2 or 3)、`verts`/`uvs`/`colors`/`indices`。`EffectDrawPlan` は別バッファなので SSPlayer がその借用を SSInternalPlayer へ渡す。
-- 同一 cellmap+blend が連続する範囲をまとめて1バッチ化。エフェクトは PartsColor を持たないので **varg を `[1,0,1,0]` 固定**（rate=1, mul）で parts-color シェーダを単純 texture*color 変調として流用。ブレンドは**コマンド毎**（batch.blend_type ではなく cmd.blend）。
+- `PlaybackNode { context, instances, effects }` の木を SSPlayer が所有。GPU リソースは `SSInternalPlayer` 1個を共有。
+- **外部参照は pack 名の文字列**（`PartTypeInstance::ref_anime_pack()`/`ref_anime_name()`）で解決＝ハッシュアルゴリズム不整合を回避。ホストは全 pack を `add_ssab(pack_name, data)` で事前登録し、`load_ssab(pack_name, data)` で主 pack 指定。ssab 型は `ssab::ssab::ss::format::{PartType, root_as_ss_anime_binary_unchecked}`。
+- **transition スナップはホスト責務**: `InstanceSlot::step` は transition 時にセクション/ループ/方向を設定するのみで開始フレームへのスナップはしない。**`result.transitioned` 時に子 `context.play()` を呼ぶ**（呼ばないと独立モードが再生状態にならず進まない）。
+- **`parent_looped` はランタイム非通知**: root は前フレームからのフレーム後退で検出（前向き再生のループ edge）、子は `result.child_looped` を伝播。
+- 検証: `core/tests/instance.rs`（ヘッドレス probe。同期/独立/pingpong の frame 推移を確認）。
+
+### 7.2 エフェクト（別 Context を持たない）✅ 実装済
+
+- エフェクトは**別 Context 不要**（親 Context の frame_no/delta で駆動するシミュレータのため上書き問題が無い）。`EffectSlot<'static>` を再生ノードが part_index で保持。`EffectSlot::new(resource, PartTypeEffect::ref_effect_name_hash(), seed=part_index)`。
+- `slot.step(ev, frame_no, delta_secs, fps, parent_looped, y_flip=false, vert_stride=2)` → `ss_effect_step_result{ visible, draw_plan_buf: *const u8, draw_plan_len }`。`draw_plan_buf` はスロット所有・次 step まで有効なので**即コピー消費**。`ev = ctx.get_active_effect_event(part_index)`、`fps = ctx.get_fps()`。
+- `EffectDrawPlan`（`root_as_effect_draw_plan_unchecked`）: `commands`（`cellmap_hash`/`quad_count`/`particle_offset`/`blend` 0=Mix 1=Add）、`vert_stride`、`verts`/`uvs`/`colors`/`indices`。スライス式（`po=particle_offset`）: verts `[po*4*stride..(po+qc)*4*stride]` / uvs `[po*4*2..]` / colors `[po*4*4..]` / indices `[po*6..]`（**quad-local 0基点、rebase 不要**）。
+- **★エフェクト UV は正規化済み(0..1)**: スプライト/メッシュの pixel UV と違い、**tex_size で割ってはいけない**（probe で確認・当初バグを修正）。colors も正規化。
+- verts は **slot-relative** → エフェクトパーツの world 行列を transform 合成（`mat4_mul(transform, effectPartWorld)`）。
+- **1 command = 1 draw call**（`cmd.blend` でパイプライン切替、`cmd.cellmap_hash` でテクスチャ）。エフェクトは PartsColor を持たず、plan の色が既存 tex*color シェーダを変調するので varg 不要。実装: `core/src/internal.rs::append_effect`。
 
 ---
 
@@ -363,66 +374,62 @@ ssconverter は `.ssab` を2形態で出力しうるので、SSPlayer はどち�
 
 **設計原則**: SSPlayer は wgpu をイディオマティックに借用する Rust API。`Device`/`Queue`/`Surface` を一切所有せず、ホスト（viewer / Bevy / web / ffi）が所有する wgpu コンテキストを借りて描く。これにより Bevy の render graph へそのまま組み込める。
 
-### 9.1 SSInternalPlayer（層2・描画）
+### 9.1 SSInternalPlayer（層2・描画）✅ 実装済（`core/src/internal.rs`）
+
+累積 API: ホスト（SSPlayer）がバッチ走査を駆動し、ノード/バッチ単位で `append_*` を呼ぶ（インスタンスの rank 差し込み・transform 合成のため）。
 
 ```rust
-pub struct SSInternalPlayer { /* pipelines, textures, buffers */ }
+pub struct SSInternalPlayer { /* pipelines, textures, buffers, vertices/indices, draw_calls */ }
 
 impl SSInternalPlayer {
-    /// 借用した device からパイプライン/リソースを生成。target_format はホストの描画先に合わせる。
     pub fn new(device: &wgpu::Device, config: &RendererConfig) -> Self;
+    pub fn update_projection(&self, queue: &wgpu::Queue, w: f32, h: f32, y_down: bool);
+    pub fn upload_texture(&mut self, device, queue, hash: u32, rgba: &[u8], w: u32, h: u32);
 
-    /// FrameData/DrawBatch/SoA を wgpu 頂点・インデックスへ変換し内部バッファへ用意。
-    pub fn prepare(&mut self, device: &wgpu::Device, queue: &wgpu::Queue, frame: &FrameView);
+    // --- 1 フレームの累積（Unity 型フラット化）---
+    pub fn begin_frame(&mut self);                                   // クリア
+    pub fn append_batch(&mut self, frame: &FrameView, transform: &[f32;16], batch: &BatchInfo);   // Normal/Mesh
+    pub fn append_effect(&mut self, plan_buf: &[u8], transform: &[f32;16]);                         // EffectDrawPlan
+    pub fn end_frame(&mut self, device, queue);                     // GPU へアップロード
 
-    /// 与えられた RenderPass へ描画コマンドを積む（ターゲットは所有しない）。
-    pub fn draw<'a>(&'a self, pass: &mut wgpu::RenderPass<'a>);
-
-    /// テクスチャ供給（hash → premul 済み RGBA）。
-    pub fn upload_texture(&mut self, device: &wgpu::Device, queue: &wgpu::Queue,
-                          hash: u32, rgba: &[u8], w: u32, h: u32);
+    pub fn draw<'a>(&'a self, pass: &mut wgpu::RenderPass<'a>) -> usize;
 }
 ```
 
-`RendererConfig { color_format, depth_stencil_format, ... }` はホストの描画先仕様。`FrameView` は ssruntime の FrameData ＋ SoA スライスをまとめた借用ビュー（`get_frame_data` 直後に構築）。
+`RendererConfig { color_format }` はホストの描画先仕様（マスク実装時に depth_stencil_format 追加）。`FrameView` は ssruntime の FrameData ＋ SoA スライスをまとめた借用ビュー（`get_frame_data` 直後に構築）。`BatchInfo { start_rank, count, texture_hash, blend_type, kind }` は SSPlayer が DrawBatch から抽出して渡す。`transform` は root=単位、子=親 world 行列合成。
 
-### 9.2 SSPlayer（層3・操作）— 幹の公開 API
+### 9.2 SSPlayer（層3・操作）— 幹の公開 API ✅ 実装済（`core/src/player.rs`）
 
 ```rust
-pub struct SSPlayer { /* Context<'static>, SsabResource, SSInternalPlayer */ }
+pub struct SSPlayer { /* SSInternalPlayer, resources: Map<pack, Arc<SsabResource>>, root: PlaybackNode 木, ... */ }
 
 impl SSPlayer {
-    /// 借用した device/queue から構築。target_format はホストの描画先に合わせる。
-    pub fn new(device: &wgpu::Device, queue: &wgpu::Queue, config: &SSPlayerConfig)
-        -> Result<Self, SSPlayerError>;
+    pub fn new(device: &wgpu::Device, config: &SSPlayerConfig) -> Self;
 
-    // --- リソース / 再生制御 ---
-    pub fn load_ssab(&mut self, data: &[u8]) -> Result<(), SSPlayerError>;
-    pub fn animation_names(&self) -> Vec<String>;
-    pub fn play(&mut self, anim: &str) -> Result<(), SSPlayerError>;
-    pub fn pause(&mut self);
-    pub fn stop(&mut self);
-    pub fn set_speed(&mut self, speed: f32);
-    pub fn seek(&mut self, frame_no: f32);
+    // --- pack 登録 / 再生制御 ---
+    pub fn add_ssab(&mut self, pack_name: &str, data: &[u8]) -> Result<(), SSRuntimeError>;   // 外部参照解決用に全 pack 登録
+    pub fn load_ssab(&mut self, pack_name: &str, data: &[u8]) -> Result<(), SSRuntimeError>;  // 主 pack 指定
+    pub fn play(&mut self, anim: &str) -> Result<(), SSRuntimeError>;   // インスタンス木を再構築
+    pub fn pause(&mut self);  pub fn stop(&mut self);  pub fn set_speed(&mut self, speed: f32);
+    pub fn is_playing(&self) -> bool;
+    pub fn animation_names(&self) -> Option<Vec<String>>;
     pub fn canvas_size(&self) -> Option<(f32, f32)>;
 
-    // --- テクスチャ供給（クロスプラットフォーム統一・premul 済み RGBA）---
-    pub fn upload_texture(&mut self, device: &wgpu::Device, queue: &wgpu::Queue,
-                          hash: u32, rgba: &[u8], w: u32, h: u32);
+    // --- テクスチャ供給（reference 用。最終的に premul 済み RGBA へ集約）---
+    pub fn upload_texture(&mut self, device, queue, hash: u32, rgba: &[u8], w: u32, h: u32);
+    pub fn set_viewport(&self, queue, w: f32, h: f32, y_down: bool);
 
     // --- 毎フレーム ---
-    /// ssruntime を delta 秒ぶん進め、FrameData/SoA を取得して内部バッファを用意。
-    pub fn update(&mut self, device: &wgpu::Device, queue: &wgpu::Queue, delta_secs: f32);
-    /// 与えられた RenderPass へ描画（ホストが RenderPass を open して渡す）。
-    pub fn draw<'a>(&'a self, pass: &mut wgpu::RenderPass<'a>);
+    pub fn update(&mut self, device, queue, delta_secs: f32);   // 木を進め、begin→append→end で累積
+    pub fn draw<'a>(&'a self, pass: &mut wgpu::RenderPass<'a>) -> usize;
 }
 ```
 
-**借用モデルの要点**: `update` と `draw` は毎回 `&Device`/`&Queue` を受け取る。`draw` はホストが用意した `RenderPass` に積むだけで、`begin_render_pass` / `submit` / `present` はホストの責務。Bevy はこの `RenderPass`（またはターゲット `TextureView`）を render graph ノードから供給する。
+**借用モデルの要点**: `update`/`draw` は毎回 `&Device`/`&Queue` を受け取る。`draw` はホストが用意した `RenderPass` に積むだけで、`begin_render_pass`/`submit`/`present` はホストの責務。
 
-**ssab の embedded / reference 両対応**（§8.1）: `load_ssab` は両形態を受ける。embedded なら埋め込みテクスチャを内部で `upload_texture` まで自動処理（`SSPlayerConfig.auto_load_embedded_textures`）、reference ならホストが hash 単位で `upload_texture` する。`load_ssab` に device/queue を渡す派生（`load_ssab_with_gpu`）で embedded 自動アップロードを完結させる形も可。
+**外部インスタンス解決**: `add_ssab(pack_name, data)` で全 pack を pack 名キーで登録 → インスタンスは `ref_anime_pack()` 文字列で resolve（§7.1）。
 
-> **エラー型**: `SSPlayerError`（`thiserror`）。FFI では整数コード＋`ss_player_last_error`、JS では `JsError` に変換。ssruntime の `SSRuntimeError` をラップ。
+> **現状と将来**: `new` は device のみ（`Result` 不要）、エラーは当面 `SSRuntimeError` を流用。将来 `SSPlayerError`（`thiserror`）でラップし FFI 整数コード / JS `JsError` へ変換。ssab の **embedded 自動テクスチャロード**（§8.1）と **seek** は未実装（reference-mode ＋ viewer での目視が現状）。
 
 ### 9.3 各ホストからの駆動（rs / js / ffi 共通の型）
 
@@ -479,7 +486,7 @@ void        ss_player_resize(ss_player_t, uint32_t w, uint32_t h);
 | P1 ssab 両対応 + WebGPU（② js） | ssab の embedded/reference 両ロード（§8.1）。`core` に `web` feature（wasm-bindgen）。`examples/web` で `<ss-player>` 互換 Web Component、canvas 表示 | embedded ssab がブラウザで WebGPU 描画される |
 | P2 描画パリティ① | varg 追加（カラーブレンド率）、BlendType 全12種のパイプラインマトリクス、premul 厳密化 | WebGL 版と色・ブレンドが一致 |
 | P3 マスク | stencil 付きターゲット、MaskPlanner 移植、write/test パイプライン | マスクアニメが WebGL 版と一致 |
-| P4 エフェクト/インスタンス | Slot API 統合、EffectDrawPlan 消費、quad slot、Instance 再帰 | エフェクト/インスタンスが描画される |
+| **P4 エフェクト/インスタンス** ✅ | **P0 の次に先行実施**。①内部を `begin_frame`/`append_batch`/`append_effect`/`end_frame` の累積 API＋transform へ（Stage 1）②インスタンス木＝子ごと独立 Context（Stage 2, §7.1）③エフェクト＝EffectSlot/EffectDrawPlan（Stage 3, §7.2） | エフェクト/インスタンスが描画される（実機確認済） |
 | P5 ネイティブ C-API + C++ viewer（③ ffi） | `core` の `ffi` feature ＋ cbindgen、`examples/viewer-dx12-cpp`・`viewer-metal-cpp` | DX12/Metal 実機で同一ライブラリが描画 |
 | P6 Shape / 追加ブレンド / 統合シェーダ13種 | 残バッチ種別 | フル機能パリティ |
 | （任意）Bevy アダプタ | `ssplayer-wgpu-bevy`（借用モデルの一利用例）。コアに依存を入れず別立て | Bevy の render graph で SSPlayer が描画 |
@@ -491,7 +498,8 @@ void        ss_player_resize(ss_player_t, uint32_t w, uint32_t h);
 
 | 対象 | 手段 |
 |---|---|
-| Rust 描画（開発） | `viewer/`（winit+wgpu、`tests/overall/overall_ssab` 再生） |
+| Rust 描画（開発） | `viewer/`（winit+wgpu、`tests/overall/overall/` 再生。横=ssab切替/縦=アニメ切替） |
+| インスタンス/エフェクト（ヘッドレス） | `core/tests/instance.rs`（probe。frame 推移・quad 生成を GUI 抜きで確認） |
 | WebGPU（主） | `examples/web/`（ブラウザで `<ss-player-webgpu>`）。初回起動計測（取得→wasm初期化→初フレーム ms） |
 | DX12（副） | `examples/viewer-dx12-cpp/`（Windows 実機、backend=DX12 強制） |
 | Metal（副） | `examples/viewer-metal-cpp/`（macOS 実機、backend=Metal 強制） |

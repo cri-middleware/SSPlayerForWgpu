@@ -15,7 +15,7 @@ use crate::internal::{BatchInfo, RendererConfig, SSInternalPlayer};
 use ssab::ssab::ss::format::{PartType, root_as_ss_anime_binary_unchecked};
 use ssruntime::error::SSRuntimeError;
 use ssruntime::runtime::framedata::ss::runtime::{DrawBatchKind, root_as_frame_data_unchecked};
-use ssruntime::{Context, InstanceSlot, SsabData, SsabResource};
+use ssruntime::{Context, EffectSlot, InstanceSlot, SsabData, SsabResource};
 use std::collections::HashMap;
 use std::sync::Arc;
 
@@ -31,11 +31,15 @@ pub struct SSPlayerConfig {
     pub color_format: wgpu::TextureFormat,
 }
 
-/// One node in the playback tree: a runtime context plus its instance children.
+/// One node in the playback tree: a runtime context plus its instance children
+/// and effect slots.
 struct PlaybackNode {
     context: Context<'static>,
     /// Instance children keyed by part index (index into parts/draw_order/SoA).
     instances: HashMap<usize, InstanceChild>,
+    /// Effect slots keyed by part index. Effects reuse this node's context
+    /// (no separate context, unlike instances).
+    effects: HashMap<usize, EffectSlot<'static>>,
 }
 
 struct InstanceChild {
@@ -196,21 +200,33 @@ fn build_node(resources: &HashMap<String, Arc<SsabResource>>, pack: &str, anime:
     context.setup_animation(anime).ok()?;
 
     let mut instances = HashMap::new();
+    let mut effects = HashMap::new();
     if let Some(ssab_bytes) = context.get_ssab_data() {
         let ab = unsafe { root_as_ss_anime_binary_unchecked(ssab_bytes) };
         // The pack's part list is shared across its animations; part index i
         // matches the FrameData part index used by draw_order/SoA.
         for (i, part) in ab.parts().iter().enumerate() {
-            if part.part_type_type() == PartType::PartTypeInstance
-                && let Some(inst) = part.part_type_as_part_type_instance()
-                && let Some(child) = build_node(resources, inst.ref_anime_pack(), inst.ref_anime_name(), depth + 1)
-            {
-                instances.insert(i, InstanceChild { slot: InstanceSlot::new(), node: Box::new(child), prev_frame: 0.0 });
+            match part.part_type_type() {
+                PartType::PartTypeInstance => {
+                    if let Some(inst) = part.part_type_as_part_type_instance()
+                        && let Some(child) = build_node(resources, inst.ref_anime_pack(), inst.ref_anime_name(), depth + 1)
+                    {
+                        instances.insert(i, InstanceChild { slot: InstanceSlot::new(), node: Box::new(child), prev_frame: 0.0 });
+                    }
+                }
+                PartType::PartTypeEffect => {
+                    if let Some(eff) = part.part_type_as_part_type_effect()
+                        && let Ok(slot) = EffectSlot::new(static_res, eff.ref_effect_name_hash(), i as u32)
+                    {
+                        effects.insert(i, slot);
+                    }
+                }
+                _ => {}
             }
         }
     }
 
-    Some(PlaybackNode { context, instances })
+    Some(PlaybackNode { context, instances, effects })
 }
 
 /// Recursively append a node's geometry to the renderer, driving instance slots
@@ -258,7 +274,27 @@ fn render_node(node: &mut PlaybackNode, internal: &mut SSInternalPlayer, transfo
                     }
                 }
             }
-            // Effect / Shape / Mask / Text / Nines: not yet handled.
+            DrawBatchKind::Effect => {
+                for rank in start_rank..start_rank + count {
+                    let part_idx = draw_order.get(rank) as usize;
+                    let Some(slot) = node.effects.get_mut(&part_idx) else { continue };
+
+                    let ev = node.context.get_active_effect_event(part_idx as u32);
+                    let fps = node.context.get_fps() as f32;
+                    // vert_stride=2 (packed XY), y_flip=false (Y handled by the world matrix).
+                    let r = slot.step(ev, frame_no, delta_secs, fps, node_looped, false, 2);
+
+                    if r.visible && !r.draw_plan_buf.is_null() && r.draw_plan_len > 0 {
+                        // The plan buffer is owned by the slot and valid until its
+                        // next step; append_effect copies it immediately.
+                        let plan = unsafe { std::slice::from_raw_parts(r.draw_plan_buf, r.draw_plan_len) };
+                        let m: [f32; 16] = frame.world_matrices[part_idx * 16..part_idx * 16 + 16].try_into().unwrap();
+                        let eff_transform = mat4_mul(transform, &m);
+                        internal.append_effect(plan, &eff_transform);
+                    }
+                }
+            }
+            // Shape / Mask / Text / Nines: not yet handled.
             _ => {}
         }
     }

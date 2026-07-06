@@ -8,6 +8,7 @@
 use crate::frame::FrameView;
 use std::collections::HashMap;
 
+use ssruntime::runtime::effect_draw_plan::ss::runtime::root_as_effect_draw_plan_unchecked;
 use ssruntime::runtime::framedata::ss::runtime::{BlendType, DrawBatchKind, root_as_frame_data_unchecked};
 
 /// Per-vertex data uploaded to the GPU: world position, normalized UV, and RGBA.
@@ -423,6 +424,64 @@ impl SSInternalPlayer {
         let index_end = self.indices.len() as u32;
         if index_end > index_start {
             self.draw_calls.push(BatchDrawCall { pipeline_idx, texture_hash, index_start, index_count: index_end - index_start });
+        }
+    }
+
+    /// Append an effect slot's `EffectDrawPlan` (a raw FlatBuffer) into the
+    /// frame accumulation. `transform` is the effect part's composed world
+    /// matrix (verts are slot-relative). Blend is per-command; color is taken
+    /// from the plan and modulates the cellmap texture via the sprite shader.
+    pub fn append_effect(&mut self, plan_buf: &[u8], transform: &[f32; 16]) {
+        if plan_buf.is_empty() {
+            return;
+        }
+        let plan = unsafe { root_as_effect_draw_plan_unchecked(plan_buf) };
+        let stride = plan.vert_stride() as usize;
+        let verts = plan.verts();
+        let uvs = plan.uvs();
+        let colors = plan.colors();
+        let indices = plan.indices();
+
+        for cmd in plan.commands().iter() {
+            let quad_count = cmd.quad_count() as usize;
+            if quad_count == 0 {
+                continue;
+            }
+            let texture_hash = cmd.cellmap_hash();
+            let particle_offset = cmd.particle_offset() as usize;
+            // 0 = Mix pipeline, 1 = Add pipeline (per-command, not per-batch).
+            let pipeline_idx = if cmd.blend() == 1 { 1 } else { 0 };
+
+            let index_start = self.indices.len() as u32;
+            let base_vert = self.vertices.len() as u32;
+
+            let vert_first = particle_offset * 4;
+            let vert_last = (particle_offset + quad_count) * 4;
+            for vi in vert_first..vert_last {
+                let px = verts.get(vi * stride);
+                let py = verts.get(vi * stride + 1);
+                let pz = if stride >= 3 { verts.get(vi * stride + 2) } else { 0.0 };
+                let (fx, fy, fz) = apply_transform(transform, px, py, pz);
+
+                // Effect UVs are already normalized 0..1 (unlike sprite/mesh pixel UVs).
+                let tu = uvs.get(vi * 2);
+                let tv = uvs.get(vi * 2 + 1);
+
+                let color = [colors.get(vi * 4), colors.get(vi * 4 + 1), colors.get(vi * 4 + 2), colors.get(vi * 4 + 3)];
+                self.vertices.push(Vertex { position: [fx, fy, fz], uv: [tu, tv], color });
+            }
+
+            // Indices are quad-local (0..quad_count*4), rebased onto base_vert.
+            let idx_first = particle_offset * 6;
+            let idx_last = (particle_offset + quad_count) * 6;
+            for ii in idx_first..idx_last {
+                self.indices.push(base_vert + indices.get(ii) as u32);
+            }
+
+            let index_end = self.indices.len() as u32;
+            if index_end > index_start {
+                self.draw_calls.push(BatchDrawCall { pipeline_idx, texture_hash, index_start, index_count: index_end - index_start });
+            }
         }
     }
 
