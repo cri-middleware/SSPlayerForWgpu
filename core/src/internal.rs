@@ -12,17 +12,26 @@ use std::collections::HashMap;
 use ssruntime::runtime::effect_draw_plan::ss::runtime::root_as_effect_draw_plan_unchecked;
 use ssruntime::runtime::framedata::ss::runtime::{BlendType, DrawBatchKind, root_as_frame_data_unchecked};
 
-/// Per-vertex data uploaded to the GPU: world position, normalized UV, and RGBA.
+/// Per-vertex data uploaded to the GPU: world position, normalized UV, RGBA, and
+/// the PartsColor blend control `varg` (`[rate, isMix, isMul, isAddSub]`, SPEC
+/// §5.1 / §5.3 — the WebGL `aVarg`).
 ///
 /// For mask-write draws the `color` channel is repurposed: `color[0]` carries
-/// the cutout threshold consumed by `fs_mask` (SPEC §6).
+/// the cutout threshold consumed by `fs_mask` (SPEC §6); `varg` is ignored there.
 #[repr(C)]
 #[derive(Copy, Clone, Debug, bytemuck::Pod, bytemuck::Zeroable)]
 pub struct Vertex {
     pub position: [f32; 3],
     pub uv: [f32; 2],
     pub color: [f32; 4],
+    pub varg: [f32; 4],
 }
+
+/// `varg` for the no-PartColor / effect path: rate 1, mul (a plain
+/// `texture * color` modulate; SPEC §5.3, matches WebGL's effect draw).
+const VARG_MODULATE: [f32; 4] = [1.0, 0.0, 1.0, 0.0];
+/// `varg` for mask-write geometry — consumed by `fs_mask`, which ignores it.
+const VARG_NONE: [f32; 4] = [0.0, 0.0, 0.0, 0.0];
 
 impl Vertex {
     fn desc() -> wgpu::VertexBufferLayout<'static> {
@@ -33,6 +42,7 @@ impl Vertex {
                 wgpu::VertexAttribute { offset: 0, shader_location: 0, format: wgpu::VertexFormat::Float32x3 },
                 wgpu::VertexAttribute { offset: 12, shader_location: 1, format: wgpu::VertexFormat::Float32x2 },
                 wgpu::VertexAttribute { offset: 20, shader_location: 2, format: wgpu::VertexFormat::Float32x4 },
+                wgpu::VertexAttribute { offset: 36, shader_location: 3, format: wgpu::VertexFormat::Float32x4 },
             ],
         }
     }
@@ -138,14 +148,47 @@ fn bilerp_color(c: &[[f32; 4]; 4], fx: f32, fy: f32) -> [f32; 4] {
     out
 }
 
-/// Blend mode -> index into the per-blend pipeline groups.
+/// The 12 `BlendType`s in schema discriminant order (SPEC §4.3). Pipelines are
+/// built in this order; [`blend_index`] maps a `BlendType` to its slot.
+const BLEND_ORDER: [BlendType; 12] =
+    [BlendType::Mix, BlendType::Mul, BlendType::Add, BlendType::Sub, BlendType::Mulalpha, BlendType::Screen, BlendType::Exclusion, BlendType::Invert, BlendType::Mul2, BlendType::Div2, BlendType::Screen2, BlendType::Overlay2];
+
+/// Blend mode -> index into the per-blend pipeline groups (schema discriminant,
+/// clamped into 0..12).
 fn blend_index(blend: BlendType) -> usize {
+    (blend.0 as usize).min(BLEND_ORDER.len() - 1)
+}
+
+/// Premultiplied blend state for a `BlendType` (SPEC §5.2, matching the WebGL
+/// `applyBlend` table). RGB factors/op per mode; alpha is `One, OneMinusSrcAlpha`
+/// (premultiplied coverage) for every mode. Unverified modes mirror ssplayer-pixi:
+/// Mulalpha/Mul2 -> Mul, Screen2 -> Screen, Div2/Overlay2 -> Mix.
+fn blend_state(blend: BlendType) -> wgpu::BlendState {
+    use wgpu::BlendFactor::{Dst, One, OneMinusDst, OneMinusSrc, OneMinusSrcAlpha, Zero};
+    use wgpu::BlendOperation::{Add, ReverseSubtract};
+    let (src, dst, op) = match blend {
+        BlendType::Mix => (One, OneMinusSrcAlpha, Add),
+        BlendType::Add => (One, One, Add),
+        BlendType::Mul | BlendType::Mulalpha | BlendType::Mul2 => (Dst, OneMinusSrcAlpha, Add),
+        BlendType::Sub => (One, One, ReverseSubtract),
+        BlendType::Screen | BlendType::Screen2 => (OneMinusDst, One, Add),
+        BlendType::Invert => (OneMinusDst, Zero, Add),
+        BlendType::Exclusion => (OneMinusDst, OneMinusSrc, Add),
+        // Div2 / Overlay2: no GPU-native equivalent -> Mix fallback (SPEC §4.3).
+        _ => (One, OneMinusSrcAlpha, Add),
+    };
+    wgpu::BlendState { color: wgpu::BlendComponent { src_factor: src, dst_factor: dst, operation: op }, alpha: wgpu::BlendComponent { src_factor: One, dst_factor: OneMinusSrcAlpha, operation: Add } }
+}
+
+/// PartsColor blend flags `(isMix, isMul, isAddSub)` for the shader `varg`
+/// (SPEC §5.3). Only Mix/Mul/Add/Sub select a PartColor formula; any other
+/// `BlendType` clamps to Mix (else no flag matches and the shader outputs black).
+fn parts_color_flags(blend: BlendType) -> (f32, f32, f32) {
     match blend {
-        BlendType::Mix => 0,
-        BlendType::Add => 1,
-        BlendType::Sub => 2,
-        BlendType::Mul => 3,
-        _ => 0,
+        BlendType::Mul => (0.0, 1.0, 0.0),
+        BlendType::Add => (0.0, 0.0, 1.0),
+        BlendType::Sub => (0.0, 0.0, -1.0),
+        _ => (1.0, 0.0, 0.0), // Mix (and clamp for all other blend types)
     }
 }
 
@@ -163,12 +206,14 @@ struct VertexInput {
     @location(0) position: vec3<f32>,
     @location(1) uv: vec2<f32>,
     @location(2) color: vec4<f32>,
+    @location(3) varg: vec4<f32>,
 }
 
 struct VertexOutput {
     @builtin(position) clip_position: vec4<f32>,
     @location(0) uv: vec2<f32>,
     @location(1) color: vec4<f32>,
+    @location(2) varg: vec4<f32>,
 }
 
 struct Globals {
@@ -185,6 +230,7 @@ fn vs_main(model: VertexInput) -> VertexOutput {
     out.clip_position = vec4<f32>(pos.x, pos.y, 0.5, 1.0);
     out.uv = model.uv;
     out.color = model.color;
+    out.varg = model.varg;
     return out;
 }
 
@@ -193,10 +239,24 @@ var t_diffuse: texture_2d<f32>;
 @group(1) @binding(1)
 var s_diffuse: sampler;
 
+// PartsColor blend (SPEC §5.3, direct port of WebGL PartsColorProgram).
+// Textures are premultiplied, so recover straight RGB, apply the mix/mul/add-sub
+// blend selected by `varg`, then re-premultiply. Blend factors are premul too
+// (see the pipeline blend table), keeping the whole path premultiplied.
 @fragment
 fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
-    let tex_color = textureSample(t_diffuse, s_diffuse, in.uv);
-    return tex_color * in.color;
+    let tex = textureSample(t_diffuse, s_diffuse, in.uv);
+    if (tex.a == 0.0) {
+        return vec4<f32>(0.0);
+    }
+    let rate = in.varg.x;
+    let straight = tex.rgb / max(tex.a, 0.0001);
+    let mixC = mix(straight, in.color.rgb, rate);
+    let mulC = straight * mix(vec3<f32>(1.0), in.color.rgb, rate);
+    let addC = straight + in.color.rgb * rate * sign(in.varg.w);
+    let rgb = mixC * in.varg.y + mulC * in.varg.z + addC * abs(in.varg.w);
+    let a = tex.a * in.color.a;
+    return vec4<f32>(rgb * a, a);
 }
 
 // Mask-write fragment: color output is discarded (ColorWrites::empty()); only
@@ -257,25 +317,6 @@ impl SSInternalPlayer {
 
         let pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor { label: Some("SpriteStudio Pipeline Layout"), bind_group_layouts: &[Some(&uniform_bind_group_layout), Some(&texture_bind_group_layout)], immediate_size: 0 });
 
-        // Blend states for the 4 supported modes.
-        let blend_mix = wgpu::BlendState {
-            color: wgpu::BlendComponent { src_factor: wgpu::BlendFactor::SrcAlpha, dst_factor: wgpu::BlendFactor::OneMinusSrcAlpha, operation: wgpu::BlendOperation::Add },
-            alpha: wgpu::BlendComponent { src_factor: wgpu::BlendFactor::One, dst_factor: wgpu::BlendFactor::OneMinusSrcAlpha, operation: wgpu::BlendOperation::Add },
-        };
-        let blend_add = wgpu::BlendState {
-            color: wgpu::BlendComponent { src_factor: wgpu::BlendFactor::SrcAlpha, dst_factor: wgpu::BlendFactor::One, operation: wgpu::BlendOperation::Add },
-            alpha: wgpu::BlendComponent { src_factor: wgpu::BlendFactor::One, dst_factor: wgpu::BlendFactor::One, operation: wgpu::BlendOperation::Add },
-        };
-        let blend_sub = wgpu::BlendState {
-            color: wgpu::BlendComponent { src_factor: wgpu::BlendFactor::SrcAlpha, dst_factor: wgpu::BlendFactor::One, operation: wgpu::BlendOperation::ReverseSubtract },
-            alpha: wgpu::BlendComponent { src_factor: wgpu::BlendFactor::Zero, dst_factor: wgpu::BlendFactor::One, operation: wgpu::BlendOperation::Add },
-        };
-        let blend_mul = wgpu::BlendState {
-            color: wgpu::BlendComponent { src_factor: wgpu::BlendFactor::Dst, dst_factor: wgpu::BlendFactor::OneMinusSrcAlpha, operation: wgpu::BlendOperation::Add },
-            alpha: wgpu::BlendComponent { src_factor: wgpu::BlendFactor::Zero, dst_factor: wgpu::BlendFactor::One, operation: wgpu::BlendOperation::Add },
-        };
-        let blends = [("Mix", blend_mix), ("Add", blend_add), ("Sub", blend_sub), ("Mul", blend_mul)];
-
         let stencil_enabled = config.stencil_format.is_some();
 
         // Baked stencil face for a given compare + op (front == back; ref is
@@ -321,12 +362,14 @@ impl SSInternalPlayer {
         // When disabled, only the None variant is built (content_stride = 1).
         let content_stride = if stencil_enabled { 3 } else { 1 };
         let mut pipelines: Vec<wgpu::RenderPipeline> = Vec::new();
-        for (name, blend) in blends {
+        for blend in BLEND_ORDER {
+            let name = blend.variant_name().unwrap_or("Blend");
+            let state = blend_state(blend);
             // Order within a blend group must match `stencil_offset`.
-            pipelines.push(make_pipeline(&format!("Content {name} None"), "fs_main", Some(blend), wgpu::ColorWrites::ALL, content_ds(wgpu::CompareFunction::Always)));
+            pipelines.push(make_pipeline(&format!("Content {name} None"), "fs_main", Some(state), wgpu::ColorWrites::ALL, content_ds(wgpu::CompareFunction::Always)));
             if stencil_enabled {
-                pipelines.push(make_pipeline(&format!("Content {name} Inside"), "fs_main", Some(blend), wgpu::ColorWrites::ALL, content_ds(wgpu::CompareFunction::NotEqual)));
-                pipelines.push(make_pipeline(&format!("Content {name} Outside"), "fs_main", Some(blend), wgpu::ColorWrites::ALL, content_ds(wgpu::CompareFunction::Equal)));
+                pipelines.push(make_pipeline(&format!("Content {name} Inside"), "fs_main", Some(state), wgpu::ColorWrites::ALL, content_ds(wgpu::CompareFunction::NotEqual)));
+                pipelines.push(make_pipeline(&format!("Content {name} Outside"), "fs_main", Some(state), wgpu::ColorWrites::ALL, content_ds(wgpu::CompareFunction::Equal)));
             }
         }
 
@@ -417,8 +460,22 @@ impl SSInternalPlayer {
 
     /// Provide a texture (SPEC §8). `hash` is the fnv1a hash of the cellmap image
     /// path. Both embedded and reference paths funnel into this single API.
+    ///
+    /// `rgba` is straight-alpha (as decoded from PNG); it is premultiplied here so
+    /// the whole pipeline stays premultiplied (SPEC §5.2, matching WebGL's
+    /// `UNPACK_PREMULTIPLY_ALPHA_WEBGL`). The premul shader recovers straight RGB
+    /// before applying PartsColor.
     pub fn upload_texture(&mut self, device: &wgpu::Device, queue: &wgpu::Queue, hash: u32, rgba: &[u8], width: u32, height: u32) {
         let size = wgpu::Extent3d { width, height, depth_or_array_layers: 1 };
+
+        // Premultiply straight-alpha RGBA in place (rgb *= a/255, rounded).
+        let mut premul = rgba.to_vec();
+        for px in premul.chunks_exact_mut(4) {
+            let a = px[3] as u32;
+            px[0] = ((px[0] as u32 * a + 127) / 255) as u8;
+            px[1] = ((px[1] as u32 * a + 127) / 255) as u8;
+            px[2] = ((px[2] as u32 * a + 127) / 255) as u8;
+        }
 
         let texture = device.create_texture(&wgpu::TextureDescriptor {
             label: Some("SpriteStudio Texture"),
@@ -433,7 +490,7 @@ impl SSInternalPlayer {
 
         queue.write_texture(
             wgpu::TexelCopyTextureInfo { texture: &texture, mip_level: 0, origin: wgpu::Origin3d::ZERO, aspect: wgpu::TextureAspect::All },
-            rgba,
+            &premul,
             wgpu::TexelCopyBufferLayout { offset: 0, bytes_per_row: Some(4 * width), rows_per_image: Some(height) },
             size,
         );
@@ -482,27 +539,24 @@ impl SSInternalPlayer {
                     let part = parts.get(part_idx);
 
                     let part_color_idx = part.part_color();
-                    let colors_arr = parts_color
+                    let (colors_arr, vargs_arr) = parts_color
                         .filter(|_| part_color_idx >= 0)
                         .map(|pc_vec| {
                             let pc = pc_vec.get(part_color_idx as usize);
-                            let c_lt = pc.lt().rgba();
-                            let c_rt = pc.rt().rgba();
-                            let c_lb = pc.lb().rgba();
-                            let c_rb = pc.rb().rgba();
-                            [
-                                [c_lt.r() as f32 / 255.0, c_lt.g() as f32 / 255.0, c_lt.b() as f32 / 255.0, c_lt.a() as f32 / 255.0],
-                                [c_rt.r() as f32 / 255.0, c_rt.g() as f32 / 255.0, c_rt.b() as f32 / 255.0, c_rt.a() as f32 / 255.0],
-                                [c_lb.r() as f32 / 255.0, c_lb.g() as f32 / 255.0, c_lb.b() as f32 / 255.0, c_lb.a() as f32 / 255.0],
-                                [c_rb.r() as f32 / 255.0, c_rb.g() as f32 / 255.0, c_rb.b() as f32 / 255.0, c_rb.a() as f32 / 255.0],
-                            ]
+                            let (mix_f, mul_f, add_f) = parts_color_flags(pc.blend_type());
+                            let corners = [pc.lt(), pc.rt(), pc.lb(), pc.rb()];
+                            let mut colors = [[0.0f32; 4]; 4];
+                            let mut vargs = [[0.0f32; 4]; 4];
+                            for (i, corner) in corners.iter().enumerate() {
+                                let c = corner.rgba();
+                                colors[i] = [c.r() as f32 / 255.0, c.g() as f32 / 255.0, c.b() as f32 / 255.0, c.a() as f32 / 255.0];
+                                vargs[i] = [corner.rate(), mix_f, mul_f, add_f];
+                            }
+                            (colors, vargs)
                         })
-                        .unwrap_or_else(|| {
-                            let a = part.alpha();
-                            [[1.0, 1.0, 1.0, a]; 4]
-                        });
+                        .unwrap_or_else(|| ([[1.0, 1.0, 1.0, part.alpha()]; 4], [VARG_MODULATE; 4]));
 
-                    self.push_quad_part(frame, transform, part_idx, tex_size, &colors_arr);
+                    self.push_quad_part(frame, transform, part_idx, tex_size, &colors_arr, &vargs_arr);
                 }
             }
             DrawBatchKind::Mesh => {
@@ -511,16 +565,19 @@ impl SSInternalPlayer {
                     let part = parts.get(part_idx);
 
                     let part_color_idx = part.part_color();
-                    let mesh_color = parts_color
+                    let (mesh_color, mesh_varg) = parts_color
                         .filter(|_| part_color_idx >= 0)
                         .map(|pc_vec| {
                             let pc = pc_vec.get(part_color_idx as usize);
-                            let c_lt = pc.lt().rgba();
-                            [c_lt.r() as f32 / 255.0, c_lt.g() as f32 / 255.0, c_lt.b() as f32 / 255.0, c_lt.a() as f32 / 255.0]
+                            let lt = pc.lt();
+                            let c = lt.rgba();
+                            let (mix_f, mul_f, add_f) = parts_color_flags(pc.blend_type());
+                            // Mesh uses a single (corner-0) PartColor sample, like WebGL.
+                            ([c.r() as f32 / 255.0, c.g() as f32 / 255.0, c.b() as f32 / 255.0, c.a() as f32 / 255.0], [lt.rate(), mix_f, mul_f, add_f])
                         })
-                        .unwrap_or_else(|| [1.0, 1.0, 1.0, part.alpha()]);
+                        .unwrap_or_else(|| ([1.0, 1.0, 1.0, part.alpha()], VARG_MODULATE));
 
-                    self.push_mesh_part(frame, transform, part_idx, part.position_z(), tex_size, mesh_color);
+                    self.push_mesh_part(frame, transform, part_idx, part.position_z(), tex_size, mesh_color, mesh_varg);
                 }
             }
             DrawBatchKind::Shape => {
@@ -531,7 +588,11 @@ impl SSInternalPlayer {
                     // Shape fill: the interpolated PartColor corners, or white *
                     // alpha when the part has no PartColor (matches WebGL). Shapes
                     // are textureless (white fallback), so this colour shows as-is.
+                    // Shape bypasses the PartColor blend formula: it is forced to
+                    // the Mix path with rate 1 (hasPc) / 0 (no PartColor), so the
+                    // fill is the bilinear PartColor itself (10_parts_color §1-2).
                     let part_color_idx = part.part_color();
+                    let has_pc = part_color_idx >= 0 && parts_color.is_some();
                     let corners = parts_color
                         .filter(|_| part_color_idx >= 0)
                         .map(|pc_vec| {
@@ -548,8 +609,9 @@ impl SSInternalPlayer {
                             ]
                         })
                         .unwrap_or_else(|| [[1.0, 1.0, 1.0, part.alpha()]; 4]);
+                    let shape_varg = [if has_pc { 1.0 } else { 0.0 }, 1.0, 0.0, 0.0];
 
-                    self.push_shape_content_part(frame, transform, part_idx, &corners);
+                    self.push_shape_content_part(frame, transform, part_idx, &corners, shape_varg);
                 }
             }
             _ => {}
@@ -581,10 +643,11 @@ impl SSInternalPlayer {
                 if frame.local_vertices.is_empty() || frame.local_uvs.is_empty() {
                     return;
                 }
-                self.push_quad_part(frame, transform, writer.part_idx, tex_size, &[color; 4]);
+                // `fs_mask` ignores varg; color[0] carries the cutout threshold.
+                self.push_quad_part(frame, transform, writer.part_idx, tex_size, &[color; 4], &[VARG_NONE; 4]);
             }
             GeomKind::Mesh => {
-                self.push_mesh_part(frame, transform, writer.part_idx, 0.0, tex_size, color);
+                self.push_mesh_part(frame, transform, writer.part_idx, 0.0, tex_size, color, VARG_NONE);
             }
             GeomKind::Shape => {
                 self.push_shape_part(frame, transform, writer.part_idx, color);
@@ -599,8 +662,8 @@ impl SSInternalPlayer {
     }
 
     /// Build one sprite quad (4 verts / 2 tris) for `part_idx` into the frame
-    /// accumulation. `colors` is per-corner `[lt, rt, lb, rb]`.
-    fn push_quad_part(&mut self, frame: &FrameView, transform: &[f32; 16], part_idx: usize, tex_size: Option<(f32, f32)>, colors: &[[f32; 4]; 4]) {
+    /// accumulation. `colors` / `vargs` are per-corner `[lt, rt, lb, rb]`.
+    fn push_quad_part(&mut self, frame: &FrameView, transform: &[f32; 16], part_idx: usize, tex_size: Option<(f32, f32)>, colors: &[[f32; 4]; 4], vargs: &[[f32; 4]; 4]) {
         let wm = &frame.world_matrices;
         let lv = &frame.local_vertices;
         let luv = &frame.local_uvs;
@@ -623,7 +686,7 @@ impl SSInternalPlayer {
 
             let (tu, tv) = if let Some(size) = tex_size { (l_uv[k * 2] / size.0, l_uv[k * 2 + 1] / size.1) } else { (l_uv[k * 2], l_uv[k * 2 + 1]) };
 
-            self.vertices.push(Vertex { position: [fx, fy, fz], uv: [tu, tv], color: colors[k] });
+            self.vertices.push(Vertex { position: [fx, fy, fz], uv: [tu, tv], color: colors[k], varg: vargs[k] });
         }
 
         self.indices.push(base_vert_idx);
@@ -637,7 +700,8 @@ impl SSInternalPlayer {
     /// Build one skinned-mesh part for `part_idx` into the frame accumulation
     /// with a single uniform `color`. `pos_z` is the part's Z. Returns silently
     /// if the part has no mesh geometry this frame.
-    fn push_mesh_part(&mut self, frame: &FrameView, transform: &[f32; 16], part_idx: usize, pos_z: f32, tex_size: Option<(f32, f32)>, color: [f32; 4]) {
+    #[allow(clippy::too_many_arguments)]
+    fn push_mesh_part(&mut self, frame: &FrameView, transform: &[f32; 16], part_idx: usize, pos_z: f32, tex_size: Option<(f32, f32)>, color: [f32; 4], varg: [f32; 4]) {
         let offsets = &frame.mesh_vertex_offsets;
         if offsets.is_empty() || part_idx >= offsets.len() - 1 {
             return;
@@ -656,7 +720,7 @@ impl SSInternalPlayer {
 
             let (tu, tv) = if let Some(size) = tex_size { (frame.mesh_uvs[k * 2] / size.0, frame.mesh_uvs[k * 2 + 1] / size.1) } else { (frame.mesh_uvs[k * 2], frame.mesh_uvs[k * 2 + 1]) };
 
-            self.vertices.push(Vertex { position: [fx, fy, fz], uv: [tu, tv], color });
+            self.vertices.push(Vertex { position: [fx, fy, fz], uv: [tu, tv], color, varg });
         }
 
         let start_idx = frame.mesh_index_offsets[part_idx] as usize;
@@ -695,7 +759,7 @@ impl SSInternalPlayer {
             let wy = m[1] * lx + m[5] * ly + m[13];
             let wz = m[2] * lx + m[6] * ly + m[14];
             let (fx, fy, fz) = apply_transform(transform, wx, wy, wz);
-            self.vertices.push(Vertex { position: [fx, fy, fz], uv: [0.0, 0.0], color });
+            self.vertices.push(Vertex { position: [fx, fy, fz], uv: [0.0, 0.0], color, varg: VARG_NONE });
         }
 
         // Triangle fan from vertex 0 (cull is disabled, so winding is irrelevant).
@@ -711,7 +775,7 @@ impl SSInternalPlayer {
     /// vertex samples it by its box coordinate (fx, fy). Textureless: UV is
     /// constant and the white fallback is bound, so the colour shows as-is
     /// (matches WebGL `buildShape`).
-    fn push_shape_content_part(&mut self, frame: &FrameView, transform: &[f32; 16], part_idx: usize, corners: &[[f32; 4]; 4]) {
+    fn push_shape_content_part(&mut self, frame: &FrameView, transform: &[f32; 16], part_idx: usize, corners: &[[f32; 4]; 4], varg: [f32; 4]) {
         const SHAPE_STRIDE: usize = 24;
         let counts = &frame.shape_vertex_counts;
         let sv = &frame.shape_vertices;
@@ -740,7 +804,7 @@ impl SSInternalPlayer {
             let (bx, by) = (bc[base + 2 * v], bc[base + 2 * v + 1]);
             let color = bilerp_color(corners, bx, by);
 
-            self.vertices.push(Vertex { position: [fx, fy, fz], uv: [0.5, 0.5], color });
+            self.vertices.push(Vertex { position: [fx, fy, fz], uv: [0.5, 0.5], color, varg });
         }
 
         for k in 1..count - 1 {
@@ -794,7 +858,8 @@ impl SSInternalPlayer {
                 let tv = uvs.get(vi * 2 + 1);
 
                 let color = [colors.get(vi * 4), colors.get(vi * 4 + 1), colors.get(vi * 4 + 2), colors.get(vi * 4 + 3)];
-                self.vertices.push(Vertex { position: [fx, fy, fz], uv: [tu, tv], color });
+                // Effects carry no PartsColor overlay: plain texture*color modulate.
+                self.vertices.push(Vertex { position: [fx, fy, fz], uv: [tu, tv], color, varg: VARG_MODULATE });
             }
 
             // Indices are quad-local (0..quad_count*4), rebased onto base_vert.

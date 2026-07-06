@@ -18,7 +18,7 @@
 - **提供3面（ssruntime と同型）**: `rs`(rlib) / `js`(wasm-bindgen・`<ss-player>`互換) / `ffi`(cbindgen・DX12/Vulkan/Metal)。
 - **データ所有契約**: `.ssab` は Player 所有→ssruntime へ borrow ／ FrameData・SoA は ssruntime 所有→Player が borrow（§1.1）。
 - **ssab は embedded / reference 両対応**（テクスチャ埋め込み／外部参照）。
-- **進捗**: **P0**（3層リファクタ＋借用モデル）✅ ／ **P4**（インスタンス §7.1・エフェクト §7.2）✅ 実機確認済。対応バッチ = Normal / Mesh / Instance / Effect。次は P2（色パリティ）/ P3（マスク）。詳細は §12。
+- **進捗**: **P0**（3層リファクタ＋借用モデル）✅ ／ **P4**（インスタンス §7.1・エフェクト §7.2）✅ ／ **P3**（マスク・Shape）✅ ／ **P2**（色パリティ: varg・全12ブレンド・premul 厳密化）✅。対応バッチ = Normal / Mesh / Shape / Instance / Effect / Mask。次は P1（WebGPU/js）/ P5（ネイティブ ffi）。詳細は §12。
 
 ---
 
@@ -235,7 +235,7 @@ FlatBuffers 側から読む: `draw_order`（`[ushort]` parts インデックス�
 ### 4.3 BlendType（全12値）
 
 `Mix, Mul, Add, Sub, Mulalpha, Screen, Exclusion, Invert, Mul2, Div2, Screen2, Overlay2`。
-現プロトは `Mix/Add/Sub/Mul` の4種のみ（他は Mix フォールバック）。§5 のパイプラインマトリクスで全種を事前生成する。
+**✅ 全12種を起動時に事前生成**（`internal.rs` `BLEND_ORDER` / `blend_state`、premul 係数）。GPU ネイティブ等価のない `Div2/Overlay2` は Mix、`Mulalpha/Mul2` は Mul、`Screen2` は Screen へフォールバック（ssplayer-pixi 準拠、要検証分は SS6PlayerForUnity と照合予定）。stencil 有効時は各ブレンド × 3（None/Inside/Outside）。
 
 ---
 
@@ -250,7 +250,7 @@ FlatBuffers 側から読む: `draw_order`（`[ushort]` parts インデックス�
 | color | 2 | vec4 | RGBA 0..1（パーツカラー頂点色 or α） |
 | varg | 3 | vec4 | `[rate, isMix, isMul, isAddSub]`（PartsColor ブレンド制御） |
 
-> 現プロトの `Vertex{position:[f32;3], uv, color}` に **`varg: [f32;4]` を追加**してカラーブレンド率に対応させる（WebGL 版と揃える）。
+> **✅ 実装済**: `Vertex{position:[f32;3], uv, color, varg:[f32;4]}`（loc 3）。varg は PartColor の**自前 blend_type**（draw batch の blend ではない）から導出：Normal は per-corner `[rate, isMix, isMul, isAddSub]`、Mesh は corner-0 単一、Shape は Mix 固定 `[hasPc?1:0, 1,0,0]`、Effect / PartColor 無しは `[1,0,1,0]`（mul modulate）。PartColor blend は Mix/Mul/Add/Sub のみ有効、他は Mix クランプ（`parts_color_flags`）。
 
 Normal パーツは builder が index を出さないので、5頂点（TL,TR,BL,BR,center）に対し中心を要にした扇 12 index を張る：`(0,1,4)(1,3,4)(3,2,4)(2,0,4)`。現プロトは4隅2三角形だが、頂点変形/カラーで center が効く場合に扇へ切替。
 
@@ -275,9 +275,9 @@ Normal パーツは builder が index を出さないので、5頂点（TL,TR,BL
 | Exclusion | `OneMinusDst, OneMinusSrc` | Add |
 | その他 | 上記に準拠（未検証分は Mix フォールバック→順次検証） | Add |
 
-alpha は全モード `src=One, dst=OneMinusSrcAlpha`（premul 前提）。
+alpha は全モード `src=One, dst=OneMinusSrcAlpha`（premul 前提）。**✅ 実装済**（`blend_state`）。**premul 厳密化**: テクスチャは `upload_texture` で CPU premultiply（WebGL の `UNPACK_PREMULTIPLY_ALPHA_WEBGL` 相当）、シェーダは逆premul→カラー演算→再premul、ブレンド係数も premul の三位一体。既存フィクスチャ（Mask/Shape）のピクセル数は P2 前後で不変を確認（premul は完全不透明/フラット色では往復ロスレス）。
 
-### 5.3 カラーブレンド WGSL（WebGL の `PartsColorProgram` を直訳）
+### 5.3 カラーブレンド WGSL（WebGL の `PartsColorProgram` を直訳）— ✅ 実装済（`internal.rs` `fs_main`）
 
 テクスチャは premul 済みなので**逆premul→カラー演算→再premul→階層α畳み込み**：
 
@@ -487,11 +487,11 @@ void        ss_player_resize(ss_player_t, uint32_t w, uint32_t h);
 |---|---|---|
 | **P0（初手）3層リファクタ＋借用モデル Rust API** ✅ | 現 `core`（Player/Renderer）を単一クレート内の `internal`(SSInternalPlayer) / `player`(SSPlayer) モジュールへ再編。**SSPlayer を借用モデル（`&Device`/`&Queue` を借りる §9）に確定**。データ所有契約（§1.1）を配線。viewer が wgpu 一式を所有し SSPlayer を駆動 | 現状の描画（Normal/Mesh/4blend）が3層＋借用モデルで従来通り動く。**これが ① rs 面の土台**（完了） |
 | P1 ssab 両対応 + WebGPU（② js） | ssab の embedded/reference 両ロード（§8.1）。`core` に `web` feature（wasm-bindgen）。`examples/web` で `<ss-player>` 互換 Web Component、canvas 表示 | embedded ssab がブラウザで WebGPU 描画される |
-| P2 描画パリティ① | varg 追加（カラーブレンド率）、BlendType 全12種のパイプラインマトリクス、premul 厳密化 | WebGL 版と色・ブレンドが一致 |
+| **P2 描画パリティ①** ✅ | varg 追加（PartColor blend 由来）、BlendType 全12種のパイプラインマトリクス、premul 厳密化（upload premul ＋ 逆/再premul シェーダ ＋ premul ブレンド係数） | PartsColor / BlendMode / Basic / Effect を PNG 目視で確認。既存フィクスチャのピクセル数は不変。WebGL 版と色・ブレンド一致 |
 | **P3 マスク** ✅ | stencil 付きターゲット（config opt-in）、MaskPlanner 移植（`core/src/mask.rs`）、write/test パイプライン、pure マスク色スキップ、インスタンス継承、**Shape 幾何のマスク writer ＋ Shape content 描画**、白フォールバック初期化（§6） | マスク/Shape アニメが描画（Mask.ssab / Shape.ssab をヘッドレス GPU readback ＋ 実機で確認） |
 | **P4 エフェクト/インスタンス** ✅ | **P0 の次に先行実施**。①内部を `begin_frame`/`append_batch`/`append_effect`/`end_frame` の累積 API＋transform へ（Stage 1）②インスタンス木＝子ごと独立 Context（Stage 2, §7.1）③エフェクト＝EffectSlot/EffectDrawPlan（Stage 3, §7.2） | エフェクト/インスタンスが描画される（実機確認済） |
 | P5 ネイティブ C-API + C++ viewer（③ ffi） | `core` の `ffi` feature ＋ cbindgen、`examples/viewer-dx12-cpp`・`viewer-metal-cpp` | DX12/Metal 実機で同一ライブラリが描画 |
-| P6 追加ブレンド / 統合シェーダ13種 | 残バッチ種別（Shape は P3 で対応済。BlendType 全12種・varg・ss_shader が残り） | フル機能パリティ |
+| P6 統合シェーダ13種 | Shape は P3・BlendType 全12種/varg は P2 で対応済。ss_shader（統合シェーダ13種）が残り | フル機能パリティ |
 | （任意）Bevy アダプタ | `ssplayer-wgpu-bevy`（借用モデルの一利用例）。コアに依存を入れず別立て | Bevy の render graph で SSPlayer が描画 |
 | （後回し）Text / Nines | 旧版も未実装 | 必要時 |
 
