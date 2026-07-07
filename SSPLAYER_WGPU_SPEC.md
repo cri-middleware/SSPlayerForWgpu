@@ -528,6 +528,11 @@ void        ss_player_resize(ss_player_t, uint32_t w, uint32_t h);
 - **データ所有契約（§1.1）**: ssab は Player 所有→ssruntime へ borrow、FrameData/SoA は ssruntime 所有→Player が borrow。ssab を Context より先に破棄しない／FrameData 借用をフレーム跨ぎで保持しない。
 - **エフェクト blend はコマンド毎**（batch.blend_type ではない）点を実装で取り違えない。
 - **ss_shader 統合シェーダ13種** ✅ 実装済（`internal.rs` `SS_SHADER_WGSL`、WebGL `SSShaderLib.ts` を WGSL 移植）。残課題: map0/map1 セカンダリテクスチャ・shader×マスク結合・GLSL 版との厳密ピクセル一致検証。
+- **WebGL 版からの堅牢性 carry-over（要設計・借用モデル前提）**: WebGL 版 Player（`SSPlayerForWeb`）で実装済みの広告向け堅牢性を wgpu へ持ち込む際の対応表。Device/Queue/Surface は**ホスト所有**（§1.1 借用モデル）なので、喪失検知・再生成が**ホスト責務**になる点が WebGL 版との最大の差。
+  - **デバイス/サーフェス喪失復帰**: web(§10) は `GPUDevice.lost` を購読し、ホストがデバイスを作り直したら **SSPlayer が旧デバイス向けに生成した pipeline/texture/buffer を全再生成**する（WebGL 版 `SSWebGLRenderer.restoreContext()` 相当のエントリを SSPlayer に用意）。テクスチャは**生成元(URL/bytes/source)を保持して再アップロード**（WebGL 版 `SSWebGLResourceManager` の retained-source 方式）。native(§11) は `SurfaceError::Lost/Outdated` を**サーフェス再構成**（resize と同経路）で吸収でき、全デバイス喪失は稀。
+  - **可視時のみ描画（pauseWhenHidden・web のみ）**: `<ss-player-webgpu>`（§10）で **IntersectionObserver ＋ visibilitychange** により画面外/裏タブ時は駆動ループを止める（WebGL 版 `SSCanvasPlayer` と同挙動）。native は winit の `Occluded`/`RedrawRequested` が相当。
+  - **精度指定は非該当**: WGSL は f32 既定で `mediump/highp` の概念が無いため、WebGL 版の fragment highp 検出はポート不要。
+  - **プレゼンテーション設定**: web は `context.configure({ alphaMode:'premultiplied', … })` ＋ `requestAdapter({ powerPreference:'low-power' })` が WebGL の `premultipliedAlpha` / `low-power` 相当。`desynchronized` / `failIfMajorPerformanceCaveat` に WebGPU 直接等価は無い。
 
 ---
 
@@ -542,10 +547,11 @@ void        ss_player_resize(ss_player_t, uint32_t w, uint32_t h);
 - C-API 一覧: `libs/ssruntime/src/ffi/mod.rs`
 
 **WebGL 参考実装（描画設計の元）**
-- 正典: `../SSPlayerForWeb/SSPLAYER_WEBGL_SPEC.md`
+- 概要/残タスク: `../SSPlayerForWeb/packages/ssplayer-webgl/ROADMAP.md`（旧 `SSPLAYER_WEBGL_SPEC.md` は廃止 → ROADMAP 化。設計詳細はソースコメントへ集約）
 - レンダラ: `../SSPlayerForWeb/packages/ssplayer-webgl/src/SSWebGLRenderer.ts`
 - シェーダ: `.../src/programs/PartsColorProgram.ts` / `MaskProgram.ts` / `SSShaderLib.ts`
 - テクスチャ: `.../src/SSWebGLResourceManager.ts`
+- 堅牢性（ロスト復帰/可視制御/精度/属性）: `.../src/SSCanvasPlayer.ts`・`.../src/SSWebGLResourceManager.ts`・`.../src/programs/PartsColorProgram.ts`
 - コールドスタート雛形: `../SSPlayerForWeb/TYRANO_COLDSTART.md`
 
 **現行 wgpu プロトタイプ**
