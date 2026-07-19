@@ -50,7 +50,6 @@ fn probe(anim: &str, frames: usize) {
     child.setup_animation(&ref_anime).unwrap();
 
     let mut slot = InstanceSlot::new();
-    let mut prev = 0.0f32;
     let mut last_parent = 0.0f32;
     let dt = 1.0 / 60.0;
 
@@ -61,12 +60,11 @@ fn probe(anim: &str, frames: usize) {
         last_parent = pf;
         let _ = parent.get_frame_data(pf);
         let ev = parent.get_active_event_instance(part_idx as u32);
-        let r = slot.step(ev, &mut child, prev, pf, dt, parent_looped);
+        let r = slot.step(ev, &mut child, pf, dt, parent_looped);
         if r.transitioned {
             child.play();
         }
         let cf = child.get_frame_no();
-        prev = cf;
         eprintln!("f{f:03} parent={pf:6.1} plooped={} child={cf:7.2} vis={} indep={} speed={:.1} trans={} clooped={}", parent_looped as u8, r.visible, r.independent, ev.speed, r.transitioned, r.child_looped);
     }
 }

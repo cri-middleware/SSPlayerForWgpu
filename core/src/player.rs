@@ -54,8 +54,6 @@ struct PlaybackNode {
 struct InstanceChild {
     slot: InstanceSlot,
     node: Box<PlaybackNode>,
-    /// Previous child frame_no, for the slot's independent-loop detection.
-    prev_frame: f32,
 }
 
 /// The SpriteStudio player. One instance owns one animation-instance tree.
@@ -285,7 +283,7 @@ fn build_node(resources: &HashMap<String, Arc<SsabResource>>, pack: &str, anime:
                     if let Some(inst) = part.part_type_as_part_type_instance()
                         && let Some(child) = build_node(resources, inst.ref_anime_pack(), inst.ref_anime_name(), depth + 1)
                     {
-                        instances.insert(i, InstanceChild { slot: InstanceSlot::new(), node: Box::new(child), prev_frame: 0.0 });
+                        instances.insert(i, InstanceChild { slot: InstanceSlot::new(), node: Box::new(child) });
                     }
                 }
                 PartType::PartTypeEffect => {
@@ -427,7 +425,7 @@ fn render_node(node: &mut PlaybackNode, internal: &mut SSInternalPlayer, transfo
                     let Some(child) = node.instances.get_mut(&part_idx) else { continue };
 
                     let ev = node.context.get_active_event_instance(part_idx as u32);
-                    let result = child.slot.step(ev, &mut child.node.context, child.prev_frame, frame_no, delta_secs, node_looped);
+                    let result = child.slot.step(ev, &mut child.node.context, frame_no, delta_secs, node_looped);
 
                     // On a transition edge the slot configures the child's section
                     // but leaves the frame snap to the host: play() moves the child
@@ -436,7 +434,6 @@ fn render_node(node: &mut PlaybackNode, internal: &mut SSInternalPlayer, transfo
                         child.node.context.play();
                     }
                     let child_frame_no = child.node.context.get_frame_no();
-                    child.prev_frame = child_frame_no;
 
                     if result.visible {
                         // Compose the instance part's world matrix onto the parent transform.

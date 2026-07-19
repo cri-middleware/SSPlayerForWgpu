@@ -14,4 +14,4 @@ ssruntime = { workspace = true }
 winit = "0.30.5"
 wgpu = { workspace = true }
 image = "0.25.10"
-pollster = "0.4.0"
+pollster = "1.0.1"
