@@ -63,6 +63,38 @@ cd examples/web && ./build.sh && python3 -m http.server   # WebGPU demo
 The two crates are versioned independently — the library and the development
 viewer are different products.
 
+## Using it in your own project
+
+Two routes, in order of preference.
+
+**A git dependency works today** and needs no knowledge of this repository's
+layout — cargo checks out the `SpriteStudio-SDK` submodule for you:
+
+```toml
+[dependencies]
+ssplayer-wgpu = { git = "https://github.com/cri-middleware/ssplayer-wgpu" }
+```
+
+The one requirement is that the SDK repository is reachable for whoever builds
+it, and that the commit this repository's submodule points at has been pushed.
+While the SDK is private, that means only people with access to it can build
+against this crate.
+
+**Publishing to crates.io** is the route that removes that requirement, and it
+is not possible yet. `cargo publish` refuses a crate whose dependencies have no
+version requirement, so it needs, in order:
+
+1. `ssab`, `ssinterpolate` and `ssruntime` published from the SDK repository
+   (all three names are still free on crates.io).
+2. `version = "..."` added alongside `path` in this workspace's `ssruntime` and
+   `ssab` dependencies. Cargo strips the `path` and keeps the version when
+   packaging, so local development is unaffected.
+3. `cargo publish -p ssplayer-wgpu`, then any adapter crates.
+
+Until then, `cargo publish --dry-run` fails with *"all dependencies must have a
+version requirement specified when publishing"* — that is expected, not a
+misconfiguration.
+
 ## SDK submodule
 
 The SDK is consumed as a git submodule and linked by path, not as a released
