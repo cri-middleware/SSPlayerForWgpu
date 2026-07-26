@@ -26,7 +26,7 @@ fn instance_ref(ctx: &Context<'static>) -> Option<(usize, String, String)> {
 }
 
 fn probe(anim: &str, frames: usize) {
-    let dir = concat!(env!("CARGO_MANIFEST_DIR"), "/../../tests/overall/overall");
+    let dir = concat!(env!("CARGO_MANIFEST_DIR"), "/../assets/overall");
     let parent_res = load(&format!("{dir}/Instance.ssab"));
 
     eprintln!("=== Instance.ssab animations: {:?}", parent_res.resource().map(|r| r.get_animation_names()));
@@ -88,7 +88,7 @@ fn probe_indep_speed_2x() {
 
 #[test]
 fn scan_all_ssab() {
-    let dir = concat!(env!("CARGO_MANIFEST_DIR"), "/../../tests/overall/overall");
+    let dir = concat!(env!("CARGO_MANIFEST_DIR"), "/../assets/overall");
     let mut entries: Vec<_> = std::fs::read_dir(dir).unwrap().flatten().map(|e| e.path()).collect();
     entries.sort();
     for path in entries {
@@ -102,7 +102,7 @@ fn scan_all_ssab() {
 
 #[test]
 fn probe_effect() {
-    let dir = concat!(env!("CARGO_MANIFEST_DIR"), "/../../tests/overall/overall");
+    let dir = concat!(env!("CARGO_MANIFEST_DIR"), "/../assets/overall");
     let res = load(&format!("{dir}/Effect.ssab"));
     let mut ctx = Context::new();
     ctx.bind_resource(unsafe { &*res.resource_static_ptr() });

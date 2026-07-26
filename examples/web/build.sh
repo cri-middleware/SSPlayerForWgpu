@@ -11,20 +11,26 @@
 set -euo pipefail
 
 here="$(cd "$(dirname "$0")" && pwd)"
-repo="$(cd "$here/../../.." && pwd)"
+repo="$(cd "$here/../.." && pwd)"
 
 profile="--release"
 [ "${1:-}" = "--dev" ] && profile="--dev"
 
 echo "==> building wasm package (core, feature=web) -> examples/web/pkg"
-wasm-pack build "$repo/ssplayer-wgpu/core" \
+wasm-pack build "$repo/core" \
   --target web $profile \
   --out-name ssplayer_wgpu \
   --out-dir "$here/pkg" \
   -- --no-default-features --features web
 
-echo "==> generating embedded .ssab demo assets -> examples/web/assets"
-mkdir -p "$here/assets"
-( cd "$repo" && cargo run -p ssconverter-cli -- --embedded --out-dir "$here/assets" tests/overall/overall.sspj )
+# Embedded ssab bakes the atlas in, so the demo needs no sibling texture files.
+if [ ! -d "$repo/assets/overall_emb" ]; then
+  echo "==> assets/overall_emb missing; running scripts/deploy-examples.sh"
+  "$repo/scripts/deploy-examples.sh"
+fi
+
+echo "==> staging embedded .ssab demo assets -> examples/web/assets"
+rm -rf "$here/assets"; mkdir -p "$here/assets"
+cp "$repo/assets/overall_emb/"*.ssab "$here/assets/"
 
 echo "==> done. serve this directory over http (e.g. python3 -m http.server) and open index.html"

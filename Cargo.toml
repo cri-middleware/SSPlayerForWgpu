@@ -1,0 +1,49 @@
+[workspace]
+resolver = "3"
+members = [
+    "core",
+    "viewer",
+]
+# The SDK submodule is a workspace of its own. Without this, cargo claims every
+# package under this directory and tries to resolve the SDK crates' inherited
+# dependencies against *this* manifest.
+exclude = ["SpriteStudio-SDK"]
+
+# `version` is deliberately not inherited: the player and the viewer are versioned
+# independently, so each crate declares its own.
+[workspace.package]
+edition = "2024"
+rust-version = "1.97"
+authors = ["CRI Middleware Co., Ltd."]
+license = "BSD-3-Clause"
+repository = "https://github.com/cri-middleware/ssplayer-wgpu"
+homepage = "https://www.webtech.co.jp/eng/spritestudio/"
+description = "wgpu renderer for OPTPiX SpriteStudio 7 animations"
+
+[workspace.dependencies]
+# The SDK is a git submodule rather than a released crate: this player links the
+# runtime's Rust API directly (not the C-API the other Players use), so it has to
+# track unreleased .ssab schema changes. `git submodule update --init` first.
+ssruntime = { path = "SpriteStudio-SDK/libs/ssruntime" }
+ssab = { path = "SpriteStudio-SDK/libs/ssab", default-features = false }
+ssplayer-wgpu = { path = "core" }
+# Versions centralized here so core, the viewer, and the wasm build never drift.
+# Pinned to the 29 line to stay compatible with Slint's `unstable-wgpu-29`: the
+# Vtuber app composes Slint UI and this player on one device, and Slint requires
+# an exact wgpu major. Do not bump without checking Slint's supported major.
+wgpu = "29"
+wasm-bindgen = { version = "0.2.126", default-features = false }
+wasm-bindgen-futures = "0.4"
+js-sys = "0.3"
+web-sys = "0.3"
+console_error_panic_hook = "0.1"
+
+[profile.dev]
+panic = "abort"
+
+[profile.release]
+lto = true
+opt-level = 3
+codegen-units = 1
+panic = "abort"
+strip = "symbols"

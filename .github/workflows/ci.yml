@@ -1,0 +1,83 @@
+name: CI
+
+on:
+  pull_request:
+    paths-ignore:
+      - '**/*.md'
+      - '.gitignore'
+      - 'LICENSE*'
+  workflow_dispatch:
+
+env:
+  CARGO_TERM_COLOR: always
+
+concurrency:
+  group: ci-${{ github.head_ref || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  check:
+    name: 🐧 Lint & Test (Linux)
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+        with:
+          # SpriteStudio-SDK is a private submodule in a different repository, so
+          # the job-scoped GITHUB_TOKEN cannot fetch it. Supply a fine-grained PAT
+          # (or GitHub App token) with read access to it as SDK_SUBMODULE_TOKEN.
+          # Once the SDK is public, drop this line and the secret.
+          token: ${{ secrets.SDK_SUBMODULE_TOKEN || github.token }}
+          submodules: recursive
+
+      - name: Setup Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy, rustfmt
+
+      - name: Setup Rust cache
+        uses: Swatinem/rust-cache@v2
+
+      - name: Format check
+        run: cargo fmt --all -- --check
+
+      - name: Generate demo assets
+        # Also proves the SDK submodule still builds against this checkout.
+        run: ./scripts/deploy-examples.sh
+
+      - name: Clippy
+        run: cargo clippy --workspace --all-targets -- -D warnings
+
+      - name: Test
+        # Runners have no GPU adapter, so the offscreen rendering tests in
+        # core/tests/render.rs skip themselves here. Rendering changes must be
+        # verified locally on a real adapter.
+        run: cargo test --workspace
+
+  wasm:
+    name: 🌐 Web (wasm32)
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+        with:
+          token: ${{ secrets.SDK_SUBMODULE_TOKEN || github.token }}
+          submodules: recursive
+
+      - name: Setup Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Setup Rust cache
+        uses: Swatinem/rust-cache@v2
+
+      - name: Install wasm target
+        run: rustup target add wasm32-unknown-unknown
+
+      - name: Build the js face
+        run: cargo build -p ssplayer-wgpu --target wasm32-unknown-unknown --no-default-features --features web

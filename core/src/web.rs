@@ -64,7 +64,7 @@ impl SsPlayerWeb {
         let instance = wgpu::Instance::new(instance_desc);
         let surface = instance.create_surface(wgpu::SurfaceTarget::Canvas(canvas)).map_err(js_err)?;
         let adapter = instance
-            .request_adapter(&wgpu::RequestAdapterOptions { power_preference: wgpu::PowerPreference::default(), compatible_surface: Some(&surface), force_fallback_adapter: false, apply_limit_buckets: false })
+            .request_adapter(&wgpu::RequestAdapterOptions { power_preference: wgpu::PowerPreference::default(), compatible_surface: Some(&surface), force_fallback_adapter: false })
             .await
             .map_err(|_| JsValue::from_str("no WebGPU adapter (this browser/GPU may not support WebGPU)"))?;
         let (device, queue) = adapter.request_device(&wgpu::DeviceDescriptor::default()).await.map_err(js_err)?;
@@ -72,17 +72,7 @@ impl SsPlayerWeb {
         let caps = surface.get_capabilities(&adapter);
         // Prefer a non-sRGB format so the premultiplied pipeline composites as authored.
         let format = caps.formats.iter().copied().find(|f| !f.is_srgb()).unwrap_or(caps.formats[0]);
-        let config = wgpu::SurfaceConfiguration {
-            usage: wgpu::TextureUsages::RENDER_ATTACHMENT,
-            format,
-            width,
-            height,
-            present_mode: wgpu::PresentMode::Fifo,
-            alpha_mode: caps.alpha_modes[0],
-            color_space: wgpu::SurfaceColorSpace::default(),
-            view_formats: vec![],
-            desired_maximum_frame_latency: 2,
-        };
+        let config = wgpu::SurfaceConfiguration { usage: wgpu::TextureUsages::RENDER_ATTACHMENT, format, width, height, present_mode: wgpu::PresentMode::Fifo, alpha_mode: caps.alpha_modes[0], view_formats: vec![], desired_maximum_frame_latency: 2 };
         surface.configure(&device, &config);
         let stencil_view = create_stencil_view(&device, width, height);
 
@@ -158,7 +148,7 @@ impl SsPlayerWeb {
             self.player.draw(&mut rpass);
         }
         self.queue.submit(std::iter::once(encoder.finish()));
-        self.queue.present(frame);
+        frame.present();
         Ok(())
     }
 }

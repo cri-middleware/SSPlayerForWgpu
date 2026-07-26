@@ -18,7 +18,8 @@
 - **提供3面（ssruntime と同型）**: `rs`(rlib) / `js`(wasm-bindgen・`<ss-player>`互換) / `ffi`(cbindgen・DX12/Vulkan/Metal)。
 - **データ所有契約**: `.ssab` は Player 所有→ssruntime へ borrow ／ FrameData・SoA は ssruntime 所有→Player が borrow（§1.1）。
 - **ssab は embedded / reference 両対応**（テクスチャ埋め込み／外部参照）。
-- **進捗**: **P0**（3層リファクタ＋借用モデル）✅ ／ **P4**（インスタンス §7.1・エフェクト §7.2）✅ ／ **P3**（マスク・Shape）✅ ／ **P2**（色パリティ: varg・全12ブレンド・premul 厳密化）✅ ／ **P6**（統合シェーダ ss_shader 全13種）✅ ／ **P1**（ssab embedded/reference 両対応・**WebGPU/js**）✅ ブラウザ実機確認済。対応バッチ = Normal / Mesh / Shape / Instance / Effect / Mask。次は P5（ネイティブ ffi）。wgpu 30。詳細は §12。
+- **進捗**: **P0**（3層リファクタ＋借用モデル）✅ ／ **P4**（インスタンス §7.1・エフェクト §7.2）✅ ／ **P3**（マスク・Shape）✅ ／ **P2**（色パリティ: varg・全12ブレンド・premul 厳密化）✅ ／ **P6**（統合シェーダ ss_shader 全13種）✅ ／ **P1**（ssab embedded/reference 両対応・**WebGPU/js**）✅ ブラウザ実機確認済。対応バッチ = Normal / Mesh / Shape / Instance / Effect / Mask。次は P5（ネイティブ ffi）。**wgpu 29**（§2.2）。詳細は §12。
+- **リポジトリ**: SDK monorepo から分離した独立リポ `ssplayer-wgpu`。SDK は git submodule（`SpriteStudio-SDK/`）として取り込み、`ssruntime`/`ssab` を **path 依存**で直リンクする（§2.2）。
 
 ---
 
@@ -108,7 +109,7 @@ wgpu が単一コードベースから WebGPU / Vulkan / DX12 / Metal / GL を�
 
 帰結（実装規約）:
 
-- **ssab は Player より長生き**でなければならない。`SsabResource` を `Context`（ssruntime）より先に破棄しない。プロトは `Context<'static>` ＋ Player 保持の `Arc<SsabResource>` でこれを担保している（`ssplayer-wgpu/core/src/player.rs`）。
+- **ssab は Player より長生き**でなければならない。`SsabResource` を `Context`（ssruntime）より先に破棄しない。プロトは `Context<'static>` ＋ Player 保持の `Arc<SsabResource>` でこれを担保している（`core/src/player.rs`）。
 - **FrameData / SoA の借用は次フレームまで**。`get_frame_data` を呼ぶたびに ssruntime 内部バッファが書き換わるので、Player は**そのフレーム内で使い切る**（保持しない）。マルチスレッド描画では SoA ポインタの use-after-free に注意し、描画ジョブ完了を待ってから `update`/`destroy`。
 - この契約は REDESIGN_ASSESSMENT §4 の「FlatBuffers をポインタ渡し／コピーなし」と一致。SSInternalPlayer は借用した FrameData/SoA を wgpu 頂点バッファへ**書き出した時点で借用を手放す**（GPU バッファ側が実体を持つ）。
 
@@ -153,7 +154,17 @@ ssplayer-wgpu/
 
 ### 2.1 Cargo ワークスペース登録
 
-ルート `Cargo.toml` の `members` は現状のまま（`ssplayer-wgpu/core`・`ssplayer-wgpu/viewer`）。将来 Bevy を足す時だけ `ssplayer-wgpu/bevy` を追加。C++ の examples は Cargo ワークスペース外で、CMake が cbindgen 生成ヘッダ＋ビルド済みライブラリを消費する。
+ルート `Cargo.toml` の `members` は `core`（クレート `ssplayer-wgpu`）と `viewer`（クレート `ssplayer-wgpu-viewer`）。**バージョンは crate ごとに独立**（ライブラリと開発用 viewer は別物なので `workspace.package.version` は置かない）。将来 Bevy を足す時だけ `bevy`（クレート `ssplayer-wgpu-bevy`）を追加する。C++ の examples は Cargo ワークスペース外で、CMake が cbindgen 生成ヘッダ＋ビルド済みライブラリを消費する。
+
+### 2.2 SDK submodule と wgpu 版
+
+**SDK は git submodule `SpriteStudio-SDK/`**。他の Player（Godot/Unity/RenPy/Web/Flutter）が C-API をリリース済み zip 経由で使うのに対し、本 Player だけは **ssruntime / ssab の Rust API を直接リンク**する（`root_as_ss_anime_binary_unchecked` などの FlatBuffers 型を読む）ため、未リリースの ssab スキーマ変更に追随する必要がある。`SSConverterGUI` と同じ構成。
+
+- ルート `Cargo.toml` の `[workspace] exclude = ["SpriteStudio-SDK"]` は必須。これが無いと cargo が submodule 内の SDK クレートを**本ワークスペースのメンバーとして掴み**、SDK 側の `workspace.dependencies` 継承が解決できず manifest エラーになる。
+- 依存は `[workspace.dependencies]` に集約：`ssruntime = { path = "SpriteStudio-SDK/libs/ssruntime" }` / `ssab = { path = "SpriteStudio-SDK/libs/ssab", default-features = false }`。
+- **wgpu は 29 系にピン**。Vtuber アプリで Slint と同一デバイスを共有する構成があり、Slint の `unstable-wgpu-NN` は wgpu メジャーの完全一致を要求するため。**メジャーを上げるときは必ず Slint 側の対応メジャーを確認する**。ワークスペースで1つの wgpu しか解決できないので、これは repo 全体の制約。
+
+**30 → 29 の API 差分（ダウングレード時に触った箇所）**: `VertexState.buffers` は `&[VertexBufferLayout]`（30 は `&[Option<_>]`）／ present は `SurfaceTexture::present()`（30 は `Queue::present(tex)`）／ `RequestAdapterOptions` に `apply_limit_buckets` は無い／ `SurfaceConfiguration` に `color_space` は無い／ `BufferSlice::get_mapped_range()` は `BufferView` を直接返す（30 は `Result`）。`get_current_texture() -> CurrentSurfaceTexture`（enum）は 29 にもある。
 
 ---
 
@@ -372,7 +383,7 @@ ssconverter は `.ssab` を2形態で出力しうるので、SSPlayer はどち�
 - **統一供給 API**: 最終的にはどちらも `upload_texture(hash, premul済みRGBA, w, h)` に集約される。embedded は Player 内部でこの呼び出しを行い、reference はホストが行う。ブラウザの `TexImageSource` 供給・ネイティブの RGBA 供給と対称。
 - **借用モデルとの整合**: `add_ssab`/`load_ssab` は device/queue を借りないので、デコードは load 時（CPU）、GPU upload は次の `update`（queue 貸与時）に `pending_textures` を flush。
 - **feature `embedded`（default on）**: Player 内蔵 `image`（PNG のみ）でデコード。WASM サイズを抑える場合は `--no-default-features` で切り、デコードをブラウザ（`createImageBitmap`）に委ねてホスト供給に一本化。
-- **検証**: `render.rs::render_embedded_ssab`（埋め込み `Basic.ssab` をテクスチャ無供給でロード → reference レンダーとピクセル完全一致 14378/14378）。埋め込みフィクスチャは `tests/overall/overall_emb/`（`ssconverter-cli --embedded` 生成）。
+- **検証**: `render.rs::render_embedded_ssab`（埋め込み `Basic.ssab` をテクスチャ無供給でロード → reference レンダーとピクセル完全一致 14378/14378）。埋め込みフィクスチャは `assets/overall_emb/`（`ssconverter-cli --embedded` 生成）。
 
 ---
 
@@ -504,7 +515,7 @@ void        ss_player_resize(ss_player_t, uint32_t w, uint32_t h);
 
 | 対象 | 手段 |
 |---|---|
-| Rust 描画（開発） | `viewer/`（winit+wgpu、`tests/overall/overall/` 再生。横=ssab切替/縦=アニメ切替） |
+| Rust 描画（開発） | `viewer/`（winit+wgpu、`assets/overall/` 再生。横=ssab切替/縦=アニメ切替） |
 | インスタンス/エフェクト（ヘッドレス） | `core/tests/instance.rs`（probe。frame 推移・quad 生成を GUI 抜きで確認） |
 | マスク/Shape（ヘッドレス） | `core/tests/mask.rs`（planner probe：writer 分類・Shape-mask）＋ `core/tests/render.rs`（GPU offscreen readback：masking on/off 差分・Shape content 描画量。adapter 無ければ skip。PNG 保存で目視も可） |
 | 統合シェーダ（ヘッドレス） | `core/tests/render.rs::render_integration_shaders`（Shader.ssab を描画し、SS WGSL コンパイル＋per-part ディスパッチ＋params で描画量が出ることを確認。adapter 無ければ skip） |
@@ -555,8 +566,8 @@ void        ss_player_resize(ss_player_t, uint32_t w, uint32_t h);
 - コールドスタート雛形: `../SSPlayerForWeb/TYRANO_COLDSTART.md`
 
 **現行 wgpu プロトタイプ**
-- `ssplayer-wgpu/core/src/renderer.rs`（Normal/Mesh のみ、再編元）
-- `ssplayer-wgpu/core/src/player.rs`（SSPlayer の土台）
+- `core/src/renderer.rs`（Normal/Mesh のみ、再編元）
+- `core/src/player.rs`（SSPlayer の土台）
 - `ssplayer-wgpu/viewer/src/main.rs`（winit+wgpu ループ）
 
 **全体方針**
