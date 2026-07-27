@@ -16,7 +16,7 @@ edition = "2024"
 rust-version = "1.97"
 authors = ["CRI Middleware Co., Ltd."]
 license = "BSD-3-Clause"
-repository = "https://github.com/cri-middleware/ssplayer-wgpu"
+repository = "https://github.com/cri-middleware/SSPlayerForWgpu"
 homepage = "https://www.webtech.co.jp/eng/spritestudio/"
 description = "wgpu renderer for OPTPiX SpriteStudio 7 animations"
 

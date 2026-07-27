@@ -33,8 +33,8 @@ viewers, Text and 9-slice geometry, and the Bevy adapter.
 ## Getting started
 
 ```bash
-git clone --recursive https://github.com/cri-middleware/ssplayer-wgpu.git
-cd ssplayer-wgpu
+git clone --recursive https://github.com/cri-middleware/SSPlayerForWgpu.git
+cd SSPlayerForWgpu
 # (if you cloned without --recursive)
 git submodule update --init
 
@@ -72,7 +72,7 @@ layout — cargo checks out the `SpriteStudio-SDK` submodule for you:
 
 ```toml
 [dependencies]
-ssplayer-wgpu = { git = "https://github.com/cri-middleware/ssplayer-wgpu" }
+ssplayer-wgpu = { git = "https://github.com/cri-middleware/SSPlayerForWgpu" }
 ```
 
 The one requirement is that the SDK repository is reachable for whoever builds
