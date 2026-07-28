@@ -103,9 +103,12 @@ impl SsPlayerWeb {
         self.player.animation_names().unwrap_or_default()
     }
 
-    /// Start playing `name`.
+    /// Select `name` and start playing it. Kept as one call because the `<ss-player>`
+    /// interface this mirrors has no separate select step (SPEC §10).
     pub fn play(&mut self, name: &str) -> Result<(), JsValue> {
-        self.player.play(name).map_err(js_err)
+        self.player.set_animation(name).map_err(js_err)?;
+        self.player.play();
+        Ok(())
     }
 
     /// Resize the surface + stencil to the canvas's new pixel size.

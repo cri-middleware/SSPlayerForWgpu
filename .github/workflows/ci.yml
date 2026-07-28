@@ -57,6 +57,14 @@ jobs:
         # verified locally on a real adapter.
         run: cargo test --workspace
 
+      - name: Build the ffi face
+        # No native default command compiles src/ffi.rs or src/host.rs, so build
+        # the feature explicitly. This also regenerates the cbindgen header.
+        run: cargo clippy -p ssplayer-wgpu --features ffi --all-targets -- -D warnings
+
+      - name: Check the generated header is up to date
+        run: git diff --exit-code -- libs/ssplayer-wgpu/include/ssplayer_wgpu.h
+
   wasm:
     name: 🌐 Web (wasm32)
     runs-on: ubuntu-latest

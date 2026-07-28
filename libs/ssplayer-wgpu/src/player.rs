@@ -141,15 +141,27 @@ impl SSPlayer {
         Ok(())
     }
 
-    /// Set up and start the named animation, (re)building the instance tree.
-    pub fn play(&mut self, anim_name: &str) -> Result<(), SSRuntimeError> {
+    /// Select the animation to play, (re)building the instance tree. The tree is
+    /// left at its start frame and **not** playing — call [`SSPlayer::play`].
+    ///
+    /// This is the allocating half of playback (contexts, slots, mask flags), so
+    /// the start/stop calls below can stay allocation-free. Mirrors the runtime's
+    /// own `setup_animation` + `play` split.
+    pub fn set_animation(&mut self, anim_name: &str) -> Result<(), SSRuntimeError> {
         let main_pack = self.main_pack.clone().ok_or(SSRuntimeError::NotLoaded)?;
-        let mut root = build_node(&self.resources, &main_pack, anim_name, 0).ok_or(SSRuntimeError::NotLoaded)?;
-        root.context.play();
+        let root = build_node(&self.resources, &main_pack, anim_name, 0).ok_or(SSRuntimeError::NotLoaded)?;
         self.last_root_frame = root.context.get_frame_no();
         self.root = Some(root);
         self.current_animation = Some(anim_name.to_string());
         Ok(())
+    }
+
+    /// Start — or, after [`SSPlayer::pause`], resume — the selected animation.
+    /// No-op until [`SSPlayer::set_animation`] has succeeded.
+    pub fn play(&mut self) {
+        if let Some(root) = &mut self.root {
+            root.context.play();
+        }
     }
 
     pub fn pause(&mut self) {

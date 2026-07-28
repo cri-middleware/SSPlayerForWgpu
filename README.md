@@ -19,10 +19,11 @@ The canonical design document is [`SSPLAYER_WGPU_SPEC.md`](SSPLAYER_WGPU_SPEC.md
 Implemented: Normal / Mesh / Shape / Instance / Effect / Mask draw batches, all 12
 blend modes, part colours (varg) with premultiplied alpha, the 13 `ss_shader`
 integration shaders, stencil-based masking, and both texture modes (embedded and
-reference). WebGPU has been verified in a browser.
+reference). WebGPU has been verified in a browser, and the native C-API (`ffi`
+feature) on Metal via the C++ viewer.
 
-Not yet implemented: the native C-API (`ffi` feature) and its C++ verification
-viewers, Text and 9-slice geometry, and the Bevy adapter.
+Not yet implemented: the DX12 and Vulkan C++ verification viewers, Text and
+9-slice geometry, and the Bevy adapter.
 
 ## Requirements
 
@@ -50,6 +51,14 @@ cargo test --workspace                # includes headless GPU readback tests
 cd examples/web && ./build.sh && python3 -m http.server   # WebGPU demo
 ```
 
+The C API is behind the `ffi` feature; building it also regenerates
+`libs/ssplayer-wgpu/include/ssplayer_wgpu.h` with cbindgen.
+
+```bash
+cargo build -p ssplayer-wgpu --features ffi
+cd examples/viewer-metal-cpp && cmake -B build && cmake --build build && ./build/ssviewer-metal
+```
+
 ## Layout
 
 | Path | What |
@@ -57,6 +66,7 @@ cd examples/web && ./build.sh && python3 -m http.server   # WebGPU demo
 | `libs/ssplayer-wgpu/` | crate `ssplayer-wgpu` — the player (`rlib` + `cdylib` for wasm) |
 | `examples/viewer/` | crate `ssplayer-wgpu-viewer` — native winit viewer used for development |
 | `examples/web/` | `<ss-player-webgpu>` custom element + WebGPU demo page |
+| `examples/viewer-metal-cpp/` | Cocoa/Objective-C++ viewer driving the C API on Metal |
 | `scripts/deploy-examples.sh` | converts the SDK's test projects into `assets/` |
 | `SpriteStudio-SDK/` | the SDK, as a git submodule |
 

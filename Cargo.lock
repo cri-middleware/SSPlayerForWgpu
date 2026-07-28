@@ -2507,6 +2507,7 @@ name = "ssplayer-wgpu"
 version = "0.1.0"
 dependencies = [
  "bytemuck",
+ "cbindgen",
  "console_error_panic_hook",
  "image",
  "js-sys",

@@ -19,9 +19,10 @@ A wgpu renderer for SpriteStudio 7 animations, split out of the SpriteStudio-SDK
 
 | Path | Role | Docs |
 |---|---|---|
-| `libs/ssplayer-wgpu/` | Crate `ssplayer-wgpu`. `lib` / `frame` / `internal` (drawing, pipelines, shaders) / `player` (playback node tree) / `mask` (stencil planner) / `web` (`web` feature). | [SPEC](./SSPLAYER_WGPU_SPEC.md) |
+| `libs/ssplayer-wgpu/` | Crate `ssplayer-wgpu`. `lib` / `frame` / `internal` (drawing, pipelines, shaders) / `player` (playback node tree) / `mask` (stencil planner) / `web` (`web` feature) / `host` + `ffi` (`ffi` feature). | [SPEC](./SSPLAYER_WGPU_SPEC.md) |
 | `examples/viewer/` | Crate `ssplayer-wgpu-viewer`. Native winit host used for development and visual checks. | — |
 | `examples/web/` | `<ss-player-webgpu>` custom element, demo page and `build.sh` (wasm-pack). | [README](./examples/web/README.md) |
+| `examples/viewer-metal-cpp/` | Cocoa/Objective-C++ host that drives the C API on Metal. CMake builds the library through cargo. | [README](./examples/viewer-metal-cpp/README.md) |
 | `scripts/deploy-examples.sh` | Builds `ssconverter-cli` from the submodule and converts the SDK's test projects into `assets/`. | — |
 | `SpriteStudio-SDK/` | The SDK, as a git submodule. `ssruntime` / `ssab` are path dependencies into it. | [SDK AGENTS](./SpriteStudio-SDK/AGENTS.md) |
 | `assets/` | Generated playback data. Gitignored — never commit it, never hand-edit it. | — |
@@ -33,6 +34,8 @@ A wgpu renderer for SpriteStudio 7 animations, split out of the SpriteStudio-SDK
 *   **`[workspace] exclude = ["SpriteStudio-SDK"]` is load-bearing.** Without it cargo claims the SDK crates as members of *this* workspace and fails to resolve their inherited dependencies (`flatbuffers was not found in workspace.dependencies`).
 *   **No engine dependencies in `ssplayer-wgpu`.** Slint and Bevy must not appear in the player crate; adapters are separate crates under `libs/`. This keeps the OSS adoption path open and lets an adapter move to its own release line if its engine's wgpu major ever diverges from ours.
 *   **Crate versions are independent.** There is deliberately no `workspace.package.version`: the library and the development viewer are different products.
+*   **`ffi.rs` holds no logic.** The C face is argument validation, type conversion and error-code mapping — nothing else. Anything it would need lives in `host.rs` (wgpu) or `player.rs` (playback), so the Rust API gets it too (SPEC §11).
+*   **Selecting an animation and starting it are separate calls.** `SSPlayer::set_animation` builds the instance tree (the allocating step); `play` / `pause` / `stop` / `set_speed` are allocation-free transport, and `play()` also resumes after `pause()`. Only the `<ss-player>`-compatible js face keeps a single `play(name)` (SPEC §9.2).
 
 ## Verification
 
@@ -45,12 +48,16 @@ A wgpu renderer for SpriteStudio 7 animations, split out of the SpriteStudio-SDK
 | Format check / apply | `cargo fmt --all -- --check` / `cargo fmt --all` |
 | Tests | `cargo test --workspace` |
 | WebGPU / js face (wasm32) | `cargo build -p ssplayer-wgpu --target wasm32-unknown-unknown --no-default-features --features web` |
+| C / ffi face (+ header regen) | `cargo build -p ssplayer-wgpu --features ffi` |
 | Native viewer | `cargo run -p ssplayer-wgpu-viewer` |
+| Metal C++ viewer (macOS) | `cd examples/viewer-metal-cpp && cmake -B build && cmake --build build && ./build/ssviewer-metal` |
 | Web demo | `cd examples/web && ./build.sh && python3 -m http.server` |
 
 The tests read `assets/`, so `deploy-examples.sh` is a prerequisite, not an optional step.
 
 **The wasm build is not optional.** `libs/ssplayer-wgpu/src/web.rs` sits behind the `web` feature and is compiled by *no* native command — not `build`, not `clippy --all-targets`, not `test`. Breakage there is invisible until the wasm target is built, which is how three of the four wgpu-30→29 API changes escaped the native checks.
+
+**`host.rs` / `ffi.rs` have the same blind spot**, behind the `ffi` feature: build with `--features ffi` after touching the player's public API, or the C face silently rots. That build also regenerates `libs/ssplayer-wgpu/include/ssplayer_wgpu.h` through cbindgen — commit the regenerated header with the change that moved it.
 
 **Beware green rendering tests.** `libs/ssplayer-wgpu/tests/render.rs` renders offscreen and asserts on drawn-pixel counts, but skips itself when no GPU adapter is present — a pass on a headless machine may have verified nothing. When changing rasterisation, dump the readback to a PNG in the scratch directory and look at it; pixel counts alone have hidden real regressions (and a dump threshold below the background colour once counted the background as drawn).
 
