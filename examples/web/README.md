@@ -1,8 +1,8 @@
 # ssplayer-wgpu — WebGPU demo (js face)
 
 Renders a SpriteStudio 7 `.ssab` to an HTML `<canvas>` via **WebGPU**, using the
-wasm-bindgen bindings from the player core's `web` feature (SPEC §12 P1). This is
-not a separate crate — the WebGPU player lives in `ssplayer-wgpu/core` behind
+wasm-bindgen bindings from the player's `web` feature (SPEC §12 P1). This is
+not a separate crate — the WebGPU player lives in `libs/ssplayer-wgpu` behind
 `--features web`; this directory is just the static page + build glue.
 
 ## Prerequisites
@@ -20,7 +20,7 @@ python3 -m http.server   # serve THIS directory
 ```
 
 `build.sh` does two things:
-1. `wasm-pack build` of `core` with `--features web` → `./pkg` (wasm + JS bindings).
+1. `wasm-pack build` of `libs/ssplayer-wgpu` with `--features web` → `./pkg` (wasm + JS bindings).
 2. Generates embedded-mode `.ssab` demo assets → `./assets`
    (`ssconverter-cli --embedded`). Embedded ssab bakes the atlas PNG in, so the
    page fetches a single self-contained file and needs no host texture supply.

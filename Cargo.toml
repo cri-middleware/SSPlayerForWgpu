@@ -1,8 +1,8 @@
 [workspace]
 resolver = "3"
 members = [
-    "core",
-    "viewer",
+    "libs/ssplayer-wgpu",
+    "examples/viewer",
 ]
 # The SDK submodule is a workspace of its own. Without this, cargo claims every
 # package under this directory and tries to resolve the SDK crates' inherited
@@ -26,7 +26,7 @@ description = "wgpu renderer for OPTPiX SpriteStudio 7 animations"
 # track unreleased .ssab schema changes. `git submodule update --init` first.
 ssruntime = { path = "SpriteStudio-SDK/libs/ssruntime" }
 ssab = { path = "SpriteStudio-SDK/libs/ssab", default-features = false }
-ssplayer-wgpu = { path = "core" }
+ssplayer-wgpu = { path = "libs/ssplayer-wgpu" }
 # Versions centralized here so core, the viewer, and the wasm build never drift.
 # Pinned to the 29 line to stay compatible with Slint's `unstable-wgpu-29`: the
 # Vtuber app composes Slint UI and this player on one device, and Slint requires
