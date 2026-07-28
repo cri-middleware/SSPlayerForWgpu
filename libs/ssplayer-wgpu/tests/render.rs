@@ -13,7 +13,7 @@ const COLOR_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Rgba8Unorm;
 const STENCIL_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Depth24PlusStencil8;
 
 fn asset_dir() -> &'static str {
-    concat!(env!("CARGO_MANIFEST_DIR"), "/../assets/overall")
+    concat!(env!("CARGO_MANIFEST_DIR"), "/../../assets/overall")
 }
 
 /// Decode every PNG in the asset dir and upload it keyed by fnv1a(stem), like
@@ -227,7 +227,7 @@ fn render_embedded_ssab() {
     // result must match the reference-mode render (same pack, host-supplied atlas).
     // The embedded fixture is a separate conversion; skip if it wasn't produced
     // (`scripts/deploy-examples.sh` emits both modes).
-    let emb_dir = concat!(env!("CARGO_MANIFEST_DIR"), "/../assets/overall_emb");
+    let emb_dir = concat!(env!("CARGO_MANIFEST_DIR"), "/../../assets/overall_emb");
     let emb_path = format!("{emb_dir}/Basic.ssab");
     let Ok(bytes) = std::fs::read(&emb_path) else {
         eprintln!("embedded fixture missing ({emb_path}); run scripts/deploy-examples.sh to generate it. skipping.");

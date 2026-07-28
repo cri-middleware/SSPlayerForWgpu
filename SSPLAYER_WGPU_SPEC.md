@@ -53,7 +53,7 @@ wgpu が単一コードベースから WebGPU / Vulkan / DX12 / Metal / GL を�
 | JS 露出 API | **既存 `<ss-player>`（WebGL 版）と同一インターフェース** | 利用側資産をそのまま流用、WebGL→WebGPU をドロップイン差し替え可能に |
 | コールドスタート doc | **単一正典 `SSPLAYER_WGPU_SPEC.md`（本書、リポジトリ内 `ssplayer-wgpu/` 直下）** | WebGL 版 `SSPLAYER_WEBGL_SPEC.md` と対称。分かりやすい |
 | 最初のマイルストーン | **3層リファクタ優先** | 現プロトの `Player`/`Renderer` を internal/player/ffi へ再編し土台を固めてから機能追加 |
-| 検証環境 | **Rust ネイティブ viewer 1本 ＋ C++ DX12 確認 viewer ＋ C++ Metal 確認 viewer ＋ Web 例** | ネイティブ C-API を per-backend 実機で検証するハーネス |
+| 検証環境 | **Rust ネイティブ viewer 1本 ＋ C++ 確認 viewer 3種（DX12/Windows・Metal/macOS・Vulkan/Linux）＋ Web 例** | ネイティブ C-API を per-backend 実機で検証するハーネス |
 | ssab テクスチャ形態 | **reference / embedded の両対応**（`SSPlayerConfig` で経路を選ばず両方受ける） | ssconverter は「外部参照ssab」も「テクスチャ埋め込みssab」も出す。Player は両方をロードできる必要がある |
 | プリマルチプライドアルファ | **全経路で premul 前提を貫く**（アップロード・シェーダ・ブレンド係数の三位一体） | どこか1つでも崩すと合成が破綻する。WebGL 版と同じ規律 |
 
@@ -109,7 +109,7 @@ wgpu が単一コードベースから WebGPU / Vulkan / DX12 / Metal / GL を�
 
 帰結（実装規約）:
 
-- **ssab は Player より長生き**でなければならない。`SsabResource` を `Context`（ssruntime）より先に破棄しない。プロトは `Context<'static>` ＋ Player 保持の `Arc<SsabResource>` でこれを担保している（`core/src/player.rs`）。
+- **ssab は Player より長生き**でなければならない。`SsabResource` を `Context`（ssruntime）より先に破棄しない。プロトは `Context<'static>` ＋ Player 保持の `Arc<SsabResource>` でこれを担保している（`libs/ssplayer-wgpu/src/player.rs`）。
 - **FrameData / SoA の借用は次フレームまで**。`get_frame_data` を呼ぶたびに ssruntime 内部バッファが書き換わるので、Player は**そのフレーム内で使い切る**（保持しない）。マルチスレッド描画では SoA ポインタの use-after-free に注意し、描画ジョブ完了を待ってから `update`/`destroy`。
 - この契約は REDESIGN_ASSESSMENT §4 の「FlatBuffers をポインタ渡し／コピーなし」と一致。SSInternalPlayer は借用した FrameData/SoA を wgpu 頂点バッファへ**書き出した時点で借用を手放す**（GPU バッファ側が実体を持つ）。
 
@@ -117,44 +117,51 @@ wgpu が単一コードベースから WebGPU / Vulkan / DX12 / Metal / GL を�
 
 ## §2 最終プロジェクト構成
 
-**単一クレート `ssplayer-wgpu`（`core/`）に3層をモジュールで集約する。**（✅=P0 実装済 / ◻=将来）
+**単一クレート `ssplayer-wgpu`（`libs/ssplayer-wgpu/`）に3層をモジュールで集約する。**（✅=P0 実装済 / ◻=将来）
+
+**ディレクトリ規約**: ライブラリクレートは `libs/<クレート名>/`（SpriteStudio-SDK と同じ規約）、ホスト実装・デモは `examples/<プラットフォーム>/`。Rust か否かは問わない（`examples/web` は JS、C++ viewer は CMake）。
 
 ```
 ssplayer-wgpu/
 ├── SSPLAYER_WGPU_SPEC.md          ← 本書（正典）
 │
-├── core/                          ← ★単一ライブラリクレート: ssplayer-wgpu（rs/js/ffi を集約）
-│   ├── Cargo.toml                 [lib] crate-type = ["rlib"(+"cdylib","staticlib" when ffi)]
-│   │                              features: web(wasm-bindgen) / ffi(cbindgen)。Device は所有しない
-│   └── src/
-│       ├── lib.rs                 ✅ 層の公開（SSPlayer が主 API）
-│       ├── frame.rs               ✅ FrameView … ランタイム所有データへの借用（§1.1）
-│       ├── internal.rs            ✅ 層2 SSInternalPlayer（描画。Context/Device 非所有）
-│       │                             ◻ 分割時: pipelines / mask / effect / texture サブモジュール
-│       ├── player.rs              ✅ 層3 SSPlayer（操作。Context+SSInternalPlayer 所有）
-│       │                             ◻ インスタンス子ごと独立 Context の再生木（§7）
-│       ├── web.rs                 ◻ #[cfg(feature="web")] wasm-bindgen + <ss-player>互換（② js）
-│       └── ffi.rs                 ◻ #[cfg(feature="ffi")] extern "C" ss_player_*（③ C/C++）
-│                                     build.rs で cbindgen → include/ssplayer_wgpu.h
+├── libs/                          ← ★ライブラリクレート置き場（ディレクトリ名 = クレート名）
+│   ├── ssplayer-wgpu/             ← ★単一ライブラリクレート（rs/js/ffi を集約）
+│   │   ├── Cargo.toml             [lib] crate-type = ["rlib","cdylib"(+"staticlib" when ffi)]
+│   │   │                          features: web(wasm-bindgen) / ffi(cbindgen)。Device は所有しない
+│   │   └── src/
+│   │       ├── lib.rs             ✅ 層の公開（SSPlayer が主 API）
+│   │       ├── frame.rs           ✅ FrameView … ランタイム所有データへの借用（§1.1）
+│   │       ├── internal.rs        ✅ 層2 SSInternalPlayer（描画。Context/Device 非所有）
+│   │       │                         ◻ 分割時: pipelines / mask / effect / texture サブモジュール
+│   │       ├── player.rs          ✅ 層3 SSPlayer（操作。Context+SSInternalPlayer 所有）
+│   │       │                         ◻ インスタンス子ごと独立 Context の再生木（§7）
+│   │       ├── mask.rs            ✅ MaskPlanner（§6）
+│   │       ├── web.rs             ✅ #[cfg(feature="web")] wasm-bindgen + <ss-player>互換（② js）
+│   │       └── ffi.rs             ◻ #[cfg(feature="ffi")] extern "C" ss_player_*（③ C/C++）
+│   │                                 build.rs で cbindgen → include/ssplayer_wgpu.h
+│   └── ssplayer-wgpu-bevy/        ◻【将来】Bevy アダプタ（借用モデルの一利用例）
+│                                     ★コアはこれに依存しない。独自リリース周期のため別クレート
+│                                     Bevy の wgpu メジャーが 29 と食い違う場合は
+│                                     `exclude` して独立ワークスペース化する（§2.2）
 │
-├── viewer/                        ← ✅ 検証: Rust ネイティブ viewer（bin, ① rs のホスト例）
-│   └── src/main.rs                winit + wgpu 一式を所有し、借用モデルの SSPlayer を駆動
-│
-├── bevy/                          ← ◻【将来・別クレート】Bevy アダプタ（借用モデルの一利用例）
-│                                     crate: ssplayer-wgpu-bevy。★コアはこれに依存しない
-│                                     独自リリース周期のため、これだけは別クレート化
-│
-└── examples/                      ← ◻ マルチプラットフォーム動作確認環境
-    ├── web/                       WebGPU ブラウザ確認（<ss-player-webgpu>）
-    ├── viewer-dx12-cpp/           C++ DX12 確認 viewer（Win32 HWND → C-API → wgpu が DX12 強制）
-    └── viewer-metal-cpp/          C++ Metal 確認 viewer（Cocoa CAMetalLayer → C-API → Metal 強制）
+└── examples/                      ← ホスト実装・マルチプラットフォーム動作確認環境
+    ├── viewer/                    ✅ Rust ネイティブ viewer（bin, ① rs のホスト例）
+    │   └── src/main.rs            winit + wgpu 一式を所有し、借用モデルの SSPlayer を駆動
+    ├── web/                       ✅ WebGPU ブラウザ確認（<ss-player-webgpu>、② js）
+    ├── viewer-dx12-cpp/           ◻ C++ DX12 確認 viewer（Win32 HWND → C-API → backend=DX12）
+    ├── viewer-metal-cpp/          ◻ C++ Metal 確認 viewer（Cocoa CAMetalLayer → C-API → Metal）
+    ├── viewer-vulkan-cpp/         ◻ C++ Vulkan 確認 viewer（Linux Xlib/Wayland → C-API → Vulkan）
+    └── bevy/                      ◻【将来】Bevy アダプタのデモアプリ
 ```
 
-> js（`web`）は feature、ffi は feature ＋ crate-type 追加で**同一クレート内**に載る（ssruntime と同型）。別クレートは viewer(bin) と将来の Bevy のみ。Vulkan 確認 viewer（Linux/C++）も `examples/viewer-vulkan-cpp/` として同型で追加可。
+> js（`web`）は feature、ffi は feature ＋ crate-type 追加で**同一クレート内**に載る（ssruntime と同型）。`libs/` に増えるのは将来の Bevy アダプタのみで、それ以外の面はすべて `ssplayer-wgpu` 1クレートに閉じる。
+
+**C++ 確認 viewer 3種は「共通コードを括り出さず、各ディレクトリ自己完結」とする。** 3者が違うのはウィンドウ／サーフェス生成（HWND / CAMetalLayer / Xlib・Wayland）だけで、C-API を叩く再生ループ自体は数十行しかない。共通ライブラリに逃がすとサンプルの価値である「1ディレクトリまるごとコピーすれば動く」が失われるので、その数十行は意図的に重複させる。`examples/` が増えて見通しが悪くなったら `examples/cpp/{dx12-win32,metal-macos,vulkan-linux}/` へまとめ直す。
 
 ### 2.1 Cargo ワークスペース登録
 
-ルート `Cargo.toml` の `members` は `core`（クレート `ssplayer-wgpu`）と `viewer`（クレート `ssplayer-wgpu-viewer`）。**バージョンは crate ごとに独立**（ライブラリと開発用 viewer は別物なので `workspace.package.version` は置かない）。将来 Bevy を足す時だけ `bevy`（クレート `ssplayer-wgpu-bevy`）を追加する。C++ の examples は Cargo ワークスペース外で、CMake が cbindgen 生成ヘッダ＋ビルド済みライブラリを消費する。
+ルート `Cargo.toml` の `members` は `libs/ssplayer-wgpu`（クレート `ssplayer-wgpu`）と `examples/viewer`（クレート `ssplayer-wgpu-viewer`）。**バージョンは crate ごとに独立**（ライブラリと開発用 viewer は別物なので `workspace.package.version` は置かない）。将来 Bevy を足す時だけ `libs/ssplayer-wgpu-bevy` を追加する。C++ の examples は Cargo ワークスペース外で、CMake が cbindgen 生成ヘッダ＋ビルド済みライブラリを消費する。
 
 ### 2.2 SDK submodule と wgpu 版
 
@@ -314,9 +321,9 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
 
 ---
 
-## §6 マスク（ステンシル）✅ 実装済（`core/src/mask.rs` ＋ `internal.rs`/`player.rs`）
+## §6 マスク（ステンシル）✅ 実装済（`libs/ssplayer-wgpu/src/mask.rs` ＋ `internal.rs`/`player.rs`）
 
-- **`MaskPlanner`（WebGL 版 core・エンジン非依存）の rank 昇順スコープ replay ロジックを Rust に移植**（`core/src/mask.rs`：`plan_writers`/`MaskWriter`/`PartMaskFlags`/`StencilTest`/`MaskOp`）。ライタごとに rank / OP(INCR|INVERT) / cutout閾値 / clipping フラグを持つ。**ライタの texture は所属 DrawBatch から取る**（pure Mask batch は `tex=0`→閾値 -1＝カットアウト無しで全ジオメトリ、clipping は content の実 texture）。
+- **`MaskPlanner`（WebGL 版 core・エンジン非依存）の rank 昇順スコープ replay ロジックを Rust に移植**（`libs/ssplayer-wgpu/src/mask.rs`：`plan_writers`/`MaskWriter`/`PartMaskFlags`/`StencilTest`/`MaskOp`）。ライタごとに rank / OP(INCR|INVERT) / cutout閾値 / clipping フラグを持つ。**ライタの texture は所属 DrawBatch から取る**（pure Mask batch は `tex=0`→閾値 -1＝カットアウト無しで全ジオメトリ、clipping は content の実 texture）。
 - **wgpu では stencil op もパイプラインに焼く**：write 用（IncrementClamp/DecrementClamp/Invert）と test 用（NotEqual/Equal, `stencil write_mask=0`）で別パイプライン。ステンシル ref は常に 0（ops/compare をパイプラインに焼くため動的変更不要）。content パイプラインは `blend×stencil_test(None/Inside/Outside)` のマトリクス、カットアウト閾値は mask-write 頂点の `color[0]` に載せ `fs_mask` が discard。
 - 手順（`40_components/40_mask.ja.md` 準拠）:
   1. pure マスクを事前書き込み（コンテンツ描画前に全ステンシル書き込み、`ColorWrites::empty()`）。
@@ -327,7 +334,7 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
 - **サーフェス/描画ターゲットに stencil 付きデプスバッファを確保する**必要がある。`SSPlayerConfig.stencil_format: Option<TextureFormat>` で opt-in（viewer は `Depth24PlusStencil8` を確保し render pass に attach、`None` なら従来どおりマスク無効で回帰なし）。
 - **白フォールバックテクスチャは必ず白で初期化**：1x1 テクスチャは `create_texture` だけでは透明黒（ゼロ初期化）で、Shape/テクスチャ欠落 content が `tex*color=0` で不可視になる。`new()` は借用モデルで queue を持たないため、`end_frame` 初回に `queue.write_texture([255;4])` で遅延初期化（`white_ready` フラグ）。
 - 既知の限界: INCR と INVERT 混在の重なりマスクは単一ステンシル値で近似（厳密解は coverage-bitmap 方式）。子アニメ内部定義のマスクは非適用（WebGL 版と同一）。エフェクト被マスクは content パイプライン流用で対応済。
-- 検証: `core/tests/mask.rs`（planner probe、Mask.ssab の writer/Shape-mask 分類）＋ `core/tests/render.rs`（ヘッドレス GPU offscreen readback：masking on/off の差分・Shape content の描画量で回帰検出）。
+- 検証: `libs/ssplayer-wgpu/tests/mask.rs`（planner probe、Mask.ssab の writer/Shape-mask 分類）＋ `libs/ssplayer-wgpu/tests/render.rs`（ヘッドレス GPU offscreen readback：masking on/off の差分・Shape content の描画量で回帰検出）。
 
 ---
 
@@ -344,13 +351,13 @@ Godot / Unity のネイティブプレイヤー実績と C-API 契約から、�
 - **wgpu の実装型は Unity 型**: 子はローカル空間で頂点/メッシュを中間バッファに事前ビルド → 親がその頂点を world 行列で変換して累積バッファへ merge（子の完了を依存に持つ）。Godot 型（子が自分の CanvasItem に先に描き親が RID 再ペアレント）は wgpu に retained scene graph が無いため移植不可。Context 独立を活かした `get_frame_data` の並列化も可能。
 - ExternalInstance は参照先 ssab を SSPlayer が別途ロードし、その Context を子ノードとして木に接ぐ。
 
-**実装メモ（✅ 実装済・`core/src/player.rs`）**
+**実装メモ（✅ 実装済・`libs/ssplayer-wgpu/src/player.rs`）**
 
 - `PlaybackNode { context, instances, effects }` の木を SSPlayer が所有。GPU リソースは `SSInternalPlayer` 1個を共有。
 - **外部参照は pack 名の文字列**（`PartTypeInstance::ref_anime_pack()`/`ref_anime_name()`）で解決＝ハッシュアルゴリズム不整合を回避。ホストは全 pack を `add_ssab(pack_name, data)` で事前登録し、`load_ssab(pack_name, data)` で主 pack 指定。ssab 型は `ssab::ssab::ss::format::{PartType, root_as_ss_anime_binary_unchecked}`。
 - **transition スナップはホスト責務**: `InstanceSlot::step` は transition 時にセクション/ループ/方向を設定するのみで開始フレームへのスナップはしない。**`result.transitioned` 時に子 `context.play()` を呼ぶ**（呼ばないと独立モードが再生状態にならず進まない）。
 - **`parent_looped` はランタイム非通知**: root は前フレームからのフレーム後退で検出（前向き再生のループ edge）、子は `result.child_looped` を伝播。
-- 検証: `core/tests/instance.rs`（ヘッドレス probe。同期/独立/pingpong の frame 推移を確認）。
+- 検証: `libs/ssplayer-wgpu/tests/instance.rs`（ヘッドレス probe。同期/独立/pingpong の frame 推移を確認）。
 
 ### 7.2 エフェクト（別 Context を持たない）✅ 実装済
 
@@ -359,13 +366,13 @@ Godot / Unity のネイティブプレイヤー実績と C-API 契約から、�
 - `EffectDrawPlan`（`root_as_effect_draw_plan_unchecked`）: `commands`（`cellmap_hash`/`quad_count`/`particle_offset`/`blend` 0=Mix 1=Add）、`vert_stride`、`verts`/`uvs`/`colors`/`indices`。スライス式（`po=particle_offset`）: verts `[po*4*stride..(po+qc)*4*stride]` / uvs `[po*4*2..]` / colors `[po*4*4..]` / indices `[po*6..]`（**quad-local 0基点、rebase 不要**）。
 - **★エフェクト UV は正規化済み(0..1)**: スプライト/メッシュの pixel UV と違い、**tex_size で割ってはいけない**（probe で確認・当初バグを修正）。colors も正規化。
 - verts は **slot-relative** → エフェクトパーツの world 行列を transform 合成（`mat4_mul(transform, effectPartWorld)`）。
-- **1 command = 1 draw call**（`cmd.blend` でパイプライン切替、`cmd.cellmap_hash` でテクスチャ）。エフェクトは PartsColor を持たず、plan の色が既存 tex*color シェーダを変調するので varg 不要。実装: `core/src/internal.rs::append_effect`。
+- **1 command = 1 draw call**（`cmd.blend` でパイプライン切替、`cmd.cellmap_hash` でテクスチャ）。エフェクトは PartsColor を持たず、plan の色が既存 tex*color シェーダを変調するので varg 不要。実装: `libs/ssplayer-wgpu/src/internal.rs::append_effect`。
 
 ---
 
 ## §8 テクスチャ管理
 
-- **hash → `{texture, width, height}`** の Map（`core/src/internal.rs`）。textureHash は atlas 識別子（fnv1a）。
+- **hash → `{texture, width, height}`** の Map（`libs/ssplayer-wgpu/src/internal.rs`）。textureHash は atlas 識別子（fnv1a）。
 - **premultiply を必ず適用**（SS 必須）。ネイティブは RGBA デコード後に自前で premul、または premul 済みテクスチャを供給。ブラウザは `UNPACK_PREMULTIPLY_ALPHA` 相当をアップロード経路で担保。
 - フィルタ/wrap: `ClampToEdge`（NPOT 対応）＋ `Linear`、mipmap なし。
 - **texture_hash 0 / 未ロード → 1x1 白テクスチャ**にフォールバック（Shape content・純カラー対応）。**この白テクスチャは必ず白(255,255,255,255)で初期化すること**（`create_texture` だけだと透明黒で `tex*color=0` になり Shape が不可視）。`new()` は queue を持たないため `end_frame` 初回に `write_texture` で遅延初期化（§6）。
@@ -391,7 +398,7 @@ ssconverter は `.ssab` を2形態で出力しうるので、SSPlayer はどち�
 
 **設計原則**: SSPlayer は wgpu をイディオマティックに借用する Rust API。`Device`/`Queue`/`Surface` を一切所有せず、ホスト（viewer / Bevy / web / ffi）が所有する wgpu コンテキストを借りて描く。これにより Bevy の render graph へそのまま組み込める。
 
-### 9.1 SSInternalPlayer（層2・描画）✅ 実装済（`core/src/internal.rs`）
+### 9.1 SSInternalPlayer（層2・描画）✅ 実装済（`libs/ssplayer-wgpu/src/internal.rs`）
 
 累積 API: ホスト（SSPlayer）がバッチ走査を駆動し、ノード/バッチ単位で `append_*` を呼ぶ（インスタンスの rank 差し込み・transform 合成のため）。
 
@@ -415,7 +422,7 @@ impl SSInternalPlayer {
 
 `RendererConfig { color_format }` はホストの描画先仕様（マスク実装時に depth_stencil_format 追加）。`FrameView` は ssruntime の FrameData ＋ SoA スライスをまとめた借用ビュー（`get_frame_data` 直後に構築）。`BatchInfo { start_rank, count, texture_hash, blend_type, kind }` は SSPlayer が DrawBatch から抽出して渡す。`transform` は root=単位、子=親 world 行列合成。
 
-### 9.2 SSPlayer（層3・操作）— 幹の公開 API ✅ 実装済（`core/src/player.rs`）
+### 9.2 SSPlayer（層3・操作）— 幹の公開 API ✅ 実装済（`libs/ssplayer-wgpu/src/player.rs`）
 
 ```rust
 pub struct SSPlayer { /* SSInternalPlayer, resources: Map<pack, Arc<SsabResource>>, root: PlaybackNode 木, ... */ }
@@ -464,7 +471,7 @@ impl SSPlayer {
 ## §10 WebGPU / JS 面（② js — Rust API の上のホスト）
 
 - **単一 Rust→WASM バイナリ**（ssruntime + internal + player を wasm-bindgen で1つに）。wgpu が WebGPU バックエンドを叩く。
-- `core/src/web.rs`（`#[cfg(feature="web")]`）が **canvas から Surface/Device を生成・所有**し、借用モデルの SSPlayer（§9）を駆動する薄いホスト。wasm-bindgen 束縛はこの層。
+- `libs/ssplayer-wgpu/src/web.rs`（`#[cfg(feature="web")]`）が **canvas から Surface/Device を生成・所有**し、借用モデルの SSPlayer（§9）を駆動する薄いホスト。wasm-bindgen 束縛はこの層。
 - **JS 露出は既存 `<ss-player>`（WebGL 版）と同一インターフェース**にし、WebGL→WebGPU をドロップイン差し替え可能に。
 - ssab は embedded / reference 両対応（§8.1）。embedded なら単一ファイルで完結（広告向け）、reference ならテクスチャを JS 側から供給。
 - ビルド/パッケージは `scripts/release-web.sh` 相当を追加し `pkg/ssplayer-wgpu-web/` を吐く。
@@ -474,8 +481,8 @@ impl SSPlayer {
 
 ## §11 ネイティブ / C・C++ 面（③ ffi — Rust API の上のホスト）
 
-- `core` の `ffi` feature（`crate-type` に cdylib / staticlib を追加）。`build.rs` で cbindgen → `include/ssplayer_wgpu.h`。
-- `core/src/ffi.rs` が **raw-window-handle から Surface/Device を生成・所有**し、借用モデルの SSPlayer を駆動する薄いホスト。C からはハンドルベース API で操作:
+- `ssplayer-wgpu` の `ffi` feature（`crate-type` に cdylib / staticlib を追加）。`build.rs` で cbindgen → `include/ssplayer_wgpu.h`。
+- `libs/ssplayer-wgpu/src/ffi.rs` が **raw-window-handle から Surface/Device を生成・所有**し、借用モデルの SSPlayer を駆動する薄いホスト。C からはハンドルベース API で操作:
 
 ```c
 typedef void* ss_player_t;
@@ -499,12 +506,12 @@ void        ss_player_resize(ss_player_t, uint32_t w, uint32_t h);
 
 | Phase | 内容 | 完了条件 |
 |---|---|---|
-| **P0（初手）3層リファクタ＋借用モデル Rust API** ✅ | 現 `core`（Player/Renderer）を単一クレート内の `internal`(SSInternalPlayer) / `player`(SSPlayer) モジュールへ再編。**SSPlayer を借用モデル（`&Device`/`&Queue` を借りる §9）に確定**。データ所有契約（§1.1）を配線。viewer が wgpu 一式を所有し SSPlayer を駆動 | 現状の描画（Normal/Mesh/4blend）が3層＋借用モデルで従来通り動く。**これが ① rs 面の土台**（完了） |
-| **P1 ssab 両対応 + WebGPU（② js）** ✅ | **ssab embedded/reference 両ロード（§8.1）** ＋ **WebGPU/js**：`core` の `web` feature（wasm-bindgen、`core/src/web.rs` の `SsPlayerWeb` が canvas から wgpu を所有し借用モデル SSPlayer を駆動）、`examples/web` の `<ss-player-webgpu>` カスタム要素＋build.sh。別 crate は作らず単一クレート。**wasm ビルド要件**: `web` feature が `ssruntime/std` を有効化（cargo は依存の全 crate-type を build するため、ssruntime の no_std cdylib/staticlib が wasm でアロケータ/パニック不足になる。std ならその衝突が消える。`ssruntime/panic-handler` は core の std と `panic_impl` 重複で不可）。release wasm-opt 用に `[package.metadata.wasm-pack.profile.release]` の SIMD 等フラグを core にも付与 | **ブラウザ実機で WebGPU 描画確認済**（release wasm 537KB） |
+| **P0（初手）3層リファクタ＋借用モデル Rust API** ✅ | 現 `core/`（Player/Renderer）を単一クレート内の `internal`(SSInternalPlayer) / `player`(SSPlayer) モジュールへ再編。**SSPlayer を借用モデル（`&Device`/`&Queue` を借りる §9）に確定**。データ所有契約（§1.1）を配線。viewer が wgpu 一式を所有し SSPlayer を駆動 | 現状の描画（Normal/Mesh/4blend）が3層＋借用モデルで従来通り動く。**これが ① rs 面の土台**（完了） |
+| **P1 ssab 両対応 + WebGPU（② js）** ✅ | **ssab embedded/reference 両ロード（§8.1）** ＋ **WebGPU/js**：`ssplayer-wgpu` の `web` feature（wasm-bindgen、`libs/ssplayer-wgpu/src/web.rs` の `SsPlayerWeb` が canvas から wgpu を所有し借用モデル SSPlayer を駆動）、`examples/web` の `<ss-player-webgpu>` カスタム要素＋build.sh。別 crate は作らず単一クレート。**wasm ビルド要件**: `web` feature が `ssruntime/std` を有効化（cargo は依存の全 crate-type を build するため、ssruntime の no_std cdylib/staticlib が wasm でアロケータ/パニック不足になる。std ならその衝突が消える。`ssruntime/panic-handler` は player の std と `panic_impl` 重複で不可）。release wasm-opt 用に `[package.metadata.wasm-pack.profile.release]` の SIMD 等フラグを player crate にも付与 | **ブラウザ実機で WebGPU 描画確認済**（release wasm 537KB） |
 | **P2 描画パリティ①** ✅ | varg 追加（PartColor blend 由来）、BlendType 全12種のパイプラインマトリクス、premul 厳密化（upload premul ＋ 逆/再premul シェーダ ＋ premul ブレンド係数） | PartsColor / BlendMode / Basic / Effect を PNG 目視で確認。既存フィクスチャのピクセル数は不変。WebGL 版と色・ブレンド一致 |
-| **P3 マスク** ✅ | stencil 付きターゲット（config opt-in）、MaskPlanner 移植（`core/src/mask.rs`）、write/test パイプライン、pure マスク色スキップ、インスタンス継承、**Shape 幾何のマスク writer ＋ Shape content 描画**、白フォールバック初期化（§6） | マスク/Shape アニメが描画（Mask.ssab / Shape.ssab をヘッドレス GPU readback ＋ 実機で確認） |
+| **P3 マスク** ✅ | stencil 付きターゲット（config opt-in）、MaskPlanner 移植（`libs/ssplayer-wgpu/src/mask.rs`）、write/test パイプライン、pure マスク色スキップ、インスタンス継承、**Shape 幾何のマスク writer ＋ Shape content 描画**、白フォールバック初期化（§6） | マスク/Shape アニメが描画（Mask.ssab / Shape.ssab をヘッドレス GPU readback ＋ 実機で確認） |
 | **P4 エフェクト/インスタンス** ✅ | **P0 の次に先行実施**。①内部を `begin_frame`/`append_batch`/`append_effect`/`end_frame` の累積 API＋transform へ（Stage 1）②インスタンス木＝子ごと独立 Context（Stage 2, §7.1）③エフェクト＝EffectSlot/EffectDrawPlan（Stage 3, §7.2） | エフェクト/インスタンスが描画される（実機確認済） |
-| P5 ネイティブ C-API + C++ viewer（③ ffi） | `core` の `ffi` feature ＋ cbindgen、`examples/viewer-dx12-cpp`・`viewer-metal-cpp` | DX12/Metal 実機で同一ライブラリが描画 |
+| P5 ネイティブ C-API + C++ viewer（③ ffi） | `ssplayer-wgpu` の `ffi` feature ＋ cbindgen、`examples/viewer-dx12-cpp`（Windows）・`viewer-metal-cpp`（macOS）・`viewer-vulkan-cpp`（Linux）。3種は各ディレクトリ自己完結（§2） | DX12/Metal/Vulkan 実機で同一ライブラリが描画 |
 | **P6 統合シェーダ13種** ✅ | ss_shader 全13種（sepia/hsb/step/pix/noise/bmask/outline/blur/wave/move/scatter/circle/spot）を WGSL 移植（`internal.rs` `SS_SHADER_WGSL`）。パーツ属性 SHDR を per-part ディスパッチ：`(id_hash, blend)` 毎に**遅延生成**するシェーダパイプライン＋group(2) の動的オフセット uniform（param0..7 / cell_rect / pixel_size）。各シェーダは straight-alpha の Pixel を計算し `ss_finish`（＝P2 の PartsColor tail）で合成（blur のみ例外）。`ssTex` は逆premul＋`textureSampleLevel`（ループ/discard 後のサンプル可）。**制限（WebGL v1 同）**: map0/map1 未対応・shader×マスク非結合・Normal パーツのみ | Shader.ssab をヘッドレス GPU＋PNG 目視（13種の効果を確認）。shader 無しアニメはコスト0 |
 | （任意）Bevy アダプタ | `ssplayer-wgpu-bevy`（借用モデルの一利用例）。コアに依存を入れず別立て | Bevy の render graph で SSPlayer が描画 |
 | （後回し）Text / Nines | 旧版も未実装 | 必要時 |
@@ -515,10 +522,10 @@ void        ss_player_resize(ss_player_t, uint32_t w, uint32_t h);
 
 | 対象 | 手段 |
 |---|---|
-| Rust 描画（開発） | `viewer/`（winit+wgpu、`assets/overall/` 再生。横=ssab切替/縦=アニメ切替） |
-| インスタンス/エフェクト（ヘッドレス） | `core/tests/instance.rs`（probe。frame 推移・quad 生成を GUI 抜きで確認） |
-| マスク/Shape（ヘッドレス） | `core/tests/mask.rs`（planner probe：writer 分類・Shape-mask）＋ `core/tests/render.rs`（GPU offscreen readback：masking on/off 差分・Shape content 描画量。adapter 無ければ skip。PNG 保存で目視も可） |
-| 統合シェーダ（ヘッドレス） | `core/tests/render.rs::render_integration_shaders`（Shader.ssab を描画し、SS WGSL コンパイル＋per-part ディスパッチ＋params で描画量が出ることを確認。adapter 無ければ skip） |
+| Rust 描画（開発） | `examples/viewer/`（winit+wgpu、`assets/overall/` 再生。横=ssab切替/縦=アニメ切替） |
+| インスタンス/エフェクト（ヘッドレス） | `libs/ssplayer-wgpu/tests/instance.rs`（probe。frame 推移・quad 生成を GUI 抜きで確認） |
+| マスク/Shape（ヘッドレス） | `libs/ssplayer-wgpu/tests/mask.rs`（planner probe：writer 分類・Shape-mask）＋ `libs/ssplayer-wgpu/tests/render.rs`（GPU offscreen readback：masking on/off 差分・Shape content 描画量。adapter 無ければ skip。PNG 保存で目視も可） |
+| 統合シェーダ（ヘッドレス） | `libs/ssplayer-wgpu/tests/render.rs::render_integration_shaders`（Shader.ssab を描画し、SS WGSL コンパイル＋per-part ディスパッチ＋params で描画量が出ることを確認。adapter 無ければ skip） |
 | WebGPU（主） | `examples/web/`（ブラウザで `<ss-player-webgpu>`）。初回起動計測（取得→wasm初期化→初フレーム ms） |
 | DX12（副） | `examples/viewer-dx12-cpp/`（Windows 実機、backend=DX12 強制） |
 | Metal（副） | `examples/viewer-metal-cpp/`（macOS 実機、backend=Metal 強制） |
@@ -566,9 +573,9 @@ void        ss_player_resize(ss_player_t, uint32_t w, uint32_t h);
 - コールドスタート雛形: `../SSPlayerForWeb/TYRANO_COLDSTART.md`
 
 **現行 wgpu プロトタイプ**
-- `core/src/renderer.rs`（Normal/Mesh のみ、再編元）
-- `core/src/player.rs`（SSPlayer の土台）
-- `ssplayer-wgpu/viewer/src/main.rs`（winit+wgpu ループ）
+- `libs/ssplayer-wgpu/src/renderer.rs`（Normal/Mesh のみ、再編元）
+- `libs/ssplayer-wgpu/src/player.rs`（SSPlayer の土台）
+- `examples/viewer/src/main.rs`（winit+wgpu ループ）
 
 **全体方針**
 - `REDESIGN_ASSESSMENT.ja.md`（頭脳/体、オーバーライド/ミキシング/ステートマシンの将来計画）

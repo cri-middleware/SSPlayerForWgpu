@@ -53,7 +53,7 @@ jobs:
 
       - name: Test
         # Runners have no GPU adapter, so the offscreen rendering tests in
-        # core/tests/render.rs skip themselves here. Rendering changes must be
+        # libs/ssplayer-wgpu/tests/render.rs skip themselves here. Rendering changes must be
         # verified locally on a real adapter.
         run: cargo test --workspace
 

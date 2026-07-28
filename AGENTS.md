@@ -19,8 +19,8 @@ A wgpu renderer for SpriteStudio 7 animations, split out of the SpriteStudio-SDK
 
 | Path | Role | Docs |
 |---|---|---|
-| `core/` | Crate `ssplayer-wgpu`. `lib` / `frame` / `internal` (drawing, pipelines, shaders) / `player` (playback node tree) / `mask` (stencil planner) / `web` (`web` feature). | [SPEC](./SSPLAYER_WGPU_SPEC.md) |
-| `viewer/` | Crate `ssplayer-wgpu-viewer`. Native winit host used for development and visual checks. | — |
+| `libs/ssplayer-wgpu/` | Crate `ssplayer-wgpu`. `lib` / `frame` / `internal` (drawing, pipelines, shaders) / `player` (playback node tree) / `mask` (stencil planner) / `web` (`web` feature). | [SPEC](./SSPLAYER_WGPU_SPEC.md) |
+| `examples/viewer/` | Crate `ssplayer-wgpu-viewer`. Native winit host used for development and visual checks. | — |
 | `examples/web/` | `<ss-player-webgpu>` custom element, demo page and `build.sh` (wasm-pack). | [README](./examples/web/README.md) |
 | `scripts/deploy-examples.sh` | Builds `ssconverter-cli` from the submodule and converts the SDK's test projects into `assets/`. | — |
 | `SpriteStudio-SDK/` | The SDK, as a git submodule. `ssruntime` / `ssab` are path dependencies into it. | [SDK AGENTS](./SpriteStudio-SDK/AGENTS.md) |
@@ -31,7 +31,7 @@ A wgpu renderer for SpriteStudio 7 animations, split out of the SpriteStudio-SDK
 *   **Borrow model:** the player must not own or store `Device` / `Queue` / `Surface`. Any API that takes ownership of wgpu state is wrong (SPEC §1). Data ownership is equally fixed: `.ssab` is owned by the player and borrowed by `ssruntime`; FrameData / SoA buffers are owned by `ssruntime` and borrowed by the player, never held across frames.
 *   **wgpu is pinned to the 29 line.** Slint's `unstable-wgpu-NN` requires an exact wgpu major and the Vtuber application composes a Slint UI with this player on one device. A Cargo workspace resolves exactly one wgpu, so this is a repository-wide constraint — check Slint's supported major before bumping, and see SPEC §2.2 for the 30↔29 API differences.
 *   **`[workspace] exclude = ["SpriteStudio-SDK"]` is load-bearing.** Without it cargo claims the SDK crates as members of *this* workspace and fails to resolve their inherited dependencies (`flatbuffers was not found in workspace.dependencies`).
-*   **No engine dependencies in `core`.** Slint and Bevy must not appear in the player crate; adapters are separate crates. This keeps the OSS adoption path open and lets an adapter move to its own release line if its engine's wgpu major ever diverges from ours.
+*   **No engine dependencies in `ssplayer-wgpu`.** Slint and Bevy must not appear in the player crate; adapters are separate crates under `libs/`. This keeps the OSS adoption path open and lets an adapter move to its own release line if its engine's wgpu major ever diverges from ours.
 *   **Crate versions are independent.** There is deliberately no `workspace.package.version`: the library and the development viewer are different products.
 
 ## Verification
@@ -50,14 +50,14 @@ A wgpu renderer for SpriteStudio 7 animations, split out of the SpriteStudio-SDK
 
 The tests read `assets/`, so `deploy-examples.sh` is a prerequisite, not an optional step.
 
-**The wasm build is not optional.** `core/src/web.rs` sits behind the `web` feature and is compiled by *no* native command — not `build`, not `clippy --all-targets`, not `test`. Breakage there is invisible until the wasm target is built, which is how three of the four wgpu-30→29 API changes escaped the native checks.
+**The wasm build is not optional.** `libs/ssplayer-wgpu/src/web.rs` sits behind the `web` feature and is compiled by *no* native command — not `build`, not `clippy --all-targets`, not `test`. Breakage there is invisible until the wasm target is built, which is how three of the four wgpu-30→29 API changes escaped the native checks.
 
-**Beware green rendering tests.** `core/tests/render.rs` renders offscreen and asserts on drawn-pixel counts, but skips itself when no GPU adapter is present — a pass on a headless machine may have verified nothing. When changing rasterisation, dump the readback to a PNG in the scratch directory and look at it; pixel counts alone have hidden real regressions (and a dump threshold below the background colour once counted the background as drawn).
+**Beware green rendering tests.** `libs/ssplayer-wgpu/tests/render.rs` renders offscreen and asserts on drawn-pixel counts, but skips itself when no GPU adapter is present — a pass on a headless machine may have verified nothing. When changing rasterisation, dump the readback to a PNG in the scratch directory and look at it; pixel counts alone have hidden real regressions (and a dump threshold below the background colour once counted the background as drawn).
 
 ## Workspace conventions
 
 *   Single Cargo workspace, Rust edition 2024, MSRV 1.97.
-*   `[workspace.dependencies]` is the single source of truth for `wgpu`, the SDK crates and the wasm-bindgen family, so `core`, the viewer and the wasm build never drift.
+*   `[workspace.dependencies]` is the single source of truth for `wgpu`, the SDK crates and the wasm-bindgen family, so the player crate, the viewer and the wasm build never drift.
 *   Rendering parity is judged against the WebGL player (`../SSPlayerForWeb/packages/ssplayer-webgl/`), which the drawing code was ported from; consult it before inventing new behaviour.
 *   CI enforces `cargo fmt --check`, `cargo clippy -D warnings`, the test suite and the wasm32 build.
 *   Documentation is English; the SPEC is Japanese, matching how it is used.

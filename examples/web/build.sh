@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Build the WebGPU demo: compile core's `web` feature to wasm (wasm-bindgen) and
+# Build the WebGPU demo: compile ssplayer-wgpu's `web` feature to wasm (wasm-bindgen) and
 # generate the embedded `.ssab` demo assets. Requires wasm-pack + the wasm32
 # target (`rustup target add wasm32-unknown-unknown`).
 #
@@ -16,8 +16,8 @@ repo="$(cd "$here/../.." && pwd)"
 profile="--release"
 [ "${1:-}" = "--dev" ] && profile="--dev"
 
-echo "==> building wasm package (core, feature=web) -> examples/web/pkg"
-wasm-pack build "$repo/core" \
+echo "==> building wasm package (ssplayer-wgpu, feature=web) -> examples/web/pkg"
+wasm-pack build "$repo/libs/ssplayer-wgpu" \
   --target web $profile \
   --out-name ssplayer_wgpu \
   --out-dir "$here/pkg" \

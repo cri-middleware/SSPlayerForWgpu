@@ -9,8 +9,8 @@
 #   assets/Ringo/          <- tests/Ringo, reference textures
 #   assets/Ringo_emb/      <- tests/Ringo, textures embedded in the .ssab
 #
-# assets/ is gitignored. The core tests read assets/overall and
-# assets/overall_emb; the viewer plays assets/overall.
+# assets/ is gitignored. libs/ssplayer-wgpu's tests read assets/overall and
+# assets/overall_emb; examples/viewer plays assets/overall.
 #
 # Usage: scripts/deploy-examples.sh [release|debug]   (ssconverter-cli build mode; default release)
 #

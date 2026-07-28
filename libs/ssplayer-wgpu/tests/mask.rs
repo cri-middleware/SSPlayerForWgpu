@@ -35,7 +35,7 @@ fn mask_flags(ctx: &Context<'static>) -> Vec<PartMaskFlags> {
 
 #[test]
 fn probe_mask() {
-    let dir = concat!(env!("CARGO_MANIFEST_DIR"), "/../assets/overall");
+    let dir = concat!(env!("CARGO_MANIFEST_DIR"), "/../../assets/overall");
     let res = load(&format!("{dir}/Mask.ssab"));
     let names = res.resource().map(|r| r.get_animation_names()).unwrap_or_default();
     eprintln!("=== Mask.ssab animations: {names:?} ===");

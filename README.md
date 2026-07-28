@@ -54,8 +54,8 @@ cd examples/web && ./build.sh && python3 -m http.server   # WebGPU demo
 
 | Path | What |
 |---|---|
-| `core/` | crate `ssplayer-wgpu` — the player (`rlib` + `cdylib` for wasm) |
-| `viewer/` | crate `ssplayer-wgpu-viewer` — native winit viewer used for development |
+| `libs/ssplayer-wgpu/` | crate `ssplayer-wgpu` — the player (`rlib` + `cdylib` for wasm) |
+| `examples/viewer/` | crate `ssplayer-wgpu-viewer` — native winit viewer used for development |
 | `examples/web/` | `<ss-player-webgpu>` custom element + WebGPU demo page |
 | `scripts/deploy-examples.sh` | converts the SDK's test projects into `assets/` |
 | `SpriteStudio-SDK/` | the SDK, as a git submodule |
