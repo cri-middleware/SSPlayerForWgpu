@@ -18,7 +18,7 @@
 - **提供3面（ssruntime と同型）**: `rs`(rlib) / `js`(wasm-bindgen・`<ss-player>`互換) / `ffi`(cbindgen・DX12/Vulkan/Metal)。
 - **データ所有契約**: `.ssab` は Player 所有→ssruntime へ borrow ／ FrameData・SoA は ssruntime 所有→Player が borrow（§1.1）。
 - **ssab は embedded / reference 両対応**（テクスチャ埋め込み／外部参照）。
-- **進捗**: **P0**（3層リファクタ＋借用モデル）✅ ／ **P4**（インスタンス §7.1・エフェクト §7.2）✅ ／ **P3**（マスク・Shape）✅ ／ **P2**（色パリティ: varg・全12ブレンド・premul 厳密化）✅ ／ **P6**（統合シェーダ ss_shader 全13種）✅ ／ **P1**（ssab embedded/reference 両対応・**WebGPU/js**）✅ ブラウザ実機確認済。対応バッチ = Normal / Mesh / Shape / Instance / Effect / Mask。次は P5（ネイティブ ffi）。**wgpu 29**（§2.2）。詳細は §12。
+- **進捗**: **P0**（3層リファクタ＋借用モデル）✅ ／ **P4**（インスタンス §7.1・エフェクト §7.2）✅ ／ **P3**（マスク・Shape）✅ ／ **P2**（色パリティ: varg・全12ブレンド・premul 厳密化）✅ ／ **P6**（統合シェーダ ss_shader 全13種）✅ ／ **P1**（ssab embedded/reference 両対応・**WebGPU/js**）✅ ブラウザ実機確認済 ／ **P5**（ネイティブ ffi・C-API ＋ Metal C++ viewer）✅ macOS 実機確認済、DX12/Vulkan viewer は未着手。対応バッチ = Normal / Mesh / Shape / Instance / Effect / Mask。**wgpu 29**（§2.2）。詳細は §12。
 - **リポジトリ**: SDK monorepo から分離した独立リポ `ssplayer-wgpu`。SDK は git submodule（`SpriteStudio-SDK/`）として取り込み、`ssruntime`/`ssab` を **path 依存**で直リンクする（§2.2）。
 
 ---
@@ -127,8 +127,11 @@ ssplayer-wgpu/
 │
 ├── libs/                          ← ★ライブラリクレート置き場（ディレクトリ名 = クレート名）
 │   ├── ssplayer-wgpu/             ← ★単一ライブラリクレート（rs/js/ffi を集約）
-│   │   ├── Cargo.toml             [lib] crate-type = ["rlib","cdylib"(+"staticlib" when ffi)]
+│   │   ├── Cargo.toml             [lib] crate-type = ["cdylib","rlib","staticlib"]
 │   │   │                          features: web(wasm-bindgen) / ffi(cbindgen)。Device は所有しない
+│   │   ├── build.rs               ✅ ffi feature 時のみ cbindgen を実行（無効時は no-op）
+│   │   ├── cbindgen.toml          ✅ 生成ヘッダの体裁（型名を ss_player_t 等へ rename）
+│   │   ├── include/               ✅ 生成物 ssplayer_wgpu.h（CMake 側が参照）
 │   │   └── src/
 │   │       ├── lib.rs             ✅ 層の公開（SSPlayer が主 API）
 │   │       ├── frame.rs           ✅ FrameView … ランタイム所有データへの借用（§1.1）
@@ -138,8 +141,9 @@ ssplayer-wgpu/
 │   │       │                         ◻ インスタンス子ごと独立 Context の再生木（§7）
 │   │       ├── mask.rs            ✅ MaskPlanner（§6）
 │   │       ├── web.rs             ✅ #[cfg(feature="web")] wasm-bindgen + <ss-player>互換（② js）
-│   │       └── ffi.rs             ◻ #[cfg(feature="ffi")] extern "C" ss_player_*（③ C/C++）
-│   │                                 build.rs で cbindgen → include/ssplayer_wgpu.h
+│   │       ├── host.rs            ✅ #[cfg(feature="ffi")] NativeHost（生ハンドル→wgpu 一式を所有）
+│   │       └── ffi.rs             ✅ #[cfg(feature="ffi")] extern "C" ss_player_*（③ C/C++）
+│   │                                 ★ABI 変換のみ。wgpu ロジックは host.rs、再生は player.rs
 │   └── ssplayer-wgpu-bevy/        ◻【将来】Bevy アダプタ（借用モデルの一利用例）
 │                                     ★コアはこれに依存しない。独自リリース周期のため別クレート
 │                                     Bevy の wgpu メジャーが 29 と食い違う場合は
@@ -150,7 +154,9 @@ ssplayer-wgpu/
     │   └── src/main.rs            winit + wgpu 一式を所有し、借用モデルの SSPlayer を駆動
     ├── web/                       ✅ WebGPU ブラウザ確認（<ss-player-webgpu>、② js）
     ├── viewer-dx12-cpp/           ◻ C++ DX12 確認 viewer（Win32 HWND → C-API → backend=DX12）
-    ├── viewer-metal-cpp/          ◻ C++ Metal 確認 viewer（Cocoa CAMetalLayer → C-API → Metal）
+    ├── viewer-metal-cpp/          ✅ C++ Metal 確認 viewer（Cocoa CAMetalLayer → C-API → Metal）
+    │   ├── CMakeLists.txt         cargo build --features ffi を叩き、cdylib＋生成ヘッダを消費
+    │   └── src/main.mm            Objective-C++。NSWindow/CAMetalLayer を所有し C-API を駆動
     ├── viewer-vulkan-cpp/         ◻ C++ Vulkan 確認 viewer（Linux Xlib/Wayland → C-API → Vulkan）
     └── bevy/                      ◻【将来】Bevy アダプタのデモアプリ
 ```
@@ -433,7 +439,8 @@ impl SSPlayer {
     // --- pack 登録 / 再生制御 ---
     pub fn add_ssab(&mut self, pack_name: &str, data: &[u8]) -> Result<(), SSRuntimeError>;   // 外部参照解決用に全 pack 登録
     pub fn load_ssab(&mut self, pack_name: &str, data: &[u8]) -> Result<(), SSRuntimeError>;  // 主 pack 指定
-    pub fn play(&mut self, anim: &str) -> Result<(), SSRuntimeError>;   // インスタンス木を再構築
+    pub fn set_animation(&mut self, anim: &str) -> Result<(), SSRuntimeError>;  // 再生アニメ選択＝インスタンス木を再構築（★確保はここだけ）
+    pub fn play(&mut self);   // 開始 / pause からの再開。引数なし・確保なし
     pub fn pause(&mut self);  pub fn stop(&mut self);  pub fn set_speed(&mut self, speed: f32);
     pub fn is_playing(&self) -> bool;
     pub fn animation_names(&self) -> Option<Vec<String>>;
@@ -452,6 +459,8 @@ impl SSPlayer {
 **借用モデルの要点**: `update`/`draw` は毎回 `&Device`/`&Queue` を受け取る。`draw` はホストが用意した `RenderPass` に積むだけで、`begin_render_pass`/`submit`/`present` はホストの責務。
 
 **外部インスタンス解決**: `add_ssab(pack_name, data)` で全 pack を pack 名キーで登録 → インスタンスは `ref_anime_pack()` 文字列で resolve（§7.1）。
+
+**再生 API の形（★確定）**: **選択（`set_animation`）と開始（`play`）を分ける**。木・Context・スロットの確保は `set_animation` に閉じ、`play`/`pause`/`stop`/`set_speed` は確保なしの遷移操作にする（ssruntime の `setup_animation` + `play` と同型で、他 Player とも揃う）。`play()` は `pause()` からの**再開**でもある。js 面だけは `<ss-player>` 互換のため `play(name)` の 1 コールを維持し、内部で両者を呼ぶ（§10）。
 
 > **現状と将来**: `new` は device のみ（`Result` 不要）、エラーは当面 `SSRuntimeError` を流用。将来 `SSPlayerError`（`thiserror`）でラップし FFI 整数コード / JS `JsError` へ変換。ssab の **embedded 自動テクスチャロード**（§8.1）は ✅ 実装済（`add_ssab` でデコード → `update` で upload）。**seek** は未実装。
 
@@ -481,22 +490,36 @@ impl SSPlayer {
 
 ## §11 ネイティブ / C・C++ 面（③ ffi — Rust API の上のホスト）
 
-- `ssplayer-wgpu` の `ffi` feature（`crate-type` に cdylib / staticlib を追加）。`build.rs` で cbindgen → `include/ssplayer_wgpu.h`。
-- `libs/ssplayer-wgpu/src/ffi.rs` が **raw-window-handle から Surface/Device を生成・所有**し、借用モデルの SSPlayer を駆動する薄いホスト。C からはハンドルベース API で操作:
+- `ssplayer-wgpu` の `ffi` feature（`crate-type` は cdylib / rlib / staticlib。crate-type は feature で切り替えられないので常時3種）。`build.rs`＋`cbindgen.toml` で cbindgen → `include/ssplayer_wgpu.h`（feature off なら build.rs は no-op）。
+- **層の分担（★厳守）**: `libs/ssplayer-wgpu/src/host.rs` の **`NativeHost`** が生ウィンドウハンドルから Surface/Device を生成・所有し、借用モデルの SSPlayer を駆動する（§9.3）。`src/ffi.rs` は **ABI 変換だけ**——null/UTF-8 検査、`*const u8`→スライス、エラー→整数コード——を行い、実処理は `NativeHost` / `SSPlayer` に委ねる。**ffi.rs にロジックを書かない**（書きたくなったら置き場所は host.rs か player.rs）。
+- C からはハンドルベース API で操作:
 
 ```c
-typedef void* ss_player_t;
-ss_player_t ss_player_create(const ss_player_desc_t* desc);   // 生ウィンドウハンドル + backend + size
-void        ss_player_destroy(ss_player_t);
-int         ss_player_load_ssab(ss_player_t, const uint8_t* data, size_t len);  // embedded/reference 両対応
-int         ss_player_play(ss_player_t, const char* anim_name);
-void        ss_player_update(ss_player_t, float delta_seconds);
-void        ss_player_add_texture(ss_player_t, uint32_t hash, const uint8_t* rgba, uint32_t w, uint32_t h);  // reference 用
-void        ss_player_render(ss_player_t);                    // swapchain 取得 → 描画 → present
-void        ss_player_resize(ss_player_t, uint32_t w, uint32_t h);
+typedef struct ss_player_t ss_player_t;                       // 不透明ハンドル
+ss_player_t* ss_player_create(const ss_player_desc_t* desc);  // 生ウィンドウハンドル + backend + size + clear + mask
+void         ss_player_destroy(ss_player_t*);
+int32_t      ss_player_add_ssab(ss_player_t*, const char* pack, const uint8_t* data, size_t len);   // 外部参照解決用に全 pack 登録
+int32_t      ss_player_load_ssab(ss_player_t*, const char* pack, const uint8_t* data, size_t len);  // 主 pack。embedded/reference 両対応
+int32_t      ss_player_add_texture(ss_player_t*, uint32_t hash, const uint8_t* rgba, uint32_t w, uint32_t h);  // reference 用
+int32_t      ss_player_set_animation(ss_player_t*, const char* anim_name);   // 選択（確保はここだけ）
+void         ss_player_play(ss_player_t*);                    // 開始 / pause からの再開
+void         ss_player_pause(ss_player_t*);  void ss_player_stop(ss_player_t*);
+void         ss_player_set_speed(ss_player_t*, float speed);  bool ss_player_is_playing(ss_player_t*);
+uint32_t     ss_player_animation_count(ss_player_t*);
+const char*  ss_player_animation_name(ss_player_t*, uint32_t index);  // 次の呼び出しまで有効
+int32_t      ss_player_canvas_size(ss_player_t*, float* w, float* h);
+void         ss_player_update(ss_player_t*, float delta_seconds);
+int32_t      ss_player_render(ss_player_t*);                  // swapchain 取得 → 描画 → present
+void         ss_player_resize(ss_player_t*, uint32_t w, uint32_t h);  // ★ピクセル単位
+const char*  ss_last_error(void);                             // スレッドローカル。次の失敗まで有効
 ```
 
-- **自己完結ホスト（既定）**: `ss_player_desc_t` に**生ウィンドウハンドル**（Windows: HWND+HINSTANCE / macOS: NSView or CAMetalLayer / Linux: Xlib/Wayland）＋ backend ヒント（DX12/Vulkan/Metal/自動）を渡し、`host.rs` が Surface/Device を生成。per-backend 確認 viewer が各バックエンドを強制指定して検証。
+- **ステータス規約**: `SS_OK`(0) ／ **正 = ssruntime のエラーコード**（`SSRuntimeError::as_code`、SDK の C-API と同番号）／ **負 = Player/ホスト側のエラー**（`SS_ERROR_INVALID_ARGUMENT` = -1、`SS_ERROR_GPU` = -2）。詳細メッセージは `ss_last_error()`。
+- **ヘッダは C。C++ からもそのまま使える**（`cpp_compat = true` で `extern "C"` ガード付き）。別途 `.hpp` は生成しない——cbindgen の C++ 出力は同じ平坦 API の別表記で得がなく、欲しいのは RAII ラッパのような**手書きの薄い C++ 層**であり、必要になった時点で追加する。
+- **アンワインドしない**: ワークスペースは `panic = "abort"` なので、パニックが ABI 境界を越えることはない。
+- **ウィンドウハンドルの渡し方**（§14）: プラットフォーム別の生ハンドルを平坦な `ss_window_handle_t{ kind, screen, window, display }` に詰めて渡し、`ffi.rs` が `raw-window-handle` 型（または CAMetalLayer 用の専用ターゲット）へ組み立てる。`kind` は `SS_WINDOW_WIN32 / APPKIT / METAL_LAYER / XLIB / WAYLAND`。
+
+- **自己完結ホスト（既定）**: `ss_player_desc_t` に**生ウィンドウハンドル**（Windows: HWND+HINSTANCE / macOS: NSView or CAMetalLayer / Linux: Xlib/Wayland）＋ backend ヒント（DX12/Vulkan/Metal/自動）＋ サイズ・クリア色・`enable_mask`（stencil 確保）・`y_down` を渡し、`host.rs` が Surface/Device を生成。per-backend 確認 viewer が各バックエンドを強制指定して検証。
 - **既存エンジンのデバイス相乗り（将来・借用モデルの延長）**: SSPlayer 自体が Device を借用する設計なので、ホストの `Device`/`Queue`/`RenderTarget` を wgpu-hal 相互運用で受け取る `ss_player_create_borrowed(...)` を後付けできる。これは Rust 側の Bevy 統合と同じ借用経路の C 版。
 - パッケージは `release-macos.sh` / `release-windows.ps1` / `release-linux.sh` 相当で cdylib/staticlib + ヘッダを配布。
 
@@ -511,7 +534,7 @@ void        ss_player_resize(ss_player_t, uint32_t w, uint32_t h);
 | **P2 描画パリティ①** ✅ | varg 追加（PartColor blend 由来）、BlendType 全12種のパイプラインマトリクス、premul 厳密化（upload premul ＋ 逆/再premul シェーダ ＋ premul ブレンド係数） | PartsColor / BlendMode / Basic / Effect を PNG 目視で確認。既存フィクスチャのピクセル数は不変。WebGL 版と色・ブレンド一致 |
 | **P3 マスク** ✅ | stencil 付きターゲット（config opt-in）、MaskPlanner 移植（`libs/ssplayer-wgpu/src/mask.rs`）、write/test パイプライン、pure マスク色スキップ、インスタンス継承、**Shape 幾何のマスク writer ＋ Shape content 描画**、白フォールバック初期化（§6） | マスク/Shape アニメが描画（Mask.ssab / Shape.ssab をヘッドレス GPU readback ＋ 実機で確認） |
 | **P4 エフェクト/インスタンス** ✅ | **P0 の次に先行実施**。①内部を `begin_frame`/`append_batch`/`append_effect`/`end_frame` の累積 API＋transform へ（Stage 1）②インスタンス木＝子ごと独立 Context（Stage 2, §7.1）③エフェクト＝EffectSlot/EffectDrawPlan（Stage 3, §7.2） | エフェクト/インスタンスが描画される（実機確認済） |
-| P5 ネイティブ C-API + C++ viewer（③ ffi） | `ssplayer-wgpu` の `ffi` feature ＋ cbindgen、`examples/viewer-dx12-cpp`（Windows）・`viewer-metal-cpp`（macOS）・`viewer-vulkan-cpp`（Linux）。3種は各ディレクトリ自己完結（§2） | DX12/Metal/Vulkan 実機で同一ライブラリが描画 |
+| **P5 ネイティブ C-API + C++ viewer（③ ffi）** ✅（Metal） | `ffi` feature ＋ cbindgen（`build.rs`/`cbindgen.toml` → `include/ssplayer_wgpu.h`）、`host.rs` の `NativeHost`（生ハンドル→wgpu 所有）＋ `ffi.rs`（ABI 変換のみ）、`examples/viewer-metal-cpp`（Cocoa/Objective-C++、CMake が cargo を駆動）。再生 API は `set_animation` + 引数なし `play`（§9.2）。◻ 残: `viewer-dx12-cpp`（Windows）・`viewer-vulkan-cpp`（Linux） | **macOS 実機で Metal 描画確認済**（Basic / Mask を C-API 経由で描画）。DX12/Vulkan は各実機で要確認 |
 | **P6 統合シェーダ13種** ✅ | ss_shader 全13種（sepia/hsb/step/pix/noise/bmask/outline/blur/wave/move/scatter/circle/spot）を WGSL 移植（`internal.rs` `SS_SHADER_WGSL`）。パーツ属性 SHDR を per-part ディスパッチ：`(id_hash, blend)` 毎に**遅延生成**するシェーダパイプライン＋group(2) の動的オフセット uniform（param0..7 / cell_rect / pixel_size）。各シェーダは straight-alpha の Pixel を計算し `ss_finish`（＝P2 の PartsColor tail）で合成（blur のみ例外）。`ssTex` は逆premul＋`textureSampleLevel`（ループ/discard 後のサンプル可）。**制限（WebGL v1 同）**: map0/map1 未対応・shader×マスク非結合・Normal パーツのみ | Shader.ssab をヘッドレス GPU＋PNG 目視（13種の効果を確認）。shader 無しアニメはコスト0 |
 | （任意）Bevy アダプタ | `ssplayer-wgpu-bevy`（借用モデルの一利用例）。コアに依存を入れず別立て | Bevy の render graph で SSPlayer が描画 |
 | （後回し）Text / Nines | 旧版も未実装 | 必要時 |
@@ -527,8 +550,9 @@ void        ss_player_resize(ss_player_t, uint32_t w, uint32_t h);
 | マスク/Shape（ヘッドレス） | `libs/ssplayer-wgpu/tests/mask.rs`（planner probe：writer 分類・Shape-mask）＋ `libs/ssplayer-wgpu/tests/render.rs`（GPU offscreen readback：masking on/off 差分・Shape content 描画量。adapter 無ければ skip。PNG 保存で目視も可） |
 | 統合シェーダ（ヘッドレス） | `libs/ssplayer-wgpu/tests/render.rs::render_integration_shaders`（Shader.ssab を描画し、SS WGSL コンパイル＋per-part ディスパッチ＋params で描画量が出ることを確認。adapter 無ければ skip） |
 | WebGPU（主） | `examples/web/`（ブラウザで `<ss-player-webgpu>`）。初回起動計測（取得→wasm初期化→初フレーム ms） |
+| C-API（③ ffi） | `cargo build -p ssplayer-wgpu --features ffi`（cbindgen がヘッダを再生成。**ネイティブの他コマンドではこの面はコンパイルされない**——web feature と同じ死角） |
 | DX12（副） | `examples/viewer-dx12-cpp/`（Windows 実機、backend=DX12 強制） |
-| Metal（副） | `examples/viewer-metal-cpp/`（macOS 実機、backend=Metal 強制） |
+| Metal（副） | `examples/viewer-metal-cpp/`（macOS 実機、backend=Metal 強制）。`cmake -B build && cmake --build build && ./build/ssviewer-metal [asset-dir] [pack]` |
 | Vulkan（将来） | `examples/viewer-vulkan-cpp/`（Linux 実機、backend=Vulkan 強制） |
 | WebGL 版との一致 | 同一 ssab を両者で再生し目視/スクリーンショット比較（色・ブレンド・マスク） |
 | Rust 品質 | `cargo clippy --workspace --all-targets -- -D warnings` / `cargo fmt --all -- --check` / `cargo test` |
@@ -541,7 +565,7 @@ void        ss_player_resize(ss_player_t, uint32_t w, uint32_t h);
 - **stencil ターゲット**: マスク実装時にサーフェス構成へデプス/ステンシルを追加（現プロトは無し）。
 - **INCR/INVERT 混在マスク**は単一ステンシルで近似（厳密解は coverage-bitmap、要検討）。
 - **WebGPU 非対応環境のフォールバック**方針（WebGL 退避か）未定。
-- **raw-window-handle の FFI 越え**: Rust トレイトは C に渡せないため、プラットフォーム別の生ハンドル構造体を C-API に定義して内部で組み立てる。
+- **raw-window-handle の FFI 越え** ✅ 実装済: Rust トレイトは C に渡せないため、平坦な `ss_window_handle_t{ kind, screen, window, display }` を C-API に定義し、`ffi.rs` が `raw-window-handle` 型へ組み立てる（§11）。CAMetalLayer だけは rwh に表現が無いので wgpu の `SurfaceTargetUnsafe::CoreAnimationLayer` を使う（Apple ターゲットのみ）。**Win32/Xlib/Wayland の経路は実機未検証**——DX12/Vulkan viewer で確認する。
 - **テクスチャ供給**: embedded（Player がデコード）/ reference（ホスト供給）の両対応（§8.1）。埋め込みテクスチャ列挙 API の正確な形は `libs/ssab/SCHEMA.md` / `SsabResource` で要確認。
 - **データ所有契約（§1.1）**: ssab は Player 所有→ssruntime へ borrow、FrameData/SoA は ssruntime 所有→Player が borrow。ssab を Context より先に破棄しない／FrameData 借用をフレーム跨ぎで保持しない。
 - **エフェクト blend はコマンド毎**（batch.blend_type ではない）点を実装で取り違えない。

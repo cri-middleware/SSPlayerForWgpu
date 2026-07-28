@@ -41,7 +41,8 @@ fn render_ssab(device: &wgpu::Device, queue: &wgpu::Queue, stencil: bool, pack: 
     let bytes = std::fs::read(format!("{}/{pack}.ssab", asset_dir())).unwrap();
     player.load_ssab(pack, &bytes).unwrap();
     let anim = player.animation_names().unwrap()[0].clone();
-    player.play(&anim).unwrap();
+    player.set_animation(&anim).unwrap();
+    player.play();
     player.set_viewport(queue, W as f32, H as f32, false);
 
     render_to_rgba(device, queue, &mut player, stencil, advance_frames)
@@ -239,7 +240,8 @@ fn render_embedded_ssab() {
     let mut player = SSPlayer::new(&device, &SSPlayerConfig { color_format: COLOR_FORMAT, stencil_format: None });
     player.load_ssab("Basic", &bytes).unwrap(); // no load_textures — embedded supplies them
     let anim = player.animation_names().unwrap()[0].clone();
-    player.play(&anim).unwrap();
+    player.set_animation(&anim).unwrap();
+    player.play();
     player.set_viewport(&queue, W as f32, H as f32, false);
     let embedded = render_to_rgba(&device, &queue, &mut player, false, 10);
 

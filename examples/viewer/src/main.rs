@@ -128,7 +128,8 @@ impl AppState {
         let anims = self.player.animation_names().unwrap_or_default();
         println!("Animations found: {:?}", anims);
         if !anims.is_empty() {
-            self.player.play(&anims[0]).expect("Failed to play animation");
+            self.player.set_animation(&anims[0]).expect("Failed to select animation");
+            self.player.play();
             self.anim_names = anims;
             self.current_anim_idx = 0;
         } else {
@@ -258,7 +259,8 @@ impl ApplicationHandler for App {
 
             anim_names = player.animation_names().unwrap_or_default();
             if !anim_names.is_empty() {
-                player.play(&anim_names[0]).expect("Failed to play animation");
+                player.set_animation(&anim_names[0]).expect("Failed to select animation");
+                player.play();
             }
         }
 
@@ -331,7 +333,8 @@ impl ApplicationHandler for App {
                 winit::keyboard::Key::Named(winit::keyboard::NamedKey::ArrowDown) if !state.anim_names.is_empty() => {
                     state.current_anim_idx = (state.current_anim_idx + 1) % state.anim_names.len();
                     let name = state.anim_names[state.current_anim_idx].clone();
-                    state.player.play(&name).unwrap();
+                    state.player.set_animation(&name).unwrap();
+                    state.player.play();
                     state.print_status();
                 }
                 winit::keyboard::Key::Named(winit::keyboard::NamedKey::ArrowUp) if !state.anim_names.is_empty() => {
@@ -341,12 +344,14 @@ impl ApplicationHandler for App {
                         state.current_anim_idx -= 1;
                     }
                     let name = state.anim_names[state.current_anim_idx].clone();
-                    state.player.play(&name).unwrap();
+                    state.player.set_animation(&name).unwrap();
+                    state.player.play();
                     state.print_status();
                 }
                 winit::keyboard::Key::Character(ref c) if c.eq_ignore_ascii_case("r") && !state.anim_names.is_empty() => {
                     let name = state.anim_names[state.current_anim_idx].clone();
-                    state.player.play(&name).unwrap();
+                    state.player.set_animation(&name).unwrap();
+                    state.player.play();
                     state.print_status();
                 }
                 winit::keyboard::Key::Character(ref c) if c.eq_ignore_ascii_case("f") => {

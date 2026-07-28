@@ -6,7 +6,16 @@
 //! device/queue/target rather than owning them, so it can render into any wgpu
 //! host (a standalone viewer, a browser canvas, or an engine like Bevy).
 
+/// The C-ABI face (`ffi` feature): a thin translation layer whose `ss_player_*`
+/// entry points are exported from the cdylib/staticlib and described by the
+/// generated `ssplayer_wgpu.h`. The work it delegates to lives in [`host`].
+#[cfg(feature = "ffi")]
+pub mod ffi;
 mod frame;
+/// A window-owning wgpu host (`ffi` feature), used by [`ffi`] and available to
+/// Rust callers that have a raw window handle rather than a winit `Window`.
+#[cfg(feature = "ffi")]
+pub mod host;
 mod internal;
 mod mask;
 mod player;

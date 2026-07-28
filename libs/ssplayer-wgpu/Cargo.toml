@@ -8,9 +8,11 @@ repository.workspace = true
 homepage.workspace = true
 description.workspace = true
 
-# cdylib for the WebGPU/WASM target (wasm-bindgen); rlib for the viewer/tests.
+# cdylib for the WebGPU/WASM target (wasm-bindgen) and for C hosts that link the
+# shared library; rlib for the viewer/tests; staticlib for C hosts that link it
+# in (SPEC §11). crate-type cannot be feature-gated, so all three are always built.
 [lib]
-crate-type = ["cdylib", "rlib"]
+crate-type = ["cdylib", "rlib", "staticlib"]
 
 # Enable exactly the wasm features rustc emits (`+simd128` from `.cargo/config.toml`
 # plus its wasm32 defaults) so release `wasm-opt` validation passes. Do NOT use
@@ -43,6 +45,11 @@ embedded = ["dep:image"]
 # crate-type of a dep). core already uses std for wgpu, so there is no conflict —
 # unlike `ssruntime/panic-handler`, which would duplicate std's `panic_impl`.
 web = ["dep:wasm-bindgen", "dep:wasm-bindgen-futures", "dep:js-sys", "dep:web-sys", "dep:console_error_panic_hook", "wasm-bindgen/std", "embedded", "ssruntime/std"]
+# C/C++ bindings (SPEC §12 P5, the "ffi" face): `ss_player_*` entry points plus a
+# self-contained host that builds wgpu from a raw window handle. `build.rs` runs
+# cbindgen over `src/ffi.rs` to emit `include/ssplayer_wgpu.h`. Pulls `embedded`
+# so a single self-contained .ssab renders with no host texture supply.
+ffi = ["dep:pollster", "dep:cbindgen", "embedded"]
 
 [dependencies]
 wgpu = { workspace = true }
@@ -55,6 +62,13 @@ wasm-bindgen-futures = { workspace = true, optional = true }
 js-sys = { workspace = true, optional = true }
 web-sys = { workspace = true, optional = true, features = ["HtmlCanvasElement", "Window", "Document"] }
 console_error_panic_hook = { workspace = true, optional = true }
+# The C face blocks on wgpu's async adapter/device requests: a C caller has no
+# executor to hand us.
+pollster = { version = "1.0.1", optional = true }
+
+# Only pulled in by the `ffi` feature; build.rs is a no-op without it.
+[build-dependencies]
+cbindgen = { version = "0.29.4", optional = true, default-features = false }
 
 [dev-dependencies]
 pollster = "1.0.1"
