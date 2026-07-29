@@ -71,6 +71,13 @@ pub struct BatchInfo {
     pub kind: DrawBatchKind,
     /// Stencil test to apply (masked content). `None` for ordinary content.
     pub stencil: StencilTest,
+    /// Player-level alpha (SPEC §9.3), folded into every vertex's colour alpha.
+    /// The shader's final coverage is `tex.a * color.a` and the blend table is
+    /// premultiplied throughout, so a plain multiply here fades the part
+    /// correctly under every blend mode (including Add / Mul, which reach `dst`
+    /// unchanged at alpha 0). Mask writers are deliberately not faded — their
+    /// `color[0]` carries the cutout threshold, not a colour.
+    pub alpha: f32,
 }
 
 /// An integration-shader (`ss-*`) draw: resolves to a lazily-built shader
@@ -945,7 +952,7 @@ impl SSInternalPlayer {
     /// interleave instance recursion at the right rank. `batch.stencil` selects
     /// the stencil-test content pipeline for masked parts.
     pub fn append_batch(&mut self, frame: &FrameView, transform: &[f32; 16], batch: &BatchInfo) {
-        let BatchInfo { start_rank, count, texture_hash, blend_type, kind, stencil } = *batch;
+        let BatchInfo { start_rank, count, texture_hash, blend_type, kind, stencil, alpha } = *batch;
         if frame.frame_data.is_empty() {
             return;
         }
@@ -985,7 +992,7 @@ impl SSInternalPlayer {
                     let part = parts.get(part_idx);
 
                     let part_color_idx = part.part_color();
-                    let (colors_arr, vargs_arr) = parts_color
+                    let (mut colors_arr, vargs_arr) = parts_color
                         .filter(|_| part_color_idx >= 0)
                         .map(|pc_vec| {
                             let pc = pc_vec.get(part_color_idx as usize);
@@ -1001,6 +1008,9 @@ impl SSInternalPlayer {
                             (colors, vargs)
                         })
                         .unwrap_or_else(|| ([[1.0, 1.0, 1.0, part.alpha()]; 4], [VARG_MODULATE; 4]));
+                    for c in &mut colors_arr {
+                        c[3] *= alpha;
+                    }
 
                     if !shader_dispatch {
                         self.push_quad_part(frame, transform, part_idx, tex_size, &colors_arr, &vargs_arr);
@@ -1031,7 +1041,7 @@ impl SSInternalPlayer {
                     let part = parts.get(part_idx);
 
                     let part_color_idx = part.part_color();
-                    let (mesh_color, mesh_varg) = parts_color
+                    let (mut mesh_color, mesh_varg) = parts_color
                         .filter(|_| part_color_idx >= 0)
                         .map(|pc_vec| {
                             let pc = pc_vec.get(part_color_idx as usize);
@@ -1042,6 +1052,7 @@ impl SSInternalPlayer {
                             ([c.r() as f32 / 255.0, c.g() as f32 / 255.0, c.b() as f32 / 255.0, c.a() as f32 / 255.0], [lt.rate(), mix_f, mul_f, add_f])
                         })
                         .unwrap_or_else(|| ([1.0, 1.0, 1.0, part.alpha()], VARG_MODULATE));
+                    mesh_color[3] *= alpha;
 
                     self.push_mesh_part(frame, transform, part_idx, part.position_z(), tex_size, mesh_color, mesh_varg);
                 }
@@ -1059,7 +1070,7 @@ impl SSInternalPlayer {
                     // fill is the bilinear PartColor itself (10_parts_color §1-2).
                     let part_color_idx = part.part_color();
                     let has_pc = part_color_idx >= 0 && parts_color.is_some();
-                    let corners = parts_color
+                    let mut corners = parts_color
                         .filter(|_| part_color_idx >= 0)
                         .map(|pc_vec| {
                             let pc = pc_vec.get(part_color_idx as usize);
@@ -1075,6 +1086,9 @@ impl SSInternalPlayer {
                             ]
                         })
                         .unwrap_or_else(|| [[1.0, 1.0, 1.0, part.alpha()]; 4]);
+                    for c in &mut corners {
+                        c[3] *= alpha;
+                    }
                     let shape_varg = [if has_pc { 1.0 } else { 0.0 }, 1.0, 0.0, 0.0];
 
                     self.push_shape_content_part(frame, transform, part_idx, &corners, shape_varg);
@@ -1354,8 +1368,9 @@ impl SSInternalPlayer {
     /// matrix (verts are slot-relative). Blend is per-command; color is taken
     /// from the plan and modulates the cellmap texture via the sprite shader.
     /// `stencil` selects the stencil test when the effect is a masked target
-    /// (inherited from a parent mask); `None` for ordinary effects.
-    pub fn append_effect(&mut self, plan_buf: &[u8], transform: &[f32; 16], stencil: StencilTest) {
+    /// (inherited from a parent mask); `None` for ordinary effects. `alpha` is
+    /// the player-level fade (see [`BatchInfo::alpha`]).
+    pub fn append_effect(&mut self, plan_buf: &[u8], transform: &[f32; 16], stencil: StencilTest, alpha: f32) {
         if plan_buf.is_empty() {
             return;
         }
@@ -1392,7 +1407,7 @@ impl SSInternalPlayer {
                 let tu = uvs.get(vi * 2);
                 let tv = uvs.get(vi * 2 + 1);
 
-                let color = [colors.get(vi * 4), colors.get(vi * 4 + 1), colors.get(vi * 4 + 2), colors.get(vi * 4 + 3)];
+                let color = [colors.get(vi * 4), colors.get(vi * 4 + 1), colors.get(vi * 4 + 2), colors.get(vi * 4 + 3) * alpha];
                 // Effects carry no PartsColor overlay: plain texture*color modulate.
                 self.vertices.push(Vertex { position: [fx, fy, fz], uv: [tu, tv], color, varg: VARG_MODULATE });
             }

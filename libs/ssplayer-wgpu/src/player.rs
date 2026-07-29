@@ -82,13 +82,40 @@ pub struct SSPlayer {
     /// Last viewport passed to [`SSPlayer::set_viewport`], re-applied on restore
     /// (the projection lives in a uniform buffer that dies with the device).
     viewport: Option<(f32, f32, bool)>,
+    /// Where this player sits in the scene — the root transform of its tree
+    /// (SPEC §5.4). Composed by [`SSPlayer::set_transform`]; only the matrix is
+    /// kept because nothing yet re-composes it. A future `box` (§9.3, the
+    /// WebGL player's viewport-tracking rect) moves after `set_transform` runs,
+    /// so it will need the authored parameters retained as well.
+    transform: [f32; 16],
+    /// Draw order within a scene; lower draws first. Nothing in this file reads
+    /// it — it exists so the host, and from P7-4 `SSScene`, can sort by it.
+    order: i32,
+    /// Skip this player entirely when false (see [`SSPlayer::set_visible`]).
+    visible: bool,
+    /// Player-level fade folded into every vertex (see [`BatchInfo::alpha`]).
+    alpha: f32,
 }
 
 impl SSPlayer {
     /// Create a player against a borrowed `device`. The device is not retained.
     pub fn new(device: &wgpu::Device, config: &SSPlayerConfig) -> Self {
         let internal = SSInternalPlayer::new(device, &RendererConfig { color_format: config.color_format, stencil_format: config.stencil_format });
-        Self { internal, resources: HashMap::new(), main_pack: None, root: None, current_animation: None, last_root_frame: 0.0, pending_textures: Vec::new(), host_textures: HashMap::new(), viewport: None }
+        Self {
+            internal,
+            resources: HashMap::new(),
+            main_pack: None,
+            root: None,
+            current_animation: None,
+            last_root_frame: 0.0,
+            pending_textures: Vec::new(),
+            host_textures: HashMap::new(),
+            viewport: None,
+            transform: IDENTITY,
+            order: 0,
+            visible: true,
+            alpha: 1.0,
+        }
     }
 
     /// Rebuild every GPU resource against a freshly created `device` after the
@@ -254,6 +281,68 @@ impl SSPlayer {
         self.root.as_ref().map(|r| r.context.is_playing()).unwrap_or(false)
     }
 
+    /// Place this player: translation, scale, then rotation in radians, composed
+    /// into the root transform of its tree.
+    ///
+    /// This is the per-player half of SPEC §5.4 — the projection belongs to the
+    /// render target ([`SSPlayer::set_viewport`]), the placement to the player.
+    /// It costs nothing extra to draw: the tree walk already composes an
+    /// arbitrary parent matrix for every instance child, so a non-identity root
+    /// simply rides along.
+    pub fn set_transform(&mut self, x: f32, y: f32, scale_x: f32, scale_y: f32, rotation: f32) {
+        let (sin, cos) = rotation.sin_cos();
+        // Column-major (see `mat4_mul` / `apply_transform`): the columns are
+        // scale*rotation for x and y, then z, then the translation.
+        #[rustfmt::skip]
+        let m = [
+            scale_x * cos,  scale_x * sin, 0.0, 0.0,
+            -scale_y * sin, scale_y * cos, 0.0, 0.0,
+            0.0,            0.0,           1.0, 0.0,
+            x,              y,             0.0, 1.0,
+        ];
+        self.transform = m;
+    }
+
+    /// Reset the placement to the identity: centred, unscaled, unrotated.
+    pub fn reset_transform(&mut self) {
+        self.transform = IDENTITY;
+    }
+
+    /// Draw order within a scene; lower draws first. Ties keep whatever order the
+    /// host hands the players over in.
+    pub fn set_order(&mut self, order: i32) {
+        self.order = order;
+    }
+
+    pub fn order(&self) -> i32 {
+        self.order
+    }
+
+    /// Skip this player entirely when false: [`SSPlayer::update`] advances no
+    /// timeline and produces no geometry, so [`SSPlayer::draw`] records nothing.
+    ///
+    /// Distinct from `set_alpha(0.0)`, which is an author-facing fade that keeps
+    /// the timeline running. This one is for a host that knows the player cannot
+    /// be seen — culled, or scrolled out of the viewport.
+    pub fn set_visible(&mut self, visible: bool) {
+        self.visible = visible;
+    }
+
+    pub fn is_visible(&self) -> bool {
+        self.visible
+    }
+
+    /// Player-level fade, clamped to 0..=1 and multiplied into every part's
+    /// colour alpha. Mask coverage is deliberately unaffected: a faded player
+    /// clips exactly as it would at full opacity.
+    pub fn set_alpha(&mut self, alpha: f32) {
+        self.alpha = alpha.clamp(0.0, 1.0);
+    }
+
+    pub fn alpha(&self) -> f32 {
+        self.alpha
+    }
+
     /// Names of all animations in the main pack, if loaded.
     pub fn animation_names(&self) -> Option<Vec<String>> {
         let anim_resource = self.resources.get(self.main_pack.as_ref()?)?.resource()?;
@@ -303,6 +392,15 @@ impl SSPlayer {
 
         self.internal.begin_frame();
 
+        // `visible == false` means "this player cannot be seen": no timeline
+        // advance and no geometry, so the frame ends empty and `draw` records
+        // nothing. Textures are still flushed above — a player can be made
+        // visible again without re-loading anything.
+        if !self.visible {
+            self.internal.end_frame(device, queue);
+            return;
+        }
+
         if let Some(root) = &mut self.root {
             // The runtime works in milliseconds for the primary context.
             root.context.update(delta_secs * 1000.0);
@@ -311,7 +409,8 @@ impl SSPlayer {
             // instance slots can persist/re-arm their children correctly.
             let looped = frame_no + 0.5 < self.last_root_frame;
             self.last_root_frame = frame_no;
-            render_node(root, &mut self.internal, &IDENTITY, frame_no, delta_secs, looped, StencilTest::None);
+            let draw = NodeDraw { transform: &self.transform, alpha: self.alpha };
+            render_node(root, &mut self.internal, draw, frame_no, delta_secs, looped, StencilTest::None);
         }
 
         self.internal.end_frame(device, queue);
@@ -419,6 +518,21 @@ fn sync_masks_to(internal: &mut SSInternalPlayer, frame: &FrameView, transform: 
     }
 }
 
+/// How one node of the tree is drawn: where it sits and how opaque it is.
+///
+/// `transform` changes per recursion level (each instance child composes its
+/// part's world matrix onto its parent's), `alpha` is the owning player's and is
+/// constant for the whole walk. They travel together so `render_node` keeps a
+/// readable signature as more player-level properties land — tint, clip and
+/// backdrop are all queued behind SPEC §5.5.
+#[derive(Clone, Copy)]
+struct NodeDraw<'a> {
+    transform: &'a [f32; 16],
+    /// Player-level fade; see [`BatchInfo::alpha`]. Never applied to mask
+    /// coverage — a faded player clips exactly as it would at full opacity.
+    alpha: f32,
+}
+
 /// Recursively append a node's geometry to the renderer, driving instance slots
 /// and composing transforms. The node's context must already be advanced to
 /// `frame_no` (root by `update`, children by the parent's `InstanceSlot::step`).
@@ -430,7 +544,12 @@ fn sync_masks_to(internal: &mut SSInternalPlayer, frame: &FrameView, transform: 
 /// node is a sub-animation clipped by a parent mask (screen-space, single level,
 /// mask doc §3-2-2): it runs no masks of its own and every content batch is
 /// tested with the inherited polarity.
-fn render_node(node: &mut PlaybackNode, internal: &mut SSInternalPlayer, transform: &[f32; 16], frame_no: f32, delta_secs: f32, node_looped: bool, inherited_stencil: StencilTest) {
+///
+/// `draw` carries the owning player's placement and fade down the tree; whatever
+/// coverage this scope writes, it takes back before returning (see
+/// [`unwind_masks`]).
+fn render_node(node: &mut PlaybackNode, internal: &mut SSInternalPlayer, draw: NodeDraw, frame_no: f32, delta_secs: f32, node_looped: bool, inherited_stencil: StencilTest) {
+    let NodeDraw { transform, alpha } = draw;
     let frame_data = match node.context.get_frame_data(frame_no) {
         Ok(bytes) => unsafe { std::slice::from_raw_parts(bytes.as_ptr(), bytes.len()) },
         Err(_) => return,
@@ -478,7 +597,7 @@ fn render_node(node: &mut PlaybackNode, internal: &mut SSInternalPlayer, transfo
                             continue;
                         }
                         let stencil = node.mask_flags.get(part_idx).map(|f| f.polarity()).unwrap_or(StencilTest::None);
-                        let info = BatchInfo { start_rank: rank, count: 1, texture_hash: batch.texture_hash(), blend_type: batch.blend_type(), kind, stencil };
+                        let info = BatchInfo { start_rank: rank, count: 1, texture_hash: batch.texture_hash(), blend_type: batch.blend_type(), kind, stencil, alpha };
                         internal.append_batch(&frame, transform, &info);
                     }
                 } else if has_pure {
@@ -489,11 +608,11 @@ fn render_node(node: &mut PlaybackNode, internal: &mut SSInternalPlayer, transfo
                         if is_pure(part_idx) {
                             continue;
                         }
-                        let info = BatchInfo { start_rank: rank, count: 1, texture_hash: batch.texture_hash(), blend_type: batch.blend_type(), kind, stencil: inherited_stencil };
+                        let info = BatchInfo { start_rank: rank, count: 1, texture_hash: batch.texture_hash(), blend_type: batch.blend_type(), kind, stencil: inherited_stencil, alpha };
                         internal.append_batch(&frame, transform, &info);
                     }
                 } else {
-                    let info = BatchInfo { start_rank, count, texture_hash: batch.texture_hash(), blend_type: batch.blend_type(), kind, stencil: inherited_stencil };
+                    let info = BatchInfo { start_rank, count, texture_hash: batch.texture_hash(), blend_type: batch.blend_type(), kind, stencil: inherited_stencil, alpha };
                     internal.append_batch(&frame, transform, &info);
                 }
             }
@@ -533,7 +652,8 @@ fn render_node(node: &mut PlaybackNode, internal: &mut SSInternalPlayer, transfo
                         // Compose the instance part's world matrix onto the parent transform.
                         let m: [f32; 16] = frame.world_matrices[part_idx * 16..part_idx * 16 + 16].try_into().unwrap();
                         let child_transform = mat4_mul(transform, &m);
-                        render_node(&mut child.node, internal, &child_transform, child_frame_no, delta_secs, result.child_looped, child_inherited);
+                        let child_draw = NodeDraw { transform: &child_transform, alpha };
+                        render_node(&mut child.node, internal, child_draw, child_frame_no, delta_secs, result.child_looped, child_inherited);
                     }
                 }
             }
@@ -562,7 +682,7 @@ fn render_node(node: &mut PlaybackNode, internal: &mut SSInternalPlayer, transfo
                         let plan = unsafe { std::slice::from_raw_parts(r.draw_plan_buf, r.draw_plan_len) };
                         let m: [f32; 16] = frame.world_matrices[part_idx * 16..part_idx * 16 + 16].try_into().unwrap();
                         let eff_transform = mat4_mul(transform, &m);
-                        internal.append_effect(plan, &eff_transform, eff_stencil);
+                        internal.append_effect(plan, &eff_transform, eff_stencil, alpha);
                     }
                 }
             }
@@ -570,6 +690,38 @@ fn render_node(node: &mut PlaybackNode, internal: &mut SSInternalPlayer, transfo
             // pre-write / scoped replay above). Text / Nines: not yet handled.
             _ => {}
         }
+    }
+
+    if masking {
+        unwind_masks(internal, &frame, transform, &writers, cursor);
+    }
+}
+
+/// Take back every bit of stencil coverage this scope wrote (SPEC §6).
+///
+/// The batch loop leaves the buffer unbalanced in two ways, because the scoped
+/// replay only runs as far as the last masked target it met:
+///
+/// * a pure mask whose rank the cursor never reached is still pre-written, and
+/// * a clipping writer the cursor *did* reach is still applied.
+///
+/// Both are undone here — increment pairs with decrement, invert is its own
+/// inverse — so the scope returns the buffer in the state it found it. Without
+/// this the invariant only holds by accident: one player per render pass, with
+/// `LoadOp::Clear(0)` wiping the residue between frames. Stack a second player
+/// into the same pass and the first one's mask clips it.
+///
+/// The extra draw calls are bounded by the writer count (at most
+/// [`crate::mask::MAX_MASK_WRITERS`]) and write no colour.
+fn unwind_masks(internal: &mut SSInternalPlayer, frame: &FrameView, transform: &[f32; 16], writers: &[MaskWriter], cursor: usize) {
+    let remove = |w: &MaskWriter| if w.op_invert { MaskOp::Invert } else { MaskOp::Decr };
+    // Consumed clipping writers: `sync_masks_to` added their coverage.
+    for w in writers[..cursor].iter().filter(|w| w.is_clipping) {
+        internal.append_mask_writer(frame, transform, w, remove(w));
+    }
+    // Unconsumed pure masks: pre-written before the batch loop, never removed.
+    for w in writers[cursor..].iter().filter(|w| !w.is_clipping) {
+        internal.append_mask_writer(frame, transform, w, remove(w));
     }
 }
 
