@@ -54,6 +54,8 @@ struct AppState {
     is_paused: bool,
     y_down: bool,
     logged_first_draw: bool,
+    /// Wall time of the last `SSScene::update`, in milliseconds.
+    last_update_ms: f64,
 }
 
 impl AppState {
@@ -72,7 +74,12 @@ impl AppState {
         self.last_update = now;
 
         if !self.is_paused {
+            // The CPU half of the frame. The scene deliberately does not time
+            // itself (SPEC §14.2 item 10) — `Instant` is not portable to wasm,
+            // and a host needs one line to do it.
+            let started = std::time::Instant::now();
             self.scene.update(&mut self.renderer, &self.device, &self.queue, delta, &mut [&mut self.player]);
+            self.last_update_ms = started.elapsed().as_secs_f64() * 1.0e3;
         }
     }
 
@@ -107,7 +114,7 @@ impl AppState {
                     depth_ops: Some(wgpu::Operations { load: wgpu::LoadOp::Clear(1.0), store: wgpu::StoreOp::Store }),
                     stencil_ops: Some(wgpu::Operations { load: wgpu::LoadOp::Clear(0), store: wgpu::StoreOp::Store }),
                 }),
-                timestamp_writes: None,
+                timestamp_writes: self.scene.timestamp_writes(),
                 occlusion_query_set: None,
                 multiview_mask: None,
             });
@@ -118,6 +125,7 @@ impl AppState {
                 self.logged_first_draw = true;
             }
         }
+        self.scene.resolve_timestamps(&mut encoder);
 
         self.queue.submit(std::iter::once(encoder.finish()));
         output.present();
@@ -162,6 +170,16 @@ impl AppState {
             println!("  Animation:        None");
         }
         println!("  Instance nodes:   {}", self.player.instance_node_count());
+        // SPEC §14.2 item 10: what the frame cost. `prims` vs `draw_calls` is the
+        // headroom draw-call merging has; `gpu` is absent when the adapter has no
+        // timestamp query, and lags a frame or two when it does.
+        let stats = self.scene.stats();
+        let gpu = match stats.gpu_pass_time_ns {
+            Some(ns) => format!("{:.3} ms", ns as f64 / 1.0e6),
+            None => "n/a (no timestamp query)".to_string(),
+        };
+        println!("  Frame:            {} prims / {} draws / {:.1} KiB uploaded", stats.prims, stats.draw_calls, stats.uploaded_bytes as f64 / 1024.0);
+        println!("  GPU pass:         {gpu}  (cpu update {:.3} ms)", self.last_update_ms);
         println!("  Playback:         {}", if self.is_paused { "Paused" } else { "Playing" });
         println!("  Y-Axis Mode:      {}", if self.y_down { "Y-Down (flipped)" } else { "Y-Up (standard)" });
         println!("----------------------------------------------------");
@@ -200,7 +218,16 @@ impl ApplicationHandler for App {
         println!("[DIAG] Adapter: {:?}", adapter.get_info().name);
 
         let (device, queue) =
-            pollster::block_on(adapter.request_device(&wgpu::DeviceDescriptor { label: None, required_features: wgpu::Features::empty(), required_limits: wgpu::Limits::default(), memory_hints: wgpu::MemoryHints::default(), ..Default::default() }))
+            // Take GPU timing when the adapter has it (SPEC §14.2 item 10). The
+            // development viewer is where the numbers behind §14.2's proposals
+            // get read, so it asks; a machine without the feature still runs.
+            pollster::block_on(adapter.request_device(&wgpu::DeviceDescriptor {
+                label: None,
+                required_features: adapter.features() & wgpu::Features::TIMESTAMP_QUERY,
+                required_limits: wgpu::Limits::default(),
+                memory_hints: wgpu::MemoryHints::default(),
+                ..Default::default()
+            }))
                 .expect("Failed to request device");
 
         let size = window.inner_size();
@@ -291,6 +318,7 @@ impl ApplicationHandler for App {
             is_paused: false,
             y_down: false,
             logged_first_draw: false,
+            last_update_ms: 0.0,
         };
 
         state.print_status();

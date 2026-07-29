@@ -110,6 +110,27 @@ pub struct SsSceneDesc {
     pub y_down: bool,
 }
 
+/// What the last frame cost (SPEC §14.2 item 10), flattened for the ABI.
+///
+/// `gpu_pass_time_ns` is 0 when the adapter has no timestamp query, or before
+/// the first measurement has come back — it is read without stalling the
+/// pipeline, so it lags a frame or two.
+#[repr(C)]
+#[derive(Clone, Copy, Default)]
+pub struct SsSceneStats {
+    /// Players that contributed geometry this frame.
+    pub players: u32,
+    /// Primitives in the frame: parts, shape fans and effect particles.
+    pub prims: u32,
+    /// Draw calls recorded. The gap from `prims` is draw-call merging headroom.
+    pub draw_calls: u32,
+    pub _reserved: u32,
+    /// Bytes written to the frame's storage buffers.
+    pub uploaded_bytes: u64,
+    /// GPU time for the last timed render pass, in nanoseconds. 0 = no reading.
+    pub gpu_pass_time_ns: u64,
+}
+
 /// Opaque scene handle: one window's [`NativeHost`], the player handles it has
 /// issued, and the buffer backing the string `ss_player_animation_name` hands
 /// back to C.
@@ -625,6 +646,20 @@ pub unsafe extern "C" fn ss_scene_render(scene: *mut SsScene) -> i32 {
         Ok(()) => SS_OK,
         Err(msg) => fail(SS_ERROR_GPU, msg),
     }
+}
+
+/// What the last frame cost (SPEC §14.2 item 10). Writes `out` and returns
+/// `SS_OK`, or leaves it untouched and reports the reason.
+///
+/// # Safety
+/// `out` must point at a writable `ss_scene_stats_t`.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn ss_scene_stats(scene: *mut SsScene, out: *mut SsSceneStats) -> i32 {
+    let Some(scene) = (unsafe { scene.as_ref() }) else { return fail(SS_ERROR_INVALID_ARGUMENT, "scene is null") };
+    let Some(out) = (unsafe { out.as_mut() }) else { return fail(SS_ERROR_INVALID_ARGUMENT, "out is null") };
+    let stats = scene.host.stats();
+    *out = SsSceneStats { players: stats.players, prims: stats.prims, draw_calls: stats.draw_calls, _reserved: 0, uploaded_bytes: stats.uploaded_bytes, gpu_pass_time_ns: stats.gpu_pass_time_ns.unwrap_or(0) };
+    SS_OK
 }
 
 /// Resize the swapchain, the depth/stencil buffer and the projection to a new

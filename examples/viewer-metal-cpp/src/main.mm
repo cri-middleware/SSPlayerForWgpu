@@ -408,6 +408,17 @@ static const NSUInteger kMaxPlayers = 6;
     printf("  Canvas:        %.0f x %.0f\n", canvasWidth, canvasHeight);
     printf("  Players:       %u in one scene\n", ss_scene_player_count(_scene));
     printf("  Playback:      %s\n", _paused ? "Paused" : "Playing");
+    // What the frame cost (SPEC §14.2 item 10). GPU time is 0 when the adapter
+    // has no timestamp query, and lags a frame or two when it does.
+    ss_scene_stats_t stats;
+    if (ss_scene_stats(_scene, &stats) == SS_OK) {
+        printf("  Frame:         %u prims / %u draws / %.1f KiB\n", stats.prims, stats.draw_calls, (double)stats.uploaded_bytes / 1024.0);
+        if (stats.gpu_pass_time_ns > 0) {
+            printf("  GPU pass:      %.3f ms\n", (double)stats.gpu_pass_time_ns / 1.0e6);
+        } else {
+            printf("  GPU pass:      n/a (no timestamp query)\n");
+        }
+    }
     printf("----------------------------------------------------\n");
     printf("  Space  pause    Left/Right  .ssab    Up/Down  anim\n");
     printf("  R      restart  +/-  players  Escape   quit\n");

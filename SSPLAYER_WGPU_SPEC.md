@@ -19,7 +19,8 @@
 - **提供3面（ssruntime と同型）**: `rs`(rlib) / `js`(wasm-bindgen) / `ffi`(cbindgen・DX12/Vulkan/Metal)。
 - **データ所有契約**: `.ssab` は Player 所有→ssruntime へ borrow ／ FrameData・SoA は ssruntime 所有→Player が borrow（§1.1）。
 - **ssab は embedded / reference 両対応**（テクスチャ埋め込み／外部参照）。
-- **進捗**: **P0**（3層リファクタ＋借用モデル）✅ ／ **P4**（インスタンス §7.1・エフェクト §7.2）✅ ／ **P3**（マスク・Shape）✅ ／ **P2**（色パリティ: varg・全12ブレンド・premul 厳密化）✅ ／ **P6**（統合シェーダ ss_shader 全13種）✅ ／ **P1**（ssab embedded/reference 両対応・**WebGPU/js**）✅ ブラウザ実機確認済 ／ **P5**（ネイティブ ffi・C-API ＋ Metal C++ viewer）✅ macOS 実機確認済、DX12/Vulkan viewer は未着手 ／ **P7**（シーン再設計：SSRenderer/SSScene 分離・複数プレイヤー・SoA パススルー）🚧 **進行中**——7-1〜7-4 ✅（**1 ターゲットに N プレイヤーが動く**）、7-5 以降が残り。対応バッチ = Normal / Mesh / Shape / Instance / Effect / Mask。**wgpu 29**（§2.2）。詳細は §12。
+- **進捗**: **P0**（3層リファクタ＋借用モデル）✅ ／ **P4**（インスタンス §7.1・エフェクト §7.2）✅ ／ **P3**（マスク・Shape）✅ ／ **P2**（色パリティ: varg・全12ブレンド・premul 厳密化）✅ ／ **P6**（統合シェーダ ss_shader 全13種）✅ ／ **P1**（ssab embedded/reference 両対応・**WebGPU/js**）✅ ブラウザ実機確認済 ／ **P5**（ネイティブ ffi・C-API ＋ Metal C++ viewer）✅ macOS 実機確認済、DX12/Vulkan viewer は未着手 ／ **P7**（シーン再設計：SSRenderer/SSScene 分離・複数プレイヤー・SoA パススルー）🚧 **進行中**——**7-1〜7-7 ✅**（1 ターゲットに N プレイヤー／pack 共有・借用テクスチャ／**頂点バッファ撤去**／C-API 2ハンドル化）、残りは **7-8**（draw マージ・ランレングス結合）と **web 面**（device をページで1つ、§10）。対応バッチ = Normal / Mesh / Shape / Instance / Effect / Mask。**wgpu 29**（§2.2）。詳細は §12。
+- **次の大物**: **§14.2**「WebGL でできることを wgpu で書いた」箇所の棚卸し 10 件（P8 候補）。P7-6 が頂点経路にやったことを、マスク／ブレンド／draw 発行／並列化にも行う。**着手前に timestamp query で計測手段を入れること**。
 - **リポジトリ**: SDK monorepo から分離した独立リポ `ssplayer-wgpu`。SDK は git submodule（`SpriteStudio-SDK/`）として取り込み、`ssruntime`/`ssab` を **path 依存**で直リンクする（§2.2）。
 
 ---
@@ -408,7 +409,7 @@ ssruntime は `world_matrices` / `local_vertices` / `local_uvs` / `mesh_*` / sha
 - **WebGL2 は SSBO 無し・UBO 64KB・大規模動的 index 不可**なので、この形には到達できない。ssplayer-webgl と差がつく最大の一点であり、WebGPU を選ぶ意味そのもの（§14.1）。
 - Player 単位の alpha は `Prim.alpha` 1つになった（旧実装は全頂点の色に畳み込んでいた）。**tint も同じ場所に足せる**。
 - **★検証の要**: 頂点ステージの座標計算は**行列積ではなくスカラーの並び**で書いてある。旧 CPU 実装と**同じ順序で同じ演算**をさせるためで、これにより 134 枚のフィクスチャが**ビット完全一致**した（§13 `golden_corpus`）。ここを「綺麗な `mat4 * vec4`」に書き換えると FMA 収縮で 1 ULP ずれ、比較の基準を失う。書き換えるなら基準の取り直しから。
-- 段階の先には **render bundle**（draw_call 列の再 encode を省く）と **timestamp query**（バッチ単位の GPU 実測。WebGL の `EXT_disjoint_timer_query` は Spectre 対策でブラウザから実質消滅している）がある。どちらも draw_call 構造が安定してから。
+- 段階の先は **§14.2**（WebGL 由来の設計の棚卸し）へ引き継いだ。render bundle と timestamp query はそこの 5 と 10。
 
 ---
 
@@ -793,6 +794,7 @@ const char*  ss_last_error(void);                             // スレッドロ
 | **P6 統合シェーダ13種** ✅ | ss_shader 全13種（sepia/hsb/step/pix/noise/bmask/outline/blur/wave/move/scatter/circle/spot）を WGSL 移植（`internal.rs` `SS_SHADER_WGSL`）。パーツ属性 SHDR を per-part ディスパッチ：`(id_hash, blend)` 毎に**遅延生成**するシェーダパイプライン＋group(2) の動的オフセット uniform（param0..7 / cell_rect / pixel_size）。各シェーダは straight-alpha の Pixel を計算し `ss_finish`（＝P2 の PartsColor tail）で合成（blur のみ例外）。`ssTex` は逆premul＋`textureSampleLevel`（ループ/discard 後のサンプル可）。**制限（WebGL v1 同）**: map0/map1 未対応・shader×マスク非結合・Normal パーツのみ | Shader.ssab をヘッドレス GPU＋PNG 目視（13種の効果を確認）。shader 無しアニメはコスト0 |
 | **P7 シーン再設計（複数プレイヤー）** 🚧 **進行中**（7-1〜7-7 ✅、残 7-8 と web 面） | 下表の 7-1〜7-8。`SSInternalPlayer` を `SSRenderer`(device) / `SSScene`(ターゲット) へ解体し、`SSPlayer` から GPU リソースを剥がす（§1.2）。**破壊的変更・後方互換は取らない**（プロト段階） | 1つの描画ターゲットに複数体を正しく描ける（マスク持ち同士を含む）。web は device 1個で N 要素。C は 1 window に N 体 |
 | （任意）Bevy アダプタ | `ssplayer-wgpu-bevy`（借用モデルの一利用例）。コアに依存を入れず別立て。**前提だった `set_texture` 借用チャネル（§8.2）は P7-5 で入った**ので着手可能 | Bevy の render graph で `SSScene` が描画。テクスチャは `GpuImage` を借用（二重アップロードなし） |
+| **P8（候補）WebGL 由来の設計の解消** 🚧 | **§14.2 の棚卸し 10 件**（**10 = 計測 ✅ 実装済**）。P7-6 が頂点経路に対してやったことを、マスク / ブレンド / draw 発行 / 並列化に対しても行う | 項目ごとに個別。共通の完了条件は「`golden_corpus`（§13）が変更前とビット一致、または差分が意図どおりと説明できる」 |
 | （後回し）Text / Nines | 旧版も未実装 | 必要時 |
 
 ### 12.1 P7 の分解と依存関係
@@ -846,6 +848,8 @@ const char*  ss_last_error(void);                             // スレッドロ
 | **全フィクスチャ回帰（ヘッドレス）** ✅ P7-6 | `libs/ssplayer-wgpu/tests/golden.rs::golden_corpus`（`#[ignore]`）。全パック × 先頭4アニメ × 4フレーム × stencil on/off ＋ 2体構成 = 134 枚を readback し、**変更前のダンプとバイト比較**する。`SS_GOLDEN_DIR=<出力> [SS_GOLDEN_COMPARE=<基準>] cargo test --test golden -- --ignored`。<br>他のレンダリングテストは「描画量」と「特定の不変条件」しか見ないので、**パーツが1px ずれた／色がわずかに変わった**を誰も検出できない——そこを埋めるのがこれ。GPU/ドライバ依存なので基準は**同じマシンで取る**（チェックインしない）。P7-6 の頂点パス総入替はこれで 134/134 ビット一致を確認した |
 | **幾何4クラス（ヘッドレス）** ✅ P7-6 | `tests/scene.rs::every_geometry_class_draws`。Basic/Mesh/Shape/Effect を1本ずつ描き、各クラスの頂点ステージが**何かを出す**ことだけを下限で見る（正確な出力は `golden_corpus` の担当）。頂点エントリが4つに割れた以上、1つ死んでも他は無傷という壊れ方をするため |
 | **複数プレイヤー（目視）** | ◻ `examples/viewer` を N 体対応にする。現状 1 体固定で、**複数体でのパリティ検証ができない**（マスク・ブレンドの相互干渉は目視でしか気づけない類） |
+| **体数スケール（計測）** ✅ P8-6 | `tests/scale.rs::update_cost_by_player_count`（`#[ignore]`、**release で**）。1〜256体の `update` 実測。`PARALLEL_THRESHOLD` はこの数字で決めた。`update` の中身を変えたら再測定して閾値を動かすこと |
+| **フレームコスト** ✅ P8-10 | `SSScene::stats()`（`tests/scene.rs::a_frame_reports_what_it_cost` / `gpu_pass_time_comes_back`）。viewer と Metal viewer が毎フレーム表示する。**§14.2 の 4〜9 に着手する前後で必ずここを比べること**——「速くなるはず」で入れた変更が実際どうだったかは、これ以外に判定材料が無い |
 | **wasm サイズ** | `cd examples/web && ./build.sh`（**release**。`--dev` は wasm-opt を飛ばすので測ってはいけない）→ `ls -l pkg/*.wasm pkg/*.js` ＋ `gzip -9 -c ... \| wc -c`。§14.1 の表を更新する |
 | WebGL 版との一致 | 同一 ssab を両者で再生し目視/スクリーンショット比較（色・ブレンド・マスク）。**P7 以降は「複数体を置いた画」でも比較する**（ssplayer-webgl も surface+players 構成のため同条件） |
 | Rust 品質 | `cargo clippy --workspace --all-targets -- -D warnings` / `cargo fmt --all -- --check` / `cargo test` |
@@ -909,6 +913,106 @@ wgpu の WebGPU バックエンドは WGSL をブラウザへそのまま渡す�
 > **注意（この訂正の経緯）**: 当初「約10倍・3.8 MB」と書いていたが、それは `build.sh --dev` の成果物だった（wasm-opt 未適用、`name` カスタムセクションだけで 1.76 MB）。**サイズを語るときは必ず release ビルドを測ること。** 計測コマンドは §13。
 
 **方針**: WebGPU 面は「表現力と native 統合」を取りに行く。**到達率**が要件の案件は ssplayer-webgl を使う——サイズは選択理由にならない。`<ss-player-webgpu>` は非対応ブラウザで**エラー表示ではなく WebGL 版へ退避できる形**を目標にする（実装方針は未定）。
+
+### 14.2 「WebGL でできることを wgpu で書いた」箇所の棚卸し（★P8 候補）
+
+P7-6 で頂点生成経路（§5.5）を WebGPU 本来の形へ移したが、**同じ出自の設計は他にも残っている**。WebGL2 の制約——SSBO 無し / テクスチャユニット束縛 / マスクはステンシルのみ / コマンドバッファ再利用なし / シングルスレッドの JS——を前提に書かれた部分で、wgpu では別の答えがある。
+
+以下は棚卸しであって着手順ではない。**まず 10（計測）を入れること**——4〜9 はすべて「速くなるはず」の話で、現状この Player には GPU 側を測る手段が1つも無い。数字が無いまま bindless のような大きな変更に踏み込まない。
+
+#### 表現力（今できないことがある）
+
+| # | 現状（WebGL 由来） | 該当 | WebGPU での本来形 | 備考 |
+|---|---|---|---|---|
+| 1 | **マスクはステンシル一択**。INCR と INVERT が混ざる重なりマスクは単一ステンシル値で**近似**、8bit なので入れ子の上限も浅い | §6 / `mask.rs` | compute ＋ storage texture の **coverage bitmap**。両方の制約が消える | §6 が「厳密解は coverage-bitmap 方式」と書いたまま止まっている箇所。ライタ数の上限（`MAX_MASK_WRITERS = 24`）の根拠も無くなる |
+| 2 | **背景を読むブレンドが Mix フォールバック**。`Div2` / `Overlay2` に「GPU ネイティブ等価が無い」として潰している | §4.3 / `renderer.rs` `blend_state` | 正確には*固定機能ブレンドに*等価が無いだけ。**オフスクリーンへ描いて下地をサンプル**すれば実装できる | group alpha の厳密実装も同じ経路。§14.1 が「安いオフスクリーン＋リードバック」を WebGPU の強みに挙げている当人 |
+| 3 | **エフェクトのパーティクル展開が CPU**。runtime がパーティクル1個につき `cosf`/`sinf` を回して4頂点へ展開し、Player はそれを memcpy する | `ssruntime` `lib.rs` の `EffectDrawPlan` 生成 | パーティクル状態（x, y, rotation, scale, color）だけ渡して**頂点ステージで展開**。転送量 1/4、CPU の三角関数ゼロ | **`EffectDrawPlan` の形を変える話なので SDK 側**。このリポジトリでは決められない——SDK への PR ＋ submodule bump（AGENTS.md の「Never commit inside the submodule」） |
+
+#### スループット（できるが WebGL と同じ天井にいる）
+
+| # | 現状（WebGL 由来） | 該当 | WebGPU での本来形 | 備考 |
+|---|---|---|---|---|
+| 4 | **1 draw = 1 テクスチャ**。GL のテクスチャユニット束縛モデルそのままで、アトラスが違うだけで draw が切れる | `scene.rs` `draw` の `set_bind_group(1, …)` | **bindless**（`binding_array`）で全アトラスを1つの bind group に入れ、`Prim` にテクスチャ index を持たせる | **7-8 の draw_call マージはこれが無いと半分しか効かない**。ただし `Features::TEXTURE_BINDING_ARRAY` は **WebGPU では使えない**——「native 専用の分岐を持つか」という設計判断が先 |
+| 5 ❌ **試して却下**（native 計測） | **draw_call 列を毎フレーム re-encode**。GL には代替が無いのでそうなっていた | `scene.rs` `draw` | **render bundle**（記録して再生） | **実装して測ったが全体で 1〜3% 遅くなったので revert**。下記 |
+| 6 ✅ **実装済**（ただし★結論に注意） | **プレイヤーを直列に進めていた**。これは WebGL ではなく **JS（シングルスレッド）由来** | `scene.rs` `FrameChunk` / `build_chunks` | Player ごとに `FrameChunk`（arena / prims / mesh_stream / draw_calls / ss_params）を持たせ、独立に組んでから **`order` 順に連結**（`absorb` がオフセットを rebase）。連結順が確定なので結果は分割方法に依存しない | **下記の計測結果を必ず読むこと** |
+
+**6 の計測結果（★「速くなるはず」が外れた例）**
+
+`tests/scale.rs`（14 コア / release / 混成キャスト）:
+
+| players | 直列 | スレッド |
+|---|---|---|
+| 8 | 0.045 ms | 0.105 ms |
+| 32 | 0.164 ms | 0.184 ms |
+| 64 | 0.252 ms | 0.241 ms |
+| 128 | 0.507 ms | **0.320 ms** |
+| 256 | 1.053 ms | **0.580 ms** |
+
+- **64体あたりまでスレッドは損**。`std::thread::scope` の spawn コストが仕事量を上回る——**7-6 で頂点組み立てが CPU から消えた結果、走査そのものが安くなった**ため。
+- **そもそも桁を見ること**: 256体でも直列 1 ms。16.6 ms のフレーム予算に対して 6%。**層2 の CPU コストはもう主要因ではない。**
+- よって `PARALLEL_THRESHOLD = 64` で**体数に応じて切り替える**。永続スレッドプール（rayon 等）なら閾値は下がるが、**1 ms 未満を買うために依存を1つ増やす**判断は数字が支持しない。
+- **`FrameChunk` への分解自体は残す価値がある**: Player 間の結合が切れ、並列化の前提が整い、直列時のコストはゼロ（`absorb` の rebase のみ）。閾値の再測定は `cargo test --release --test scale -- --ignored --nocapture`。
+| 7 | **テクスチャ bind group を毎 draw 無条件に再設定**。同じテクスチャが続いても再バインドする | `scene.rs` `draw` | 直前と同じならスキップ（pipeline 側の `_lastBlend` 相当の去重がテクスチャには無い） | 小さいが 4 の前段として自然 |
+| 8 | **Shape は常に 30 頂点**（`SHAPE_FAN_VERTS` 固定ストライド）。余りは面積ゼロに潰している | §5.5 / `renderer.rs` `vs_shape` | prefix sum ＋ **indirect draw** で実頂点数ぶんだけ回す | Shape は稀なので優先度は低い。7-6 で「算術で引ける」ことを優先した意図的な割り切り |
+| 9 | **テクスチャの premultiply を CPU でやる**。WebGL は `UNPACK_PREMULTIPLY_ALPHA_WEBGL` がドライバ側で無料だった | §8 / `renderer.rs` `upload_texture` | web は `createImageBitmap` ＋ `copy_external_image_to_texture` で**デコードをオフスレッド・premul を GPU へ** | §8 に既に案として書いてある。2048² で 16 MB の一時コピーが消える。native 側は premul のまま（線形補間の正しさのため、§14） |
+
+**5 の計測結果（★実装して却下した例）**
+
+draw リストが前フレームと同一なら bundle を再生、変われば録り直す実装で計測（`tests/scale.rs`、`update` ＋ pass encode を**同一ループで**）:
+
+| players | 直接 encode | render bundle | 録り直し率 |
+|---|---|---|---|
+| 8 | 0.0578 ms | 0.0600 ms | 115/200 |
+| 64 | 0.2671 ms | 0.2742 ms | 115/200 |
+| 256 | 0.6633 ms | 0.6822 ms | 115/200 |
+
+- **draw リストは 58% のフレームで変わる**。パーツの表示/非表示で prim 数が動き、vertex range がずれるため。録り直すフレームは「直接 encode ＋ リスト比較 ＋ bundle finish」で確実に損。
+- 再生できる 42% で浮くのは encode ぶんだけで、**encode は 256体でも 0.09 ms＝フレームの 13%**。差引きマイナス。
+- 加えて **bundle は pass の depth/stencil 読み書き属性と一致する必要**があり、ホストの pass 記述子に新しい制約が増える。得るもののほうが小さい。
+- **計測の落とし穴**: `update` と encode を別ループで測ると bundle は 0.0898→0.0003 ms（300倍）に見える。更新しないループでは録り直しが起きないため。**キャッシュ系を測るときは必ず実フレーム順で回すこと。**
+- **成立させる道が1つだけある**: `draw_indirect` で vertex range をバッファへ追い出せば、リストは安定し録り直しがほぼ消える。ただし上限は依然 0.09 ms なので、現状では割に合わない。
+- **web は未計測**。WebGPU では1コマンドが1 JS 呼び出しなので比率が変わる可能性はある。**ブラウザで測ってから**再検討すること。
+
+**7 / 4 の当たり取り（★GPU 側の実測）**
+
+`tests/scale.rs`（1280x720、混成キャスト、release）。`mergeable` は「直前の draw と pipeline・texture が同じで vertex range が連続する」数＝**マージの上限**、`rebinds` は「直前と同じテクスチャなのに bind group を張り直している」数＝**7 の上限**。
+
+| players | CPU (ms) | **GPU (ms)** | prims | draws | mergeable | rebinds |
+|---|---|---|---|---|---|---|
+| 8 | 0.26 | 0.043 | 234 | 78 | 24 (31%) | 65 (83%) |
+| 64 | 0.64 | 0.136 | 1872 | 624 | 192 (31%) | 527 (84%) |
+| 256 | 1.33 | **0.185** | 7488 | 2496 | 768 (31%) | 2111 (85%) |
+
+- **draw の 85% は bind group の張り直しが不要**（同一アトラスを共有するため）。7 の効果は確かにあるが、**削れるのは CPU の encode 側だけ**で、encode は 256体でも 0.09 ms。
+- **マージできるのは 31%**。2496 → 1728 draws。
+- **しかし GPU は 256体でも 0.185 ms**。16.6 ms の予算に対して 1.1%。draws を 31% 削っても、削れるのはその一部でしかない。
+- **結論: 7 も 4 も、現状のワークロードでは投資に見合わない。** 4（bindless）は WebGPU で使えず native 分岐が要る話でもあり、**0.1 ms 未満を買うために持ち込む複雑さではない**。
+- **ただし `rebinds` 85% は web では話が変わりうる**（1コマンド＝1 JS 呼び出し）。ブラウザで測ってからにすること。7 は実装も小さいので、web の数字が出たら再考する価値はある。
+
+#### 計測
+
+| # | 現状（WebGL 由来） | WebGPU での本来形 | 備考 |
+|---|---|---|---|
+| 10 ✅ **実装済** | **GPU 側を測る手段が無かった**。WebGL の `EXT_disjoint_timer_query` は Spectre 対策でブラウザから実質消滅したので、参照実装には読む時計自体が無く、読む習慣も育たなかった | `metrics.rs`：`SceneStats`（players / prims / draw_calls / uploaded_bytes）＋ **timestamp query** による pass 単位の GPU 時間 | 下記参照 |
+
+**10 の実装メモ**
+
+- `SSScene::stats() -> SceneStats`。**カウンタは常に取れる**（無料）。`prims` と `draw_calls` の差が、そのまま 4（bindless）と 7-8（draw マージ）の伸びしろ。
+- GPU 時間は `Features::TIMESTAMP_QUERY` が要る。**`request_device` 時に要求しないと一生使えない**ので、各ホストが `adapter.features() & TIMESTAMP_QUERY` で「あれば取る」形にしてある（`host.rs` / `web.rs` / `examples/viewer`）。無い環境でも動作は変わらず、数字だけ `None` になる。
+- **pass 単位**（`timestamp_writes` の beginning/end）に留めた。draw 単位は `TIMESTAMP_QUERY_INSIDE_PASSES` が要り、これは native 限定。「その変更でフレームは安くなったか」には pass 単位で答えられる。
+- 借用モデルの帰結として、**render pass を開くのはホスト**なので、scene は `timestamp_writes()` を渡すだけ。ホストは pass 記述子に入れ、pass 後に `resolve_timestamps(&mut encoder)` を呼ぶ。
+- **読み出しは1〜2フレーム遅れる**。パイプラインを止めずに読むとはそういうこと。プロファイル用カウンタとしては正しい割り切りで、`begin_frame` が「前フレームの submit 済み」を利用して map を仕掛ける。
+- **CPU 時間は意図的に持たない**。`std::time::Instant` は `wasm32-unknown-unknown` で panic するため、ここで測ると依存を1つ増やして、ホストが1行で書けるものを肩代わりすることになる（viewer は `Instant` で `update` を挟んでいる）。
+- C 面は `ss_scene_stats(ss_scene_t*, ss_scene_stats_t*)`。Metal viewer が表示する。
+- 検証: `tests/scene.rs::a_frame_reports_what_it_cost`（カウンタが実際に増減するか）＋ `gpu_pass_time_comes_back`（**timestamp のハンドシェイク全体**を歩いて数字が返ることを要求。timestamp query 非対応アダプタでは skip）。実測 0.025 ms / 256² / Basic.ssab 1体。
+
+**★結論（計測ののち）**: **§14.2 の速度側 6 項目（4〜9）は、現状のワークロードでは着手する理由が無い。**
+
+- 10（計測）✅ → 6（並列化）✅ ただし 64体未満では損 → 5（render bundle）❌ 全域で損、revert → **7 / 4 は当たりを取った結果、上限が小さすぎて見送り**。
+- 数字がすべてを説明する: **256体で CPU 1.3 ms ＋ GPU 0.19 ms**。60fps の予算 16.6 ms に対して合計 9%。**P7-6 が CPU 側の仕事を実際に消した**ため、その先に積む最適化は削る対象を失っている。
+- 8（Shape 固定30頂点）・9（CPU premul）も同じ理由で優先度は低い。9 は web でのアップロード一時コピー 16 MB の話なので、**サイズ/メモリの観点**なら別途価値がある。
+- **残る価値は速度ではなく表現力**——1（マスクの厳密化）と 2（背景読みブレンド）は「今できないことができるようになる」項目で、計測とは無関係に効く。**次に着手するならこちら。**
+- **web だけは未計測**。1コマンド＝1 JS 呼び出しなので 5 / 7 の比率は変わりうる。ブラウザで `stats()` を取ってから再考すること。1 / 2 は表現力なので必要になってから。3 は SDK 側の合意が要る。
 
 ---
 

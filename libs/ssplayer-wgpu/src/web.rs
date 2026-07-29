@@ -44,7 +44,11 @@ fn create_stencil_view(device: &wgpu::Device, width: u32, height: u32) -> wgpu::
 /// (backgrounded tab, GPU process crash, driver reset), so a long-lived ad creative
 /// has to expect it. Once set, the host is meant to call [`SsPlayerWeb::restore_device`].
 async fn request_device(adapter: &wgpu::Adapter) -> Result<(wgpu::Device, wgpu::Queue, Arc<AtomicBool>), JsValue> {
-    let (device, queue) = adapter.request_device(&wgpu::DeviceDescriptor::default()).await.map_err(js_err)?;
+    // GPU timing when the browser offers it (SPEC §14.2 item 10) — Chrome gates
+    // `timestamp-query` behind a flag on some platforms, so this must not be
+    // required, only taken when available.
+    let device_desc = wgpu::DeviceDescriptor { required_features: adapter.features() & wgpu::Features::TIMESTAMP_QUERY, ..Default::default() };
+    let (device, queue) = adapter.request_device(&device_desc).await.map_err(js_err)?;
     let lost = Arc::new(AtomicBool::new(false));
     let flag = Arc::clone(&lost);
     device.set_device_lost_callback(move |_reason, _message| flag.store(true, Ordering::Relaxed));
@@ -233,12 +237,13 @@ impl SsPlayerWeb {
                     depth_ops: Some(wgpu::Operations { load: wgpu::LoadOp::Clear(1.0), store: wgpu::StoreOp::Store }),
                     stencil_ops: Some(wgpu::Operations { load: wgpu::LoadOp::Clear(0), store: wgpu::StoreOp::Store }),
                 }),
-                timestamp_writes: None,
+                timestamp_writes: self.scene.timestamp_writes(),
                 occlusion_query_set: None,
                 multiview_mask: None,
             });
             self.scene.draw(&self.renderer, &mut rpass);
         }
+        self.scene.resolve_timestamps(&mut encoder);
         self.queue.submit(std::iter::once(encoder.finish()));
         frame.present();
         Ok(())

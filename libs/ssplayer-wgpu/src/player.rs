@@ -14,7 +14,7 @@ use crate::frame::FrameView;
 use crate::mask::{GeomKind, MaskOp, MaskWriter, PartMaskFlags, StencilTest, plan_writers};
 use crate::pack::SSPack;
 use crate::renderer::{Retention, SSRenderer};
-use crate::scene::{BatchInfo, NodeSlot, SSScene};
+use crate::scene::{BatchInfo, FrameChunk, NodeSlot};
 use ssab::ssab::ss::format::{PartType, root_as_ss_anime_binary_unchecked};
 use ssruntime::error::SSRuntimeError;
 use ssruntime::runtime::framedata::ss::runtime::{DrawBatchKind, root_as_frame_data_unchecked};
@@ -105,7 +105,7 @@ impl SSPlayer {
     /// was never affected: the animation resumes where it was interrupted.
     pub fn restore_textures(&mut self, renderer: &mut SSRenderer, device: &wgpu::Device, queue: &wgpu::Queue) {
         self.packs_awaiting_textures = self.packs.values().filter(|p| p.has_embedded_textures()).map(|p| p.name().to_string()).collect();
-        self.flush_pending_textures(renderer, device, queue);
+        self.flush_textures(renderer, device, queue);
     }
 
     /// Register a pack for external instance references (SPEC §7.1) without
@@ -280,7 +280,7 @@ impl SSPlayer {
     /// skips the PNG decode as well as the upload, and a host that supplied its own
     /// image for a hash keeps it. A host that wants the embedded pixels instead
     /// calls [`SSRenderer::forget_texture`] first.
-    fn flush_pending_textures(&mut self, renderer: &mut SSRenderer, device: &wgpu::Device, queue: &wgpu::Queue) {
+    pub(crate) fn flush_textures(&mut self, renderer: &mut SSRenderer, device: &wgpu::Device, queue: &wgpu::Queue) {
         if self.packs_awaiting_textures.is_empty() {
             return;
         }
@@ -304,11 +304,7 @@ impl SSPlayer {
     /// Called by [`SSScene::update`] for each player in draw order — the scene
     /// owns the frame boundary (`begin_frame` / `end_frame`), because one frame
     /// now spans every player sharing the target.
-    pub(crate) fn build_frame(&mut self, scene: &mut SSScene, renderer: &mut SSRenderer, device: &wgpu::Device, queue: &wgpu::Queue, delta_secs: f32) {
-        // Flush any embedded textures decoded at load time (§8.1); this is the
-        // earliest point the borrow model lends a Queue.
-        self.flush_pending_textures(renderer, device, queue);
-
+    pub(crate) fn build_frame(&mut self, scene: &mut FrameChunk, renderer: &SSRenderer, delta_secs: f32) {
         // `visible == false` means "this player cannot be seen": no timeline
         // advance and no geometry. Textures are still flushed above, so it can be
         // made visible again without re-loading anything.
@@ -432,7 +428,7 @@ fn sync_masks_to(build: &mut FrameBuild<'_>, frame: &FrameView, node: &NodeSlot,
 /// sizes from. Only the scene is mutated — pipelines are compiled later, in
 /// `end_frame`, which is where the renderer is borrowed mutably.
 struct FrameBuild<'a> {
-    scene: &'a mut SSScene,
+    scene: &'a mut FrameChunk,
     renderer: &'a SSRenderer,
 }
 
