@@ -222,7 +222,7 @@ impl ApplicationHandler for App {
         let stencil_view = create_stencil_view(&device, config.width, config.height);
 
         let mut renderer = SSRenderer::new(&device);
-        let scene = SSScene::new(&device, &renderer, &SceneConfig { color_format: format, stencil_format: Some(STENCIL_FORMAT) });
+        let scene = SSScene::new(&device, &SceneConfig { color_format: format, stencil_format: Some(STENCIL_FORMAT) });
         let mut player = SSPlayer::new();
 
         // Host responsibility (reference-mode ssab): decode atlas PNGs and hand

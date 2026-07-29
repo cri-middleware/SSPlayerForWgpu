@@ -73,10 +73,20 @@
 #define SS_BACKEND_VULKAN 3
 
 /*
- Opaque player handle: a [`NativeHost`] plus the buffer backing the string
- `ss_player_animation_name` hands back to C.
+ Opaque player handle: which scene, and which player within it.
+
+ Not a pointer into the scene's player list. That list moves as it grows, and
+ slots are reused, so the id carries a generation and every call re-resolves it
+ (SPEC §11).
  */
 typedef struct ss_player_t ss_player_t;
+
+/*
+ Opaque scene handle: one window's [`NativeHost`], the player handles it has
+ issued, and the buffer backing the string `ss_player_animation_name` hands
+ back to C.
+ */
+typedef struct ss_scene_t ss_scene_t;
 
 /*
  A platform window, flattened for the ABI. Which fields are read depends on
@@ -104,7 +114,7 @@ typedef struct {
 } ss_window_handle_t;
 
 /*
- Everything `ss_player_create` needs: where to draw, how big, and how to clear.
+ Everything `ss_scene_create` needs: where to draw, how big, and how to clear.
  */
 typedef struct {
     /*
@@ -130,7 +140,7 @@ typedef struct {
     float clear_color[4];
     /*
      Allocate a depth/stencil buffer so mask parts rasterise (SPEC §6). With
-     `false` the player runs without masking, exactly as if the host attached
+     `false` the scene runs without masking, exactly as if the host attached
      no stencil.
      */
     bool enable_mask;
@@ -138,7 +148,7 @@ typedef struct {
      Flip the projection to Y-down (screen coordinates). `false` = Y-up.
      */
     bool y_down;
-} ss_player_desc_t;
+} ss_scene_desc_t;
 
 #ifdef __cplusplus
 extern "C" {
@@ -156,24 +166,64 @@ extern "C" {
 const char *ss_last_error(void);
 
 /*
- Create a player that renders into the window described by `desc`.
+ Create a scene that renders into the window described by `desc`.
 
  Returns null on failure; call `ss_last_error` for the reason. The window (and
- its layer, on macOS) must stay alive until `ss_player_destroy`.
+ its layer, on macOS) must stay alive until `ss_scene_destroy`.
+
+ A scene holds no player of its own — add them with `ss_scene_create_player`,
+ as many as the window should show.
 
  # Safety
- `desc` must point at a valid `ss_player_desc_t` whose window handle is live
+ `desc` must point at a valid `ss_scene_desc_t` whose window handle is live
  and matches its `kind`. On macOS this must be called from the main thread.
  */
-ss_player_t *ss_player_create(const ss_player_desc_t *desc);
+ss_scene_t *ss_scene_create(const ss_scene_desc_t *desc);
 
 /*
- Destroy a player and release its wgpu resources. Null is a no-op.
+ Destroy a scene, its players and its wgpu resources. Null is a no-op.
+
+ **Every `ss_player_t` this scene issued becomes invalid**, including handles
+ the caller still holds — using one afterwards reads freed memory. Drop them
+ with the scene.
 
  # Safety
- `handle` must come from `ss_player_create` and must not be used afterwards.
+ `handle` must come from `ss_scene_create` and must not be used afterwards,
+ nor must any player handle it created.
+ */
+void ss_scene_destroy(ss_scene_t *handle);
+
+/*
+ Add a player to `scene` and return its handle, or null if `scene` is null.
+
+ One scene draws any number of players, in ascending `ss_player_set_order`.
+ They share the window's device, renderer and atlas textures, so the second
+ character of a pack costs no upload and no extra pipeline (SPEC §1.2).
+
+ The handle stays valid until `ss_player_destroy` or `ss_scene_destroy`.
+
+ # Safety
+ `scene` must be a live handle or null.
+ */
+ss_player_t *ss_scene_create_player(ss_scene_t *scene);
+
+/*
+ Remove a player from its scene. Null, or a handle already destroyed, is a
+ safe no-op — the handle itself stays allocated until the scene goes.
+
+ # Safety
+ `handle` must be null or come from `ss_scene_create_player` on a scene that
+ is still alive.
  */
 void ss_player_destroy(ss_player_t *handle);
+
+/*
+ How many players `scene` currently holds.
+
+ # Safety
+ `scene` must be a live handle or null.
+ */
+uint32_t ss_scene_player_count(ss_scene_t *scene);
 
 /*
  Register an `.ssab` pack under `pack_name` without changing what plays.
@@ -181,7 +231,7 @@ void ss_player_destroy(ss_player_t *handle);
  Every pack an animation can reference must be registered before
  `ss_player_set_animation`, since external instance parts resolve by pack name
  (SPEC §7.1). Embedded-mode packs (SPEC §8.1) also carry their atlases; those
- are decoded here and uploaded on the next `ss_player_update`.
+ are decoded here and uploaded on the next `ss_scene_update`.
 
  # Safety
  `pack_name` must be a NUL-terminated UTF-8 string and `data` must point at
@@ -200,18 +250,22 @@ int32_t ss_player_load_ssab(ss_player_t *handle, const char *pack_name, const ui
 /*
  Supply a texture for a reference-mode pack, keyed by the fnv1a hash the
  runtime reports in `DrawBatch.texture_hash` (SPEC §8.1). `rgba` is
- straight-alpha RGBA8, `width * height * 4` bytes; the player premultiplies it.
+ straight-alpha RGBA8, `width * height * 4` bytes; it is premultiplied on the
+ way to the GPU.
 
- Embedded-mode packs need no call: their atlases load with the pack.
+ Registered on the **scene**, because the texture map is device-scoped: every
+ player in the window sees it, and a pack shown five times is uploaded once
+ (SPEC §1.2). Embedded-mode packs need no call — their atlases load with the
+ pack.
 
  # Safety
  `rgba` must point at `width * height * 4` readable bytes. It is not retained.
  */
-int32_t ss_player_add_texture(ss_player_t *handle,
-                              uint32_t hash,
-                              const uint8_t *rgba,
-                              uint32_t width,
-                              uint32_t height);
+int32_t ss_scene_add_texture(ss_scene_t *scene,
+                             uint32_t hash,
+                             const uint8_t *rgba,
+                             uint32_t width,
+                             uint32_t height);
 
 /*
  Select the animation to play, rebuilding the instance tree. It is left at its
@@ -286,6 +340,51 @@ uint32_t ss_player_animation_count(ss_player_t *handle);
 const char *ss_player_animation_name(ss_player_t *handle, uint32_t index);
 
 /*
+ Place this player in its scene: translation in pixels from the centre, scale,
+ then rotation in radians.
+
+ Without this every player sits at the origin on top of the others, which is
+ why the old one-player-per-window API never needed it.
+
+ # Safety
+ `handle` must be a live handle or null.
+ */
+void ss_player_set_transform(ss_player_t *handle,
+                             float x,
+                             float y,
+                             float scale_x,
+                             float scale_y,
+                             float rotation);
+
+/*
+ Draw order within the scene; lower draws first. Ties keep the order the
+ players were created in.
+
+ # Safety
+ `handle` must be a live handle or null.
+ */
+void ss_player_set_order(ss_player_t *handle, int32_t order);
+
+/*
+ Skip this player entirely when `false`: its timeline does not advance and it
+ produces no geometry. For a player the caller knows cannot be seen; use
+ `ss_player_set_alpha(0)` for a fade that keeps playing.
+
+ # Safety
+ `handle` must be a live handle or null.
+ */
+void ss_player_set_visible(ss_player_t *handle, bool visible);
+
+/*
+ Player-level fade, clamped to 0..1. Mask coverage is unaffected: a faded
+ player clips exactly as it would at full opacity.
+
+ # Safety
+ `handle` must be a live handle or null.
+ */
+void ss_player_set_alpha(ss_player_t *handle, float alpha);
+
+/*
  Canvas size of the animation currently playing. Either out-pointer may be null.
 
  # Safety
@@ -294,33 +393,35 @@ const char *ss_player_animation_name(ss_player_t *handle, uint32_t index);
 int32_t ss_player_canvas_size(ss_player_t *handle, float *width, float *height);
 
 /*
- Advance the playback tree by `delta_seconds` and build this frame's GPU buffers.
- Call once per frame, before `ss_player_render`.
+ Advance every player in the scene by `delta_seconds` and build this frame's
+ GPU buffers. Call once per frame, before `ss_scene_render`.
 
  # Safety
- `handle` must be a live handle or null.
+ `scene` must be a live handle or null.
  */
-void ss_player_update(ss_player_t *handle, float delta_seconds);
+void ss_scene_update(ss_scene_t *scene, float delta_seconds);
 
 /*
  Acquire the swapchain image, draw the prepared frame into it, and present.
+
+ One pass covers every player, in ascending `ss_player_set_order`.
 
  A lost/outdated surface is absorbed by reconfiguring (SPEC §14): the call
  returns `SS_OK` having skipped one frame.
 
  # Safety
- `handle` must be a live handle or null.
+ `scene` must be a live handle or null.
  */
-int32_t ss_player_render(ss_player_t *handle);
+int32_t ss_scene_render(ss_scene_t *scene);
 
 /*
  Resize the swapchain, the depth/stencil buffer and the projection to a new
  drawable size in **pixels**. Zero in either dimension is ignored.
 
  # Safety
- `handle` must be a live handle or null.
+ `scene` must be a live handle or null.
  */
-void ss_player_resize(ss_player_t *handle, uint32_t width, uint32_t height);
+void ss_scene_resize(ss_scene_t *scene, uint32_t width, uint32_t height);
 
 #ifdef __cplusplus
 }  // extern "C"

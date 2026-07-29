@@ -12,14 +12,14 @@
 
 use crate::frame::FrameView;
 use crate::mask::{GeomKind, MaskOp, MaskWriter, PartMaskFlags, StencilTest, plan_writers};
+use crate::pack::SSPack;
 use crate::renderer::{Retention, SSRenderer};
-use crate::scene::{BatchInfo, SSScene};
+use crate::scene::{BatchInfo, NodeSlot, SSScene};
 use ssab::ssab::ss::format::{PartType, root_as_ss_anime_binary_unchecked};
 use ssruntime::error::SSRuntimeError;
 use ssruntime::runtime::framedata::ss::runtime::{DrawBatchKind, root_as_frame_data_unchecked};
-use ssruntime::{Context, EffectSlot, InstanceSlot, SsabData, SsabResource};
+use ssruntime::{Context, EffectSlot, InstanceSlot};
 use std::collections::HashMap;
-use std::sync::Arc;
 
 /// Column-major 4x4 identity.
 const IDENTITY: [f32; 16] = [1.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 1.0];
@@ -49,17 +49,21 @@ struct InstanceChild {
 /// The SpriteStudio player. One instance owns one animation-instance tree.
 pub struct SSPlayer {
     /// All registered packs, keyed by pack name (matches `ref_anime_pack`).
-    resources: HashMap<String, Arc<SsabResource>>,
+    /// Cloning a pack shares its parse and its bytes (SPEC §8.2), so N players of
+    /// one character cost one copy of the `.ssab` between them.
+    packs: HashMap<String, SSPack>,
     main_pack: Option<String>,
     root: Option<PlaybackNode>,
     current_animation: Option<String>,
     /// Root frame_no from the previous `update`, used to detect the loop edge
     /// that instance slots need (`parent_looped`).
     last_root_frame: f32,
-    /// Embedded-mode textures decoded at `add_ssab` (CPU), awaiting GPU upload on
-    /// the next `update` (the borrow model means load has no `Device`/`Queue`).
-    /// Each entry is `(cellmap name_hash, straight-alpha RGBA, width, height)`.
-    pending_textures: Vec<(u32, Vec<u8>, u32, u32)>,
+    /// Names of packs whose embedded atlases (SPEC §8.1) have not been offered to
+    /// a renderer yet. The offer happens on the next `update`, which is the
+    /// earliest point the borrow model lends a `Device`/`Queue`; the decode itself
+    /// waits until then too, so a pack whose atlas is already registered is never
+    /// decoded at all.
+    packs_awaiting_textures: Vec<String>,
     /// Where this player sits in the scene — the root transform of its tree
     /// (SPEC §5.4). Composed by [`SSPlayer::set_transform`]; only the matrix is
     /// kept because nothing yet re-composes it. A future `box` (§9.3, the
@@ -87,10 +91,10 @@ impl SSPlayer {
     /// cheap. The device-scoped [`SSRenderer`] and the target-scoped
     /// [`SSScene`] are lent to it per frame by [`SSScene::update`].
     pub fn new() -> Self {
-        Self { resources: HashMap::new(), main_pack: None, root: None, current_animation: None, last_root_frame: 0.0, pending_textures: Vec::new(), transform: IDENTITY, order: 0, visible: true, alpha: 1.0 }
+        Self { packs: HashMap::new(), main_pack: None, root: None, current_animation: None, last_root_frame: 0.0, packs_awaiting_textures: Vec::new(), transform: IDENTITY, order: 0, visible: true, alpha: 1.0 }
     }
 
-    /// Re-register this player's embedded atlases after a device loss (SPEC §14).
+    /// Re-offer this player's embedded atlases after a device loss (SPEC §14).
     ///
     /// The player itself has nothing to rebuild — it owns no GPU resource. What it
     /// does own is the `.ssab`, which is the only place a [`Retention::Reproducible`]
@@ -100,78 +104,47 @@ impl SSPlayer {
     /// Playback state (packs, the instance tree, the current frame) is CPU-side and
     /// was never affected: the animation resumes where it was interrupted.
     pub fn restore_textures(&mut self, renderer: &mut SSRenderer, device: &wgpu::Device, queue: &wgpu::Queue) {
-        // Anything queued for the old device is stale — the decode below covers it.
-        self.pending_textures.clear();
-        // Sorted by pack name because later packs overwrite earlier ones on a
-        // texture-hash collision, and a restore must not land on a different
-        // winner than the last one did.
-        let mut packs: Vec<(&String, &Arc<SsabResource>)> = self.resources.iter().collect();
-        packs.sort_by_key(|(name, _)| *name);
-        let packs: Vec<Arc<SsabResource>> = packs.into_iter().map(|(_, r)| Arc::clone(r)).collect();
-        for resource in &packs {
-            self.decode_embedded_textures(resource.data().as_slice());
-        }
+        self.packs_awaiting_textures = self.packs.values().filter(|p| p.has_embedded_textures()).map(|p| p.name().to_string()).collect();
         self.flush_pending_textures(renderer, device, queue);
     }
 
-    /// Register an `.ssab` pack under `pack_name` (used to resolve external
-    /// instance references). Does not change what is playing.
-    pub fn add_ssab(&mut self, pack_name: &str, data: &[u8]) -> Result<(), SSRuntimeError> {
-        let ssab_data = SsabData::load_copy(data)?;
-        let resource = SsabResource::new(ssab_data);
-        if resource.resource_static_ptr().is_null() {
-            return Err(SSRuntimeError::NotLoaded);
+    /// Register a pack for external instance references (SPEC §7.1) without
+    /// changing what is playing. Registration is by [`SSPack::name`].
+    ///
+    /// Sharing one pack between players is the intended shape (SPEC §8.2): the
+    /// clone is an `Arc` bump, and the atlas reaches the GPU once no matter how
+    /// many players hold it.
+    pub fn add_pack(&mut self, pack: &SSPack) {
+        let name = pack.name().to_string();
+        if pack.has_embedded_textures() {
+            self.packs_awaiting_textures.push(name.clone());
         }
-        self.resources.insert(pack_name.to_string(), resource);
-        // Embedded ssab (SPEC §8.1): decode the atlas PNGs the pack carries and
-        // queue them for GPU upload on the next `update`. Reference ssab has no
-        // embedded_assets, so this is a no-op and the host supplies textures via
-        // `upload_texture`. Both modes funnel into the same renderer texture map.
-        self.decode_embedded_textures(data);
+        self.packs.insert(name, pack.clone());
+    }
+
+    /// Register `pack` and make it the one [`SSPlayer::set_animation`] selects
+    /// from. Clears the current animation.
+    pub fn set_pack(&mut self, pack: &SSPack) {
+        self.add_pack(pack);
+        self.main_pack = Some(pack.name().to_string());
+        self.root = None;
+        self.current_animation = None;
+    }
+
+    /// Parse `data` and register it under `pack_name` — [`SSPack::load_named`] +
+    /// [`SSPlayer::add_pack`] in one call, for hosts holding bytes rather than
+    /// packs (the C and js faces, and anything naming packs after files).
+    pub fn add_ssab(&mut self, pack_name: &str, data: &[u8]) -> Result<(), SSRuntimeError> {
+        let pack = SSPack::load_named(pack_name, data)?;
+        self.add_pack(&pack);
         Ok(())
     }
 
-    /// Decode a pack's embedded atlas textures (SPEC §8.1) into `pending_textures`
-    /// for upload on the next `update`. Each `CellMap` names its texture by
-    /// `name_hash` (what `DrawBatch.texture_hash` carries) and points at its bytes
-    /// via `image_path_hash` (the `embedded_assets` key). No-op without the
-    /// `embedded` feature (host decodes texture-side instead).
-    #[cfg(feature = "embedded")]
-    fn decode_embedded_textures(&mut self, data: &[u8]) {
-        let ab = unsafe { root_as_ss_anime_binary_unchecked(data) };
-        let (Some(cellmaps), Some(assets)) = (ab.cellmaps(), ab.embedded_assets()) else {
-            return;
-        };
-        // image_path_hash -> raw PNG bytes.
-        let mut bytes_by_hash: HashMap<u32, &[u8]> = HashMap::new();
-        for asset in assets {
-            if let Some(bytes) = asset.data() {
-                bytes_by_hash.insert(asset.name_hash(), bytes.bytes());
-            }
-        }
-        for cm in cellmaps {
-            let Some(png) = bytes_by_hash.get(&cm.image_path_hash()) else {
-                continue;
-            };
-            let Ok(img) = image::load_from_memory(png) else {
-                continue;
-            };
-            let rgba = img.to_rgba8();
-            let (w, h) = rgba.dimensions();
-            // Keyed by the cellmap name_hash — the hash the renderer looks up.
-            self.pending_textures.push((cm.name_hash(), rgba.into_raw(), w, h));
-        }
-    }
-
-    #[cfg(not(feature = "embedded"))]
-    fn decode_embedded_textures(&mut self, _data: &[u8]) {}
-
-    /// Register `pack_name` and make it the main pack to play from.
+    /// [`SSPlayer::add_ssab`] + [`SSPlayer::set_pack`]: register `pack_name` and
+    /// make it the main pack to play from.
     pub fn load_ssab(&mut self, pack_name: &str, data: &[u8]) -> Result<(), SSRuntimeError> {
-        self.add_ssab(pack_name, data)?;
-        self.main_pack = Some(pack_name.to_string());
-        self.root = None;
-        self.current_animation = None;
+        let pack = SSPack::load_named(pack_name, data)?;
+        self.set_pack(&pack);
         Ok(())
     }
 
@@ -183,7 +156,7 @@ impl SSPlayer {
     /// own `setup_animation` + `play` split.
     pub fn set_animation(&mut self, anim_name: &str) -> Result<(), SSRuntimeError> {
         let main_pack = self.main_pack.clone().ok_or(SSRuntimeError::NotLoaded)?;
-        let root = build_node(&self.resources, &main_pack, anim_name, 0).ok_or(SSRuntimeError::NotLoaded)?;
+        let root = build_node(&self.packs, &main_pack, anim_name, 0).ok_or(SSRuntimeError::NotLoaded)?;
         self.last_root_frame = root.context.get_frame_no();
         self.root = Some(root);
         self.current_animation = Some(anim_name.to_string());
@@ -284,27 +257,45 @@ impl SSPlayer {
 
     /// Names of all animations in the main pack, if loaded.
     pub fn animation_names(&self) -> Option<Vec<String>> {
-        let anim_resource = self.resources.get(self.main_pack.as_ref()?)?.resource()?;
+        let anim_resource = self.packs.get(self.main_pack.as_ref()?)?.resource().resource()?;
         Some(anim_resource.get_animation_names())
     }
 
     /// Canvas size of the currently playing animation.
     pub fn canvas_size(&self) -> Option<(f32, f32)> {
         let name = self.current_animation.as_ref()?;
-        let anim_resource = self.resources.get(self.main_pack.as_ref()?)?.resource()?;
+        let anim_resource = self.packs.get(self.main_pack.as_ref()?)?.resource().resource()?;
         let idx = anim_resource.find_animation_index(name)?;
         let anim_meta = &anim_resource.animations()[idx];
         Some((anim_meta.canvas_width, anim_meta.canvas_height))
     }
 
-    /// Upload everything `decode_embedded_textures` queued. Called at the start of
-    /// each `update` (the earliest point the borrow model lends a `Queue`) and by
-    /// `restore_device`, which re-queues the packs against the new device.
+    /// Hand the renderer any embedded atlas it does not already have (SPEC §8.1).
+    /// Called at the start of each `update` — the earliest point the borrow model
+    /// lends a `Device`/`Queue` — and by `restore_textures`, which re-queues every
+    /// pack against the new device.
+    ///
+    /// **Whatever is already registered wins**, and that is what makes the shared
+    /// texture map pay off: the second player of a pack finds the atlas present,
+    /// skips the PNG decode as well as the upload, and a host that supplied its own
+    /// image for a hash keeps it. A host that wants the embedded pixels instead
+    /// calls [`SSRenderer::forget_texture`] first.
     fn flush_pending_textures(&mut self, renderer: &mut SSRenderer, device: &wgpu::Device, queue: &wgpu::Queue) {
-        for (hash, rgba, w, h) in std::mem::take(&mut self.pending_textures) {
-            // Reproducible: this player still owns the `.ssab` and can decode the
-            // atlas again, so the renderer need not retain a second copy.
-            renderer.upload_texture(device, queue, hash, &rgba, (w, h), Retention::Reproducible);
+        if self.packs_awaiting_textures.is_empty() {
+            return;
+        }
+        // Sorted because packs that disagree about a texture hash resolve by who
+        // registers first, and that answer must not depend on load order.
+        let mut names = std::mem::take(&mut self.packs_awaiting_textures);
+        names.sort();
+        names.dedup();
+        for name in names {
+            let Some(pack) = self.packs.get(&name) else { continue };
+            for tex in pack.decode_embedded_where(|hash| renderer.texture_size(hash).is_none()) {
+                // Reproducible: this player still holds the `.ssab` and can decode
+                // the atlas again, so the renderer need not retain a second copy.
+                renderer.upload_texture(device, queue, tex.hash, &tex.rgba, (tex.width, tex.height), Retention::Reproducible);
+            }
         }
     }
 
@@ -352,16 +343,16 @@ impl SSPlayer {
 /// Recursively build a playback node: create a context bound to `pack`'s
 /// resource, set up `anime`, and build an instance child for every instance
 /// part found in the pack. Child failures are skipped (not fatal).
-fn build_node(resources: &HashMap<String, Arc<SsabResource>>, pack: &str, anime: &str, depth: u32) -> Option<PlaybackNode> {
+fn build_node(packs: &HashMap<String, SSPack>, pack: &str, anime: &str, depth: u32) -> Option<PlaybackNode> {
     if depth > MAX_INSTANCE_DEPTH {
         return None;
     }
-    let resource = resources.get(pack)?;
+    let resource = packs.get(pack)?.resource();
     let res_ptr = resource.resource_static_ptr();
     if res_ptr.is_null() {
         return None;
     }
-    // SAFETY: the resource lives in `resources` for the player's lifetime.
+    // SAFETY: the resource lives in `packs` for the player's lifetime.
     let static_res = unsafe { &*res_ptr };
     let mut context = Context::new();
     context.bind_resource(static_res);
@@ -392,7 +383,7 @@ fn build_node(resources: &HashMap<String, Arc<SsabResource>>, pack: &str, anime:
             match part_type {
                 PartType::PartTypeInstance => {
                     if let Some(inst) = part.part_type_as_part_type_instance()
-                        && let Some(child) = build_node(resources, inst.ref_anime_pack(), inst.ref_anime_name(), depth + 1)
+                        && let Some(child) = build_node(packs, inst.ref_anime_pack(), inst.ref_anime_name(), depth + 1)
                     {
                         instances.insert(i, InstanceChild { slot: InstanceSlot::new(), node: Box::new(child) });
                     }
@@ -421,7 +412,7 @@ const FLAG_MASK_INFLUENCE: u8 = 0x01;
 /// a pure mask's backward scope has ended → remove it (Decr/Invert); a clipping
 /// writer's forward scope has begun → add it (Incr/Invert). Monotonic in
 /// `cursor`; ops are baked per pipeline, so ref is always 0.
-fn sync_masks_to(build: &mut FrameBuild<'_>, frame: &FrameView, transform: &[f32; 16], writers: &[MaskWriter], cursor: &mut usize, up_to_rank: usize) {
+fn sync_masks_to(build: &mut FrameBuild<'_>, frame: &FrameView, node: &NodeSlot, writers: &[MaskWriter], cursor: &mut usize, up_to_rank: usize) {
     while *cursor < writers.len() && writers[*cursor].rank < up_to_rank {
         let w = &writers[*cursor];
         let op = if w.is_clipping {
@@ -431,7 +422,7 @@ fn sync_masks_to(build: &mut FrameBuild<'_>, frame: &FrameView, transform: &[f32
         } else {
             MaskOp::Decr
         };
-        build.scene.append_mask_writer(build.renderer, frame, transform, w, op);
+        build.scene.append_mask_writer(frame, node, w, op);
         *cursor += 1;
     }
 }
@@ -482,6 +473,9 @@ fn render_node(node: &mut PlaybackNode, build: &mut FrameBuild<'_>, draw: NodeDr
         Err(_) => return,
     };
     let frame = frame_view(&mut node.context, frame_data);
+    // Hand this node's runtime buffers to the scene once, up front: everything
+    // below refers to them by arena offset rather than expanding them (SPEC §5.5).
+    let node_slot = build.scene.begin_node(&frame, transform);
 
     // Own masking runs only at the root scope; a masked sub-animation inherits.
     let masking = build.scene.stencil_enabled() && inherited_stencil == StencilTest::None;
@@ -491,7 +485,7 @@ fn render_node(node: &mut PlaybackNode, build: &mut FrameBuild<'_>, draw: NodeDr
     for w in &writers {
         if !w.is_clipping {
             let op = if w.op_invert { MaskOp::Invert } else { MaskOp::Incr };
-            build.scene.append_mask_writer(build.renderer, &frame, transform, w, op);
+            build.scene.append_mask_writer(&frame, &node_slot, w, op);
         }
     }
     let mut cursor = 0usize;
@@ -519,13 +513,13 @@ fn render_node(node: &mut PlaybackNode, build: &mut FrameBuild<'_>, draw: NodeDr
                     // Polarity and active coverage vary per part → draw one at a time.
                     for rank in start_rank..start_rank + count {
                         let part_idx = draw_order.get(rank) as usize;
-                        sync_masks_to(build, &frame, transform, &writers, &mut cursor, rank);
+                        sync_masks_to(build, &frame, &node_slot, &writers, &mut cursor, rank);
                         if is_pure(part_idx) {
                             continue;
                         }
                         let stencil = node.mask_flags.get(part_idx).map(|f| f.polarity()).unwrap_or(StencilTest::None);
                         let info = BatchInfo { start_rank: rank, count: 1, texture_hash: batch.texture_hash(), blend_type: batch.blend_type(), kind, stencil, alpha };
-                        build.scene.append_batch(build.renderer, &frame, transform, &info);
+                        build.scene.append_batch(build.renderer, &frame, &node_slot, &info);
                     }
                 } else if has_pure {
                     // Non-masked batch that still contains a pure mask: draw the
@@ -536,11 +530,11 @@ fn render_node(node: &mut PlaybackNode, build: &mut FrameBuild<'_>, draw: NodeDr
                             continue;
                         }
                         let info = BatchInfo { start_rank: rank, count: 1, texture_hash: batch.texture_hash(), blend_type: batch.blend_type(), kind, stencil: inherited_stencil, alpha };
-                        build.scene.append_batch(build.renderer, &frame, transform, &info);
+                        build.scene.append_batch(build.renderer, &frame, &node_slot, &info);
                     }
                 } else {
                     let info = BatchInfo { start_rank, count, texture_hash: batch.texture_hash(), blend_type: batch.blend_type(), kind, stencil: inherited_stencil, alpha };
-                    build.scene.append_batch(build.renderer, &frame, transform, &info);
+                    build.scene.append_batch(build.renderer, &frame, &node_slot, &info);
                 }
             }
             DrawBatchKind::Instance => {
@@ -553,7 +547,7 @@ fn render_node(node: &mut PlaybackNode, build: &mut FrameBuild<'_>, draw: NodeDr
                     let child_inherited = if masking && !writers.is_empty() {
                         let f = node.mask_flags.get(part_idx).copied().unwrap_or_default();
                         if f.mask_influence {
-                            sync_masks_to(build, &frame, transform, &writers, &mut cursor, rank);
+                            sync_masks_to(build, &frame, &node_slot, &writers, &mut cursor, rank);
                             f.polarity()
                         } else {
                             StencilTest::None
@@ -589,7 +583,7 @@ fn render_node(node: &mut PlaybackNode, build: &mut FrameBuild<'_>, draw: NodeDr
                 // against the screen-space stencil; sync coverage once at its rank.
                 let eff_stencil = if masked_target {
                     let part_idx = draw_order.get(start_rank) as usize;
-                    sync_masks_to(build, &frame, transform, &writers, &mut cursor, start_rank);
+                    sync_masks_to(build, &frame, &node_slot, &writers, &mut cursor, start_rank);
                     node.mask_flags.get(part_idx).map(|f| f.polarity()).unwrap_or(StencilTest::None)
                 } else {
                     inherited_stencil
@@ -609,7 +603,10 @@ fn render_node(node: &mut PlaybackNode, build: &mut FrameBuild<'_>, draw: NodeDr
                         let plan = unsafe { std::slice::from_raw_parts(r.draw_plan_buf, r.draw_plan_len) };
                         let m: [f32; 16] = frame.world_matrices[part_idx * 16..part_idx * 16 + 16].try_into().unwrap();
                         let eff_transform = mat4_mul(transform, &m);
-                        build.scene.append_effect(plan, &eff_transform, eff_stencil, alpha);
+                        // The effect draws from its own plan, so it needs its own
+                        // arena slot rather than this node's.
+                        let eff_slot = build.scene.push_transform(&eff_transform);
+                        build.scene.append_effect(plan, &eff_slot, eff_stencil, alpha);
                     }
                 }
             }
@@ -620,7 +617,7 @@ fn render_node(node: &mut PlaybackNode, build: &mut FrameBuild<'_>, draw: NodeDr
     }
 
     if masking {
-        unwind_masks(build, &frame, transform, &writers, cursor);
+        unwind_masks(build, &frame, &node_slot, &writers, cursor);
     }
 }
 
@@ -640,15 +637,15 @@ fn render_node(node: &mut PlaybackNode, build: &mut FrameBuild<'_>, draw: NodeDr
 ///
 /// The extra draw calls are bounded by the writer count (at most
 /// [`crate::mask::MAX_MASK_WRITERS`]) and write no colour.
-fn unwind_masks(build: &mut FrameBuild<'_>, frame: &FrameView, transform: &[f32; 16], writers: &[MaskWriter], cursor: usize) {
+fn unwind_masks(build: &mut FrameBuild<'_>, frame: &FrameView, node: &NodeSlot, writers: &[MaskWriter], cursor: usize) {
     let remove = |w: &MaskWriter| if w.op_invert { MaskOp::Invert } else { MaskOp::Decr };
     // Consumed clipping writers: `sync_masks_to` added their coverage.
     for w in writers[..cursor].iter().filter(|w| w.is_clipping) {
-        build.scene.append_mask_writer(build.renderer, frame, transform, w, remove(w));
+        build.scene.append_mask_writer(frame, node, w, remove(w));
     }
     // Unconsumed pure masks: pre-written before the batch loop, never removed.
     for w in writers[cursor..].iter().filter(|w| !w.is_clipping) {
-        build.scene.append_mask_writer(build.renderer, frame, transform, w, remove(w));
+        build.scene.append_mask_writer(frame, node, w, remove(w));
     }
 }
 

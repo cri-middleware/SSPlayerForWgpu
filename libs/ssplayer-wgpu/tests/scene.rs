@@ -52,8 +52,8 @@ fn load_textures(renderer: &mut SSRenderer, device: &wgpu::Device, queue: &wgpu:
 }
 
 /// A scene sized for the W x H offscreen target.
-fn make_scene(device: &wgpu::Device, queue: &wgpu::Queue, renderer: &SSRenderer, stencil: bool) -> SSScene {
-    let mut scene = SSScene::new(device, renderer, &SceneConfig { color_format: COLOR_FORMAT, stencil_format: stencil.then_some(STENCIL_FORMAT) });
+fn make_scene(device: &wgpu::Device, queue: &wgpu::Queue, stencil: bool) -> SSScene {
+    let mut scene = SSScene::new(device, &SceneConfig { color_format: COLOR_FORMAT, stencil_format: stencil.then_some(STENCIL_FORMAT) });
     scene.set_viewport(queue, W as f32, H as f32, false);
     scene
 }
@@ -207,15 +207,15 @@ fn stencil_unwind_isolates_players() {
     let mut renderer = SSRenderer::new(&device);
 
     // Subject: one scene holding both players.
-    let mut shared = make_scene(&device, &queue, &renderer, true);
+    let mut shared = make_scene(&device, &queue, true);
     let mut a = make_player(&device, &queue, &mut renderer, "Mask");
     let mut b = make_player(&device, &queue, &mut renderer, "Mask");
     advance(&mut shared, &mut renderer, &device, &queue, &mut [&mut a, &mut b], 10);
     let one_scene = render(&device, &queue, &renderer, &shared);
 
     // Reference: a scene each, a pass each — coverage cannot leak by construction.
-    let mut scene_a = make_scene(&device, &queue, &renderer, true);
-    let mut scene_b = make_scene(&device, &queue, &renderer, true);
+    let mut scene_a = make_scene(&device, &queue, true);
+    let mut scene_b = make_scene(&device, &queue, true);
     let mut a2 = make_player(&device, &queue, &mut renderer, "Mask");
     let mut b2 = make_player(&device, &queue, &mut renderer, "Mask");
     advance(&mut scene_a, &mut renderer, &device, &queue, &mut [&mut a2], 10);
@@ -242,14 +242,14 @@ fn stencil_unwind_survives_mixed_players() {
     for (label, first_pack, second_pack) in [("mask first", "Mask", "Basic"), ("plain first", "Basic", "Mask")] {
         let mut renderer = SSRenderer::new(&device);
 
-        let mut shared = make_scene(&device, &queue, &renderer, true);
+        let mut shared = make_scene(&device, &queue, true);
         let mut p1 = make_player(&device, &queue, &mut renderer, first_pack);
         let mut p2 = make_player(&device, &queue, &mut renderer, second_pack);
         advance(&mut shared, &mut renderer, &device, &queue, &mut [&mut p1, &mut p2], 10);
         let one_scene = render(&device, &queue, &renderer, &shared);
 
-        let mut scene_1 = make_scene(&device, &queue, &renderer, true);
-        let mut scene_2 = make_scene(&device, &queue, &renderer, true);
+        let mut scene_1 = make_scene(&device, &queue, true);
+        let mut scene_2 = make_scene(&device, &queue, true);
         let mut q1 = make_player(&device, &queue, &mut renderer, first_pack);
         let mut q2 = make_player(&device, &queue, &mut renderer, second_pack);
         advance(&mut scene_1, &mut renderer, &device, &queue, &mut [&mut q1], 10);
@@ -270,7 +270,7 @@ fn order_decides_who_draws_on_top() {
         return;
     };
     let mut renderer = SSRenderer::new(&device);
-    let mut scene = make_scene(&device, &queue, &renderer, true);
+    let mut scene = make_scene(&device, &queue, true);
 
     let mut back = make_player(&device, &queue, &mut renderer, "Basic");
     let mut front = make_player(&device, &queue, &mut renderer, "Mask");
@@ -309,7 +309,7 @@ fn set_transform_moves_the_player() {
     const SHIFT: usize = 20;
 
     let mut renderer = SSRenderer::new(&device);
-    let mut scene = make_scene(&device, &queue, &renderer, true);
+    let mut scene = make_scene(&device, &queue, true);
     let mut player = make_player(&device, &queue, &mut renderer, "Basic");
     advance(&mut scene, &mut renderer, &device, &queue, &mut [&mut player], 10);
     let at_origin = render(&device, &queue, &renderer, &scene);
@@ -347,7 +347,7 @@ fn invisible_player_draws_nothing() {
         return;
     };
     let mut renderer = SSRenderer::new(&device);
-    let mut scene = make_scene(&device, &queue, &renderer, true);
+    let mut scene = make_scene(&device, &queue, true);
     let mut player = make_player(&device, &queue, &mut renderer, "Basic");
 
     advance(&mut scene, &mut renderer, &device, &queue, &mut [&mut player], 10);
@@ -374,7 +374,7 @@ fn pipelines_are_built_on_demand() {
     let mut renderer = SSRenderer::new(&device);
     assert_eq!(renderer.pipeline_count(), 0, "constructing a renderer compiled pipelines before anything had been drawn");
 
-    let mut scene = make_scene(&device, &queue, &renderer, true);
+    let mut scene = make_scene(&device, &queue, true);
     let mut player = make_player(&device, &queue, &mut renderer, "Basic");
     advance(&mut scene, &mut renderer, &device, &queue, &mut [&mut player], 10);
     let after = renderer.pipeline_count();
@@ -401,7 +401,7 @@ fn players_share_one_renderer() {
         return;
     };
     let mut renderer = SSRenderer::new(&device);
-    let mut scene = make_scene(&device, &queue, &renderer, true);
+    let mut scene = make_scene(&device, &queue, true);
 
     let mut first = make_player(&device, &queue, &mut renderer, "Mask");
     advance(&mut scene, &mut renderer, &device, &queue, &mut [&mut first], 10);
@@ -417,6 +417,36 @@ fn players_share_one_renderer() {
     assert!(drawn_pixels(&render(&device, &queue, &renderer, &scene)) > 0, "the shared scene drew nothing");
 }
 
+/// SPEC §5.5: there is no vertex buffer. Each geometry kind is expanded by its
+/// own vertex stage — `vs_quad` / `vs_mesh` / `vs_shape` / `vs_effect` — reading
+/// the runtime's SoA buffers straight out of the scene's arena, so the pipeline
+/// key gained a geometry class and each stage is a separate way to draw nothing.
+///
+/// The four fixtures below are one per class. Counts are floors well under what
+/// each currently draws (Basic ~17k, Effect ~14k, Shape ~26k, Mesh ~5k at frame
+/// 8), so this catches a class vanishing rather than tracking its exact output —
+/// that is [`golden_corpus`]'s job.
+///
+/// [`golden_corpus`]: ../golden/fn.golden_corpus.html
+#[test]
+fn every_geometry_class_draws() {
+    let Some((device, queue)) = gpu() else {
+        eprintln!("no GPU adapter available, skipping headless render test");
+        return;
+    };
+
+    for (pack, floor) in [("Basic", 8_000), ("Mesh", 2_000), ("Shape", 8_000), ("Effect", 5_000)] {
+        let mut renderer = SSRenderer::new(&device);
+        let mut scene = make_scene(&device, &queue, true);
+        let mut player = make_player(&device, &queue, &mut renderer, pack);
+        advance(&mut scene, &mut renderer, &device, &queue, &mut [&mut player], 8);
+
+        let drawn = drawn_pixels(&render(&device, &queue, &renderer, &scene));
+        eprintln!("{pack}.ssab drew {drawn} px with {} pipelines", renderer.pipeline_count());
+        assert!(drawn > floor, "{pack}.ssab drew {drawn} px (floor {floor}) — its geometry class produced nothing");
+    }
+}
+
 /// `set_alpha` fades the whole player. The target is cleared to opaque black and
 /// the blend table is premultiplied throughout, so alpha 0 leaves the backdrop
 /// untouched under every blend mode and a half fade lands strictly in between.
@@ -427,7 +457,7 @@ fn set_alpha_fades_the_player() {
         return;
     };
     let mut renderer = SSRenderer::new(&device);
-    let mut scene = make_scene(&device, &queue, &renderer, true);
+    let mut scene = make_scene(&device, &queue, true);
     let mut player = make_player(&device, &queue, &mut renderer, "Basic");
 
     advance(&mut scene, &mut renderer, &device, &queue, &mut [&mut player], 10);

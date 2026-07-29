@@ -1,13 +1,20 @@
-//! The self-contained native host (SPEC §9.3, "③ ffi"): owns a wgpu stack built
-//! from a raw window handle and drives the borrow-model [`SSPlayer`] with it.
+//! The self-contained native host (SPEC §9.4, "③ ffi"): owns a wgpu stack built
+//! from a raw window handle and drives **any number of** borrow-model
+//! [`SSPlayer`]s with it.
 //!
 //! This is the native counterpart of `examples/viewer` (winit) and [`crate::web`]
-//! (canvas): `Instance`/`Surface`/`Device`/`Queue` live here, and the player
-//! borrows device+queue on every frame. All of the wgpu work for the C face lives
+//! (canvas): `Instance`/`Surface`/`Device`/`Queue` live here, and the players
+//! borrow device+queue on every frame. All of the wgpu work for the C face lives
 //! in this module so that `ffi.rs` stays pure ABI translation.
 //!
 //! It is plain Rust, so a Rust host that only has a window handle (rather than a
 //! winit `Window`) can use it directly instead of assembling wgpu itself.
+//!
+//! **Players live here, behind [`PlayerId`]** (SPEC §11). The C face cannot hold a
+//! `&mut SSPlayer` across calls, so it needs something stable to name a player
+//! by; a raw pointer into a `Vec` would dangle the moment the vector grew. A
+//! generation-tagged slot index cannot dangle and cannot be confused with the
+//! player that later reuses its slot.
 
 use crate::player::SSPlayer;
 use crate::renderer::{Retention, SSRenderer};
@@ -33,15 +40,84 @@ pub struct NativeHostConfig {
     pub y_down: bool,
 }
 
-/// A window-owning wgpu host plus the one player drawing into it.
+/// Names one player owned by a [`NativeHost`].
+///
+/// Stable across everything the host does to its player list, and safe to hold
+/// past a `destroy_player`: the generation makes a stale id resolve to `None`
+/// rather than to whatever player took over the slot (SPEC §11).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct PlayerId {
+    index: u32,
+    generation: u32,
+}
+
+/// One slot in the roster. Slots are reused; the generation is what keeps ids
+/// from being reused with them.
+struct PlayerSlot {
+    player: Option<SSPlayer>,
+    generation: u32,
+}
+
+/// The host's players, addressable by [`PlayerId`].
+///
+/// Split out from [`NativeHost`] so the id bookkeeping — the part with an actual
+/// invariant, and the part a C caller can get wrong — is testable without a
+/// window (see the tests at the foot of this file).
+#[derive(Default)]
+struct PlayerRoster {
+    /// Players by slot. Empty slots are reused, so this does not grow with churn.
+    slots: Vec<PlayerSlot>,
+    /// Indices of empty slots, so `create` is O(1).
+    free: Vec<u32>,
+}
+
+impl PlayerRoster {
+    fn create(&mut self) -> PlayerId {
+        if let Some(index) = self.free.pop() {
+            let slot = &mut self.slots[index as usize];
+            slot.player = Some(SSPlayer::new());
+            return PlayerId { index, generation: slot.generation };
+        }
+        let index = self.slots.len() as u32;
+        self.slots.push(PlayerSlot { player: Some(SSPlayer::new()), generation: 0 });
+        PlayerId { index, generation: 0 }
+    }
+
+    fn destroy(&mut self, id: PlayerId) -> bool {
+        let Some(slot) = self.slots.get_mut(id.index as usize) else { return false };
+        if slot.generation != id.generation || slot.player.is_none() {
+            return false;
+        }
+        slot.player = None;
+        // Retiring the generation is what stops the next player in this slot from
+        // answering to the id just released.
+        slot.generation = slot.generation.wrapping_add(1);
+        self.free.push(id.index);
+        true
+    }
+
+    fn get_mut(&mut self, id: PlayerId) -> Option<&mut SSPlayer> {
+        let slot = self.slots.get_mut(id.index as usize)?;
+        if slot.generation != id.generation { None } else { slot.player.as_mut() }
+    }
+
+    fn live_mut(&mut self) -> Vec<&mut SSPlayer> {
+        self.slots.iter_mut().filter_map(|s| s.player.as_mut()).collect()
+    }
+
+    fn len(&self) -> usize {
+        self.slots.iter().filter(|s| s.player.is_some()).count()
+    }
+}
+
+/// A window-owning wgpu host and the players drawing into it.
 pub struct NativeHost {
-    /// The player. Public because the host adds nothing to playback control —
-    /// callers drive `load_ssab` / `play` / … on it directly.
-    pub player: SSPlayer,
+    players: PlayerRoster,
     /// Device-scoped renderer (SPEC §1.2). Owned here because the host owns the
-    /// device; every player this host gains at P7-7 will share this one.
+    /// device; **every player above shares this one** — one atlas upload and one
+    /// set of pipelines no matter how many characters are on screen.
     renderer: SSRenderer,
-    /// One scene per window. P7-7 turns `player` into a `Vec` drawn through it.
+    /// One scene per window, drawing every player in `order`.
     scene: SSScene,
     surface: wgpu::Surface<'static>,
     device: wgpu::Device,
@@ -102,24 +178,61 @@ impl NativeHost {
 
         let stencil_view = config.enable_mask.then(|| create_stencil_view(&device, surface_config.width, surface_config.height));
         let renderer = SSRenderer::new(&device);
-        let scene = SSScene::new(&device, &renderer, &SceneConfig { color_format: format, stencil_format: config.enable_mask.then_some(STENCIL_FORMAT) });
-        let player = SSPlayer::new();
+        let scene = SSScene::new(&device, &SceneConfig { color_format: format, stencil_format: config.enable_mask.then_some(STENCIL_FORMAT) });
 
         let c = config.clear_color;
-        let mut host = Self { player, renderer, scene, surface, device, queue, config: surface_config, stencil_view, clear_color: wgpu::Color { r: c[0] as f64, g: c[1] as f64, b: c[2] as f64, a: c[3] as f64 }, y_down: config.y_down, _instance: instance };
+        let mut host = Self {
+            players: PlayerRoster::default(),
+            renderer,
+            scene,
+            surface,
+            device,
+            queue,
+            config: surface_config,
+            stencil_view,
+            clear_color: wgpu::Color { r: c[0] as f64, g: c[1] as f64, b: c[2] as f64, a: c[3] as f64 },
+            y_down: config.y_down,
+            _instance: instance,
+        };
         host.scene.set_viewport(&host.queue, host.config.width as f32, host.config.height as f32, host.y_down);
         Ok(host)
     }
 
-    /// Hand the player a texture for a reference-mode pack, lending it this
-    /// host's device+queue (SPEC §8.1).
+    /// Add a player to this window and return its id.
+    ///
+    /// Players are cheap — no GPU resource of their own (SPEC §1.2) — so a window
+    /// holding a dozen characters costs one device, one renderer and one scene.
+    pub fn create_player(&mut self) -> PlayerId {
+        self.players.create()
+    }
+
+    /// Remove a player. Returns whether `id` named a live one; a stale id is a
+    /// no-op rather than a mistake made silently.
+    pub fn destroy_player(&mut self, id: PlayerId) -> bool {
+        self.players.destroy(id)
+    }
+
+    /// The player `id` names, or `None` if it has been destroyed.
+    pub fn player_mut(&mut self, id: PlayerId) -> Option<&mut SSPlayer> {
+        self.players.get_mut(id)
+    }
+
+    /// How many players this window currently holds.
+    pub fn player_count(&self) -> usize {
+        self.players.len()
+    }
+
+    /// Register a texture for a reference-mode pack, lending the renderer this
+    /// host's device+queue (SPEC §8.1). Shared by every player in the window.
     pub fn upload_texture(&mut self, hash: u32, rgba: &[u8], width: u32, height: u32) {
         self.renderer.upload_texture(&self.device, &self.queue, hash, rgba, (width, height), Retention::Retain);
     }
 
-    /// Advance the playback tree and build this frame's GPU buffers.
+    /// Advance every player and build this frame's GPU buffers. Players are drawn
+    /// in ascending `order` (SPEC §9.2), whatever order the slots happen to be in.
     pub fn update(&mut self, delta_secs: f32) {
-        self.scene.update(&mut self.renderer, &self.device, &self.queue, delta_secs, &mut [&mut self.player]);
+        let mut players = self.players.live_mut();
+        self.scene.update(&mut self.renderer, &self.device, &self.queue, delta_secs, &mut players);
     }
 
     /// Acquire the swapchain image, draw the prepared frame, and present.
@@ -190,4 +303,58 @@ fn create_stencil_view(device: &wgpu::Device, width: u32, height: u32) -> wgpu::
         view_formats: &[],
     });
     texture.create_view(&wgpu::TextureViewDescriptor::default())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// SPEC §11: a `ss_player_t` outliving its player must resolve to "gone",
+    /// not to whatever took over the slot. Slots *are* reused — a program that
+    /// spawns and drops characters must not grow a slot per spawn — so the
+    /// generation is the only thing separating the two.
+    #[test]
+    fn a_destroyed_id_never_names_its_successor() {
+        let mut roster = PlayerRoster::default();
+
+        let first = roster.create();
+        assert!(roster.get_mut(first).is_some());
+        assert_eq!(roster.len(), 1);
+
+        assert!(roster.destroy(first), "destroying a live player reported failure");
+        assert!(roster.get_mut(first).is_none(), "a destroyed id still resolved");
+        assert_eq!(roster.len(), 0);
+        // Double destroy is the easy C mistake; it has to be inert, not a panic
+        // and not a second slot release.
+        assert!(!roster.destroy(first), "destroying the same id twice reported success");
+
+        // The slot comes back, but the id does not.
+        let second = roster.create();
+        assert_eq!(second.index, first.index, "the empty slot was not reused");
+        assert_ne!(second.generation, first.generation);
+        assert!(roster.get_mut(first).is_none(), "the old id resolved to the player that reused its slot");
+        assert!(roster.get_mut(second).is_some());
+        assert_eq!(roster.len(), 1);
+    }
+
+    /// Live players are handed to the scene in slot order; holes left by
+    /// destroyed ones are skipped rather than drawn as blanks.
+    #[test]
+    fn only_live_players_are_drawn() {
+        let mut roster = PlayerRoster::default();
+        let ids: Vec<PlayerId> = (0..4).map(|_| roster.create()).collect();
+        assert_eq!(roster.live_mut().len(), 4);
+
+        roster.destroy(ids[1]);
+        roster.destroy(ids[2]);
+        assert_eq!(roster.len(), 2);
+        assert_eq!(roster.live_mut().len(), 2);
+
+        // Refilling the holes must not produce duplicates or lose anyone.
+        roster.create();
+        roster.create();
+        roster.create();
+        assert_eq!(roster.len(), 5);
+        assert_eq!(roster.live_mut().len(), 5);
+    }
 }

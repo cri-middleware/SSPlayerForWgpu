@@ -3,7 +3,7 @@
 //!
 //! **This module is a translation layer and nothing else.** Every entry point
 //! does the same three things: validate the C arguments, convert them to Rust
-//! types, and call [`NativeHost`] (the wgpu host, SPEC §9.3) or [`SSPlayer`]
+//! types, and call [`NativeHost`] (the wgpu host, SPEC §9.4) or [`SSPlayer`]
 //! (playback). No rendering or playback logic lives here — when something needs
 //! doing it belongs in `host.rs` or `player.rs`, where the Rust API gets it too.
 //!
@@ -11,15 +11,21 @@
 //! caller fills in a flat [`SsWindowHandle`] (HWND / NSView / CAMetalLayer /
 //! Xlib / Wayland) which [`surface_target`] turns into what wgpu wants.
 //!
+//! **Two handles, not one (SPEC §11).** `ss_scene_t` is the window — surface,
+//! device, renderer, scene — and `ss_player_t` is one character drawn into it.
+//! They used to be the same object, which made a second character in one window
+//! structurally impossible: creating one meant creating a second surface on the
+//! same window, and the two cleared and presented over each other.
+//!
 //! Conventions:
 //! * Status is `int32_t`: `SS_OK` (0), positive = an `ssruntime` error code
 //!   (same numbering as the SDK's C-API), negative = a player/host error.
 //!   [`ss_last_error`] carries the human-readable detail.
 //! * No entry point unwinds: the workspace builds with `panic = "abort"`.
 //! * Nothing here retains the window; the caller must keep it (and its layer)
-//!   alive until [`ss_player_destroy`].
+//!   alive until [`ss_scene_destroy`].
 
-use crate::host::{NativeHost, NativeHostConfig};
+use crate::host::{NativeHost, NativeHostConfig, PlayerId};
 use crate::player::SSPlayer;
 use std::cell::RefCell;
 use std::ffi::{CStr, CString, c_char, c_void};
@@ -81,10 +87,10 @@ pub struct SsWindowHandle {
     pub display: *mut c_void,
 }
 
-/// Everything `ss_player_create` needs: where to draw, how big, and how to clear.
+/// Everything `ss_scene_create` needs: where to draw, how big, and how to clear.
 #[repr(C)]
 #[derive(Clone, Copy)]
-pub struct SsPlayerDesc {
+pub struct SsSceneDesc {
     /// Target window/layer.
     pub window: SsWindowHandle,
     /// One of the `SS_BACKEND_*` constants.
@@ -97,18 +103,35 @@ pub struct SsPlayerDesc {
     /// where nothing is drawn.
     pub clear_color: [f32; 4],
     /// Allocate a depth/stencil buffer so mask parts rasterise (SPEC §6). With
-    /// `false` the player runs without masking, exactly as if the host attached
+    /// `false` the scene runs without masking, exactly as if the host attached
     /// no stencil.
     pub enable_mask: bool,
     /// Flip the projection to Y-down (screen coordinates). `false` = Y-up.
     pub y_down: bool,
 }
 
-/// Opaque player handle: a [`NativeHost`] plus the buffer backing the string
-/// `ss_player_animation_name` hands back to C.
-pub struct SsPlayerHost {
+/// Opaque scene handle: one window's [`NativeHost`], the player handles it has
+/// issued, and the buffer backing the string `ss_player_animation_name` hands
+/// back to C.
+pub struct SsScene {
     host: NativeHost,
+    /// Every handle this scene created, alive until the scene is destroyed.
+    ///
+    /// `ss_player_destroy` deliberately does **not** free the box: a handle that
+    /// outlives its player then resolves to "no such player" instead of reading
+    /// freed memory, so a double destroy — the easy mistake — is a safe no-op.
+    handles: Vec<*mut SsPlayer>,
     name_scratch: CString,
+}
+
+/// Opaque player handle: which scene, and which player within it.
+///
+/// Not a pointer into the scene's player list. That list moves as it grows, and
+/// slots are reused, so the id carries a generation and every call re-resolves it
+/// (SPEC §11).
+pub struct SsPlayer {
+    scene: *mut SsScene,
+    id: PlayerId,
 }
 
 // --- last error -----------------------------------------------------------
@@ -141,12 +164,25 @@ pub unsafe extern "C" fn ss_last_error() -> *const c_char {
 
 // --- argument conversion --------------------------------------------------
 
-/// Borrow the player behind a caller-supplied handle.
+/// Borrow the scene behind a caller-supplied player handle.
 ///
 /// # Safety
-/// `handle` must be null or a live handle from `ss_player_create`.
-unsafe fn player<'a>(handle: *mut SsPlayerHost) -> Option<&'a mut SSPlayer> {
-    unsafe { handle.as_mut() }.map(|h| &mut h.host.player)
+/// `handle` must be null or a handle from `ss_scene_create_player` whose scene
+/// is still alive.
+unsafe fn scene_of<'a>(handle: *mut SsPlayer) -> Option<(&'a mut SsScene, PlayerId)> {
+    let handle = unsafe { handle.as_mut() }?;
+    let scene = unsafe { handle.scene.as_mut() }?;
+    Some((scene, handle.id))
+}
+
+/// Borrow the player behind a caller-supplied handle, or `None` if it has been
+/// destroyed (SPEC §11 — a stale handle resolves, it does not dangle).
+///
+/// # Safety
+/// As [`scene_of`].
+unsafe fn player<'a>(handle: *mut SsPlayer) -> Option<&'a mut SSPlayer> {
+    let (scene, id) = unsafe { scene_of(handle) }?;
+    scene.host.player_mut(id)
 }
 
 /// Borrow a NUL-terminated UTF-8 string argument.
@@ -211,16 +247,19 @@ unsafe fn surface_target(handle: &SsWindowHandle) -> Result<wgpu::SurfaceTargetU
 
 // --- lifecycle ------------------------------------------------------------
 
-/// Create a player that renders into the window described by `desc`.
+/// Create a scene that renders into the window described by `desc`.
 ///
 /// Returns null on failure; call `ss_last_error` for the reason. The window (and
-/// its layer, on macOS) must stay alive until `ss_player_destroy`.
+/// its layer, on macOS) must stay alive until `ss_scene_destroy`.
+///
+/// A scene holds no player of its own — add them with `ss_scene_create_player`,
+/// as many as the window should show.
 ///
 /// # Safety
-/// `desc` must point at a valid `ss_player_desc_t` whose window handle is live
+/// `desc` must point at a valid `ss_scene_desc_t` whose window handle is live
 /// and matches its `kind`. On macOS this must be called from the main thread.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn ss_player_create(desc: *const SsPlayerDesc) -> *mut SsPlayerHost {
+pub unsafe extern "C" fn ss_scene_create(desc: *const SsSceneDesc) -> *mut SsScene {
     let Some(desc) = (unsafe { desc.as_ref() }) else {
         set_last_error("desc is null");
         return std::ptr::null_mut();
@@ -235,9 +274,9 @@ pub unsafe extern "C" fn ss_player_create(desc: *const SsPlayerDesc) -> *mut SsP
     let config = NativeHostConfig { backends: backend_bits(desc.backend), width: desc.width, height: desc.height, clear_color: desc.clear_color, enable_mask: desc.enable_mask, y_down: desc.y_down };
 
     // SAFETY: forwarded from this function's contract — the caller keeps the
-    // window alive until `ss_player_destroy`.
+    // window alive until `ss_scene_destroy`.
     match unsafe { NativeHost::new(target, &config) } {
-        Ok(host) => Box::into_raw(Box::new(SsPlayerHost { host, name_scratch: CString::default() })),
+        Ok(host) => Box::into_raw(Box::new(SsScene { host, handles: Vec::new(), name_scratch: CString::default() })),
         Err(msg) => {
             set_last_error(msg);
             std::ptr::null_mut()
@@ -245,15 +284,69 @@ pub unsafe extern "C" fn ss_player_create(desc: *const SsPlayerDesc) -> *mut SsP
     }
 }
 
-/// Destroy a player and release its wgpu resources. Null is a no-op.
+/// Destroy a scene, its players and its wgpu resources. Null is a no-op.
+///
+/// **Every `ss_player_t` this scene issued becomes invalid**, including handles
+/// the caller still holds — using one afterwards reads freed memory. Drop them
+/// with the scene.
 ///
 /// # Safety
-/// `handle` must come from `ss_player_create` and must not be used afterwards.
+/// `handle` must come from `ss_scene_create` and must not be used afterwards,
+/// nor must any player handle it created.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn ss_player_destroy(handle: *mut SsPlayerHost) {
-    if !handle.is_null() {
-        drop(unsafe { Box::from_raw(handle) });
+pub unsafe extern "C" fn ss_scene_destroy(handle: *mut SsScene) {
+    if handle.is_null() {
+        return;
     }
+    let scene = unsafe { Box::from_raw(handle) };
+    for player in &scene.handles {
+        drop(unsafe { Box::from_raw(*player) });
+    }
+    drop(scene);
+}
+
+/// Add a player to `scene` and return its handle, or null if `scene` is null.
+///
+/// One scene draws any number of players, in ascending `ss_player_set_order`.
+/// They share the window's device, renderer and atlas textures, so the second
+/// character of a pack costs no upload and no extra pipeline (SPEC §1.2).
+///
+/// The handle stays valid until `ss_player_destroy` or `ss_scene_destroy`.
+///
+/// # Safety
+/// `scene` must be a live handle or null.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn ss_scene_create_player(scene: *mut SsScene) -> *mut SsPlayer {
+    let Some(scene_ref) = (unsafe { scene.as_mut() }) else {
+        set_last_error("scene is null");
+        return std::ptr::null_mut();
+    };
+    let id = scene_ref.host.create_player();
+    let handle = Box::into_raw(Box::new(SsPlayer { scene, id }));
+    scene_ref.handles.push(handle);
+    handle
+}
+
+/// Remove a player from its scene. Null, or a handle already destroyed, is a
+/// safe no-op — the handle itself stays allocated until the scene goes.
+///
+/// # Safety
+/// `handle` must be null or come from `ss_scene_create_player` on a scene that
+/// is still alive.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn ss_player_destroy(handle: *mut SsPlayer) {
+    if let Some((scene, id)) = unsafe { scene_of(handle) } {
+        scene.host.destroy_player(id);
+    }
+}
+
+/// How many players `scene` currently holds.
+///
+/// # Safety
+/// `scene` must be a live handle or null.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn ss_scene_player_count(scene: *mut SsScene) -> u32 {
+    unsafe { scene.as_ref() }.map(|s| s.host.player_count() as u32).unwrap_or(0)
 }
 
 // --- resources ------------------------------------------------------------
@@ -263,13 +356,13 @@ pub unsafe extern "C" fn ss_player_destroy(handle: *mut SsPlayerHost) {
 /// Every pack an animation can reference must be registered before
 /// `ss_player_set_animation`, since external instance parts resolve by pack name
 /// (SPEC §7.1). Embedded-mode packs (SPEC §8.1) also carry their atlases; those
-/// are decoded here and uploaded on the next `ss_player_update`.
+/// are decoded here and uploaded on the next `ss_scene_update`.
 ///
 /// # Safety
 /// `pack_name` must be a NUL-terminated UTF-8 string and `data` must point at
 /// `len` readable bytes. Neither is retained beyond the call.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn ss_player_add_ssab(handle: *mut SsPlayerHost, pack_name: *const c_char, data: *const u8, len: usize) -> i32 {
+pub unsafe extern "C" fn ss_player_add_ssab(handle: *mut SsPlayer, pack_name: *const c_char, data: *const u8, len: usize) -> i32 {
     unsafe { load_pack(handle, pack_name, data, len, false) }
 }
 
@@ -278,7 +371,7 @@ pub unsafe extern "C" fn ss_player_add_ssab(handle: *mut SsPlayerHost, pack_name
 /// # Safety
 /// As `ss_player_add_ssab`.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn ss_player_load_ssab(handle: *mut SsPlayerHost, pack_name: *const c_char, data: *const u8, len: usize) -> i32 {
+pub unsafe extern "C" fn ss_player_load_ssab(handle: *mut SsPlayer, pack_name: *const c_char, data: *const u8, len: usize) -> i32 {
     unsafe { load_pack(handle, pack_name, data, len, true) }
 }
 
@@ -286,8 +379,8 @@ pub unsafe extern "C" fn ss_player_load_ssab(handle: *mut SsPlayerHost, pack_nam
 ///
 /// # Safety
 /// As `ss_player_add_ssab`.
-unsafe fn load_pack(handle: *mut SsPlayerHost, pack_name: *const c_char, data: *const u8, len: usize, main: bool) -> i32 {
-    let Some(player) = (unsafe { player(handle) }) else { return fail(SS_ERROR_INVALID_ARGUMENT, "player is null") };
+unsafe fn load_pack(handle: *mut SsPlayer, pack_name: *const c_char, data: *const u8, len: usize, main: bool) -> i32 {
+    let Some(player) = (unsafe { player(handle) }) else { return fail(SS_ERROR_INVALID_ARGUMENT, "player handle is null or destroyed") };
     let Some(pack) = (unsafe { c_str(pack_name) }) else { return fail(SS_ERROR_INVALID_ARGUMENT, "pack_name is null or not UTF-8") };
     if data.is_null() || len == 0 {
         return fail(SS_ERROR_INVALID_ARGUMENT, "ssab data is empty");
@@ -302,20 +395,24 @@ unsafe fn load_pack(handle: *mut SsPlayerHost, pack_name: *const c_char, data: *
 
 /// Supply a texture for a reference-mode pack, keyed by the fnv1a hash the
 /// runtime reports in `DrawBatch.texture_hash` (SPEC §8.1). `rgba` is
-/// straight-alpha RGBA8, `width * height * 4` bytes; the player premultiplies it.
+/// straight-alpha RGBA8, `width * height * 4` bytes; it is premultiplied on the
+/// way to the GPU.
 ///
-/// Embedded-mode packs need no call: their atlases load with the pack.
+/// Registered on the **scene**, because the texture map is device-scoped: every
+/// player in the window sees it, and a pack shown five times is uploaded once
+/// (SPEC §1.2). Embedded-mode packs need no call — their atlases load with the
+/// pack.
 ///
 /// # Safety
 /// `rgba` must point at `width * height * 4` readable bytes. It is not retained.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn ss_player_add_texture(handle: *mut SsPlayerHost, hash: u32, rgba: *const u8, width: u32, height: u32) -> i32 {
-    let Some(host) = (unsafe { handle.as_mut() }) else { return fail(SS_ERROR_INVALID_ARGUMENT, "player is null") };
+pub unsafe extern "C" fn ss_scene_add_texture(scene: *mut SsScene, hash: u32, rgba: *const u8, width: u32, height: u32) -> i32 {
+    let Some(scene) = (unsafe { scene.as_mut() }) else { return fail(SS_ERROR_INVALID_ARGUMENT, "scene is null") };
     let len = (width as usize) * (height as usize) * 4;
     if rgba.is_null() || len == 0 {
         return fail(SS_ERROR_INVALID_ARGUMENT, "texture is empty");
     }
-    host.host.upload_texture(hash, unsafe { std::slice::from_raw_parts(rgba, len) }, width, height);
+    scene.host.upload_texture(hash, unsafe { std::slice::from_raw_parts(rgba, len) }, width, height);
     SS_OK
 }
 
@@ -330,8 +427,8 @@ pub unsafe extern "C" fn ss_player_add_texture(handle: *mut SsPlayerHost, hash: 
 /// # Safety
 /// `anim_name` must be a NUL-terminated UTF-8 string.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn ss_player_set_animation(handle: *mut SsPlayerHost, anim_name: *const c_char) -> i32 {
-    let Some(player) = (unsafe { player(handle) }) else { return fail(SS_ERROR_INVALID_ARGUMENT, "player is null") };
+pub unsafe extern "C" fn ss_player_set_animation(handle: *mut SsPlayer, anim_name: *const c_char) -> i32 {
+    let Some(player) = (unsafe { player(handle) }) else { return fail(SS_ERROR_INVALID_ARGUMENT, "player handle is null or destroyed") };
     let Some(name) = (unsafe { c_str(anim_name) }) else { return fail(SS_ERROR_INVALID_ARGUMENT, "anim_name is null or not UTF-8") };
     match player.set_animation(name) {
         Ok(()) => SS_OK,
@@ -345,7 +442,7 @@ pub unsafe extern "C" fn ss_player_set_animation(handle: *mut SsPlayerHost, anim
 /// # Safety
 /// `handle` must be a live handle or null.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn ss_player_play(handle: *mut SsPlayerHost) {
+pub unsafe extern "C" fn ss_player_play(handle: *mut SsPlayer) {
     if let Some(player) = unsafe { player(handle) } {
         player.play();
     }
@@ -356,7 +453,7 @@ pub unsafe extern "C" fn ss_player_play(handle: *mut SsPlayerHost) {
 /// # Safety
 /// `handle` must be a live handle or null.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn ss_player_pause(handle: *mut SsPlayerHost) {
+pub unsafe extern "C" fn ss_player_pause(handle: *mut SsPlayer) {
     if let Some(player) = unsafe { player(handle) } {
         player.pause();
     }
@@ -367,7 +464,7 @@ pub unsafe extern "C" fn ss_player_pause(handle: *mut SsPlayerHost) {
 /// # Safety
 /// `handle` must be a live handle or null.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn ss_player_stop(handle: *mut SsPlayerHost) {
+pub unsafe extern "C" fn ss_player_stop(handle: *mut SsPlayer) {
     if let Some(player) = unsafe { player(handle) } {
         player.stop();
     }
@@ -378,7 +475,7 @@ pub unsafe extern "C" fn ss_player_stop(handle: *mut SsPlayerHost) {
 /// # Safety
 /// `handle` must be a live handle or null.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn ss_player_set_speed(handle: *mut SsPlayerHost, speed: f32) {
+pub unsafe extern "C" fn ss_player_set_speed(handle: *mut SsPlayer, speed: f32) {
     if let Some(player) = unsafe { player(handle) } {
         player.set_speed(speed);
     }
@@ -389,7 +486,7 @@ pub unsafe extern "C" fn ss_player_set_speed(handle: *mut SsPlayerHost, speed: f
 /// # Safety
 /// `handle` must be a live handle or null.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn ss_player_is_playing(handle: *mut SsPlayerHost) -> bool {
+pub unsafe extern "C" fn ss_player_is_playing(handle: *mut SsPlayer) -> bool {
     unsafe { player(handle) }.map(|p| p.is_playing()).unwrap_or(false)
 }
 
@@ -398,7 +495,7 @@ pub unsafe extern "C" fn ss_player_is_playing(handle: *mut SsPlayerHost) -> bool
 /// # Safety
 /// `handle` must be a live handle or null.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn ss_player_animation_count(handle: *mut SsPlayerHost) -> u32 {
+pub unsafe extern "C" fn ss_player_animation_count(handle: *mut SsPlayer) -> u32 {
     unsafe { player(handle) }.and_then(|p| p.animation_names()).map(|names| names.len() as u32).unwrap_or(0)
 }
 
@@ -410,12 +507,12 @@ pub unsafe extern "C" fn ss_player_animation_count(handle: *mut SsPlayerHost) ->
 /// # Safety
 /// `handle` must be a live handle or null.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn ss_player_animation_name(handle: *mut SsPlayerHost, index: u32) -> *const c_char {
-    let Some(host) = (unsafe { handle.as_mut() }) else {
-        set_last_error("player is null");
+pub unsafe extern "C" fn ss_player_animation_name(handle: *mut SsPlayer, index: u32) -> *const c_char {
+    let Some((scene, id)) = (unsafe { scene_of(handle) }) else {
+        set_last_error("player handle is null or destroyed");
         return std::ptr::null();
     };
-    let Some(name) = host.host.player.animation_names().and_then(|names| names.into_iter().nth(index as usize)) else {
+    let Some(name) = scene.host.player_mut(id).and_then(|p| p.animation_names()).and_then(|names| names.into_iter().nth(index as usize)) else {
         set_last_error(format!("no animation at index {index}"));
         return std::ptr::null();
     };
@@ -423,8 +520,62 @@ pub unsafe extern "C" fn ss_player_animation_name(handle: *mut SsPlayerHost, ind
         set_last_error("animation name contains an interior NUL");
         return std::ptr::null();
     };
-    host.name_scratch = name;
-    host.name_scratch.as_ptr()
+    scene.name_scratch = name;
+    scene.name_scratch.as_ptr()
+}
+
+// --- placement (SPEC §9.3) ------------------------------------------------
+
+/// Place this player in its scene: translation in pixels from the centre, scale,
+/// then rotation in radians.
+///
+/// Without this every player sits at the origin on top of the others, which is
+/// why the old one-player-per-window API never needed it.
+///
+/// # Safety
+/// `handle` must be a live handle or null.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn ss_player_set_transform(handle: *mut SsPlayer, x: f32, y: f32, scale_x: f32, scale_y: f32, rotation: f32) {
+    if let Some(player) = unsafe { player(handle) } {
+        player.set_transform(x, y, scale_x, scale_y, rotation);
+    }
+}
+
+/// Draw order within the scene; lower draws first. Ties keep the order the
+/// players were created in.
+///
+/// # Safety
+/// `handle` must be a live handle or null.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn ss_player_set_order(handle: *mut SsPlayer, order: i32) {
+    if let Some(player) = unsafe { player(handle) } {
+        player.set_order(order);
+    }
+}
+
+/// Skip this player entirely when `false`: its timeline does not advance and it
+/// produces no geometry. For a player the caller knows cannot be seen; use
+/// `ss_player_set_alpha(0)` for a fade that keeps playing.
+///
+/// # Safety
+/// `handle` must be a live handle or null.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn ss_player_set_visible(handle: *mut SsPlayer, visible: bool) {
+    if let Some(player) = unsafe { player(handle) } {
+        player.set_visible(visible);
+    }
+}
+
+/// Player-level fade, clamped to 0..1. Mask coverage is unaffected: a faded
+/// player clips exactly as it would at full opacity.
+///
+/// # Safety
+/// `handle` must be a live handle or null.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn ss_player_set_alpha(handle: *mut SsPlayer, alpha: f32) {
+    if let Some(player) = unsafe { player(handle) } {
+        player.set_alpha(alpha);
+    }
 }
 
 /// Canvas size of the animation currently playing. Either out-pointer may be null.
@@ -432,8 +583,8 @@ pub unsafe extern "C" fn ss_player_animation_name(handle: *mut SsPlayerHost, ind
 /// # Safety
 /// `width` / `height` must be null or point at writable `float`s.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn ss_player_canvas_size(handle: *mut SsPlayerHost, width: *mut f32, height: *mut f32) -> i32 {
-    let Some(player) = (unsafe { player(handle) }) else { return fail(SS_ERROR_INVALID_ARGUMENT, "player is null") };
+pub unsafe extern "C" fn ss_player_canvas_size(handle: *mut SsPlayer, width: *mut f32, height: *mut f32) -> i32 {
+    let Some(player) = (unsafe { player(handle) }) else { return fail(SS_ERROR_INVALID_ARGUMENT, "player handle is null or destroyed") };
     let Some((w, h)) = player.canvas_size() else { return fail(SS_ERROR_INVALID_ARGUMENT, "no animation is playing") };
     if let Some(out) = unsafe { width.as_mut() } {
         *out = w;
@@ -446,29 +597,31 @@ pub unsafe extern "C" fn ss_player_canvas_size(handle: *mut SsPlayerHost, width:
 
 // --- per frame ------------------------------------------------------------
 
-/// Advance the playback tree by `delta_seconds` and build this frame's GPU buffers.
-/// Call once per frame, before `ss_player_render`.
+/// Advance every player in the scene by `delta_seconds` and build this frame's
+/// GPU buffers. Call once per frame, before `ss_scene_render`.
 ///
 /// # Safety
-/// `handle` must be a live handle or null.
+/// `scene` must be a live handle or null.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn ss_player_update(handle: *mut SsPlayerHost, delta_seconds: f32) {
-    if let Some(host) = unsafe { handle.as_mut() } {
-        host.host.update(delta_seconds);
+pub unsafe extern "C" fn ss_scene_update(scene: *mut SsScene, delta_seconds: f32) {
+    if let Some(scene) = unsafe { scene.as_mut() } {
+        scene.host.update(delta_seconds);
     }
 }
 
 /// Acquire the swapchain image, draw the prepared frame into it, and present.
 ///
+/// One pass covers every player, in ascending `ss_player_set_order`.
+///
 /// A lost/outdated surface is absorbed by reconfiguring (SPEC §14): the call
 /// returns `SS_OK` having skipped one frame.
 ///
 /// # Safety
-/// `handle` must be a live handle or null.
+/// `scene` must be a live handle or null.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn ss_player_render(handle: *mut SsPlayerHost) -> i32 {
-    let Some(host) = (unsafe { handle.as_mut() }) else { return fail(SS_ERROR_INVALID_ARGUMENT, "player is null") };
-    match host.host.render() {
+pub unsafe extern "C" fn ss_scene_render(scene: *mut SsScene) -> i32 {
+    let Some(scene) = (unsafe { scene.as_mut() }) else { return fail(SS_ERROR_INVALID_ARGUMENT, "scene is null") };
+    match scene.host.render() {
         Ok(()) => SS_OK,
         Err(msg) => fail(SS_ERROR_GPU, msg),
     }
@@ -478,10 +631,10 @@ pub unsafe extern "C" fn ss_player_render(handle: *mut SsPlayerHost) -> i32 {
 /// drawable size in **pixels**. Zero in either dimension is ignored.
 ///
 /// # Safety
-/// `handle` must be a live handle or null.
+/// `scene` must be a live handle or null.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn ss_player_resize(handle: *mut SsPlayerHost, width: u32, height: u32) {
-    if let Some(host) = unsafe { handle.as_mut() } {
-        host.host.resize(width, height);
+pub unsafe extern "C" fn ss_scene_resize(scene: *mut SsScene, width: u32, height: u32) {
+    if let Some(scene) = unsafe { scene.as_mut() } {
+        scene.host.resize(width, height);
     }
 }

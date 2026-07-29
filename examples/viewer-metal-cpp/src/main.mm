@@ -1,19 +1,26 @@
 // Metal (macOS) verification viewer for the ssplayer-wgpu C API (SPEC §12 P5, §13).
 //
 // This is the "③ ffi" face end to end: Cocoa owns the window and its
-// CAMetalLayer, hands the layer to `ss_player_create`, and drives the player
-// with `ss_player_update` / `ss_player_render` — no Rust in sight. The player's
-// own host (host.rs) builds the wgpu stack behind the ABI, with backend=Metal
-// forced so this really exercises Metal rather than whatever wgpu would pick.
+// CAMetalLayer, hands the layer to `ss_scene_create`, and drives the scene with
+// `ss_scene_update` / `ss_scene_render` — no Rust in sight. The scene's own host
+// (host.rs) builds the wgpu stack behind the ABI, with backend=Metal forced so
+// this really exercises Metal rather than whatever wgpu would pick.
 //
 // It plays the embedded-mode packs from assets/overall_emb, so the atlases ride
 // inside the .ssab and no texture supply is needed (SPEC §8.1).
+//
+// **It shows two characters at once by default** (SPEC §11, phase P7-7). That
+// used to be impossible through this API: the handle fused the window and the
+// player, so a second character meant a second surface on the same window and
+// the two cleared over each other. Now the window is `ss_scene_t` and each
+// character is an `ss_player_t` placed with `ss_player_set_transform`, sharing
+// one device, one renderer and one atlas upload.
 //
 //   ssviewer-metal [asset-dir] [pack-name]     e.g. ssviewer-metal "" Mask
 //
 //   Space       pause / resume        Left/Right  previous / next .ssab
 //   R           restart animation     Up/Down     previous / next animation
-//   Escape      quit
+//   +/-         add / remove player   Escape      quit
 //
 // The other C++ viewers (DX12/Win32, Vulkan/Linux) deliberately duplicate this
 // loop instead of sharing it: the point of the sample is that one directory is
@@ -47,10 +54,17 @@
 @interface SSViewerApp : NSObject <NSApplicationDelegate, NSWindowDelegate>
 @end
 
+/// How many characters to show at startup. Two is the point of the exercise.
+static const NSUInteger kInitialPlayers = 2;
+/// Most players the +/- keys will go to.
+static const NSUInteger kMaxPlayers = 6;
+
 @implementation SSViewerApp {
     NSWindow *_window;
     SSMetalView *_view;
-    ss_player_t *_player;
+    ss_scene_t *_scene;
+    /// One handle per character. All of them draw into `_scene`.
+    NSMutableArray<NSValue *> *_players;
 
     NSString *_assetDir;
     NSString *_initialPack; // pack to show first, or nil for Basic
@@ -95,7 +109,7 @@
     // The player wants pixels, not points.
     NSSize pixels = [_view convertSizeToBacking:_view.bounds.size];
 
-    ss_player_desc_t desc;
+    ss_scene_desc_t desc;
     memset(&desc, 0, sizeof(desc));
     desc.window.kind = SS_WINDOW_METAL_LAYER;
     desc.window.window = (__bridge void *)layer;
@@ -109,11 +123,16 @@
     desc.enable_mask = true; // stencil buffer, so Mask.ssab renders (SPEC §6)
     desc.y_down = false;
 
-    _player = ss_player_create(&desc);
-    if (_player == NULL) {
-        fprintf(stderr, "ss_player_create failed: %s\n", ss_last_error());
+    _scene = ss_scene_create(&desc);
+    if (_scene == NULL) {
+        fprintf(stderr, "ss_scene_create failed: %s\n", ss_last_error());
         [NSApp terminate:nil];
         return;
+    }
+
+    _players = [NSMutableArray array];
+    for (NSUInteger i = 0; i < kInitialPlayers; i++) {
+        [self addPlayer];
     }
 
     if (![self collectPacks]) {
@@ -132,12 +151,54 @@
 }
 
 - (void)applicationWillTerminate:(NSNotification *)note {
-    ss_player_destroy(_player);
-    _player = NULL;
+    // Destroying the scene takes its players with it; the handles must not be
+    // touched afterwards (SPEC §11).
+    ss_scene_destroy(_scene);
+    _scene = NULL;
+    [_players removeAllObjects];
 }
 
 - (BOOL)applicationShouldTerminateAfterLastWindowClosed:(NSApplication *)sender {
     return YES;
+}
+
+// --- players -------------------------------------------------------------
+
+- (ss_player_t *)playerAt:(NSUInteger)index {
+    return (ss_player_t *)_players[index].pointerValue;
+}
+
+/// Add one character to the scene and lay the row out again.
+- (void)addPlayer {
+    ss_player_t *player = ss_scene_create_player(_scene);
+    if (player == NULL) {
+        fprintf(stderr, "ss_scene_create_player: %s\n", ss_last_error());
+        return;
+    }
+    [_players addObject:[NSValue valueWithPointer:player]];
+    [self layOutPlayers];
+}
+
+- (void)removePlayer {
+    if (_players.count <= 1) {
+        return; // keep at least one, or there is nothing to look at
+    }
+    ss_player_destroy([self playerAt:_players.count - 1]);
+    [_players removeLastObject];
+    [self layOutPlayers];
+}
+
+/// Spread the characters across the window and stack them front to back.
+/// Placement is per player (SPEC §5.4); the projection belongs to the scene.
+- (void)layOutPlayers {
+    NSUInteger count = _players.count;
+    float spacing = count > 1 ? 220.0f : 0.0f;
+    float first = -spacing * (float)(count - 1) * 0.5f;
+    for (NSUInteger i = 0; i < count; i++) {
+        ss_player_t *player = [self playerAt:i];
+        ss_player_set_transform(player, first + spacing * (float)i, 0.0f, 0.85f, 0.85f, 0.0f);
+        ss_player_set_order(player, (int32_t)i);
+    }
 }
 
 // --- assets --------------------------------------------------------------
@@ -171,8 +232,12 @@
             continue;
         }
         NSString *pack = path.lastPathComponent.stringByDeletingPathExtension;
-        if (ss_player_add_ssab(_player, pack.UTF8String, (const uint8_t *)data.bytes, data.length) != SS_OK) {
-            fprintf(stderr, "add_ssab %s: %s\n", pack.UTF8String, ss_last_error());
+        // Every player needs every pack registered: instance parts resolve their
+        // sub-animation by pack name, per player (SPEC §7.1).
+        for (NSValue *entry in _players) {
+            if (ss_player_add_ssab((ss_player_t *)entry.pointerValue, pack.UTF8String, (const uint8_t *)data.bytes, data.length) != SS_OK) {
+                fprintf(stderr, "add_ssab %s: %s\n", pack.UTF8String, ss_last_error());
+            }
         }
     }
 
@@ -193,15 +258,21 @@
     NSString *path = _packs[index];
     NSData *data = [NSData dataWithContentsOfFile:path];
     NSString *pack = path.lastPathComponent.stringByDeletingPathExtension;
-    if (data == nil || ss_player_load_ssab(_player, pack.UTF8String, (const uint8_t *)data.bytes, data.length) != SS_OK) {
-        fprintf(stderr, "load_ssab %s: %s\n", pack.UTF8String, ss_last_error());
+    if (data == nil) {
+        fprintf(stderr, "cannot read %s\n", path.UTF8String);
         return;
+    }
+    for (NSValue *entry in _players) {
+        if (ss_player_load_ssab((ss_player_t *)entry.pointerValue, pack.UTF8String, (const uint8_t *)data.bytes, data.length) != SS_OK) {
+            fprintf(stderr, "load_ssab %s: %s\n", pack.UTF8String, ss_last_error());
+            return;
+        }
     }
 
     NSMutableArray<NSString *> *anims = [NSMutableArray array];
-    uint32_t count = ss_player_animation_count(_player);
+    uint32_t count = ss_player_animation_count([self playerAt:0]);
     for (uint32_t i = 0; i < count; i++) {
-        const char *name = ss_player_animation_name(_player, i);
+        const char *name = ss_player_animation_name([self playerAt:0], i);
         // The pointer is only valid until the next call, so copy it now.
         if (name != NULL) {
             [anims addObject:@(name)];
@@ -217,12 +288,15 @@
         return;
     }
     _animIndex = index % _anims.count;
-    // Selecting is the allocating step; starting is free.
-    if (ss_player_set_animation(_player, _anims[_animIndex].UTF8String) != SS_OK) {
-        fprintf(stderr, "set_animation %s: %s\n", _anims[_animIndex].UTF8String, ss_last_error());
-        return;
+    for (NSValue *entry in _players) {
+        ss_player_t *player = (ss_player_t *)entry.pointerValue;
+        // Selecting is the allocating step; starting is free.
+        if (ss_player_set_animation(player, _anims[_animIndex].UTF8String) != SS_OK) {
+            fprintf(stderr, "set_animation %s: %s\n", _anims[_animIndex].UTF8String, ss_last_error());
+            return;
+        }
+        ss_player_play(player);
     }
-    ss_player_play(_player);
     _paused = NO;
     [self printStatus];
 }
@@ -234,10 +308,10 @@
     float delta = (float)(now - _lastTick);
     _lastTick = now;
 
-    // Always update: while paused the runtime holds the frame, so this rebuilds
-    // the same geometry rather than advancing it.
-    ss_player_update(_player, delta);
-    if (ss_player_render(_player) != SS_OK) {
+    // One update and one render for the whole window, whatever the player count:
+    // they share a scene, so they share the pass (SPEC §9.2).
+    ss_scene_update(_scene, delta);
+    if (ss_scene_render(_scene) != SS_OK) {
         fprintf(stderr, "render: %s\n", ss_last_error());
     }
 }
@@ -253,7 +327,7 @@
 
 - (void)syncDrawableSize {
     NSSize pixels = [_view convertSizeToBacking:_view.bounds.size];
-    ss_player_resize(_player, (uint32_t)pixels.width, (uint32_t)pixels.height);
+    ss_scene_resize(_scene, (uint32_t)pixels.width, (uint32_t)pixels.height);
 }
 
 // --- input ---------------------------------------------------------------
@@ -274,10 +348,13 @@
         return YES;
     case kSpace:
         _paused = !_paused;
-        if (_paused) {
-            ss_player_pause(_player);
-        } else {
-            ss_player_play(_player);
+        for (NSValue *entry in _players) {
+            ss_player_t *player = (ss_player_t *)entry.pointerValue;
+            if (_paused) {
+                ss_player_pause(player);
+            } else {
+                ss_player_play(player);
+            }
         }
         [self printStatus];
         return YES;
@@ -297,8 +374,23 @@
         break;
     }
 
-    if ([event.charactersIgnoringModifiers caseInsensitiveCompare:@"r"] == NSOrderedSame) {
+    NSString *chars = event.charactersIgnoringModifiers;
+    if ([chars caseInsensitiveCompare:@"r"] == NSOrderedSame) {
         [self playAnimationAtIndex:_animIndex];
+        return YES;
+    }
+    // Adding a character costs a playback tree and nothing on the GPU: the pack
+    // and its atlas are already there (SPEC §1.2 / §8.2).
+    if ([chars isEqualToString:@"+"] || [chars isEqualToString:@"="]) {
+        if (_players.count < kMaxPlayers) {
+            [self addPlayer];
+            [self loadPackAtIndex:_packIndex];
+        }
+        return YES;
+    }
+    if ([chars isEqualToString:@"-"]) {
+        [self removePlayer];
+        [self printStatus];
         return YES;
     }
     return NO;
@@ -306,7 +398,7 @@
 
 - (void)printStatus {
     float canvasWidth = 0.0f, canvasHeight = 0.0f;
-    ss_player_canvas_size(_player, &canvasWidth, &canvasHeight);
+    ss_player_canvas_size([self playerAt:0], &canvasWidth, &canvasHeight);
     printf("\033[2J\033[H");
     printf("====================================================\n");
     printf("   SpriteStudio 7 wgpu Viewer — Metal / C API\n");
@@ -314,10 +406,11 @@
     printf("  Active File:   %s (%lu/%lu)\n", _packs[_packIndex].lastPathComponent.UTF8String, (unsigned long)_packIndex + 1, (unsigned long)_packs.count);
     printf("  Animation:     %s (%lu/%lu)\n", _anims.count ? _anims[_animIndex].UTF8String : "none", (unsigned long)_animIndex + 1, (unsigned long)_anims.count);
     printf("  Canvas:        %.0f x %.0f\n", canvasWidth, canvasHeight);
+    printf("  Players:       %u in one scene\n", ss_scene_player_count(_scene));
     printf("  Playback:      %s\n", _paused ? "Paused" : "Playing");
     printf("----------------------------------------------------\n");
     printf("  Space  pause    Left/Right  .ssab    Up/Down  anim\n");
-    printf("  R      restart  Escape      quit\n");
+    printf("  R      restart  +/-  players  Escape   quit\n");
     printf("====================================================\n");
     fflush(stdout);
 }

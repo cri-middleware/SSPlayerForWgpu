@@ -10,16 +10,39 @@
 
 use crate::frame::FrameView;
 use crate::mask::{MaskOp, MaskWriter, StencilTest};
-use crate::renderer::{PipelineKey, PipelineKind, SHADER_PARAM_STRIDE, SHADER_PARAM_STRIDE_F32, SSRenderer, Vertex, blend_index, ss_shader_entry};
+use crate::renderer::{GeomClass, PipelineKey, PipelineKind, SHADER_PARAM_STRIDE, SHADER_PARAM_STRIDE_F32, SHAPE_FAN_VERTS, SSRenderer, blend_index, ss_shader_entry};
 
 use ssruntime::runtime::effect_draw_plan::ss::runtime::root_as_effect_draw_plan_unchecked;
 use ssruntime::runtime::framedata::ss::runtime::{BlendType, DrawBatchKind, PartAttributeShader, root_as_frame_data_unchecked};
 
-/// `varg` for the no-PartColor / effect path: rate 1, mul (a plain
-/// `texture * color` modulate; SPEC §5.3, matches WebGL's effect draw).
-const VARG_MODULATE: [f32; 4] = [1.0, 0.0, 1.0, 0.0];
-/// `varg` for mask-write geometry — consumed by `fs_mask`, which ignores it.
-const VARG_NONE: [f32; 4] = [0.0, 0.0, 0.0, 0.0];
+/// PartsColor formula selector, matching `varg_of` in the WGSL. Only four exist,
+/// so the shader takes two bits per primitive rather than three floats per vertex
+/// (SPEC §5.3).
+///
+/// Deliberately *not* four module-level `pub const`s: cbindgen sweeps those into
+/// the C header (see `cbindgen.toml`), and `#define MIX 0` in a public header is
+/// a collision waiting to happen.
+mod mode {
+    /// `mix(straight, colour, rate)` — also what a Shape fill and any unsupported
+    /// PartColor blend clamps to.
+    pub(super) const MIX: u32 = 0;
+    /// `straight * mix(1, colour, rate)`. With rate 1 this is the plain
+    /// `texture * colour` modulate the no-PartColor and effect paths use.
+    pub(super) const MUL: u32 = 1;
+    pub(super) const ADD: u32 = 2;
+    pub(super) const SUB: u32 = 3;
+}
+
+/// Opaque white, the colour a part without PartColor contributes (its alpha
+/// travels separately, at full precision).
+const WHITE: u32 = 0x00FF_FFFF;
+
+/// Pack a 0..1 RGB triple into the `unpack4x8unorm` byte order (x = byte 0).
+/// Sources are `u8 / 255`, so this round-trips exactly.
+fn pack_rgb(r: f32, g: f32, b: f32) -> u32 {
+    let q = |v: f32| ((v.clamp(0.0, 1.0) * 255.0).round() as u32) & 0xFF;
+    q(r) | (q(g) << 8) | (q(b) << 16)
+}
 
 /// Construction config for SSScene, matched to the host's render target.
 #[derive(Clone, Copy, Debug)]
@@ -57,11 +80,73 @@ pub struct BatchInfo {
 struct BatchDrawCall {
     key: PipelineKey,
     texture_hash: u32,
-    index_start: u32,
-    index_count: u32,
+    /// The `vertex_index` range to issue. Which primitives that covers is the
+    /// class's own arithmetic (SPEC §5.5) — 6 per quad or particle, 30 per shape,
+    /// one stream entry per mesh vertex.
+    vertices: std::ops::Range<u32>,
     /// Index of this part's block in the shader-params buffer, for
     /// [`PipelineKey::Shader`] draws — the dynamic offset for bind group(2).
     shader_slot: Option<u32>,
+}
+
+/// One drawn primitive: where its geometry sits in the frame arena, and the
+/// handful of per-part values that are not in the runtime's buffers.
+///
+/// This is the record SPEC §5.5 trades the vertex buffer for. The CPU no longer
+/// transforms corners — it copies the runtime's SoA arrays into the arena and
+/// writes one of these (80 bytes) per part, against 4 x 52 bytes of vertices plus
+/// 24 bytes of indices before.
+///
+/// Field meanings are per geometry class; see the `Prim` comment in the WGSL,
+/// which this must stay in step with.
+#[repr(C)]
+#[derive(Copy, Clone, Debug, Default, bytemuck::Pod, bytemuck::Zeroable)]
+struct Prim {
+    /// Quad/Shape: world matrix base. Mesh: the Y vertex array. Effect: unused.
+    aux_base: u32,
+    /// Local vertices (Quad), mesh X (Mesh), shape vertices (Shape), particle XY.
+    pos_base: u32,
+    /// Local UVs (Quad/Mesh, texture pixels), box coords (Shape), particle UVs.
+    uv_base: u32,
+    /// The owning node's placement matrix.
+    node_base: u32,
+    /// Shape: live vertex count. Unused elsewhere.
+    count: u32,
+    /// PartsColor formula (see [`mode`]).
+    mode: u32,
+    /// Player-level fade, applied in the vertex stage so it multiplies the corner
+    /// alphas before interpolation — the order the CPU path used.
+    alpha: f32,
+    /// Mesh: the part's Z. Unused elsewhere (local Z is zero).
+    z: f32,
+    /// Per-corner RGB, packed. Alpha is deliberately *not* in here.
+    colors: [u32; 4],
+    /// Per-corner alpha, kept as f32: a part without PartColor takes its alpha
+    /// straight from the runtime and quantising it would shift the output.
+    alphas: [f32; 4],
+    /// Per-corner PartsColor rate — or, for a mask writer, the cutout threshold
+    /// (`fs_mask` reads `varg.x`), which needs the full range including -1.
+    rates: [f32; 4],
+}
+
+/// Where one node's slice of the frame arena starts (SPEC §5.5).
+///
+/// [`SSScene::begin_node`] copies the runtime's SoA buffers in — once per node
+/// per frame, as a handful of memcpys — and hands back the offsets. Every
+/// primitive that node contributes then refers to the arena rather than carrying
+/// its own expanded geometry.
+#[derive(Clone, Copy, Debug, Default)]
+pub struct NodeSlot {
+    /// The node's placement matrix (16 floats).
+    transform: u32,
+    world_matrices: u32,
+    local_vertices: u32,
+    local_uvs: u32,
+    mesh_x: u32,
+    mesh_y: u32,
+    mesh_uvs: u32,
+    shape_vertices: u32,
+    shape_box_coords: u32,
 }
 
 /// Layer 2b: the per-target, per-frame half — what one render target's worth of
@@ -80,21 +165,26 @@ pub struct SSScene {
     color_format: wgpu::TextureFormat,
     stencil_format: Option<wgpu::TextureFormat>,
 
-    /// The projection matrix and its bind group (group(0)).
+    /// The projection matrix. Part of group(0) along with the frame buffers.
     globals_buffer: wgpu::Buffer,
-    globals_bind_group: wgpu::BindGroup,
+    /// group(0), rebuilt whenever one of the frame buffers below is reallocated.
+    scene_bind_group: Option<wgpu::BindGroup>,
     /// Last viewport passed to [`SSScene::set_viewport`], re-applied on restore
     /// (the projection lives in a buffer that dies with the device).
     viewport: Option<(f32, f32, bool)>,
 
-    vertex_buffer: Option<wgpu::Buffer>,
-    index_buffer: Option<wgpu::Buffer>,
+    arena_buffer: Option<wgpu::Buffer>,
+    prim_buffer: Option<wgpu::Buffer>,
+    mesh_stream_buffer: Option<wgpu::Buffer>,
     draw_calls: Vec<BatchDrawCall>,
 
-    // Per-frame CPU accumulation (Unity-style flatten): every node/batch appends
-    // here between begin_frame and end_frame, then it is uploaded once.
-    vertices: Vec<Vertex>,
-    indices: Vec<u32>,
+    // Per-frame CPU accumulation: every node copies its runtime SoA buffers into
+    // `arena` and appends a `Prim` per part; nothing here is per vertex except
+    // the mesh stream, whose geometry is genuinely irregular (SPEC §5.5).
+    arena: Vec<f32>,
+    prims: Vec<Prim>,
+    /// `(primitive, vertex)` pairs, one per mesh vertex.
+    mesh_stream: Vec<u32>,
 
     // --- Integration shaders (`ss-*`, SPEC §6). Only touched when a frame has
     // shader parts; shader-free animations never build any of this. ---
@@ -108,23 +198,6 @@ pub struct SSScene {
 /// Column-major 4x4 identity. Used as the root transform (children compose their
 /// parent instance part's world matrix onto this).
 pub const IDENTITY_TRANSFORM: [f32; 16] = [1.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 1.0];
-
-/// Apply a column-major 4x4 transform to a point.
-fn apply_transform(t: &[f32; 16], x: f32, y: f32, z: f32) -> (f32, f32, f32) {
-    (t[0] * x + t[4] * y + t[8] * z + t[12], t[1] * x + t[5] * y + t[9] * z + t[13], t[2] * x + t[6] * y + t[10] * z + t[14])
-}
-
-/// Bilinearly interpolate `[lt, rt, lb, rb]` RGBA at box coordinate `(fx, fy)`
-/// (fx: 0=left/1=right, fy: 0=top/1=bottom).
-fn bilerp_color(c: &[[f32; 4]; 4], fx: f32, fy: f32) -> [f32; 4] {
-    let mut out = [0.0f32; 4];
-    for i in 0..4 {
-        let top = c[0][i] * (1.0 - fx) + c[1][i] * fx;
-        let bot = c[2][i] * (1.0 - fx) + c[3][i] * fx;
-        out[i] = top * (1.0 - fy) + bot * fy;
-    }
-    out
-}
 
 /// Min/max of a Normal part's 4 corner UVs (normalized by `tex_size`), as
 /// `[minU, minV, maxU, maxV]` — the cell UV rect an integration shader receives
@@ -147,43 +220,45 @@ fn quad_uv_bounds(frame: &FrameView, part_idx: usize, tex_size: Option<(f32, f32
     [min_u, min_v, max_u, max_v]
 }
 
-/// PartsColor blend flags `(isMix, isMul, isAddSub)` for the shader `varg`
-/// (SPEC §5.3). Only Mix/Mul/Add/Sub select a PartColor formula; any other
-/// `BlendType` clamps to Mix (else no flag matches and the shader outputs black).
-fn parts_color_flags(blend: BlendType) -> (f32, f32, f32) {
+/// PartsColor formula for a `BlendType` (SPEC §5.3). Only Mix/Mul/Add/Sub select
+/// one; any other `BlendType` clamps to Mix (else no branch matches and the
+/// shader outputs black).
+fn parts_color_mode(blend: BlendType) -> u32 {
     match blend {
-        BlendType::Mul => (0.0, 1.0, 0.0),
-        BlendType::Add => (0.0, 0.0, 1.0),
-        BlendType::Sub => (0.0, 0.0, -1.0),
-        _ => (1.0, 0.0, 0.0), // Mix (and clamp for all other blend types)
+        BlendType::Mul => mode::MUL,
+        BlendType::Add => mode::ADD,
+        BlendType::Sub => mode::SUB,
+        _ => mode::MIX, // Mix (and clamp for all other blend types)
     }
 }
 
 impl SSScene {
-    /// Build the target-scoped resources: the projection uniform and its bind
-    /// group, cut against `renderer`'s shared layout.
-    pub fn new(device: &wgpu::Device, renderer: &SSRenderer, config: &SceneConfig) -> Self {
+    /// Build the target-scoped resources: the projection uniform. The rest of
+    /// group(0) is this frame's geometry, so its bind group is built in
+    /// `end_frame` — against whichever renderer is drawing the frame — once the
+    /// buffers are sized. That is why no `SSRenderer` is needed here.
+    pub fn new(device: &wgpu::Device, config: &SceneConfig) -> Self {
         let globals_buffer = device.create_buffer(&wgpu::BufferDescriptor {
             label: Some("SpriteStudio Globals UB"),
             size: 64, // 16 * 4 bytes for mat4x4
             usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
             mapped_at_creation: false,
         });
-        let globals_bind_group =
-            device.create_bind_group(&wgpu::BindGroupDescriptor { label: Some("SpriteStudio Globals Bind Group"), layout: &renderer.globals_bind_group_layout, entries: &[wgpu::BindGroupEntry { binding: 0, resource: globals_buffer.as_entire_binding() }] });
 
         Self {
             stencil_enabled: config.stencil_format.is_some(),
             color_format: config.color_format,
             stencil_format: config.stencil_format,
             globals_buffer,
-            globals_bind_group,
+            scene_bind_group: None,
             viewport: None,
-            vertex_buffer: None,
-            index_buffer: None,
+            arena_buffer: None,
+            prim_buffer: None,
+            mesh_stream_buffer: None,
             draw_calls: Vec::new(),
-            vertices: Vec::new(),
-            indices: Vec::new(),
+            arena: Vec::new(),
+            prims: Vec::new(),
+            mesh_stream: Vec::new(),
             ss_params: Vec::new(),
             ss_params_buffer: None,
             ss_params_bind_group: None,
@@ -205,9 +280,9 @@ impl SSScene {
     /// Cache key for a content draw. Without a stencil buffer every draw uses the
     /// untested variant, so the test is normalised away rather than filling the
     /// cache with three identical pipelines.
-    fn content_key(&self, blend: BlendType, stencil: StencilTest) -> PipelineKey {
+    fn content_key(&self, blend: BlendType, stencil: StencilTest, class: GeomClass) -> PipelineKey {
         let stencil = if self.stencil_enabled { stencil } else { StencilTest::None };
-        self.key(PipelineKind::Content(blend_index(blend), stencil))
+        self.key(PipelineKind::Content(blend_index(blend), stencil, class))
     }
 
     /// Attach this target's formats to a pipeline kind (SPEC §9.1).
@@ -227,9 +302,9 @@ impl SSScene {
     /// [`SSRenderer::restore_device`] first — that covers pipelines and textures
     /// for the whole device — then this once per render target, then
     /// [`crate::SSPlayer::restore_textures`] once per player.
-    pub fn restore_device(&mut self, renderer: &SSRenderer, device: &wgpu::Device, queue: &wgpu::Queue) {
+    pub fn restore_device(&mut self, device: &wgpu::Device, queue: &wgpu::Queue) {
         let viewport = self.viewport;
-        *self = Self::new(device, renderer, &SceneConfig { color_format: self.color_format, stencil_format: self.stencil_format });
+        *self = Self::new(device, &SceneConfig { color_format: self.color_format, stencil_format: self.stencil_format });
         if let Some((width, height, y_down)) = viewport {
             self.set_viewport(queue, width, height, y_down);
         }
@@ -263,10 +338,79 @@ impl SSScene {
 
     /// Reset per-frame accumulation. Call once before appending any batches.
     pub fn begin_frame(&mut self) {
-        self.vertices.clear();
-        self.indices.clear();
+        self.arena.clear();
+        self.prims.clear();
+        self.mesh_stream.clear();
         self.draw_calls.clear();
         self.ss_params.clear();
+    }
+
+    /// Copy one node's runtime buffers into the frame arena and return where they
+    /// landed (SPEC §5.5). Call once per node per frame, before appending any of
+    /// its batches.
+    ///
+    /// This is the whole CPU side of the vertex path: a handful of
+    /// `extend_from_slice` calls over buffers `ssruntime` already laid out
+    /// contiguously. Nothing is transformed here — the vertex stage does that,
+    /// reading the same numbers the runtime produced.
+    ///
+    /// `transform` is the node's placement: the player's for a root, the
+    /// composition with the parent instance part's world matrix for a child.
+    pub fn begin_node(&mut self, frame: &FrameView, transform: &[f32; 16]) -> NodeSlot {
+        let mut push = |src: &[f32]| -> u32 {
+            let base = self.arena.len() as u32;
+            self.arena.extend_from_slice(src);
+            base
+        };
+        NodeSlot {
+            transform: push(transform),
+            world_matrices: push(frame.world_matrices),
+            local_vertices: push(frame.local_vertices),
+            local_uvs: push(frame.local_uvs),
+            mesh_x: push(frame.mesh_vertices_x),
+            mesh_y: push(frame.mesh_vertices_y),
+            mesh_uvs: push(frame.mesh_uvs),
+            shape_vertices: push(frame.shape_vertices),
+            shape_box_coords: push(frame.shape_vertex_box_coords),
+        }
+    }
+
+    /// Copy a standalone placement matrix into the arena.
+    ///
+    /// An effect draws from its own `EffectDrawPlan`, not from the node's runtime
+    /// buffers, so the only arena slot it needs is its composed transform — the
+    /// rest of the returned [`NodeSlot`] is unused and must stay so.
+    pub fn push_transform(&mut self, transform: &[f32; 16]) -> NodeSlot {
+        let base = self.arena.len() as u32;
+        self.arena.extend_from_slice(transform);
+        NodeSlot { transform: base, ..Default::default() }
+    }
+
+    /// Append `prim`, returning its index in the frame's primitive table.
+    fn push_prim(&mut self, prim: Prim) -> u32 {
+        let index = self.prims.len() as u32;
+        self.prims.push(prim);
+        index
+    }
+
+    /// Record a draw over the primitives `[first, self.prims.len())`.
+    ///
+    /// Primitive indices are global to the frame, and each class turns one into a
+    /// fixed span of `vertex_index` values (SPEC §5.5). Primitives of other
+    /// classes in between simply leave gaps in a span nothing draws, which is why
+    /// one primitive table serves all four.
+    fn push_draw(&mut self, key: PipelineKey, class: GeomClass, texture_hash: u32, first: u32, shader_slot: Option<u32>) {
+        let last = self.prims.len() as u32;
+        if last == first {
+            return;
+        }
+        let stride = match class {
+            GeomClass::Quad | GeomClass::Effect => 6,
+            GeomClass::Shape => SHAPE_FAN_VERTS,
+            // Mesh draws are driven by the stream, not by primitive arithmetic.
+            GeomClass::Mesh => return,
+        };
+        self.draw_calls.push(BatchDrawCall { key, texture_hash, vertices: first * stride..last * stride, shader_slot });
     }
 
     /// Append one Normal/Mesh DrawBatch's geometry into the frame accumulation,
@@ -276,7 +420,7 @@ impl SSScene {
     /// passed in so the caller (SSPlayer) drives batch iteration and can
     /// interleave instance recursion at the right rank. `batch.stencil` selects
     /// the stencil-test content pipeline for masked parts.
-    pub fn append_batch(&mut self, renderer: &SSRenderer, frame: &FrameView, transform: &[f32; 16], batch: &BatchInfo) {
+    pub fn append_batch(&mut self, renderer: &SSRenderer, frame: &FrameView, node: &NodeSlot, batch: &BatchInfo) {
         let BatchInfo { start_rank, count, texture_hash, blend_type, kind, stencil, alpha } = *batch;
         if frame.frame_data.is_empty() {
             return;
@@ -290,12 +434,11 @@ impl SSScene {
             return;
         }
 
-        let key = self.content_key(blend_type, stencil);
-        let tex_size = renderer.texture_size(texture_hash);
-        let index_start = self.indices.len() as u32;
+        let first_prim = self.prims.len() as u32;
 
         match kind {
             DrawBatchKind::Normal => {
+                let key = self.content_key(blend_type, stencil, GeomClass::Quad);
                 // Integration-shader dispatch (SPEC §6): when the frame carries
                 // `SHDR` attributes and this non-masked batch has ≥1 shader part,
                 // draw per-part so each shader part gets its own pipeline + params.
@@ -317,77 +460,77 @@ impl SSScene {
                     let part = parts.get(part_idx);
 
                     let part_color_idx = part.part_color();
-                    let (mut colors_arr, vargs_arr) = parts_color
+                    let (colors, alphas, rates, mode) = parts_color
                         .filter(|_| part_color_idx >= 0)
                         .map(|pc_vec| {
                             let pc = pc_vec.get(part_color_idx as usize);
-                            let (mix_f, mul_f, add_f) = parts_color_flags(pc.blend_type());
                             let corners = [pc.lt(), pc.rt(), pc.lb(), pc.rb()];
-                            let mut colors = [[0.0f32; 4]; 4];
-                            let mut vargs = [[0.0f32; 4]; 4];
+                            let mut colors = [0u32; 4];
+                            let mut alphas = [0.0f32; 4];
+                            let mut rates = [0.0f32; 4];
                             for (i, corner) in corners.iter().enumerate() {
                                 let c = corner.rgba();
-                                colors[i] = [c.r() as f32 / 255.0, c.g() as f32 / 255.0, c.b() as f32 / 255.0, c.a() as f32 / 255.0];
-                                vargs[i] = [corner.rate(), mix_f, mul_f, add_f];
+                                colors[i] = pack_rgb(c.r() as f32 / 255.0, c.g() as f32 / 255.0, c.b() as f32 / 255.0);
+                                alphas[i] = c.a() as f32 / 255.0;
+                                rates[i] = corner.rate();
                             }
-                            (colors, vargs)
+                            (colors, alphas, rates, parts_color_mode(pc.blend_type()))
                         })
-                        .unwrap_or_else(|| ([[1.0, 1.0, 1.0, part.alpha()]; 4], [VARG_MODULATE; 4]));
-                    for c in &mut colors_arr {
-                        c[3] *= alpha;
-                    }
+                        // No PartColor: white modulated by the part's own alpha.
+                        .unwrap_or(([WHITE; 4], [part.alpha(); 4], [1.0; 4], mode::MUL));
 
+                    let call_start = self.prims.len() as u32;
+                    self.push_quad_prim(frame, node, part_idx, Prim { mode, alpha, colors, alphas, rates, ..Default::default() });
                     if !shader_dispatch {
-                        self.push_quad_part(frame, transform, part_idx, tex_size, &colors_arr, &vargs_arr);
                         continue;
                     }
-
                     // Per-part draw call so shader / non-shader parts don't merge.
-                    let call_start = self.indices.len() as u32;
-                    self.push_quad_part(frame, transform, part_idx, tex_size, &colors_arr, &vargs_arr);
-                    let call_end = self.indices.len() as u32;
-                    if call_end == call_start {
+                    if self.prims.len() as u32 == call_start {
                         continue;
                     }
                     // A shader part gets its own pipeline and params slot; a plain
                     // part sharing the batch falls back to the content pipeline.
                     let (call_key, shader_slot) = match has_shader(rank) {
                         Some(attr) => {
-                            let slot = self.push_shader_params(&attr, frame, part_idx, tex_size);
+                            let slot = self.push_shader_params(&attr, frame, part_idx, renderer.texture_size(texture_hash));
                             (self.key(PipelineKind::Shader(attr.id_hash(), blend_index(blend_type))), Some(slot))
                         }
                         None => (key, None),
                     };
-                    self.draw_calls.push(BatchDrawCall { key: call_key, texture_hash, index_start: call_start, index_count: call_end - call_start, shader_slot });
+                    self.push_draw(call_key, GeomClass::Quad, texture_hash, call_start, shader_slot);
                 }
-                if shader_dispatch {
-                    // Per-part draw calls already emitted; skip the aggregate push.
-                    return;
+                if !shader_dispatch {
+                    self.push_draw(key, GeomClass::Quad, texture_hash, first_prim, None);
                 }
             }
             DrawBatchKind::Mesh => {
+                let key = self.content_key(blend_type, stencil, GeomClass::Mesh);
+                let stream_start = (self.mesh_stream.len() / 2) as u32;
                 for rank in start_rank..start_rank + count {
                     let part_idx = draw_order.get(rank) as usize;
                     let part = parts.get(part_idx);
 
                     let part_color_idx = part.part_color();
-                    let (mut mesh_color, mesh_varg) = parts_color
+                    let (color, part_alpha, rate, mode) = parts_color
                         .filter(|_| part_color_idx >= 0)
                         .map(|pc_vec| {
                             let pc = pc_vec.get(part_color_idx as usize);
                             let lt = pc.lt();
                             let c = lt.rgba();
-                            let (mix_f, mul_f, add_f) = parts_color_flags(pc.blend_type());
                             // Mesh uses a single (corner-0) PartColor sample, like WebGL.
-                            ([c.r() as f32 / 255.0, c.g() as f32 / 255.0, c.b() as f32 / 255.0, c.a() as f32 / 255.0], [lt.rate(), mix_f, mul_f, add_f])
+                            (pack_rgb(c.r() as f32 / 255.0, c.g() as f32 / 255.0, c.b() as f32 / 255.0), c.a() as f32 / 255.0, lt.rate(), parts_color_mode(pc.blend_type()))
                         })
-                        .unwrap_or_else(|| ([1.0, 1.0, 1.0, part.alpha()], VARG_MODULATE));
-                    mesh_color[3] *= alpha;
+                        .unwrap_or((WHITE, part.alpha(), 1.0, mode::MUL));
 
-                    self.push_mesh_part(frame, transform, part_idx, part.position_z(), tex_size, mesh_color, mesh_varg);
+                    self.push_mesh_prim(frame, node, part_idx, Prim { mode, alpha, z: part.position_z(), colors: [color; 4], alphas: [part_alpha; 4], rates: [rate; 4], ..Default::default() });
+                }
+                let stream_end = (self.mesh_stream.len() / 2) as u32;
+                if stream_end > stream_start {
+                    self.draw_calls.push(BatchDrawCall { key, texture_hash, vertices: stream_start..stream_end, shader_slot: None });
                 }
             }
             DrawBatchKind::Shape => {
+                let key = self.content_key(blend_type, stencil, GeomClass::Shape);
                 for rank in start_rank..start_rank + count {
                     let part_idx = draw_order.get(rank) as usize;
                     let part = parts.get(part_idx);
@@ -400,36 +543,26 @@ impl SSScene {
                     // fill is the bilinear PartColor itself (10_parts_color §1-2).
                     let part_color_idx = part.part_color();
                     let has_pc = part_color_idx >= 0 && parts_color.is_some();
-                    let mut corners = parts_color
+                    let (colors, alphas) = parts_color
                         .filter(|_| part_color_idx >= 0)
                         .map(|pc_vec| {
                             let pc = pc_vec.get(part_color_idx as usize);
-                            let c_lt = pc.lt().rgba();
-                            let c_rt = pc.rt().rgba();
-                            let c_lb = pc.lb().rgba();
-                            let c_rb = pc.rb().rgba();
-                            [
-                                [c_lt.r() as f32 / 255.0, c_lt.g() as f32 / 255.0, c_lt.b() as f32 / 255.0, c_lt.a() as f32 / 255.0],
-                                [c_rt.r() as f32 / 255.0, c_rt.g() as f32 / 255.0, c_rt.b() as f32 / 255.0, c_rt.a() as f32 / 255.0],
-                                [c_lb.r() as f32 / 255.0, c_lb.g() as f32 / 255.0, c_lb.b() as f32 / 255.0, c_lb.a() as f32 / 255.0],
-                                [c_rb.r() as f32 / 255.0, c_rb.g() as f32 / 255.0, c_rb.b() as f32 / 255.0, c_rb.a() as f32 / 255.0],
-                            ]
+                            let corners = [pc.lt().rgba(), pc.rt().rgba(), pc.lb().rgba(), pc.rb().rgba()];
+                            let mut colors = [0u32; 4];
+                            let mut alphas = [0.0f32; 4];
+                            for (i, c) in corners.iter().enumerate() {
+                                colors[i] = pack_rgb(c.r() as f32 / 255.0, c.g() as f32 / 255.0, c.b() as f32 / 255.0);
+                                alphas[i] = c.a() as f32 / 255.0;
+                            }
+                            (colors, alphas)
                         })
-                        .unwrap_or_else(|| [[1.0, 1.0, 1.0, part.alpha()]; 4]);
-                    for c in &mut corners {
-                        c[3] *= alpha;
-                    }
-                    let shape_varg = [if has_pc { 1.0 } else { 0.0 }, 1.0, 0.0, 0.0];
+                        .unwrap_or(([WHITE; 4], [part.alpha(); 4]));
 
-                    self.push_shape_content_part(frame, transform, part_idx, &corners, shape_varg);
+                    self.push_shape_prim(frame, node, part_idx, Prim { mode: mode::MIX, alpha, colors, alphas, rates: [if has_pc { 1.0 } else { 0.0 }; 4], ..Default::default() });
                 }
+                self.push_draw(key, GeomClass::Shape, texture_hash, first_prim, None);
             }
             _ => {}
-        }
-
-        let index_end = self.indices.len() as u32;
-        if index_end > index_start {
-            self.draw_calls.push(BatchDrawCall { key, texture_hash, index_start, index_count: index_end - index_start, shader_slot: None });
         }
     }
 
@@ -461,10 +594,11 @@ impl SSScene {
         slot
     }
 
-    /// Append one mask writer's geometry into the frame accumulation, routed to
-    /// the mask-write pipeline for `op`. The cutout threshold rides in the
-    /// vertex `color[0]` (consumed by `fs_mask`). No-op if masking is disabled.
-    pub fn append_mask_writer(&mut self, renderer: &SSRenderer, frame: &FrameView, transform: &[f32; 16], writer: &MaskWriter, op: MaskOp) {
+    /// Append one mask writer's geometry, routed to the mask-write pipeline for
+    /// `op`. The cutout threshold rides in the primitive's rate slot, which
+    /// `fs_mask` reads as `varg.x` (SPEC §6): it needs the full f32 range,
+    /// including the -1 that means "no cutout". No-op if masking is disabled.
+    pub fn append_mask_writer(&mut self, frame: &FrameView, node: &NodeSlot, writer: &MaskWriter, op: MaskOp) {
         use crate::mask::GeomKind;
         if !self.stencil_enabled || frame.frame_data.is_empty() {
             return;
@@ -472,74 +606,55 @@ impl SSScene {
         if frame.world_matrices.is_empty() {
             return;
         }
-        let tex_size = renderer.texture_size(writer.texture_hash);
-        let color = [writer.threshold, 0.0, 0.0, 0.0];
-        let index_start = self.indices.len() as u32;
+        // Colour output is masked off for these pipelines, so only the threshold
+        // in `rates` matters.
+        let prim = Prim { rates: [writer.threshold; 4], alpha: 1.0, ..Default::default() };
+        let first_prim = self.prims.len() as u32;
 
-        match writer.geom {
+        let class = match writer.geom {
             GeomKind::Quad => {
                 if frame.local_vertices.is_empty() || frame.local_uvs.is_empty() {
                     return;
                 }
-                // `fs_mask` ignores varg; color[0] carries the cutout threshold.
-                self.push_quad_part(frame, transform, writer.part_idx, tex_size, &[color; 4], &[VARG_NONE; 4]);
+                self.push_quad_prim(frame, node, writer.part_idx, prim);
+                GeomClass::Quad
             }
             GeomKind::Mesh => {
-                self.push_mesh_part(frame, transform, writer.part_idx, 0.0, tex_size, color, VARG_NONE);
+                let stream_start = (self.mesh_stream.len() / 2) as u32;
+                self.push_mesh_prim(frame, node, writer.part_idx, prim);
+                let stream_end = (self.mesh_stream.len() / 2) as u32;
+                if stream_end > stream_start {
+                    self.draw_calls.push(BatchDrawCall { key: self.key(PipelineKind::Mask(op, GeomClass::Mesh)), texture_hash: writer.texture_hash, vertices: stream_start..stream_end, shader_slot: None });
+                }
+                return;
             }
             GeomKind::Shape => {
-                self.push_shape_part(frame, transform, writer.part_idx, color);
+                self.push_shape_prim(frame, node, writer.part_idx, prim);
+                GeomClass::Shape
             }
             GeomKind::Unsupported => return,
-        }
+        };
 
-        let index_end = self.indices.len() as u32;
-        if index_end > index_start {
-            self.draw_calls.push(BatchDrawCall { key: self.key(PipelineKind::Mask(op)), texture_hash: writer.texture_hash, index_start, index_count: index_end - index_start, shader_slot: None });
-        }
+        self.push_draw(self.key(PipelineKind::Mask(op, class)), class, writer.texture_hash, first_prim, None);
     }
 
-    /// Build one sprite quad (4 verts / 2 tris) for `part_idx` into the frame
-    /// accumulation. `colors` / `vargs` are per-corner `[lt, rt, lb, rb]`.
-    fn push_quad_part(&mut self, frame: &FrameView, transform: &[f32; 16], part_idx: usize, tex_size: Option<(f32, f32)>, colors: &[[f32; 4]; 4], vargs: &[[f32; 4]; 4]) {
-        let wm = &frame.world_matrices;
-        let lv = &frame.local_vertices;
-        let luv = &frame.local_uvs;
-        if (part_idx + 1) * 16 > wm.len() || (part_idx + 1) * 10 > lv.len() || (part_idx + 1) * 10 > luv.len() {
+    /// Record one sprite quad for `part_idx`: point `prim` at the part's slice of
+    /// this node's arena copy and append it. The corners themselves are expanded
+    /// by `vs_quad` (SPEC §5.5).
+    fn push_quad_prim(&mut self, frame: &FrameView, node: &NodeSlot, part_idx: usize, prim: Prim) {
+        // Bounds are still checked here: the vertex stage indexes the arena
+        // unconditionally, so a part the runtime has no geometry for must not
+        // produce a primitive at all.
+        if (part_idx + 1) * 16 > frame.world_matrices.len() || (part_idx + 1) * 10 > frame.local_vertices.len() || (part_idx + 1) * 10 > frame.local_uvs.len() {
             return;
         }
-        let m = &wm[part_idx * 16..(part_idx + 1) * 16];
-        let lv = &lv[part_idx * 10..(part_idx + 1) * 10];
-        let l_uv = &luv[part_idx * 10..(part_idx + 1) * 10];
-
-        let base_vert_idx = self.vertices.len() as u32;
-        for k in 0..4 {
-            let lx = lv[k * 2];
-            let ly = lv[k * 2 + 1];
-
-            let wx = m[0] * lx + m[4] * ly + m[12];
-            let wy = m[1] * lx + m[5] * ly + m[13];
-            let wz = m[2] * lx + m[6] * ly + m[14];
-            let (fx, fy, fz) = apply_transform(transform, wx, wy, wz);
-
-            let (tu, tv) = if let Some(size) = tex_size { (l_uv[k * 2] / size.0, l_uv[k * 2 + 1] / size.1) } else { (l_uv[k * 2], l_uv[k * 2 + 1]) };
-
-            self.vertices.push(Vertex { position: [fx, fy, fz], uv: [tu, tv], color: colors[k], varg: vargs[k] });
-        }
-
-        self.indices.push(base_vert_idx);
-        self.indices.push(base_vert_idx + 1);
-        self.indices.push(base_vert_idx + 2);
-        self.indices.push(base_vert_idx + 2);
-        self.indices.push(base_vert_idx + 1);
-        self.indices.push(base_vert_idx + 3);
+        self.push_prim(Prim { aux_base: node.world_matrices + (part_idx * 16) as u32, pos_base: node.local_vertices + (part_idx * 10) as u32, uv_base: node.local_uvs + (part_idx * 10) as u32, node_base: node.transform, ..prim });
     }
 
-    /// Build one skinned-mesh part for `part_idx` into the frame accumulation
-    /// with a single uniform `color`. `pos_z` is the part's Z. Returns silently
-    /// if the part has no mesh geometry this frame.
-    #[allow(clippy::too_many_arguments)]
-    fn push_mesh_part(&mut self, frame: &FrameView, transform: &[f32; 16], part_idx: usize, pos_z: f32, tex_size: Option<(f32, f32)>, color: [f32; 4], varg: [f32; 4]) {
+    /// Record one skinned-mesh part. Mesh geometry is the one irregular case, so
+    /// besides the primitive this appends a `(primitive, vertex)` pair per index —
+    /// the runtime's own triangle list, rebased onto the arena.
+    fn push_mesh_prim(&mut self, frame: &FrameView, node: &NodeSlot, part_idx: usize, prim: Prim) {
         let offsets = &frame.mesh_vertex_offsets;
         if offsets.is_empty() || part_idx >= offsets.len() - 1 {
             return;
@@ -550,106 +665,43 @@ impl SSScene {
             return;
         }
 
-        let base_vert_idx = self.vertices.len() as u32;
-        for k in start_vert..end_vert {
-            let wx = frame.mesh_vertices_x[k];
-            let wy = frame.mesh_vertices_y[k];
-            let (fx, fy, fz) = apply_transform(transform, wx, wy, pos_z);
-
-            let (tu, tv) = if let Some(size) = tex_size { (frame.mesh_uvs[k * 2] / size.0, frame.mesh_uvs[k * 2 + 1] / size.1) } else { (frame.mesh_uvs[k * 2], frame.mesh_uvs[k * 2 + 1]) };
-
-            self.vertices.push(Vertex { position: [fx, fy, fz], uv: [tu, tv], color, varg });
-        }
+        let index = self.push_prim(Prim {
+            // Mesh vertices come as two parallel world-space arrays.
+            aux_base: node.mesh_y,
+            pos_base: node.mesh_x,
+            uv_base: node.mesh_uvs,
+            node_base: node.transform,
+            ..prim
+        });
 
         let start_idx = frame.mesh_index_offsets[part_idx] as usize;
         let end_idx = frame.mesh_index_offsets[part_idx + 1] as usize;
         for &rel_idx in &frame.mesh_indices[start_idx..end_idx] {
-            self.indices.push(base_vert_idx + rel_idx as u32);
+            self.mesh_stream.push(index);
+            self.mesh_stream.push(start_vert as u32 + rel_idx as u32);
         }
     }
 
-    /// Build one Shape part for `part_idx` as a triangle fan into the frame
-    /// accumulation with a single uniform `color`. Vertices are the runtime's
-    /// local shape vertices transformed by the part's world matrix; UV is unused
-    /// (Shape mask writers are textureless). No-op if the part is not a shape or
-    /// has fewer than 3 live vertices.
-    fn push_shape_part(&mut self, frame: &FrameView, transform: &[f32; 16], part_idx: usize, color: [f32; 4]) {
+    /// Record one Shape part, drawn as a fan from vertex 0 by `vs_shape`.
+    /// No-op if the part is not a shape or has fewer than 3 live vertices.
+    fn push_shape_prim(&mut self, frame: &FrameView, node: &NodeSlot, part_idx: usize, prim: Prim) {
         // Layout: `shape_vertices[part_idx * SHAPE_STRIDE + 2*v]` = local xy.
         const SHAPE_STRIDE: usize = 24;
         let counts = &frame.shape_vertex_counts;
-        let sv = &frame.shape_vertices;
-        let wm = &frame.world_matrices;
-        if part_idx >= counts.len() || (part_idx + 1) * 16 > wm.len() {
+        if part_idx >= counts.len() || (part_idx + 1) * 16 > frame.world_matrices.len() {
             return;
         }
         let count = counts[part_idx].max(0) as usize;
-        if count < 3 || part_idx * SHAPE_STRIDE + count * 2 > sv.len() {
+        // The fan pattern is baked into the vertex stage at a fixed stride, so a
+        // shape with more vertices than that would silently lose triangles.
+        if count < 3 || count > (SHAPE_FAN_VERTS as usize / 3) + 2 {
             return;
         }
-        let m = &wm[part_idx * 16..(part_idx + 1) * 16];
         let base = part_idx * SHAPE_STRIDE;
-
-        let base_vert_idx = self.vertices.len() as u32;
-        for v in 0..count {
-            let lx = sv[base + 2 * v];
-            let ly = sv[base + 2 * v + 1];
-            let wx = m[0] * lx + m[4] * ly + m[12];
-            let wy = m[1] * lx + m[5] * ly + m[13];
-            let wz = m[2] * lx + m[6] * ly + m[14];
-            let (fx, fy, fz) = apply_transform(transform, wx, wy, wz);
-            self.vertices.push(Vertex { position: [fx, fy, fz], uv: [0.0, 0.0], color, varg: VARG_NONE });
-        }
-
-        // Triangle fan from vertex 0 (cull is disabled, so winding is irrelevant).
-        for k in 1..count - 1 {
-            self.indices.push(base_vert_idx);
-            self.indices.push(base_vert_idx + k as u32);
-            self.indices.push(base_vert_idx + (k + 1) as u32);
-        }
-    }
-
-    /// Build one Shape *content* part as a triangle fan with a bilinearly
-    /// interpolated fill colour. `corners` is `[lt, rt, lb, rb]` RGBA; each
-    /// vertex samples it by its box coordinate (fx, fy). Textureless: UV is
-    /// constant and the white fallback is bound, so the colour shows as-is
-    /// (matches WebGL `buildShape`).
-    fn push_shape_content_part(&mut self, frame: &FrameView, transform: &[f32; 16], part_idx: usize, corners: &[[f32; 4]; 4], varg: [f32; 4]) {
-        const SHAPE_STRIDE: usize = 24;
-        let counts = &frame.shape_vertex_counts;
-        let sv = &frame.shape_vertices;
-        let bc = &frame.shape_vertex_box_coords;
-        let wm = &frame.world_matrices;
-        if part_idx >= counts.len() || (part_idx + 1) * 16 > wm.len() {
+        if base + count * 2 > frame.shape_vertices.len() || base + count * 2 > frame.shape_vertex_box_coords.len() {
             return;
         }
-        let count = counts[part_idx].max(0) as usize;
-        if count < 3 || part_idx * SHAPE_STRIDE + count * 2 > sv.len() || part_idx * SHAPE_STRIDE + count * 2 > bc.len() {
-            return;
-        }
-        let m = &wm[part_idx * 16..(part_idx + 1) * 16];
-        let base = part_idx * SHAPE_STRIDE;
-
-        let base_vert_idx = self.vertices.len() as u32;
-        for v in 0..count {
-            let lx = sv[base + 2 * v];
-            let ly = sv[base + 2 * v + 1];
-            let wx = m[0] * lx + m[4] * ly + m[12];
-            let wy = m[1] * lx + m[5] * ly + m[13];
-            let wz = m[2] * lx + m[6] * ly + m[14];
-            let (fx, fy, fz) = apply_transform(transform, wx, wy, wz);
-
-            // Bilinear over box coords: [lt,rt] on top, [lb,rb] on bottom.
-            let (bx, by) = (bc[base + 2 * v], bc[base + 2 * v + 1]);
-            let color = bilerp_color(corners, bx, by);
-
-            self.vertices.push(Vertex { position: [fx, fy, fz], uv: [0.5, 0.5], color, varg });
-        }
-
-        for k in 1..count - 1 {
-            self.indices.push(base_vert_idx);
-            self.indices.push(base_vert_idx + k as u32);
-            self.indices.push(base_vert_idx + (k + 1) as u32);
-        }
+        self.push_prim(Prim { aux_base: node.world_matrices + (part_idx * 16) as u32, pos_base: node.shape_vertices + base as u32, uv_base: node.shape_box_coords + base as u32, node_base: node.transform, count: count as u32, ..prim });
     }
 
     /// Append an effect slot's `EffectDrawPlan` (a raw FlatBuffer) into the
@@ -659,7 +711,7 @@ impl SSScene {
     /// `stencil` selects the stencil test when the effect is a masked target
     /// (inherited from a parent mask); `None` for ordinary effects. `alpha` is
     /// the player-level fade (see [`BatchInfo::alpha`]).
-    pub fn append_effect(&mut self, plan_buf: &[u8], transform: &[f32; 16], stencil: StencilTest, alpha: f32) {
+    pub fn append_effect(&mut self, plan_buf: &[u8], node: &NodeSlot, stencil: StencilTest, alpha: f32) {
         if plan_buf.is_empty() {
             return;
         }
@@ -668,7 +720,6 @@ impl SSScene {
         let verts = plan.verts();
         let uvs = plan.uvs();
         let colors = plan.colors();
-        let indices = plan.indices();
 
         for cmd in plan.commands().iter() {
             let quad_count = cmd.quad_count() as usize;
@@ -679,61 +730,78 @@ impl SSScene {
             let particle_offset = cmd.particle_offset() as usize;
             // 0 = Mix pipeline, 1 = Add pipeline (per-command, not per-batch).
             let blend = if cmd.blend() == 1 { BlendType::Add } else { BlendType::Mix };
-            let key = self.content_key(blend, stencil);
-
-            let index_start = self.indices.len() as u32;
-            let base_vert = self.vertices.len() as u32;
+            let key = self.content_key(blend, stencil, GeomClass::Effect);
 
             let vert_first = particle_offset * 4;
             let vert_last = (particle_offset + quad_count) * 4;
+
+            // The particle quads go into the arena as they are — the runtime
+            // already put them in world space. Only the effect part's own
+            // placement is left, and the vertex stage applies that.
+            let pos_base = self.arena.len() as u32;
             for vi in vert_first..vert_last {
-                let px = verts.get(vi * stride);
-                let py = verts.get(vi * stride + 1);
-                let pz = if stride >= 3 { verts.get(vi * stride + 2) } else { 0.0 };
-                let (fx, fy, fz) = apply_transform(transform, px, py, pz);
-
-                // Effect UVs are already normalized 0..1 (unlike sprite/mesh pixel UVs).
-                let tu = uvs.get(vi * 2);
-                let tv = uvs.get(vi * 2 + 1);
-
-                let color = [colors.get(vi * 4), colors.get(vi * 4 + 1), colors.get(vi * 4 + 2), colors.get(vi * 4 + 3) * alpha];
-                // Effects carry no PartsColor overlay: plain texture*color modulate.
-                self.vertices.push(Vertex { position: [fx, fy, fz], uv: [tu, tv], color, varg: VARG_MODULATE });
+                self.arena.push(verts.get(vi * stride));
+                self.arena.push(verts.get(vi * stride + 1));
+            }
+            let uv_base = self.arena.len() as u32;
+            for vi in vert_first..vert_last {
+                self.arena.push(uvs.get(vi * 2));
+                self.arena.push(uvs.get(vi * 2 + 1));
             }
 
-            // Indices are quad-local (0..quad_count*4), rebased onto base_vert.
-            let idx_first = particle_offset * 6;
-            let idx_last = (particle_offset + quad_count) * 6;
-            for ii in idx_first..idx_last {
-                self.indices.push(base_vert + indices.get(ii) as u32);
+            // One primitive per particle. The runtime emits every particle as a
+            // quad with the same corner order this player uses (see
+            // `quad_corner`), so no index list has to travel with them.
+            let first_prim = self.prims.len() as u32;
+            for q in 0..quad_count {
+                let vi = vert_first + q * 4;
+                let color = pack_rgb(colors.get(vi * 4), colors.get(vi * 4 + 1), colors.get(vi * 4 + 2));
+                self.push_prim(Prim {
+                    pos_base: pos_base + (q * 8) as u32,
+                    uv_base: uv_base + (q * 8) as u32,
+                    node_base: node.transform,
+                    // Effects carry no PartsColor overlay: plain texture*color modulate.
+                    mode: mode::MUL,
+                    alpha,
+                    colors: [color; 4],
+                    alphas: [colors.get(vi * 4 + 3); 4],
+                    rates: [1.0; 4],
+                    ..Default::default()
+                });
             }
-
-            let index_end = self.indices.len() as u32;
-            if index_end > index_start {
-                self.draw_calls.push(BatchDrawCall { key, texture_hash, index_start, index_count: index_end - index_start, shader_slot: None });
-            }
+            self.push_draw(key, GeomClass::Effect, texture_hash, first_prim, None);
         }
     }
 
-    /// Upload the accumulated geometry to the GPU. Call once after all batches.
+    /// Upload the accumulated frame to the GPU. Call once after all batches.
     pub fn end_frame(&mut self, renderer: &mut SSRenderer, device: &wgpu::Device, queue: &wgpu::Queue) {
         renderer.ensure_white(queue);
 
-        if self.vertices.is_empty() || self.indices.is_empty() {
+        if self.prims.is_empty() {
             return;
         }
 
-        let vertex_len = std::mem::size_of_val(self.vertices.as_slice());
-        self.ensure_vertex_buffer(device, vertex_len);
-        if let Some(ref buffer) = self.vertex_buffer {
-            queue.write_buffer(buffer, 0, bytemuck::cast_slice(&self.vertices));
+        // Growing any of the three invalidates group(0), so they are sized
+        // together and the bind group is rebuilt only when one actually moved.
+        let mut rebuild = self.scene_bind_group.is_none();
+        rebuild |= ensure_storage(&mut self.arena_buffer, device, "SpriteStudio Arena", std::mem::size_of_val(self.arena.as_slice()));
+        rebuild |= ensure_storage(&mut self.prim_buffer, device, "SpriteStudio Prims", std::mem::size_of_val(self.prims.as_slice()));
+        rebuild |= ensure_storage(&mut self.mesh_stream_buffer, device, "SpriteStudio Mesh Stream", std::mem::size_of_val(self.mesh_stream.as_slice()));
+        if rebuild {
+            self.scene_bind_group = Some(device.create_bind_group(&wgpu::BindGroupDescriptor {
+                label: Some("SpriteStudio Scene Bind Group"),
+                layout: &renderer.scene_bind_group_layout,
+                entries: &[
+                    wgpu::BindGroupEntry { binding: 0, resource: self.globals_buffer.as_entire_binding() },
+                    wgpu::BindGroupEntry { binding: 1, resource: self.arena_buffer.as_ref().unwrap().as_entire_binding() },
+                    wgpu::BindGroupEntry { binding: 2, resource: self.prim_buffer.as_ref().unwrap().as_entire_binding() },
+                    wgpu::BindGroupEntry { binding: 3, resource: self.mesh_stream_buffer.as_ref().unwrap().as_entire_binding() },
+                ],
+            }));
         }
-
-        let index_len = std::mem::size_of_val(self.indices.as_slice());
-        self.ensure_index_buffer(device, index_len);
-        if let Some(ref buffer) = self.index_buffer {
-            queue.write_buffer(buffer, 0, bytemuck::cast_slice(&self.indices));
-        }
+        write_slice(queue, self.arena_buffer.as_ref(), &self.arena);
+        write_slice(queue, self.prim_buffer.as_ref(), &self.prims);
+        write_slice(queue, self.mesh_stream_buffer.as_ref(), &self.mesh_stream);
 
         // Compile whatever this frame draws with and has not drawn with before
         // (SPEC §5.2). After the first few frames every key is a cache hit, so
@@ -775,14 +843,10 @@ impl SSScene {
             return 0;
         }
 
-        let (v_buf, i_buf) = match (&self.vertex_buffer, &self.index_buffer) {
-            (Some(v), Some(i)) => (v, i),
-            _ => return 0,
-        };
+        let Some(scene_bg) = self.scene_bind_group.as_ref() else { return 0 };
 
-        rpass.set_vertex_buffer(0, v_buf.slice(..));
-        rpass.set_index_buffer(i_buf.slice(..), wgpu::IndexFormat::Uint32);
-        rpass.set_bind_group(0, &self.globals_bind_group, &[]);
+        // No vertex or index buffer: group(0) *is* the geometry (SPEC §5.5).
+        rpass.set_bind_group(0, scene_bg, &[]);
         if self.stencil_enabled {
             // Stencil ref is always 0; ops/compare are baked into the pipelines.
             rpass.set_stencil_reference(0);
@@ -811,26 +875,28 @@ impl SSScene {
             if let Some((slot, bg)) = params {
                 rpass.set_bind_group(2, bg, &[slot * SHADER_PARAM_STRIDE as u32]);
             }
-            rpass.draw_indexed(call.index_start..call.index_start + call.index_count, 0, 0..1);
+            rpass.draw(call.vertices.clone(), 0..1);
             issued += 1;
         }
 
         issued
     }
+}
 
-    fn ensure_vertex_buffer(&mut self, device: &wgpu::Device, size: usize) {
-        let current_size = self.vertex_buffer.as_ref().map(|b| b.size()).unwrap_or(0);
-        if current_size < size as u64 {
-            let new_size = (size * 2).max(1024);
-            self.vertex_buffer = Some(device.create_buffer(&wgpu::BufferDescriptor { label: Some("SpriteStudio Vertex Buffer"), size: new_size as u64, usage: wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST, mapped_at_creation: false }));
-        }
+/// Make sure `buffer` can hold `size` bytes, reallocating (with headroom) if not.
+/// Returns whether it was replaced — the caller's bind group is stale if so.
+fn ensure_storage(buffer: &mut Option<wgpu::Buffer>, device: &wgpu::Device, label: &str, size: usize) -> bool {
+    if buffer.as_ref().is_some_and(|b| b.size() >= size as u64) {
+        return false;
     }
+    // A zero-length frame array still needs a bindable buffer, hence the floor.
+    let new_size = (size * 2).max(1024) as u64;
+    *buffer = Some(device.create_buffer(&wgpu::BufferDescriptor { label: Some(label), size: new_size, usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST, mapped_at_creation: false }));
+    true
+}
 
-    fn ensure_index_buffer(&mut self, device: &wgpu::Device, size: usize) {
-        let current_size = self.index_buffer.as_ref().map(|b| b.size()).unwrap_or(0);
-        if current_size < size as u64 {
-            let new_size = (size * 2).max(1024);
-            self.index_buffer = Some(device.create_buffer(&wgpu::BufferDescriptor { label: Some("SpriteStudio Index Buffer"), size: new_size as u64, usage: wgpu::BufferUsages::INDEX | wgpu::BufferUsages::COPY_DST, mapped_at_creation: false }));
-        }
+fn write_slice<T: bytemuck::Pod>(queue: &wgpu::Queue, buffer: Option<&wgpu::Buffer>, data: &[T]) {
+    if let (Some(buffer), false) = (buffer, data.is_empty()) {
+        queue.write_buffer(buffer, 0, bytemuck::cast_slice(data));
     }
 }

@@ -111,7 +111,7 @@ impl SsPlayerWeb {
         let stencil_view = create_stencil_view(&device, width, height);
 
         let renderer = SSRenderer::new(&device);
-        let scene = SSScene::new(&device, &renderer, &SceneConfig { color_format: format, stencil_format: Some(STENCIL_FORMAT) });
+        let scene = SSScene::new(&device, &SceneConfig { color_format: format, stencil_format: Some(STENCIL_FORMAT) });
         let player = SSPlayer::new();
         let mut me = SsPlayerWeb { surface, device, queue, config, stencil_view, renderer, scene, player, instance, device_lost };
         me.scene.set_viewport(&me.queue, width as f32, height as f32, false);
@@ -146,7 +146,7 @@ impl SsPlayerWeb {
         self.stencil_view = create_stencil_view(&device, self.config.width, self.config.height);
         // Device-scoped first, then the target, then each player's atlases (§14).
         self.renderer.restore_device(&device, &queue);
-        self.scene.restore_device(&self.renderer, &device, &queue);
+        self.scene.restore_device(&device, &queue);
         self.player.restore_textures(&mut self.renderer, &device, &queue);
         // `restore_device` re-applies the viewport the player last saw, which is
         // stale if the canvas was resized while the device was gone (`resize` only

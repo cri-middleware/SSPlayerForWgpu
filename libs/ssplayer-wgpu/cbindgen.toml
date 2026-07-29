@@ -30,6 +30,7 @@ exclude = ["IDENTITY_TRANSFORM", "MAX_MASK_WRITERS"]
 # Types keep idiomatic Rust names in the source and take their C names here, so
 # the header reads like the hand-written API sketch in SPEC §11.
 [export.rename]
-"SsPlayerHost" = "ss_player_t"
-"SsPlayerDesc" = "ss_player_desc_t"
+"SsScene" = "ss_scene_t"
+"SsPlayer" = "ss_player_t"
+"SsSceneDesc" = "ss_scene_desc_t"
 "SsWindowHandle" = "ss_window_handle_t"

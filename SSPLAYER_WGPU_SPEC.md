@@ -173,14 +173,14 @@ ssplayer-wgpu/
 │   │       │                         layout/sampler/白 ＋ テクスチャ ＋ WGSL・頂点形式）§9.1
 │   │       ├── scene.rs           ✅ 層2b SSScene（ターゲットスコープ。投影 ＋ 頂点アリーナ ＋
 │   │       │                         draw_call ＋ order 昇順で N プレイヤーを1フレームに）§9.2
-│   │       ├── pack.rs            ◻ P7: SSPack（.ssab の共有単位。★CPU のみ・GPU 非所有）§8.2
+│   │       ├── pack.rs            ✅ SSPack（.ssab の共有単位。★CPU のみ・GPU 非所有）§8.2
 │   │       ├── player.rs          ✅ 層3 SSPlayer（操作。再生木 ＋ transform/order/visible）
 │   │       │                         ★P7 以降 wgpu 型のフィールドを持たない（§1.2）
 │   │       ├── mask.rs            ✅ MaskPlanner（§6）
 │   │       ├── web.rs             ✅ #[cfg(feature="web")] wasm-bindgen（② js）
 │   │       │                         ◻ P7: SsSurfaceWeb（1 canvas = N player、device はページ共有）
 │   │       ├── host.rs            ✅ #[cfg(feature="ffi")] NativeHost（生ハンドル→wgpu 一式を所有）
-│   │       │                         ◻ P7: 1 window = N player（Vec<SSPlayer> を持つ）
+│   │       │                         ✅ 1 window = N player（PlayerRoster：世代付き slot）
 │   │       └── ffi.rs             ✅ #[cfg(feature="ffi")] extern "C" ss_scene_* / ss_player_*（③ C/C++）
 │   │                                 ★ABI 変換のみ。wgpu ロジックは host.rs、再生は player.rs
 │   └── ssplayer-wgpu-bevy/        ◻【将来】Bevy アダプタ（借用モデルの一利用例）
@@ -304,26 +304,21 @@ FlatBuffers 側から読む: `draw_order`（`[ushort]` parts インデックス�
 
 ## §5 層2（描画）の設計
 
-### 5.1 頂点フォーマット（WebGL 版と同一 SoA 意味論）
+### 5.1 頂点の受け渡し — **頂点バッファは無い**（★P7-6 で撤去）✅
 
-| 属性 | loc | 型 | 内容 |
-|---|---|---|---|
-| position | 0 | vec2/vec3 | ワールド座標（Normal は世界行列適用後、Mesh は済み＋z） |
-| uv | 1 | vec2 | 正規化 UV（0..1） |
-| color | 2 | vec4 | RGBA 0..1（パーツカラー頂点色 or α） |
-| varg | 3 | vec4 | `[rate, isMix, isMul, isAddSub]`（PartsColor ブレンド制御） |
+**現在の実装には `VertexBufferLayout` も index buffer も存在しない。** 頂点属性は §5.5 の SoA パススルーに置き換わり、頂点ステージが scene のストレージバッファから直接読む。以下は「何が頂点として届くか」の意味論であり、**バッファの中身ではない**（`VertexOutput` の中身である）。
 
-> **✅ 実装済**: `Vertex{position:[f32;3], uv, color, varg:[f32;4]}`（loc 3）。varg は PartColor の**自前 blend_type**（draw batch の blend ではない）から導出：Normal は per-corner `[rate, isMix, isMul, isAddSub]`、Mesh は corner-0 単一、Shape は Mix 固定 `[hasPc?1:0, 1,0,0]`、Effect / PartColor 無しは `[1,0,1,0]`（mul modulate）。PartColor blend は Mix/Mul/Add/Sub のみ有効、他は Mix クランプ（`parts_color_flags`）。
+| varying | 内容 |
+|---|---|
+| clip_position | 投影後。z は `0.5` 直書き（下記） |
+| uv | 正規化 UV（0..1）。**正規化は頂点ステージ**が `TexInfo.size` で行う（§8.2） |
+| color | RGBA 0..1（パーツカラー頂点色 or α） |
+| varg | `[rate, isMix, isMul, isAddSub]`（PartsColor ブレンド制御） |
 
-Normal パーツは builder が index を出さないので、5頂点（TL,TR,BL,BR,center）に対し中心を要にした扇 12 index を張る：`(0,1,4)(1,3,4)(3,2,4)(2,0,4)`。現プロトは4隅2三角形だが、頂点変形/カラーで center が効く場合に扇へ切替。
-
-**★P7 で改定（頂点を詰める）**: 現行 52 B/頂点には無駄がある。
-
-- **`position.z` は完全に死んでいる**。投影行列の第2列は `[0,0,1,0]`（`update_projection`）なので z は x,y に影響せず、`vs_main` は `out.clip_position = vec4(pos.x, pos.y, 0.5, 1.0)` と **z を捨てて 0.5 を直書き**している。つまり z 成分の変換（3 mul + 2 add / 頂点）と 4 B/頂点は計算して捨てているだけ。→ **`position: vec2` にする**（Mesh の `position_z` も同様に不要）。
-- `color` は 0..1 の f32×4 → **`unorm8x4`（4 B）**で十分（元データが 0..255 の u8）。
-- `varg` は実質 `(rate: f32, mode: 2bit)` → **packed u32（4 B）**。
-
-結果 **pos(8) + uv(8) + color(4) + varg(4) = 24 B**（現状比 46%）。ただしこれは §5.5 の SoA パススルーへ移行するまでの中間形であり、最終形では**頂点バッファ自体が消える**。
+- varg は PartColor の**自前 blend_type**（draw batch の blend ではない）から導出：Normal は per-corner `rate`、Mesh は corner-0 単一、Shape は Mix 固定（`rate = hasPc?1:0`）、Effect / PartColor 無しは Mul + rate 1（modulate）。PartColor blend は Mix/Mul/Add/Sub のみ有効、他は Mix クランプ（`parts_color_mode`）。**`(isMix,isMul,isAddSub)` は4通りしかないので `Prim.mode`（2bit）に畳み、頂点ステージの `varg_of` が展開する**——頂点あたり3 float を運ぶ理由が無い。
+- **`position.z` は x,y に影響しない**。投影行列の第2列は `[0,0,1,0]`（`update_projection`）で、頂点ステージは `clip_position = vec4(pos.x, pos.y, 0.5, 1.0)` と z を捨てる。ただし**変換の途中では z を持つ**——インスタンス子の合成行列（`mat4_mul`）は3D回転を含みうるので、`t[8]*wz` が x に効く。捨てるのは最後だけ。
+- `Prim` の色は **packed unorm8x4**（元データが u8 なので無損失）だが、**アルファだけは f32 のまま別配列**にしてある。PartColor 無しのパーツは α を runtime から f32 で受け取るので、量子化すると出力が動く。
+- Normal パーツは4隅2三角形（`quad_corner` の `[0,1,2,2,1,3]`）。頂点変形/カラーで中心が効く場合に5頂点の扇へ切替する余地は残っている（WebGL 版と同じ判断）。
 
 ### 5.2 パイプライン設計（WebGL の動的 state → wgpu は焼き込み）
 
@@ -336,7 +331,8 @@ Normal パーツは builder が index を出さないので、5頂点（TL,TR,BL
 
 **★P7 で確定：全パイプラインを遅延生成にする。** 現行は `SSInternalPlayer::new` が 12ブレンド × stencil3 = 36本＋マスク書き込み3本を**起動時に全部**コンパイルしており、1ブレンドしか使わないアニメでも全額払っている（初回表示レイテンシは §14 の WebGPU 弱点そのもの）。統合シェーダ側（`ss_pipelines`）が既に `(id_hash, blend)` キーの遅延生成を採用しているので、**同じ手法を content / mask 側にも広げる**だけ。
 
-- キーは **`(blend, stencil_test, color_format, stencil_format)`**。フォーマットをキーに含めることで `SSRenderer` 自体がフォーマット非依存になり、**1 device に1個**で足りる（§1.2）。
+- キーは **`(kind, color_format, stencil_format)`**、`kind` は `Content(blend, stencil_test, geom_class)` / `Mask(op, geom_class)` / `Shader(id_hash, blend)`。フォーマットをキーに含めることで `SSRenderer` 自体がフォーマット非依存になり、**1 device に1個**で足りる（§1.2）。
+- **`geom_class` は P7-6 で増えた次元**（Quad / Mesh / Shape / Effect）。頂点バッファを廃して展開を頂点ステージに移したので、幾何の種類＝頂点エントリポイントの違いになった（§5.5）。**遅延生成なので実測は増えていない**——Basic.ssab は1本、Shape.ssab で3本（`every_geometry_class_draws`）。
 - 20体を載せたページで旧設計は 39本 × 20 = 780本、新設計は実使用ぶんの数本。
 - 去重は「同一パイプラインなら再バインドしない」（現プロトの `_lastBlend` 相当）。
 
@@ -378,32 +374,40 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
 
 **投影は `SSScene`（ターゲット単位）、配置は `SSPlayer`（体単位）**（P7）。現行はルート transform が単位行列固定で、位置決めの手段が `set_viewport` しかない——複数体を1画面に置く前提が無かったことの現れ。`render_node` は既にインスタンス子のために任意 transform の合成（`mat4_mul`）を実装済みなので、**ルートに Player の行列を渡すだけで動く**（配管は揃っていて公開されていないだけ）。
 
-### 5.5 頂点生成経路（★P7・WebGPU 固有の本命）
+### 5.5 頂点生成経路（★P7-6・WebGPU 固有の本命）— ✅ 実装済（`scene.rs` ＋ `renderer.rs` `COMMON_WGSL`）
 
-**現状は「WebGL でできることを wgpu で書いた」形**——毎フレーム CPU で `Vec<Vertex>` を組み立て（パーツ×4頂点×13 float の**散らばったストア**）、`write_buffer` で上げ、`draw_call` を1本ずつ encode している。ここが CPU 律速で、WebGL 版と同じ天井に当たる。
+**旧実装は「WebGL でできることを wgpu で書いた」形**——毎フレーム CPU で `Vec<Vertex>` を組み立て（パーツ×4頂点×13 float の**散らばったストア**）、`write_buffer` で上げ、index buffer も毎フレーム作り直していた。ここが CPU 律速で、WebGL 版と同じ天井に当たっていた。
 
 **WebGPU には storage buffer があるので、頂点を CPU で組む必要がない。**
 
-ssruntime は `world_matrices` / `local_vertices` / `local_uvs` / `mesh_*` を**フラットな f32 配列**で出している（§3.2）。これを**そのまま GPU へ渡し、頂点シェーダで展開する**：
+ssruntime は `world_matrices` / `local_vertices` / `local_uvs` / `mesh_*` / shape 系を**フラットな f32 配列**で出している（§3.2）。これを**そのまま GPU へ渡し、頂点ステージで展開する**。現在の形:
 
 ```
-[CPU] ノード毎: SoA スライスを scene アリーナへ copy_from_slice（SIMD memcpy）
-      パーツ毎: {arena 内 part slot, node transform index, color, varg} の小さなレコード
-      draw 毎 : {pipeline, texture, 範囲}
-[GPU] vs: world_matrices[part*16] * local_vertices[part*10 + corner]
+[CPU] ノード毎: begin_node() が SoA スライスを scene アリーナへ extend_from_slice（memcpy）
+                ＋ ノードの配置行列 16 float。返り値 NodeSlot が各配列の先頭オフセット
+      パーツ毎: Prim（80 B）1本 — {arena オフセット4本, count, mode, alpha, z,
+                colors[4] packed, alphas[4] f32, rates[4] f32}
+      draw 毎 : {pipeline, texture, vertex_index 範囲}
+[GPU] vs_quad / vs_mesh / vs_shape / vs_effect が vertex_index からパーツを引き、
+      world_matrix × local_vertex → node transform → 投影 を実行
 ```
 
-| | 現行 | SoA パススルー |
+**`vertex_index` の割り当て**（頂点バッファも index buffer も無いので、これが唯一の入力）:
+
+| class | 1 プリミティブあたり | vertex_index → プリミティブ |
 |---|---|---|
-| CPU の書き込み | パーツ × 4頂点 × 13 float の散らばったストア | **数回の memcpy** |
-| 転送量 | 208 B（頂点）+ 24 B（index）= 232 B/パーツ | 144 B/パーツ（matrix 64 + verts 40 + uvs 40）※更に圧縮可 |
-| index buffer | **毎フレーム再構築＋再アップロード** | quad は `0,1,2,0,2,3…` の**静的パターン**→ 一度作れば再アップロード不要、または indexless `draw(0..6n)` |
+| Quad | 6（`[0,1,2,2,1,3]`） | `vi / 6`。**完全に算術** |
+| Effect | 6（パーティクル1枚＝1 prim） | `vi / 6`。runtime の index 列は必ずこの順（`lib.rs` の `[v,v+1,v+2,v+2,v+1,v+3]`）なので index 配列を運ばない |
+| Shape | 30 固定（`SHAPE_FAN_VERTS`） | `vi / 30`。**余りの三角形は頂点0へ潰して面積ゼロ**にする。runtime の shape 配列は1パーツ 24 f32 = 最大12頂点＝最大10三角形なので 30 で必ず足りる（`push_shape_prim` が超過を弾く） |
+| Mesh | 可変（runtime の三角形リスト） | 唯一算術で引けないので `(prim, vertex)` の**ペア列**（`mesh_stream`）を頂点ごとに1組持つ |
 
+- **プリミティブ表は class をまたいで1本**。class ごとの `vertex_index` 空間に「他 class の prim が空けた穴」ができるが、そこは誰も draw しないので害が無い。おかげで prim のインデックスがフレーム内で一意になる。
+- group(0) が「シーン」になった: 投影 uniform ＋ `f_arena` ＋ `prims` ＋ `mesh_stream`（storage 3本、`ShaderStages::VERTEX`）。バッファが再確保されたフレームだけ bind group を作り直す。
 - **§1.1 の所有契約そのもの**：SoA は ssruntime 所有・Player は borrow。memcpy はまさに「borrow して書き出した時点で手放す」。
-- インスタンスサブツリーの transform 合成は**ノード単位**（パーツ単位ではない）なので、ノード transform 配列を別 storage buffer に置いて index 参照すれば `mat4_mul` の回数は変わらない。
-- mesh / shape も同じ扱い（`mesh_vertices_x/y` / `mesh_uvs` / `mesh_indices` は既に SoA）。エフェクトの `EffectDrawPlan` も同形。
-- **WebGL2 は SSBO 無し・UBO 64KB・大規模動的 index 不可**なので、この形には到達できない。ssplayer-webgl と差がつく最大の一点であり、P7 で WebGPU を選ぶ意味そのもの。
-- これが入ると Player 単位の alpha / tint も「per-player レコード1本」で済む（現行の形だと全頂点書き込みに触る必要がある）。**機能追加より先にこの経路へ移すこと。**
+- インスタンスサブツリーの transform 合成は**ノード単位**（パーツ単位ではない）なので、`mat4_mul` の回数は変わっていない。合成結果はアリーナに1本置き、`Prim.node_base` で参照する。
+- **WebGL2 は SSBO 無し・UBO 64KB・大規模動的 index 不可**なので、この形には到達できない。ssplayer-webgl と差がつく最大の一点であり、WebGPU を選ぶ意味そのもの（§14.1）。
+- Player 単位の alpha は `Prim.alpha` 1つになった（旧実装は全頂点の色に畳み込んでいた）。**tint も同じ場所に足せる**。
+- **★検証の要**: 頂点ステージの座標計算は**行列積ではなくスカラーの並び**で書いてある。旧 CPU 実装と**同じ順序で同じ演算**をさせるためで、これにより 134 枚のフィクスチャが**ビット完全一致**した（§13 `golden_corpus`）。ここを「綺麗な `mat4 * vec4`」に書き換えると FMA 収縮で 1 ULP ずれ、比較の基準を失う。書き換えるなら基準の取り直しから。
 - 段階の先には **render bundle**（draw_call 列の再 encode を省く）と **timestamp query**（バッチ単位の GPU 実測。WebGL の `EXT_disjoint_timer_query` は Spectre 対策でブラウザから実質消滅している）がある。どちらも draw_call 構造が安定してから。
 
 ---
@@ -488,20 +492,28 @@ ssconverter は `.ssab` を2形態で出力しうるので、SSPlayer はどち�
 - **feature `embedded`（default on）**: Player 内蔵 `image`（PNG のみ）でデコード。WASM サイズを抑える場合は `--no-default-features` で切り、デコードをブラウザ（`createImageBitmap`）に委ねてホスト供給に一本化。
 - **検証**: `render.rs::render_embedded_ssab`（埋め込み `Basic.ssab` をテクスチャ無供給でロード → reference レンダーとピクセル完全一致 14378/14378）。埋め込みフィクスチャは `assets/overall_emb/`（`ssconverter-cli --embedded` 生成）。
 
-### 8.2 SSPack とテクスチャ供給（★P7）— **GPU テクスチャは所有しない**
+### 8.2 SSPack とテクスチャ供給（★P7-5）— **GPU テクスチャは所有しない** ✅ 実装済（`libs/ssplayer-wgpu/src/pack.rs`）
 
 「同じキャラを何体も出す」が普通になるので `.ssab` の共有単位を作る。ただし **`SSPack` は CPU データだけを持ち、GPU テクスチャは所有しない。**
 
 ```rust
-pub struct SSPack { /* Arc<SsabResource>, 必要な texture hash 一覧, embedded 画像の取り出し口 */ }
+pub struct SSPack { /* Arc<str> 名前, Arc<SsabResource>, Arc<[u32]> 必要 hash, embedded 有無 */ }
 
-SSPack::load(bytes) -> Result<SSPack, SSRuntimeError>   // ★device も queue も要らない（CPU のみ）
-pack.required_textures() -> &[u32];                     // このパックが要求する hash
-pack.decode_embedded() -> Vec<(u32, Vec<u8>, u32, u32)>; // embedded の場合のみ。ピクセルを**渡すだけ**
+SSPack::load(bytes) -> Result<SSPack, SSRuntimeError>       // ★device も queue も要らない（CPU のみ）
+SSPack::load_named(name, bytes) -> Result<SSPack, _>        // ホストが名前を決める場合
+pack.name() -> &str;                                        // ★既定は .ssab 自身の name
+pack.required_textures() -> &[u32];                         // このパックが要求する hash
+pack.has_embedded_textures() -> bool;
+pack.animation_names() -> Vec<String>;
+pack.decode_embedded() -> Vec<EmbeddedTexture>;             // embedded の場合のみ。ピクセルを**渡すだけ**
+pack.decode_embedded_where(|hash| ...) -> Vec<EmbeddedTexture>; // ★デコード前に絞る
 
-player.set_pack(&pack);   // Arc をクローンして参照するだけ
+player.set_pack(&pack);   // Arc をクローンして参照するだけ（主パック指定）
 player.add_pack(&pack);   // 外部インスタンス参照解決用
 ```
+
+- **パック名は `.ssab` が持っている**（`SsAnimeBinary.name`）。インスタンス参照は `ref_anime_pack` 文字列で解決する（§7.1）ので、ホストがファイル名から名前を復元する必要はない——`SSPack::load` の既定名がそのまま噛み合う。`load_named` はファイル名で管理したいホスト向け（`add_ssab` / `load_ssab` はこちらの薄いラッパ）。
+- **デコードは「渡すだけ」でキャッシュしない**。代わりに `decode_embedded_where` の述語が **PNG デコードの前**に走るので、既に登録済みのアトラスは**デコードごとスキップ**される。`SSPlayer` はこれを使って `update` 時に「まだ無いものだけ」を上げる。
 
 **なぜ GPU テクスチャを持たせないか（★設計判断）**: 持たせると `SSPack` の refcount が **engine のアセット管理と二重の所有系**になる。Bevy なら `Assets<Image>` / `Handle<Image>` / `RenderAssets<GpuImage>` が既にライフサイクル・ホットリロード・アンロードを握っており、そこへ第二の所有者を持ち込むと (1) 同じアトラスが Bevy 側と我々側で**二重アップロード**、(2) 解放タイミングが engine の意図とずれる、(3) フォーマット・mip・サンプラの方針を engine から奪う、という3点で必ず衝突する。
 
@@ -509,17 +521,19 @@ player.add_pack(&pack);   // 外部インスタンス参照解決用
 
 ```rust
 // 供給側が所有する TextureView を借りる。renderer はこれで bind group だけ作る
-renderer.set_texture(hash: u32, view: &wgpu::TextureView, size: (u32,u32), alpha: AlphaMode);
+renderer.set_texture(&device, hash: u32, view: &wgpu::TextureView, size: (u32,u32), alpha: AlphaMode);
+renderer.forget_texture(hash);                  // 借用を返す（供給側の解放を遅らせない）
+renderer.texture_alpha_mode(hash) -> Option<AlphaMode>;
 
-// 便利経路（viewer / web / ffi）: renderer が自分でテクスチャを作ってから set_texture する
-renderer.upload_texture(&device, &queue, hash, rgba, w, h);
+// 便利経路（viewer / web / ffi）: renderer が自分でテクスチャを作る（CPU premul 付き）
+renderer.upload_texture(&device, &queue, hash, rgba, (w, h), retention);
 ```
 
 - **Bevy 統合**: アダプタが `GpuImage.texture_view` を毎回 `set_texture` で渡すだけ。二重アップロードなし、解放は Bevy の意志どおり。embedded ssab の場合も `decode_embedded()` の**ピクセルを `Assets<Image>` へ流し込めば**、テクスチャは最初から Bevy の資産になる。
 - **wgpu の型は内部が refcount** なので `TextureView` を clone して保持しても dangling しない。ただし**我々が握っている間は解放が遅れる**——engine 側で不要になったら `renderer.forget_texture(hash)` を呼ぶ、という契約にする。
-- **`AlphaMode`（premul / straight）を per-texture で持つ**。engine が供給するテクスチャは premultiply されていないのが普通で、現行の「アップロード時に CPU で premul」（§8 冒頭）が使えないため。シェーダの逆premul（`tex.rgb / tex.a`）を**このフラグで飛ばす**だけで済み、パイプラインは増やさない。→ フラグはテクスチャ bind group 側の小さな uniform に置く。**同じ uniform にテクスチャサイズも入れれば、現在 CPU でやっている UV 正規化も GPU へ移せる**（§5.5 と相性が良い）。
-- **重複排除は hash マップ側の性質**なので、`SSPack` が GPU を持たなくても「同じキャラ N 体でアップロード1回」は成立する（`SSRenderer` の `hash → entry` が1つだから）。
-- **device 喪失復帰の責務分界**（§14）: `upload_texture` 経路（我々が作った）は `SSRenderer` が retained source から復帰させる。`set_texture` 経路（借り物）は**供給側の責務**——engine は自分の asset を作り直したうえで `set_texture` を再度呼ぶ。境界を曖昧にしない。
+- **`AlphaMode`（premul / straight）を per-texture で持つ** ✅。engine が供給するテクスチャは premultiply されていないのが普通で、現行の「アップロード時に CPU で premul」（§8 冒頭）が使えないため。シェーダの逆premul（`tex.rgb / tex.a`）を**このフラグで飛ばす**だけで済み、パイプラインは増やさない（`renderer.rs` `ss_straight_rgb` / `ssTex` の `select`）。→ フラグはテクスチャ bind group 側の小さな uniform（group(1) binding(2) の `TexInfo`、32 B）に置く。**同じ uniform にテクスチャサイズ `(w, h, 1/w, 1/h)` も入れてあり**、現在 CPU でやっている UV 正規化を GPU へ移す器はもう出来ている（§5.5 と相性が良い。可視性は `VERTEX_FRAGMENT`）。
+- **重複排除は hash マップ側の性質**なので、`SSPack` が GPU を持たなくても「同じキャラ N 体でアップロード1回」は成立する（`SSRenderer` の `hash → entry` が1つだから）。**登録済みが勝つ**——2体目はデコードもアップロードもせず、ホストが自前で供給した hash も奪われない。逆に embedded 側で上書きしたいホストは先に `forget_texture` を呼ぶ。
+- **device 喪失復帰の責務分界**（§14）: `upload_texture` 経路（我々が作った）は `SSRenderer` が retained source から復帰させる。`set_texture` 経路（借り物）は**供給側の責務**——engine は自分の asset を作り直したうえで `set_texture` を再度呼ぶ。境界を曖昧にしない。1つの hash を両経路が同時に主張しないよう、`set_texture` は既存の retained source を捨てる。
 
 ---
 
@@ -559,13 +573,15 @@ impl SSRenderer {
     pub fn new(device: &wgpu::Device) -> Self;                      // ★config を取らない
     pub fn pipeline_count(&self) -> usize;                          // 診断（§5.2）
 
-    // --- テクスチャ ---
+    // --- テクスチャ（借用チャネル＝主、所有は便利経路。§8.2）---
+    pub fn set_texture(&mut self, device, hash: u32, view: &wgpu::TextureView, size: (u32,u32), alpha: AlphaMode);
+    pub fn forget_texture(&mut self, hash: u32);
+    pub fn texture_alpha_mode(&self, hash: u32) -> Option<AlphaMode>;
     pub fn upload_texture(&mut self, device, queue, hash: u32, rgba: &[u8], size: (u32,u32), retention: Retention);
     pub fn texture_size(&self, hash: u32) -> Option<(f32, f32)>;
+    pub fn texture_count(&self) -> usize;                           // 診断
+    pub fn texture_upload_count(&self) -> usize;                    // 診断（§13：N体で1回を測る）
     pub fn forget_texture_sources(&mut self);                       // 保持コピーを捨てる（§14）
-    // ◻ 7-5: 所有ではなく借用チャネルへ（§8.2）
-    // pub fn set_texture(&mut self, hash, view: &wgpu::TextureView, size, alpha: AlphaMode);
-    // pub fn forget_texture(&mut self, hash: u32);
 
     // --- device 喪失復帰（§14）。ここ1回で device 上の全 Scene / Player が復帰する ---
     pub fn restore_device(&mut self, device: &wgpu::Device, queue: &wgpu::Queue);
@@ -579,6 +595,15 @@ pub enum Retention {
     /// 所有する `.ssab` から再デコードするので、2枚目のコピーは純粋な無駄。
     Reproducible,
 }
+
+/// テクスチャの色とアルファの関係（§8.2）。パイプラインではなく
+/// テクスチャ側の uniform に載るので、混在しても本数は増えない。
+pub enum AlphaMode {
+    /// rgb は a 済み。我々の `upload_texture` はこちら。
+    Premultiplied,
+    /// rgb は a と独立（PNG デコード直後 ＝ engine が渡してくる普通の形）。
+    Straight,
+}
 ```
 
 **復帰の責務分界（★7-3 で確定）**: device 喪失時、ホストは **`SSRenderer::restore_device` を1回**呼び、続いて各 Player の `restore_device(&mut renderer, ..)` を呼ぶ。前者が pipeline / テクスチャ（`Retain` 分）を、後者が投影 uniform とフレームアリーナを、そして embedded アトラスの再デコード（`Reproducible` 分）を受け持つ。**旧設計はこの全部を Player ごとに繰り返していた**——アトラスの PNG デコードを含めて。
@@ -591,12 +616,11 @@ pub enum Retention {
 **描画ターゲット1枚に1個**。投影・フレーム頂点アリーナ・draw_call 列・ステンシル管理を持ち、**order 昇順で N 体を1 pass にまとめる**。
 
 ```rust
-pub struct SSScene { /* projection UB, frame arena (verts/indices/params), draw_calls, stencil state */ }
+pub struct SSScene { /* projection UB, frame arena / prims / mesh_stream, draw_calls, ss params */ }
 
 impl SSScene {
-    pub fn new(device: &wgpu::Device, config: &SceneConfig) -> Self;
+    pub fn new(device: &wgpu::Device, config: &SceneConfig) -> Self;   // ★renderer を取らない（§5.5）
     pub fn set_viewport(&mut self, queue: &wgpu::Queue, w: f32, h: f32, y_down: bool);
-    pub fn resize(&mut self, device, queue, w: u32, h: u32);
 
     /// 全 Player を進め、1本のアリーナへ積んで GPU へ上げる。
     /// players は order 昇順に整列してから走査（同値は与えられた順を保つ）。
@@ -607,8 +631,17 @@ impl SSScene {
     pub fn draw<'a>(&'a self, renderer: &'a SSRenderer, pass: &mut wgpu::RenderPass<'a>) -> usize;
 
     pub fn restore_device(&mut self, device: &wgpu::Device, queue: &wgpu::Queue);
+
+    // --- 層3（SSPlayer の木走査）が積むための下位 API（§5.5）---
+    pub fn begin_node(&mut self, frame: &FrameView, transform: &[f32;16]) -> NodeSlot;  // SoA を memcpy
+    pub fn push_transform(&mut self, transform: &[f32;16]) -> NodeSlot;                 // エフェクト用
+    pub fn append_batch(&mut self, renderer: &SSRenderer, frame: &FrameView, node: &NodeSlot, batch: &BatchInfo);
+    pub fn append_mask_writer(&mut self, frame: &FrameView, node: &NodeSlot, writer: &MaskWriter, op: MaskOp);
+    pub fn append_effect(&mut self, plan_buf: &[u8], node: &NodeSlot, stencil: StencilTest, alpha: f32);
 }
 ```
+
+- **`new` / `restore_device` は `SSRenderer` を取らない**。group(0) の bind group はフレームのバッファが確定する `end_frame` で、**その時に描いているレンダラの layout に対して**作るため。構築時のレンダラを覚え込む必要が無くなった（P7-6）。
 
 - `SceneConfig { color_format, stencil_format: Option<_>, .. }` がターゲット仕様。`stencil_format` が `Some` のときホストは毎 pass に一致する depth/stencil を attach する（§6）。
 - **Player は所有せず借りる**（§1.2）。ECS や engine のノードに Player が住むケースをそのまま載せるため。
@@ -624,9 +657,11 @@ pub struct SSPlayer { /* packs: Vec<SSPack>, root: PlaybackNode 木, transform, 
 impl SSPlayer {
     pub fn new() -> Self;                  // ★device も renderer も取らない。GPU リソースが無いので失敗しない
 
-    // --- pack 登録 / 再生制御 ---
+    // --- pack 登録 / 再生制御（★P7-5 実装済）---
     pub fn add_pack(&mut self, pack: &SSPack);      // 外部参照解決用に全 pack 登録（§8.2）
     pub fn set_pack(&mut self, pack: &SSPack);      // 主 pack 指定
+    pub fn add_ssab(&mut self, pack_name: &str, data: &[u8]) -> Result<(), SSRuntimeError>;   // = load_named + add_pack
+    pub fn load_ssab(&mut self, pack_name: &str, data: &[u8]) -> Result<(), SSRuntimeError>;  // = load_named + set_pack
     pub fn set_animation(&mut self, anim: &str) -> Result<(), SSRuntimeError>;  // 選択＝インスタンス木を再構築（★確保はここだけ）
     pub fn play(&mut self);   // 開始 / pause からの再開。引数なし・確保なし
     pub fn pause(&mut self);  pub fn stop(&mut self);  pub fn set_speed(&mut self, speed: f32);
@@ -706,12 +741,13 @@ typedef struct ss_player_t ss_player_t;                       // 不透明ハン
 ss_scene_t*  ss_scene_create(const ss_scene_desc_t* desc);    // 生ウィンドウハンドル + backend + size + clear + mask
 void         ss_scene_destroy(ss_scene_t*);                   // 配下の player もまとめて破棄
 void         ss_scene_update(ss_scene_t*, float delta_seconds);
-int32_t      ss_scene_render(ss_scene_t*);                    // swapchain 取得 → 全 player 描画 → present
+int32_t      ss_scene_render(ss_scene_t*);                    // swapchain 取得 → 全 player を1 pass → present
 void         ss_scene_resize(ss_scene_t*, uint32_t w, uint32_t h);  // ★ピクセル単位
 int32_t      ss_scene_add_texture(ss_scene_t*, uint32_t hash, const uint8_t* rgba, uint32_t w, uint32_t h);  // reference 用（renderer 共有）
+uint32_t     ss_scene_player_count(ss_scene_t*);              // 診断
 
 ss_player_t* ss_scene_create_player(ss_scene_t*);             // ★1シーンに何体でも
-void         ss_player_destroy(ss_player_t*);                 // シーンから外して破棄
+void         ss_player_destroy(ss_player_t*);                 // シーンから外す（ハンドル自体は scene 破棄まで生存）
 int32_t      ss_player_add_ssab(ss_player_t*, const char* pack, const uint8_t* data, size_t len);   // 外部参照解決用に全 pack 登録
 int32_t      ss_player_load_ssab(ss_player_t*, const char* pack, const uint8_t* data, size_t len);  // 主 pack。embedded/reference 両対応
 int32_t      ss_player_set_animation(ss_player_t*, const char* anim_name);   // 選択（確保はここだけ）
@@ -721,13 +757,17 @@ void         ss_player_set_speed(ss_player_t*, float speed);  bool ss_player_is_
 void         ss_player_set_transform(ss_player_t*, float x, float y, float sx, float sy, float rot);
 void         ss_player_set_order(ss_player_t*, int32_t order);       // 小さいほど先に描く
 void         ss_player_set_visible(ss_player_t*, bool visible);
+void         ss_player_set_alpha(ss_player_t*, float alpha);
 uint32_t     ss_player_animation_count(ss_player_t*);
 const char*  ss_player_animation_name(ss_player_t*, uint32_t index);  // 次の呼び出しまで有効
 int32_t      ss_player_canvas_size(ss_player_t*, float* w, float* h);
 const char*  ss_last_error(void);                             // スレッドローカル。次の失敗まで有効
 ```
 
-- **ハンドルの寿命**: `ss_player_t*` は `ss_scene_t` が所有する要素への参照。**シーンを破棄したら配下の player ハンドルは全て無効**（use-after-free になるので C 側で持ち越さない）。世代付きインデックスで dangling を検出できるようにする。
+- **ハンドルの寿命（★実装済の形）**: `ss_player_t*` は「どの scene の、どの slot か」を持つ小さな box。**scene の Vec への生ポインタではない**——Vec は伸びると移動し、slot は再利用されるため。
+  - `ss_player_destroy` は **box を解放しない**（scene が破棄されるまで生かす）。おかげで**二重 destroy も、破棄後の呼び出しも安全な no-op** になる。よくある C の間違いを未定義動作にしない。
+  - slot は再利用するが、**世代番号**（`PlayerId { index, generation }`）が付いているので、解放済みの id が「その slot を引き継いだ別の player」を指すことはない（`host.rs` の `PlayerRoster`。ウィンドウ無しで単体テストできるよう `NativeHost` から切り出してある）。
+  - **シーンを破棄したら配下の player ハンドルは全て無効**（そこだけは use-after-free なので C 側で持ち越さない）。
 
 - **ステータス規約**: `SS_OK`(0) ／ **正 = ssruntime のエラーコード**（`SSRuntimeError::as_code`、SDK の C-API と同番号）／ **負 = Player/ホスト側のエラー**（`SS_ERROR_INVALID_ARGUMENT` = -1、`SS_ERROR_GPU` = -2）。詳細メッセージは `ss_last_error()`。
 - **ヘッダは C。C++ からもそのまま使える**（`cpp_compat = true` で `extern "C"` ガード付き）。別途 `.hpp` は生成しない——cbindgen の C++ 出力は同じ平坦 API の別表記で得がなく、欲しいのは RAII ラッパのような**手書きの薄い C++ 層**であり、必要になった時点で追加する。
@@ -751,8 +791,8 @@ const char*  ss_last_error(void);                             // スレッドロ
 | **P4 エフェクト/インスタンス** ✅ | **P0 の次に先行実施**。①内部を `begin_frame`/`append_batch`/`append_effect`/`end_frame` の累積 API＋transform へ（Stage 1）②インスタンス木＝子ごと独立 Context（Stage 2, §7.1）③エフェクト＝EffectSlot/EffectDrawPlan（Stage 3, §7.2） | エフェクト/インスタンスが描画される（実機確認済） |
 | **P5 ネイティブ C-API + C++ viewer（③ ffi）** ✅（Metal） | `ffi` feature ＋ cbindgen（`build.rs`/`cbindgen.toml` → `include/ssplayer_wgpu.h`）、`host.rs` の `NativeHost`（生ハンドル→wgpu 所有）＋ `ffi.rs`（ABI 変換のみ）、`examples/viewer-metal-cpp`（Cocoa/Objective-C++、CMake が cargo を駆動）。再生 API は `set_animation` + 引数なし `play`（§9.3）。◻ 残: `viewer-dx12-cpp`（Windows）・`viewer-vulkan-cpp`（Linux）／P7 で `ss_scene_*` へ作り直し | **macOS 実機で Metal 描画確認済**（Basic / Mask を C-API 経由で描画）。DX12/Vulkan は各実機で要確認 |
 | **P6 統合シェーダ13種** ✅ | ss_shader 全13種（sepia/hsb/step/pix/noise/bmask/outline/blur/wave/move/scatter/circle/spot）を WGSL 移植（`internal.rs` `SS_SHADER_WGSL`）。パーツ属性 SHDR を per-part ディスパッチ：`(id_hash, blend)` 毎に**遅延生成**するシェーダパイプライン＋group(2) の動的オフセット uniform（param0..7 / cell_rect / pixel_size）。各シェーダは straight-alpha の Pixel を計算し `ss_finish`（＝P2 の PartsColor tail）で合成（blur のみ例外）。`ssTex` は逆premul＋`textureSampleLevel`（ループ/discard 後のサンプル可）。**制限（WebGL v1 同）**: map0/map1 未対応・shader×マスク非結合・Normal パーツのみ | Shader.ssab をヘッドレス GPU＋PNG 目視（13種の効果を確認）。shader 無しアニメはコスト0 |
-| **P7 シーン再設計（複数プレイヤー）** 🚧 **進行中**（7-1 / 7-2 / 7-3 / 7-4 ✅） | 下表の 7-1〜7-8。`SSInternalPlayer` を `SSRenderer`(device) / `SSScene`(ターゲット) へ解体し、`SSPlayer` から GPU リソースを剥がす（§1.2）。**破壊的変更・後方互換は取らない**（プロト段階） | 1つの描画ターゲットに複数体を正しく描ける（マスク持ち同士を含む）。web は device 1個で N 要素。C は 1 window に N 体 |
-| （任意）Bevy アダプタ | `ssplayer-wgpu-bevy`（借用モデルの一利用例）。コアに依存を入れず別立て。**P7 の `set_texture` 借用チャネル（§8.2）が前提** | Bevy の render graph で `SSScene` が描画。テクスチャは `GpuImage` を借用（二重アップロードなし） |
+| **P7 シーン再設計（複数プレイヤー）** 🚧 **進行中**（7-1〜7-7 ✅、残 7-8 と web 面） | 下表の 7-1〜7-8。`SSInternalPlayer` を `SSRenderer`(device) / `SSScene`(ターゲット) へ解体し、`SSPlayer` から GPU リソースを剥がす（§1.2）。**破壊的変更・後方互換は取らない**（プロト段階） | 1つの描画ターゲットに複数体を正しく描ける（マスク持ち同士を含む）。web は device 1個で N 要素。C は 1 window に N 体 |
+| （任意）Bevy アダプタ | `ssplayer-wgpu-bevy`（借用モデルの一利用例）。コアに依存を入れず別立て。**前提だった `set_texture` 借用チャネル（§8.2）は P7-5 で入った**ので着手可能 | Bevy の render graph で `SSScene` が描画。テクスチャは `GpuImage` を借用（二重アップロードなし） |
 | （後回し）Text / Nines | 旧版も未実装 | 必要時 |
 
 ### 12.1 P7 の分解と依存関係
@@ -779,10 +819,10 @@ const char*  ss_last_error(void);                             // スレッドロ
 | 7-2 ✅ **実装済** | `set_transform` / `reset_transform` / `set_order` / `set_visible` / `set_alpha`。`order` は保持のみ（消費するのは 7-4 の `SSScene`）。`tint` は §5.5 後に回す——PartsColor の Mix 式より後段に掛ける必要があり、頂点色への畳み込みでは表現できない | §5.4 / §9.3 | 単独で入った |
 | 7-3 ✅ **実装済** | パイプライン遅延生成（39本 eager → 使ったぶんだけ）＋ `SSRenderer` 分離。ホストが所有し `update`/`draw` で貸す。テクスチャ・pipeline・layout・sampler・白フォールバックが device 単位の共有に。**ファイルはまだ `internal.rs`**——`renderer.rs` / `scene.rs` への分割は 7-4 と同時に1回で行う（2度のファイル移動を避けるため） | §5.2 / §9.1 | 遅延生成は単独で先行 |
 | 7-4 ✅ **実装済** | `SSScene`（旧 `SSInternalPlayer` を改名）。1 シーンが N プレイヤーを `order` 昇順で1フレームに積む。`SSPlayer` から **GPU 型のフィールドが完全に消えた**（`new()` は引数なし）。投影・アリーナ・復帰はシーン側へ。`internal.rs` を `renderer.rs` / `scene.rs` へ分割済 | §9.2 | 7-3 の後 |
-| 7-5 | `SSPack` ＋ `set_texture` 借用チャネル | §8.2 | 7-3 の後 |
-| 7-6 | SoA パススルー（GPU 頂点展開） | §5.5 | 7-4 の後 |
-| 7-7 | C-API を `ss_scene_*` + `ss_player_*` へ | §11 | 7-4 の後 |
-| 7-8 | 静的/indexless index buffer、draw_call マージ、マスクのランレングス結合 | §5.5 / §6 | 7-6 の後（マージ・ランレングスは単独可） |
+| 7-5 ✅ **実装済** | `SSPack`（`pack.rs`、CPU のみ・`Arc` 共有・パック名は ssab 由来）＋ `set_texture` / `forget_texture` 借用チャネル ＋ per-texture `AlphaMode`（group(1) の `TexInfo` uniform。テクスチャサイズも同居させ §5.5 の器を先に作った）。埋め込みアトラスは**登録済みならデコードごとスキップ**するので N 体で1回 | §8.2 | 7-3 の後 |
+| 7-6 ✅ **実装済** | SoA パススルー（GPU 頂点展開）。**頂点バッファ / index buffer を撤去**し、group(0) を「シーン」（投影 ＋ `f_arena` ＋ `prims` ＋ `mesh_stream`）に。幾何4種＝頂点エントリ4種（`vs_quad`/`vs_mesh`/`vs_shape`/`vs_effect`）でパイプラインキーに `geom_class` が増えた。**フィクスチャ134枚がビット完全一致**（§13） | §5.5 | 7-4 の後 |
+| 7-7 ✅ **実装済** | C-API を `ss_scene_*`（ウィンドウ）+ `ss_player_*`（1体）の**2ハンドル**へ。`NativeHost` が `PlayerRoster`（世代付き slot）で N 体を持ち、`ss_scene_create_player` / `ss_player_destroy` / `set_transform` / `set_order` / `set_visible` / `set_alpha` を追加。テクスチャ供給は scene 側（`ss_scene_add_texture`）——テクスチャマップが device スコープだから。Metal viewer は**既定で2体**表示し `+/-` で増減 | §11 | 7-4 の後 |
+| 7-8 | draw_call マージ、マスクのランレングス結合（**indexless 化は 7-6 で完了**——index buffer 自体が無くなった） | §5.5 / §6 | 7-6 の後（マージ・ランレングスは単独可） |
 
 **単独で先に入る小改善**（P7 を待たない）: 7-1 / 7-2 / パイプライン遅延生成 / マスク時のランレングス結合 / `position.z` 削除（§5.1） / premul スクラッチ再利用（§8）。
 
@@ -797,11 +837,14 @@ const char*  ss_last_error(void);                             // スレッドロ
 | マスク/Shape（ヘッドレス） | `libs/ssplayer-wgpu/tests/mask.rs`（planner probe：writer 分類・Shape-mask）＋ `libs/ssplayer-wgpu/tests/render.rs`（GPU offscreen readback：masking on/off 差分・Shape content 描画量。adapter 無ければ skip。PNG 保存で目視も可） |
 | 統合シェーダ（ヘッドレス） | `libs/ssplayer-wgpu/tests/render.rs::render_integration_shaders`（Shader.ssab を描画し、SS WGSL コンパイル＋per-part ディスパッチ＋params で描画量が出ることを確認。adapter 無ければ skip） |
 | WebGPU（主） | `examples/web/`（ブラウザで `<ss-player-webgpu>`）。初回起動計測（取得→wasm初期化→初フレーム ms） |
-| C-API（③ ffi） | `cargo build -p ssplayer-wgpu --features ffi`（cbindgen がヘッダを再生成。**ネイティブの他コマンドではこの面はコンパイルされない**——web feature と同じ死角） |
+| C-API（③ ffi） | `cargo build -p ssplayer-wgpu --features ffi`（cbindgen がヘッダを再生成。**ネイティブの他コマンドではこの面はコンパイルされない**——web feature と同じ死角）＋ **`cargo test -p ssplayer-wgpu --features ffi --lib`**（`host.rs` の `PlayerRoster` 単体テスト：破棄した id が後継を指さないこと、二重 destroy が no-op であること。ハンドル寿命は C 側の未定義動作に直結するので、ここだけは死角に置かない） |
 | DX12（副） | `examples/viewer-dx12-cpp/`（Windows 実機、backend=DX12 強制） |
 | Metal（副） | `examples/viewer-metal-cpp/`（macOS 実機、backend=Metal 強制）。`cmake -B build && cmake --build build && ./build/ssviewer-metal [asset-dir] [pack]` |
 | Vulkan（将来） | `examples/viewer-vulkan-cpp/`（Linux 実機、backend=Vulkan 強制） |
-| **複数プレイヤー（ヘッドレス）** ✅ P7-1/7-2/7-3 | `libs/ssplayer-wgpu/tests/scene.rs`。**レンダラ共有**は `players_share_one_renderer`（同一 pack の2体目でパイプライン本数が増えないこと）と `pipelines_are_built_on_demand`（構築直後は0本、Basic.ssab で1本、同一フレーム再構築で増えない＝キーが安定）で見る。**ステンシル残留の回帰**は「1 pass に N 体」と「1 体 1 pass（stencil を毎回クリア）」の**ピクセル完全一致**で検出する——後者は構造的に漏れようがないので基準になる。マスク持ち同士（`Mask.ssab` ×2）と混在（`Mask` × `Basic`、順序両方向）。`set_transform` は**同一フレームで**（`update(0.0)` で再構築）整数ピクセル平行移動し、元画像を N px ずらしたものと完全一致することを要求。`set_visible(false)` は描画ゼロ、`set_alpha(0.0)` も描画ゼロ、0.5 はその中間。◻ 残: `order` の並べ替え、同一 pack N 体のアップロード1回（どちらも P7-4/7-5 で `SSScene`/`SSRenderer` ができてから） |
+| **複数プレイヤー（ヘッドレス）** ✅ P7-1/7-2/7-3 | `libs/ssplayer-wgpu/tests/scene.rs`。**レンダラ共有**は `players_share_one_renderer`（同一 pack の2体目でパイプライン本数が増えないこと）と `pipelines_are_built_on_demand`（構築直後は0本、Basic.ssab で1本、同一フレーム再構築で増えない＝キーが安定）で見る。**ステンシル残留の回帰**は「1 pass に N 体」と「1 体 1 pass（stencil を毎回クリア）」の**ピクセル完全一致**で検出する——後者は構造的に漏れようがないので基準になる。マスク持ち同士（`Mask.ssab` ×2）と混在（`Mask` × `Basic`、順序両方向）。`set_transform` は**同一フレームで**（`update(0.0)` で再構築）整数ピクセル平行移動し、元画像を N px ずらしたものと完全一致することを要求。`set_visible(false)` は描画ゼロ、`set_alpha(0.0)` も描画ゼロ、0.5 はその中間。`order` の並べ替えは `order_decides_who_draws_on_top`（前後入替で composite が変わる ＋ スライス順を逆にしても値順に描く） |
+| **pack 共有 / 借用テクスチャ（ヘッドレス）** ✅ P7-5 | `libs/ssplayer-wgpu/tests/pack.rs`。**同一 pack N 体でアップロード1回**は `texture_upload_count()` で見る（`texture_count()` は N 回上書きしても同じ値なので判定にならない）。`set_texture` は同じピクセルで `upload_texture` と**ピクセル完全一致**、`forget_texture` で白フォールバックに落ちること。**`AlphaMode` は合成アトラス（アルファ横ランプ）で検証する**——出荷フィクスチャはほぼ不透明で、premul と straight が一致してしまい**フラグを無視しても通ってしまう**。ランプなら誤申告は 1/α ぶん明るくなり、正しい申告 0.001 に対し 11.6 と桁で開く |
+| **全フィクスチャ回帰（ヘッドレス）** ✅ P7-6 | `libs/ssplayer-wgpu/tests/golden.rs::golden_corpus`（`#[ignore]`）。全パック × 先頭4アニメ × 4フレーム × stencil on/off ＋ 2体構成 = 134 枚を readback し、**変更前のダンプとバイト比較**する。`SS_GOLDEN_DIR=<出力> [SS_GOLDEN_COMPARE=<基準>] cargo test --test golden -- --ignored`。<br>他のレンダリングテストは「描画量」と「特定の不変条件」しか見ないので、**パーツが1px ずれた／色がわずかに変わった**を誰も検出できない——そこを埋めるのがこれ。GPU/ドライバ依存なので基準は**同じマシンで取る**（チェックインしない）。P7-6 の頂点パス総入替はこれで 134/134 ビット一致を確認した |
+| **幾何4クラス（ヘッドレス）** ✅ P7-6 | `tests/scene.rs::every_geometry_class_draws`。Basic/Mesh/Shape/Effect を1本ずつ描き、各クラスの頂点ステージが**何かを出す**ことだけを下限で見る（正確な出力は `golden_corpus` の担当）。頂点エントリが4つに割れた以上、1つ死んでも他は無傷という壊れ方をするため |
 | **複数プレイヤー（目視）** | ◻ `examples/viewer` を N 体対応にする。現状 1 体固定で、**複数体でのパリティ検証ができない**（マスク・ブレンドの相互干渉は目視でしか気づけない類） |
 | **wasm サイズ** | `cd examples/web && ./build.sh`（**release**。`--dev` は wasm-opt を飛ばすので測ってはいけない）→ `ls -l pkg/*.wasm pkg/*.js` ＋ `gzip -9 -c ... \| wc -c`。§14.1 の表を更新する |
 | WebGL 版との一致 | 同一 ssab を両者で再生し目視/スクリーンショット比較（色・ブレンド・マスク）。**P7 以降は「複数体を置いた画」でも比較する**（ssplayer-webgl も surface+players 構成のため同条件） |
@@ -812,13 +855,13 @@ const char*  ss_last_error(void);                             // スレッドロ
 ## §14 既知の制約・要調査
 
 - **premul の一貫性**が最重要。アップロード・シェーダ・ブレンド係数のどこか1つでも崩すと合成破綻。
-- **premul と WebGPU の非対称（★要注意）**: WebGL は `UNPACK_PREMULTIPLY_ALPHA_WEBGL` でドライバが無料で premultiply するが、**WebGPU の `writeTexture` に等価は無い**。現行は CPU で premul しており、2048² で 16 MB の一時コピーが出る。web は `copy_external_image_to_texture` ＋ `createImageBitmap` へ寄せる（§8）。engine から借りるテクスチャは premul されていないのが普通なので `AlphaMode` フラグで受ける（§8.2）。
+- **premul と WebGPU の非対称（★要注意）**: WebGL は `UNPACK_PREMULTIPLY_ALPHA_WEBGL` でドライバが無料で premultiply するが、**WebGPU の `writeTexture` に等価は無い**。現行は CPU で premul しており、2048² で 16 MB の一時コピーが出る。web は `copy_external_image_to_texture` ＋ `createImageBitmap` へ寄せる（§8）。engine から借りるテクスチャは premul されていないのが普通なので `AlphaMode` フラグで受ける ✅ P7-5（§8.2）。なお `upload_texture` は **`AlphaMode::Straight` で上げれば CPU premul を省ける**が、そうしない——線形補間はアルファ境界で premultiplied のほうが正しく、フチが出るのを避けるため。省くのは供給側が既にその判断をしている `set_texture` 経路だけ。
 - **stencil ターゲット** ✅ 実装済: `SSPlayerConfig.stencil_format`（P7 以降は `SceneConfig`）で opt-in し、ホストが毎 pass に attach（§6）。
 - **INCR/INVERT 混在マスク**は単一ステンシルで近似（厳密解は coverage-bitmap、要検討）。
 - **ステンシル残留**（P7 で解消予定）: `render_node` がフレーム末尾で未消化 writer を巻き戻さないため、**1 pass に複数 Player を積むと A のマスクが B をクリップする**。現状は 1 pass = 1 player ＋ `LoadOp::Clear(0)` で隠れているだけ（§6）。
 - **WebGPU 非対応環境のフォールバック**方針（WebGL 退避か）未定 → §14.1。
 - **raw-window-handle の FFI 越え** ✅ 実装済: Rust トレイトは C に渡せないため、平坦な `ss_window_handle_t{ kind, screen, window, display }` を C-API に定義し、`ffi.rs` が `raw-window-handle` 型へ組み立てる（§11）。CAMetalLayer だけは rwh に表現が無いので wgpu の `SurfaceTargetUnsafe::CoreAnimationLayer` を使う（Apple ターゲットのみ）。**Win32/Xlib/Wayland の経路は実機未検証**——DX12/Vulkan viewer で確認する。
-- **テクスチャ供給**: embedded（Player がデコード）/ reference（ホスト供給）の両対応（§8.1）。埋め込みテクスチャ列挙 API の正確な形は `libs/ssab/SCHEMA.md` / `SsabResource` で要確認。
+- **テクスチャ供給** ✅: embedded（`SSPack::decode_embedded`）/ reference（ホスト供給）/ 借用（`set_texture`）の3経路が `SSRenderer` の1つの hash マップに集約される（§8.1 / §8.2）。
 - **データ所有契約（§1.1）**: ssab は Player 所有→ssruntime へ borrow、FrameData/SoA は ssruntime 所有→Player が borrow。ssab を Context より先に破棄しない／FrameData 借用をフレーム跨ぎで保持しない。
 - **エフェクト blend はコマンド毎**（batch.blend_type ではない）点を実装で取り違えない。
 - **ss_shader 統合シェーダ13種** ✅ 実装済（`internal.rs` `SS_SHADER_WGSL`、WebGL `SSShaderLib.ts` を WGSL 移植）。残課題: map0/map1 セカンダリテクスチャ・shader×マスク結合・GLSL 版との厳密ピクセル一致検証。
@@ -839,7 +882,7 @@ const char*  ss_last_error(void);                             // スレッドロ
 
 | 能力 | WebGL 側 | この Player で何が変わるか |
 |---|---|---|
-| **compute / storage buffer** | WebGL2 に SSBO も compute も無い（**原理的に不可**） | SoA パススルー（§5.5）。CPU の頂点組み立てが消え、体数・パーツ数の天井が上がる |
+| **compute / storage buffer** | WebGL2 に SSBO も compute も無い（**原理的に不可**） | ✅ SoA パススルー（§5.5）。CPU の頂点組み立てが消え、体数・パーツ数の天井が上がる |
 | **同一 device を engine と共有** | GL は global state の奪い合いで実質不可能 | **本命**。Slint / Bevy と1 device で合成できる（借用モデルはこのためにある） |
 | **native と同一コード** | web 専用 | Metal / Vulkan / DX12（`examples/viewer-metal-cpp` 実績あり） |
 | render bundle / indirect draw / timestamp query | 無し（`EXT_disjoint_timer_query` は Spectre 対策で実質消滅） | draw_call 再 encode の削減、GPU 側カリング、バッチ単位の実測 |

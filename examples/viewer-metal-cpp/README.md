@@ -3,8 +3,14 @@
 A macOS/Cocoa host that drives `ssplayer-wgpu` through its **C API** with the
 Metal backend forced, so the "③ ffi" face of [SPEC §11](../../SSPLAYER_WGPU_SPEC.md)
 is exercised end to end: Cocoa owns the window and its `CAMetalLayer`, hands the
-layer to `ss_player_create`, and calls `ss_player_update` / `ss_player_render`
+layer to `ss_scene_create`, and calls `ss_scene_update` / `ss_scene_render`
 every frame. No Rust is involved on this side of the ABI.
+
+**It opens with two characters in one window**, which is the point of the P7-7
+handle split: `ss_scene_t` is the window, `ss_player_t` is a character drawn into
+it, and they share one device, one renderer and one atlas upload. Before the
+split a handle was both at once, so a second character meant a second surface on
+the same window and the two presented over each other.
 
 The packs it plays come from `assets/overall_emb`, i.e. **embedded-mode** `.ssab`
 whose atlases ride inside the file, so nothing has to supply textures
@@ -34,6 +40,7 @@ the asset directory to keep the built-in default and still pick a pack.
 | Left / Right | previous / next `.ssab` |
 | Up / Down | previous / next animation |
 | R | restart the current animation |
+| `+` / `-` | add / remove a character (`ss_scene_create_player` / `ss_player_destroy`) |
 | Escape | quit |
 
 ## Linking against the library
