@@ -211,6 +211,87 @@ fn render_integration_shaders() {
     assert_eq!(plain, with_stencil, "Shader.ssab differs with a stencil buffer — shaders skipped by the masked path (no-writer gating regressed)");
 }
 
+/// Device-loss recovery (SPEC §14). The player's pipelines, buffers, textures and
+/// projection all belong to the device that made them, so `restore_device` has to
+/// rebuild every one of them against the replacement. Restoring onto a *second*
+/// device (not the same one again) is what makes this a real test: a leftover
+/// resource from the first device is either a wgpu validation error or a wrong
+/// pixel, never a silent pass.
+#[test]
+fn restore_device_rebuilds_gpu_state() {
+    let instance = wgpu::Instance::new(wgpu::InstanceDescriptor::new_without_display_handle());
+    let adapter = match pollster::block_on(instance.request_adapter(&wgpu::RequestAdapterOptions { power_preference: wgpu::PowerPreference::default(), compatible_surface: None, force_fallback_adapter: false })) {
+        Ok(a) => a,
+        Err(_) => {
+            eprintln!("no GPU adapter available, skipping headless render test");
+            return;
+        }
+    };
+    let (device, queue) = pollster::block_on(adapter.request_device(&wgpu::DeviceDescriptor::default())).expect("request_device");
+    // The replacement device, standing in for the one the browser hands back after
+    // `GPUDevice.lost`.
+    let (device2, queue2) = pollster::block_on(adapter.request_device(&wgpu::DeviceDescriptor::default())).expect("request_device (replacement)");
+
+    // What frame 11 must look like: one uninterrupted player on the first device.
+    let expected = render_ssab(&device, &queue, true, "Mask", 11);
+
+    // Reference mode (host-supplied textures): play 10 frames, lose the device,
+    // restore onto the replacement, then render frame 11 there.
+    let mut player = SSPlayer::new(&device, &SSPlayerConfig { color_format: COLOR_FORMAT, stencil_format: Some(STENCIL_FORMAT) });
+    load_textures(&mut player, &device, &queue, Path::new(asset_dir()));
+    let bytes = std::fs::read(format!("{}/Mask.ssab", asset_dir())).unwrap();
+    player.load_ssab("Mask", &bytes).unwrap();
+    let anim = player.animation_names().unwrap()[0].clone();
+    player.set_animation(&anim).unwrap();
+    player.play();
+    player.set_viewport(&queue, W as f32, H as f32, false);
+    let _ = render_to_rgba(&device, &queue, &mut player, true, 10);
+
+    player.restore_device(&device2, &queue2);
+    let restored = render_to_rgba(&device2, &queue2, &mut player, true, 1);
+
+    assert!(drawn_pixels(&restored) > 0, "nothing drawn after restore_device — pipelines/projection not rebuilt");
+    assert_eq!(restored, expected, "restored render differs from the uninterrupted one — some GPU state was not rebuilt");
+
+    // Negative control: with the retained sources dropped, the same restore leaves
+    // the host textures missing and the render changes. If this passed as equal,
+    // the assertion above would prove nothing about texture restoration.
+    player.forget_texture_sources();
+    player.restore_device(&device2, &queue2);
+    let without_sources = render_to_rgba(&device2, &queue2, &mut player, true, 1);
+    assert_ne!(without_sources, restored, "render unchanged after forget_texture_sources — textures are not actually coming from the retained sources");
+
+    // Embedded mode (SPEC §8.1) retains no pixels: the atlas is re-decoded from the
+    // `.ssab` the player still owns. Same fixture-optional skip as render_embedded_ssab.
+    let emb_path = concat!(env!("CARGO_MANIFEST_DIR"), "/../../assets/overall_emb/Basic.ssab");
+    let Ok(emb_bytes) = std::fs::read(emb_path) else {
+        eprintln!("embedded fixture missing ({emb_path}); run scripts/deploy-examples.sh to generate it. skipping the embedded half.");
+        return;
+    };
+    let emb_expected = {
+        let mut p = SSPlayer::new(&device, &SSPlayerConfig { color_format: COLOR_FORMAT, stencil_format: None });
+        p.load_ssab("Basic", &emb_bytes).unwrap();
+        let anim = p.animation_names().unwrap()[0].clone();
+        p.set_animation(&anim).unwrap();
+        p.play();
+        p.set_viewport(&queue, W as f32, H as f32, false);
+        render_to_rgba(&device, &queue, &mut p, false, 11)
+    };
+
+    let mut emb = SSPlayer::new(&device, &SSPlayerConfig { color_format: COLOR_FORMAT, stencil_format: None });
+    emb.load_ssab("Basic", &emb_bytes).unwrap();
+    let anim = emb.animation_names().unwrap()[0].clone();
+    emb.set_animation(&anim).unwrap();
+    emb.play();
+    emb.set_viewport(&queue, W as f32, H as f32, false);
+    let _ = render_to_rgba(&device, &queue, &mut emb, false, 10);
+
+    emb.restore_device(&device2, &queue2);
+    let emb_restored = render_to_rgba(&device2, &queue2, &mut emb, false, 1);
+    assert!(drawn_pixels(&emb_restored) > 5_000, "embedded atlas not re-decoded after restore_device");
+    assert_eq!(emb_restored, emb_expected, "restored embedded render differs — the atlas was not re-decoded from the retained .ssab");
+}
+
 #[test]
 fn render_embedded_ssab() {
     let instance = wgpu::Instance::new(wgpu::InstanceDescriptor::new_without_display_handle());

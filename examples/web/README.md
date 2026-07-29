@@ -35,9 +35,15 @@ Both `pkg/` and `assets/` are generated (git-ignored).
 ```
 
 The `<ss-player-webgpu>` element owns the wgpu stack (created from its canvas) and
-drives `requestAnimationFrame`. Attributes: `src` (embedded `.ssab` URL), `pack`
-(optional name), `anim` (optional animation, defaults to the first). Call
-`element.loadSrc(url)` to switch animations at runtime.
+drives `requestAnimationFrame`. Call `element.loadSrc(url)` to switch animations at
+runtime.
+
+| Attribute | Default | Meaning |
+|---|---|---|
+| `src` | — | Embedded `.ssab` URL |
+| `pack` | file stem | Pack name (for external instance references) |
+| `anim` | first | Animation to play |
+| `pause-when-hidden` | on | Stop the rAF loop while the element is scrolled off-screen or the tab is backgrounded. Opt out with `pause-when-hidden="false"` |
 
 ## Notes
 
@@ -45,4 +51,10 @@ drives `requestAnimationFrame`. Attributes: `src` (embedded `.ssab` URL), `pack`
   instance/surface/device/queue and lends device+queue to `SSPlayer` each frame,
   exactly like the native `viewer`. The event loop is the browser's rAF.
 - Masks/shaders work: the demo configures a depth/stencil buffer.
+- **Device loss is recovered, not fatal** (SPEC §14): the browser can take the
+  WebGPU device at any time (backgrounded tab, GPU process crash). `SsPlayerWeb`
+  watches `GPUDevice.lost`, the element stops drawing and calls `restoreDevice()`,
+  and `SSPlayer::restore_device` rebuilds every pipeline/buffer/texture against the
+  replacement — playback resumes on the frame it was interrupted on, with no
+  re-fetch of the `.ssab`.
 - The dev wasm is ~3 MB; a `--release` build (wasm-opt) is much smaller.

@@ -10,6 +10,8 @@
 //! the `.ssab`, so a single fetched file renders with no host texture supply.
 
 use crate::player::{SSPlayer, SSPlayerConfig};
+use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 use wasm_bindgen::prelude::*;
 
 /// Depth/stencil format for masking (matches the native viewer). Masks and the
@@ -35,6 +37,26 @@ fn create_stencil_view(device: &wgpu::Device, width: u32, height: u32) -> wgpu::
     texture.create_view(&wgpu::TextureViewDescriptor::default())
 }
 
+/// Request a device and subscribe to its `GPUDevice.lost` (SPEC §14). The returned
+/// flag flips when the browser drops the device — which it does on its own schedule
+/// (backgrounded tab, GPU process crash, driver reset), so a long-lived ad creative
+/// has to expect it. Once set, the host is meant to call [`SsPlayerWeb::restore_device`].
+async fn request_device(adapter: &wgpu::Adapter) -> Result<(wgpu::Device, wgpu::Queue, Arc<AtomicBool>), JsValue> {
+    let (device, queue) = adapter.request_device(&wgpu::DeviceDescriptor::default()).await.map_err(js_err)?;
+    let lost = Arc::new(AtomicBool::new(false));
+    let flag = Arc::clone(&lost);
+    device.set_device_lost_callback(move |_reason, _message| flag.store(true, Ordering::Relaxed));
+    Ok((device, queue, lost))
+}
+
+/// Ask the instance for an adapter that can present to `surface`.
+async fn request_adapter(instance: &wgpu::Instance, surface: &wgpu::Surface<'static>) -> Result<wgpu::Adapter, JsValue> {
+    instance
+        .request_adapter(&wgpu::RequestAdapterOptions { power_preference: wgpu::PowerPreference::default(), compatible_surface: Some(surface), force_fallback_adapter: false })
+        .await
+        .map_err(|_| JsValue::from_str("no WebGPU adapter (this browser/GPU may not support WebGPU)"))
+}
+
 /// A WebGPU SpriteStudio player bound to one `<canvas>`. Construct it with
 /// [`SsPlayerWeb::create`] (async — WebGPU adapter/device requests are Promises),
 /// load an embedded `.ssab`, `play` an animation, then call [`SsPlayerWeb::frame`]
@@ -47,6 +69,12 @@ pub struct SsPlayerWeb {
     config: wgpu::SurfaceConfiguration,
     stencil_view: wgpu::TextureView,
     player: SSPlayer,
+    /// Kept so a lost device can be replaced without rebuilding the surface
+    /// (the canvas context outlives the device it was configured with).
+    instance: wgpu::Instance,
+    /// Set from `GPUDevice.lost`. While it is set, [`SsPlayerWeb::frame`] draws
+    /// nothing — every GPU object is dead until [`SsPlayerWeb::restore_device`].
+    device_lost: Arc<AtomicBool>,
 }
 
 #[wasm_bindgen]
@@ -63,11 +91,8 @@ impl SsPlayerWeb {
         instance_desc.backends = wgpu::Backends::BROWSER_WEBGPU;
         let instance = wgpu::Instance::new(instance_desc);
         let surface = instance.create_surface(wgpu::SurfaceTarget::Canvas(canvas)).map_err(js_err)?;
-        let adapter = instance
-            .request_adapter(&wgpu::RequestAdapterOptions { power_preference: wgpu::PowerPreference::default(), compatible_surface: Some(&surface), force_fallback_adapter: false })
-            .await
-            .map_err(|_| JsValue::from_str("no WebGPU adapter (this browser/GPU may not support WebGPU)"))?;
-        let (device, queue) = adapter.request_device(&wgpu::DeviceDescriptor::default()).await.map_err(js_err)?;
+        let adapter = request_adapter(&instance, &surface).await?;
+        let (device, queue, device_lost) = request_device(&adapter).await?;
 
         let caps = surface.get_capabilities(&adapter);
         // Prefer a non-sRGB format so the premultiplied pipeline composites as authored.
@@ -77,9 +102,47 @@ impl SsPlayerWeb {
         let stencil_view = create_stencil_view(&device, width, height);
 
         let player = SSPlayer::new(&device, &SSPlayerConfig { color_format: format, stencil_format: Some(STENCIL_FORMAT) });
-        let me = SsPlayerWeb { surface, device, queue, config, stencil_view, player };
+        let mut me = SsPlayerWeb { surface, device, queue, config, stencil_view, player, instance, device_lost };
         me.player.set_viewport(&me.queue, width as f32, height as f32, false);
         Ok(me)
+    }
+
+    /// Whether the browser has taken the WebGPU device away (SPEC §14). While this
+    /// is true `frame` is a no-op; call [`SsPlayerWeb::restore_device`] to come back.
+    #[wasm_bindgen(js_name = isDeviceLost)]
+    pub fn is_device_lost(&self) -> bool {
+        self.device_lost.load(Ordering::Relaxed)
+    }
+
+    /// Rebuild the WebGPU stack after a device loss and restore the player's GPU
+    /// state (pipelines, buffers, textures, projection) — playback continues from
+    /// the frame it was interrupted on, with no re-fetch of the `.ssab`.
+    ///
+    /// Rejects if WebGPU is gone for good, or if the new adapter cannot present the
+    /// surface format the player's pipelines were baked against (then the host
+    /// should build a fresh `SsPlayerWeb`).
+    #[wasm_bindgen(js_name = restoreDevice)]
+    pub async fn restore_device(&mut self) -> Result<(), JsValue> {
+        let adapter = request_adapter(&self.instance, &self.surface).await?;
+        let caps = self.surface.get_capabilities(&adapter);
+        if !caps.formats.contains(&self.config.format) {
+            return Err(JsValue::from_str("the restored adapter cannot present the original surface format; rebuild the player"));
+        }
+        let (device, queue, device_lost) = request_device(&adapter).await?;
+
+        self.config.alpha_mode = caps.alpha_modes[0];
+        self.surface.configure(&device, &self.config);
+        self.stencil_view = create_stencil_view(&device, self.config.width, self.config.height);
+        self.player.restore_device(&device, &queue);
+        // `restore_device` re-applies the viewport the player last saw, which is
+        // stale if the canvas was resized while the device was gone (`resize` only
+        // records the size then). `config` is authoritative — re-apply from it.
+        self.player.set_viewport(&queue, self.config.width as f32, self.config.height as f32, false);
+
+        self.device = device;
+        self.queue = queue;
+        self.device_lost = device_lost;
+        Ok(())
     }
 
     /// Register + select an embedded `.ssab` (its atlas textures are decoded and
@@ -115,13 +178,25 @@ impl SsPlayerWeb {
     pub fn resize(&mut self, width: u32, height: u32) {
         self.config.width = width.max(1);
         self.config.height = height.max(1);
+        // While the device is gone the new size is only recorded; `restore_device`
+        // configures the surface and the stencil from `config` on the way back.
+        if self.is_device_lost() {
+            return;
+        }
         self.surface.configure(&self.device, &self.config);
         self.stencil_view = create_stencil_view(&self.device, self.config.width, self.config.height);
         self.player.set_viewport(&self.queue, self.config.width as f32, self.config.height as f32, false);
     }
 
     /// Advance by `dt` seconds and render one frame to the canvas.
+    ///
+    /// A no-op while the device is lost — every GPU object it would touch is dead.
+    /// The host polls [`SsPlayerWeb::is_device_lost`] and calls
+    /// [`SsPlayerWeb::restore_device`] to resume (SPEC §14).
     pub fn frame(&mut self, dt: f32) -> Result<(), JsValue> {
+        if self.is_device_lost() {
+            return Ok(());
+        }
         self.player.update(&self.device, &self.queue, dt);
 
         use wgpu::CurrentSurfaceTexture;
