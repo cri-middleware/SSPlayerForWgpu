@@ -19,7 +19,7 @@
 - **提供3面（ssruntime と同型）**: `rs`(rlib) / `js`(wasm-bindgen) / `ffi`(cbindgen・DX12/Vulkan/Metal)。
 - **データ所有契約**: `.ssab` は Player 所有→ssruntime へ borrow ／ FrameData・SoA は ssruntime 所有→Player が borrow（§1.1）。
 - **ssab は embedded / reference 両対応**（テクスチャ埋め込み／外部参照）。
-- **進捗**: **P0**（3層リファクタ＋借用モデル）✅ ／ **P4**（インスタンス §7.1・エフェクト §7.2）✅ ／ **P3**（マスク・Shape）✅ ／ **P2**（色パリティ: varg・全12ブレンド・premul 厳密化）✅ ／ **P6**（統合シェーダ ss_shader 全13種）✅ ／ **P1**（ssab embedded/reference 両対応・**WebGPU/js**）✅ ブラウザ実機確認済 ／ **P5**（ネイティブ ffi・C-API ＋ Metal C++ viewer）✅ macOS 実機確認済、DX12/Vulkan viewer は未着手 ／ **P7**（シーン再設計：SSRenderer/SSScene 分離・複数プレイヤー・SoA パススルー）◻ **未着手・現在の最優先**。対応バッチ = Normal / Mesh / Shape / Instance / Effect / Mask。**wgpu 29**（§2.2）。詳細は §12。
+- **進捗**: **P0**（3層リファクタ＋借用モデル）✅ ／ **P4**（インスタンス §7.1・エフェクト §7.2）✅ ／ **P3**（マスク・Shape）✅ ／ **P2**（色パリティ: varg・全12ブレンド・premul 厳密化）✅ ／ **P6**（統合シェーダ ss_shader 全13種）✅ ／ **P1**（ssab embedded/reference 両対応・**WebGPU/js**）✅ ブラウザ実機確認済 ／ **P5**（ネイティブ ffi・C-API ＋ Metal C++ viewer）✅ macOS 実機確認済、DX12/Vulkan viewer は未着手 ／ **P7**（シーン再設計：SSRenderer/SSScene 分離・複数プレイヤー・SoA パススルー）🚧 **進行中**——7-1 ステンシル巻き戻し ✅ / 7-2 プレイヤー配置 API ✅、7-3 以降が残り。対応バッチ = Normal / Mesh / Shape / Instance / Effect / Mask。**wgpu 29**（§2.2）。詳細は §12。
 - **リポジトリ**: SDK monorepo から分離した独立リポ `ssplayer-wgpu`。SDK は git submodule（`SpriteStudio-SDK/`）として取り込み、`ssruntime`/`ssab` を **path 依存**で直リンクする（§2.2）。
 
 ---
@@ -470,7 +470,7 @@ Godot / Unity のネイティブプレイヤー実績と C-API 契約から、�
 - **hash → `{texture, width, height}`** の Map。textureHash は atlas 識別子（fnv1a）。**★P7: この Map は `SSRenderer`（device スコープ）が持つ**——同じキャラを N 体出しても VRAM もアップロードも1回で済ませるため（§1.2）。WebGL 版が `SSWebGLTextureCache` を surface 側に置いたのと同じ判断で、wgpu は pipeline 同様テクスチャも device 単位なので**共有範囲はさらに広い**（複数 canvas 間でも共有できる）。
 - **premultiply を必ず適用**（SS 必須）。ネイティブは RGBA デコード後に自前で premul、または premul 済みテクスチャを供給。
   - **★注意（WebGPU の弱点）**: WebGL の `UNPACK_PREMULTIPLY_ALPHA_WEBGL` はドライバが無料でやってくれるが、**WebGPU の `writeTexture` に等価は無い**。現行は `upload_texture` が CPU で premul しており、2048² で 16 MB の一時コピーが発生する。
-  - **★P7 の対処（web）**: `Queue::copy_external_image_to_texture`（wgpu 29 にあり）＋ `createImageBitmap` を使えば、**デコードはブラウザのネイティブ実装（オフスレッド）、premultiply は GPU 側**に寄せられる。**wasm から PNG デコーダ（`image` crate）が消えるのでバイナリサイズにも効く**（§14 の 3.8 MB 問題）。
+  - **★P7 の対処（web）**: `Queue::copy_external_image_to_texture`（wgpu 29 にあり）＋ `createImageBitmap` を使えば、**デコードはブラウザのネイティブ実装（オフスレッド）、premultiply は GPU 側**に寄せられる。主目的はこの2点で、wasm から PNG デコーダ（`image` crate）が落ちるサイズ減はおまけ（§14.1 のとおりサイズは元々問題ではない）。
   - ネイティブ側は CPU premul のままだが、使い回しスクラッチバッファにしてアップロード毎の alloc を無くす。
 - フィルタ/wrap: `ClampToEdge`（NPOT 対応）＋ `Linear`、mipmap なし。
 - **texture_hash 0 / 未ロード → 1x1 白テクスチャ**にフォールバック（Shape content・純カラー対応）。**この白テクスチャは必ず白(255,255,255,255)で初期化すること**（`create_texture` だけだと透明黒で `tex*color=0` になり Shape が不可視）。`new()` は queue を持たないため `end_frame` 初回に `write_texture` で遅延初期化（§6）。
@@ -674,7 +674,7 @@ player.setTransform({x, y, scaleX, scaleY, rotation}); player.order = 1;
 
 - **JS 露出は再設計後の ssplayer-webgl（`SSSurface` ＋ N 体の `SSPlayer`）と同型**にする（§0.2）。旧 `<ss-player>` の 1 canvas = 1 player・`play(name)` 1コールには揃えない——参照実装から既に消えているため。
 - `<ss-player-webgpu>` カスタム要素は「1要素 = 1 canvas = 1 player」の**便利ラッパ**として残す（広告のような単体用途はこれが最短）。ただし内部では上記の共有 device を使い、要素を何個置いても device は1つ。
-- ssab は embedded / reference 両対応（§8.1）。**embedded のデコードは `createImageBitmap` ＋ `copy_external_image_to_texture` に寄せ、`image` crate を wasm から外す**（§8 / §14 のサイズ問題）。
+- ssab は embedded / reference 両対応（§8.1）。**embedded のデコードは `createImageBitmap` ＋ `copy_external_image_to_texture` に寄せ、`image` crate を wasm から外す**（§8——狙いは premultiply の GPU 化とオフスレッドデコード）。
 - ビルド/パッケージは `scripts/release-web.sh` 相当を追加し `pkg/ssplayer-wgpu-web/` を吐く。
 - 注意: WebGPU 未対応ブラウザへのフォールバック方針（WebGL 版へ退避 or エラー表示）を Web Component 層で定義（§14）。
 
@@ -739,7 +739,7 @@ const char*  ss_last_error(void);                             // スレッドロ
 | **P4 エフェクト/インスタンス** ✅ | **P0 の次に先行実施**。①内部を `begin_frame`/`append_batch`/`append_effect`/`end_frame` の累積 API＋transform へ（Stage 1）②インスタンス木＝子ごと独立 Context（Stage 2, §7.1）③エフェクト＝EffectSlot/EffectDrawPlan（Stage 3, §7.2） | エフェクト/インスタンスが描画される（実機確認済） |
 | **P5 ネイティブ C-API + C++ viewer（③ ffi）** ✅（Metal） | `ffi` feature ＋ cbindgen（`build.rs`/`cbindgen.toml` → `include/ssplayer_wgpu.h`）、`host.rs` の `NativeHost`（生ハンドル→wgpu 所有）＋ `ffi.rs`（ABI 変換のみ）、`examples/viewer-metal-cpp`（Cocoa/Objective-C++、CMake が cargo を駆動）。再生 API は `set_animation` + 引数なし `play`（§9.3）。◻ 残: `viewer-dx12-cpp`（Windows）・`viewer-vulkan-cpp`（Linux）／P7 で `ss_scene_*` へ作り直し | **macOS 実機で Metal 描画確認済**（Basic / Mask を C-API 経由で描画）。DX12/Vulkan は各実機で要確認 |
 | **P6 統合シェーダ13種** ✅ | ss_shader 全13種（sepia/hsb/step/pix/noise/bmask/outline/blur/wave/move/scatter/circle/spot）を WGSL 移植（`internal.rs` `SS_SHADER_WGSL`）。パーツ属性 SHDR を per-part ディスパッチ：`(id_hash, blend)` 毎に**遅延生成**するシェーダパイプライン＋group(2) の動的オフセット uniform（param0..7 / cell_rect / pixel_size）。各シェーダは straight-alpha の Pixel を計算し `ss_finish`（＝P2 の PartsColor tail）で合成（blur のみ例外）。`ssTex` は逆premul＋`textureSampleLevel`（ループ/discard 後のサンプル可）。**制限（WebGL v1 同）**: map0/map1 未対応・shader×マスク非結合・Normal パーツのみ | Shader.ssab をヘッドレス GPU＋PNG 目視（13種の効果を確認）。shader 無しアニメはコスト0 |
-| **P7 シーン再設計（複数プレイヤー）** ◻ **最優先** | 下表の 7-1〜7-8。`SSInternalPlayer` を `SSRenderer`(device) / `SSScene`(ターゲット) へ解体し、`SSPlayer` から GPU リソースを剥がす（§1.2）。**破壊的変更・後方互換は取らない**（プロト段階） | 1つの描画ターゲットに複数体を正しく描ける（マスク持ち同士を含む）。web は device 1個で N 要素。C は 1 window に N 体 |
+| **P7 シーン再設計（複数プレイヤー）** 🚧 **進行中**（7-1 / 7-2 ✅） | 下表の 7-1〜7-8。`SSInternalPlayer` を `SSRenderer`(device) / `SSScene`(ターゲット) へ解体し、`SSPlayer` から GPU リソースを剥がす（§1.2）。**破壊的変更・後方互換は取らない**（プロト段階） | 1つの描画ターゲットに複数体を正しく描ける（マスク持ち同士を含む）。web は device 1個で N 要素。C は 1 window に N 体 |
 | （任意）Bevy アダプタ | `ssplayer-wgpu-bevy`（借用モデルの一利用例）。コアに依存を入れず別立て。**P7 の `set_texture` 借用チャネル（§8.2）が前提** | Bevy の render graph で `SSScene` が描画。テクスチャは `GpuImage` を借用（二重アップロードなし） |
 | （後回し）Text / Nines | 旧版も未実装 | 必要時 |
 
@@ -763,8 +763,8 @@ const char*  ss_last_error(void);                             // スレッドロ
 
 | # | 内容 | 参照 | 単独で入るか |
 |---|---|---|---|
-| 7-1 | ステンシル完全巻き戻し（不変条件） | §6 | ✅ 単独。**最初に入れる** |
-| 7-2 | `set_transform` / `order` / `visible` / `alpha` | §5.4 / §9.3 | ✅ 単独 |
+| 7-1 ✅ **実装済** | ステンシル完全巻き戻し（不変条件）。`player.rs` の `unwind_masks` | §6 | 単独で入った |
+| 7-2 ✅ **実装済** | `set_transform` / `reset_transform` / `set_order` / `set_visible` / `set_alpha`。`order` は保持のみ（消費するのは 7-4 の `SSScene`）。`tint` は §5.5 後に回す——PartsColor の Mix 式より後段に掛ける必要があり、頂点色への畳み込みでは表現できない | §5.4 / §9.3 | 単独で入った |
 | 7-3 | `SSRenderer` 分離＋**パイプライン遅延生成** | §5.2 / §9.1 | ✅ 遅延生成だけなら単独 |
 | 7-4 | `SSScene`（共有アリーナ・order 合成） | §9.2 | 7-3 の後 |
 | 7-5 | `SSPack` ＋ `set_texture` 借用チャネル | §8.2 | 7-3 の後 |
@@ -789,8 +789,9 @@ const char*  ss_last_error(void);                             // スレッドロ
 | DX12（副） | `examples/viewer-dx12-cpp/`（Windows 実機、backend=DX12 強制） |
 | Metal（副） | `examples/viewer-metal-cpp/`（macOS 実機、backend=Metal 強制）。`cmake -B build && cmake --build build && ./build/ssviewer-metal [asset-dir] [pack]` |
 | Vulkan（将来） | `examples/viewer-vulkan-cpp/`（Linux 実機、backend=Vulkan 強制） |
-| **複数プレイヤー（ヘッドレス・P7）** | ◻ `tests/scene.rs`: ①**ステンシル残留の回帰**——マスク持ち Player A と マスク無し Player B を1シーンに置き、B の描画結果が「B 単体」と**ピクセル一致**すること（A のマスクが B をクリップしていないことの証明）。順序を入れ替えても成立すること。②`order` を入れ替えると前後関係が変わること。③同一 pack の N 体でテクスチャアップロードが1回であること（`SSRenderer` のカウンタ probe） |
+| **複数プレイヤー（ヘッドレス）** ✅ P7-1/7-2 | `libs/ssplayer-wgpu/tests/scene.rs`。**ステンシル残留の回帰**は「1 pass に N 体」と「1 体 1 pass（stencil を毎回クリア）」の**ピクセル完全一致**で検出する——後者は構造的に漏れようがないので基準になる。マスク持ち同士（`Mask.ssab` ×2）と混在（`Mask` × `Basic`、順序両方向）。`set_transform` は**同一フレームで**（`update(0.0)` で再構築）整数ピクセル平行移動し、元画像を N px ずらしたものと完全一致することを要求。`set_visible(false)` は描画ゼロ、`set_alpha(0.0)` も描画ゼロ、0.5 はその中間。◻ 残: `order` の並べ替え、同一 pack N 体のアップロード1回（どちらも P7-4/7-5 で `SSScene`/`SSRenderer` ができてから） |
 | **複数プレイヤー（目視）** | ◻ `examples/viewer` を N 体対応にする。現状 1 体固定で、**複数体でのパリティ検証ができない**（マスク・ブレンドの相互干渉は目視でしか気づけない類） |
+| **wasm サイズ** | `cd examples/web && ./build.sh`（**release**。`--dev` は wasm-opt を飛ばすので測ってはいけない）→ `ls -l pkg/*.wasm pkg/*.js` ＋ `gzip -9 -c ... \| wc -c`。§14.1 の表を更新する |
 | WebGL 版との一致 | 同一 ssab を両者で再生し目視/スクリーンショット比較（色・ブレンド・マスク）。**P7 以降は「複数体を置いた画」でも比較する**（ssplayer-webgl も surface+players 構成のため同条件） |
 | Rust 品質 | `cargo clippy --workspace --all-targets -- -D warnings` / `cargo fmt --all -- --check` / `cargo test` |
 
@@ -834,13 +835,25 @@ const char*  ss_last_error(void);                             // スレッドロ
 
 **それでも WebGL を選ぶ理由（弱み）**
 
-1. **到達率。これが唯一の決定打。** Safari は 26（2025）、Firefox は 141（Windows・2025）でようやく。**iOS 26 未満には無い**。広告クリエイティブ・教材のような「全端末で必ず動く」用途は WebGL2/1 一択（正確な数字は caniuse で都度確認）。
-2. **バイナリサイズが約10倍。** 実測 `examples/web/pkg/ssplayer_wgpu_bg.wasm` = **3.8 MB** に対し、ssplayer-webgl は `ssruntime_bg.wasm` 278 KB + JS 60 KB ≒ **350 KB**。wgpu + naga + PNG デコーダが乗るためで、実装で削り切れる差ではない（`image` 除去（§8）は効くが桁は変わらない）。広告の容量枠では**それだけで失格**。
-3. **初期表示レイテンシ。** adapter → device が2段の Promise、加えて現行はパイプライン39本を起動時に全コンパイル（→ P7 で遅延生成、§5.2）。WebGL 版は program 1〜2本を遅延コンパイル。
-4. **フォールバックの二重保守。** 非対応なら別レンダラが要る＝ WebGL 版は結局残る。
-5. **canvas 周りの機能差**（`desynchronized` / `failIfMajorPerformanceCaveat` / `preserveDrawingBuffer` に等価なし）、**premul の非対称**（上記）、**ツールの成熟度**（Spector.js 相当が弱い）。
+1. **到達率。これが決定打であり、事実上これだけ。** Safari は 26（2025）、Firefox は 141（Windows・2025）でようやく。**iOS 26 未満には無い**。広告クリエイティブ・教材のような「全端末で必ず動く」用途は WebGL2/1 一択（正確な数字は caniuse で都度確認）。
+2. **初期表示レイテンシ。** adapter → device が2段の Promise、加えて現行はパイプライン39本を起動時に全コンパイル（→ P7 で遅延生成、§5.2）。WebGL 版は program 1〜2本を遅延コンパイル。First Paint が KPI の用途では効く。
+3. **フォールバックの二重保守。** 非対応なら別レンダラが要る＝ WebGL 版は結局残る。
+4. **canvas 周りの機能差**（`desynchronized` / `failIfMajorPerformanceCaveat` / `preserveDrawingBuffer` に等価なし）、**premul の非対称**（§8）、**ツールの成熟度**（Spector.js 相当が弱い）。
 
-**方針**: WebGPU 面は「表現力と native 統合」を取りに行く。到達率とサイズが要件の案件は ssplayer-webgl を使う。`<ss-player-webgpu>` は非対応ブラウザで**エラー表示ではなく WebGL 版へ退避できる形**を目標にする（実装方針は未定）。
+**バイナリサイズは弱点ではない（★2026-07 実測で訂正）**
+
+|  | ssplayer-wgpu (WebGPU) | ssplayer-webgl | 比 |
+|---|---|---|---|
+| wasm | 577,338 B | 277,601 B（`ssruntime_bg.wasm`） | |
+| JS | 65,146 B（wasm-bindgen glue） | 301,707 B（`ss-player.element.min.js`） | |
+| **raw 合計** | **642,484 B** | **579,308 B** | **1.11×** |
+| **gzip 合計** | **242,517 B** | **147,415 B** | **1.65×** |
+
+wgpu の WebGPU バックエンドは WGSL をブラウザへそのまま渡すので **naga のバックエンド群が丸ごと落ちる**のが効いている。`image` を外せば（§8）さらに縮む。
+
+> **注意（この訂正の経緯）**: 当初「約10倍・3.8 MB」と書いていたが、それは `build.sh --dev` の成果物だった（wasm-opt 未適用、`name` カスタムセクションだけで 1.76 MB）。**サイズを語るときは必ず release ビルドを測ること。** 計測コマンドは §13。
+
+**方針**: WebGPU 面は「表現力と native 統合」を取りに行く。**到達率**が要件の案件は ssplayer-webgl を使う——サイズは選択理由にならない。`<ss-player-webgpu>` は非対応ブラウザで**エラー表示ではなく WebGL 版へ退避できる形**を目標にする（実装方針は未定）。
 
 ---
 
