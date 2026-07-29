@@ -8,18 +8,25 @@
     :root { color-scheme: light dark; }
     body { font: 15px/1.6 system-ui, sans-serif; margin: 0; padding: 2rem; max-width: 720px; margin-inline: auto; }
     h1 { font-size: 1.3rem; }
+    h2 { font-size: 1.05rem; margin-top: 2.5rem; }
     .stage { width: 360px; height: 360px; max-width: 100%; margin: 1rem 0; border: 1px solid color-mix(in srgb, currentColor 20%, transparent); border-radius: 8px; background:
       repeating-conic-gradient(#8883 0% 25%, transparent 0% 50%) 50% / 24px 24px; }
+    .stage.wide { width: 100%; height: 300px; }
+    canvas.stage { display: block; }
     label { font-weight: 600; }
-    select { font: inherit; padding: 0.3em 0.5em; }
+    select, button { font: inherit; padding: 0.3em 0.6em; }
     code { background: color-mix(in srgb, currentColor 12%, transparent); padding: 0.1em 0.4em; border-radius: 4px; }
     .hint { opacity: 0.7; font-size: 0.9em; }
+    #stats { font-family: ui-monospace, monospace; font-size: 0.85em; white-space: pre-wrap; opacity: 0.85; }
   </style>
 </head>
 <body>
   <h1>ssplayer-wgpu — WebGPU demo</h1>
   <p>SpriteStudio 7 の <code>.ssab</code>（テクスチャ埋め込み）を <strong>WebGPU</strong> で再生します。
      ホストからのテクスチャ供給は不要（埋め込みをプレイヤーがデコード）。</p>
+
+  <h2>① <code>&lt;ss-player-webgpu&gt;</code>（1要素 = 1 canvas = 1 体）</h2>
+  <p class="hint">単体用途向けの便利ラッパ。下の②と <strong>device・パイプライン・アトラスを共有</strong>します。</p>
 
   <p>
     <label for="pick">アニメーション:</label>
@@ -30,6 +37,19 @@
   <!-- The custom element creates its own <canvas> and drives requestAnimationFrame. -->
   <ss-player-webgpu id="player" class="stage" src="assets/Basic.ssab"></ss-player-webgpu>
 
+  <h2>② 1 canvas に N 体（<code>SsContextWeb</code> を直接駆動）</h2>
+  <p class="hint">1枚の canvas ＝ 1 <code>SSScene</code> に何体でも載る形（SPEC §10）。
+     ①と同じ device・同じ <code>SSRenderer</code> を使うので、体を増やしてもアトラスのアップロードは増えません。</p>
+
+  <p>
+    <button id="add" type="button">＋ 1体</button>
+    <button id="remove" type="button">− 1体</button>
+    <span class="hint">— order 昇順で1パスに合成</span>
+  </p>
+
+  <canvas id="cast" class="stage wide"></canvas>
+  <p id="stats">…</p>
+
   <p class="hint">
     WebGPU 対応ブラウザ（Chrome / Edge 113+ など）＋ <code>http://localhost</code> 配信が必要です。
     ビルド: <code>./build.sh</code> → <code>python3 -m http.server</code> で本ディレクトリを配信。
@@ -37,6 +57,7 @@
 
   <script type="module">
     import './ss-player-webgpu.js';
+    import { sharedContext } from './ss-context.js';
 
     // Standalone single-pack animations from tests/overall (no external instance refs).
     const PACKS = ['Basic', 'PartsColor', 'BlendMode', 'Mask', 'Shape', 'Mesh', 'Effect', 'Shader'];
@@ -48,6 +69,88 @@
       pick.appendChild(o);
     }
     pick.addEventListener('change', () => player.loadSrc(`assets/${pick.value}.ssab`));
+
+    // --- ② one canvas, many players -------------------------------------
+    // Fetched once and reused: the same bytes make every player, and the atlas
+    // inside them is uploaded once by the shared renderer however many players
+    // load it (SPEC §8.2 — "registered wins", so the second one skips the decode).
+    const packBytes = new Map();
+    async function bytesFor(name) {
+      if (!packBytes.has(name)) packBytes.set(name, new Uint8Array(await (await fetch(`assets/${name}.ssab`)).arrayBuffer()));
+      return packBytes.get(name);
+    }
+
+    (async () => {
+      const statsEl = document.getElementById('stats');
+      const canvas = document.getElementById('cast');
+      const dpr = window.devicePixelRatio || 1;
+      canvas.width = Math.round(canvas.clientWidth * dpr);
+      canvas.height = Math.round(canvas.clientHeight * dpr);
+
+      let ctx, surface;
+      try {
+        ctx = await sharedContext();
+        surface = ctx.createSurface(canvas);
+      } catch (e) {
+        statsEl.textContent = `⚠️ ${e}`;
+        return;
+      }
+
+      const CAST = ['Basic', 'Mask', 'Shape', 'Effect'];
+      const players = [];
+
+      async function addPlayer() {
+        const name = CAST[players.length % CAST.length];
+        const p = surface.createPlayer();
+        p.loadSsab(name, await bytesFor(name));
+        // Select, then start — two calls (SPEC §9.3).
+        p.setAnimation(p.animationNames()[0]);
+        p.play();
+        players.push(p);
+        layout();
+      }
+
+      function removePlayer() {
+        players.pop()?.destroy();
+        layout();
+      }
+
+      /** Spread the cast over the canvas and give each one a draw order. */
+      function layout() {
+        const cols = Math.ceil(Math.sqrt(players.length)) || 1;
+        const rows = Math.ceil(players.length / cols) || 1;
+        const w = canvas.width / dpr, h = canvas.height / dpr;
+        players.forEach((p, i) => {
+          const x = ((i % cols) + 0.5) / cols * w - w / 2;
+          const y = (Math.floor(i / cols) + 0.5) / rows * h - h / 2;
+          p.setTransform(x, y, 0.34, 0.34, 0);
+          p.setOrder(i);
+        });
+      }
+
+      document.getElementById('add').addEventListener('click', () => void addPlayer());
+      document.getElementById('remove').addEventListener('click', removePlayer);
+      for (let i = 0; i < 4; i++) await addPlayer();
+
+      // SPEC §14.2 item 10: the counters the native measurements were taken from,
+      // read in the browser — where the draw-call ratios may differ, because one
+      // wgpu command is one JS call here and a memcpy on native.
+      let last = performance.now();
+      const loop = (now) => {
+        const dt = Math.min((now - last) / 1000, 0.05);
+        last = now;
+        if (!ctx.isDeviceLost()) {
+          surface.frame(dt);
+          const s = surface.stats();
+          const gpu = s.gpuPassTimeNs === undefined ? '—' : `${(s.gpuPassTimeNs / 1e6).toFixed(3)} ms`;
+          statsEl.textContent =
+            `players ${s.players}  prims ${s.prims}  draws ${s.drawCalls}  gpu ${gpu}\n` +
+            `mergeable ${s.mergeableDraws}  redundant binds ${s.redundantTextureBinds}  uploaded ${s.uploadedBytes} B`;
+        }
+        requestAnimationFrame(loop);
+      };
+      requestAnimationFrame(loop);
+    })();
   </script>
 </body>
 </html>

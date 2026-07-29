@@ -19,8 +19,9 @@
 - **提供3面（ssruntime と同型）**: `rs`(rlib) / `js`(wasm-bindgen) / `ffi`(cbindgen・DX12/Vulkan/Metal)。
 - **データ所有契約**: `.ssab` は Player 所有→ssruntime へ borrow ／ FrameData・SoA は ssruntime 所有→Player が borrow（§1.1）。
 - **ssab は embedded / reference 両対応**（テクスチャ埋め込み／外部参照）。
-- **進捗**: **P0**（3層リファクタ＋借用モデル）✅ ／ **P4**（インスタンス §7.1・エフェクト §7.2）✅ ／ **P3**（マスク・Shape）✅ ／ **P2**（色パリティ: varg・全12ブレンド・premul 厳密化）✅ ／ **P6**（統合シェーダ ss_shader 全13種）✅ ／ **P1**（ssab embedded/reference 両対応・**WebGPU/js**）✅ ブラウザ実機確認済 ／ **P5**（ネイティブ ffi・C-API ＋ Metal C++ viewer）✅ macOS 実機確認済、DX12/Vulkan viewer は未着手 ／ **P7**（シーン再設計：SSRenderer/SSScene 分離・複数プレイヤー・SoA パススルー）🚧 **進行中**——**7-1〜7-7 ✅**（1 ターゲットに N プレイヤー／pack 共有・借用テクスチャ／**頂点バッファ撤去**／C-API 2ハンドル化）、残りは **7-8**（draw マージ・ランレングス結合）と **web 面**（device をページで1つ、§10）。対応バッチ = Normal / Mesh / Shape / Instance / Effect / Mask。**wgpu 29**（§2.2）。詳細は §12。
-- **次の大物**: **§14.2**「WebGL でできることを wgpu で書いた」箇所の棚卸し 10 件（P8 候補）。P7-6 が頂点経路にやったことを、マスク／ブレンド／draw 発行／並列化にも行う。**着手前に timestamp query で計測手段を入れること**。
+- **進捗**: **P0**（3層リファクタ＋借用モデル）✅ ／ **P4**（インスタンス §7.1・エフェクト §7.2）✅ ／ **P3**（マスク・Shape）✅ ／ **P2**（色パリティ: varg・全12ブレンド・premul 厳密化）✅ ／ **P6**（統合シェーダ ss_shader 全13種）✅ ／ **P1**（ssab embedded/reference 両対応・**WebGPU/js**）✅ ブラウザ実機確認済 ／ **P5**（ネイティブ ffi・C-API ＋ Metal C++ viewer）✅ macOS 実機確認済、DX12/Vulkan viewer は未着手 ／ **P7**（シーン再設計：SSRenderer/SSScene 分離・複数プレイヤー・SoA パススルー）✅ **完了**——**7-1〜7-7・7-9 ✅**（1 ターゲットに N プレイヤー／pack 共有・借用テクスチャ／**頂点バッファ撤去**／C-API 2ハンドル化／**web 面 3オブジェクト化・device はページで1つ**）。**7-8 のみ計測により保留**（下記）。対応バッチ = Normal / Mesh / Shape / Instance / Effect / Mask。**wgpu 29**（§2.2）。詳細は §12。
+- **7-8（draw マージ・マスクのランレングス結合）は保留**: 上限は `SSScene::stats()` の `mergeable_draws` が数えており、256体で 2496→1728 draws＝**削れるのは encode 0.09 ms の 31%≒0.03 ms**（予算 16.6 ms の 0.2%）。§14.2 が同じ理由で項目 7 / 4 を見送ったのと同根で、しかも上限はそれらより小さい。**やるならステンシル境界と `shader_slot` を跨がない条件付き実装**になるため、割に合わない（§14.2 結論）。
+- **次の大物**: **表現力側**——§14.2 の **1（マスクの coverage-bitmap 厳密化）と 2（背景読みブレンド `Div2`/`Overlay2`）**。速度側 6 項目（4〜9）は計測の結果「着手する理由が無い」と結論済み（256体で CPU 1.3 ms ＋ GPU 0.19 ms）。**web だけは未計測**だが、計測器は入った——`surface.stats()`（§10）。
 - **リポジトリ**: SDK monorepo から分離した独立リポ `ssplayer-wgpu`。SDK は git submodule（`SpriteStudio-SDK/`）として取り込み、`ssruntime`/`ssab` を **path 依存**で直リンクする（§2.2）。
 
 ---
@@ -178,10 +179,12 @@ ssplayer-wgpu/
 │   │       ├── player.rs          ✅ 層3 SSPlayer（操作。再生木 ＋ transform/order/visible）
 │   │       │                         ★P7 以降 wgpu 型のフィールドを持たない（§1.2）
 │   │       ├── mask.rs            ✅ MaskPlanner（§6）
+│   │       ├── roster.rs          ✅ Roster<T>（世代付き slot）。ハンドルを配る2面が共有 §11
 │   │       ├── web.rs             ✅ #[cfg(feature="web")] wasm-bindgen（② js）
-│   │       │                         ◻ P7: SsSurfaceWeb（1 canvas = N player、device はページ共有）
+│   │       │                         ✅ P7-9: SsContextWeb(ページ) / SsSurfaceWeb(canvas) /
+│   │       │                            SsPlayerWeb(体)。device と SSRenderer はページで1つ §10
 │   │       ├── host.rs            ✅ #[cfg(feature="ffi")] NativeHost（生ハンドル→wgpu 一式を所有）
-│   │       │                         ✅ 1 window = N player（PlayerRoster：世代付き slot）
+│   │       │                         ✅ 1 window = N player（roster.rs の世代付き slot）
 │   │       └── ffi.rs             ✅ #[cfg(feature="ffi")] extern "C" ss_scene_* / ss_player_*（③ C/C++）
 │   │                                 ★ABI 変換のみ。wgpu ロジックは host.rs、再生は player.rs
 │   └── ssplayer-wgpu-bevy/        ◻【将来】Bevy アダプタ（借用モデルの一利用例）
@@ -192,7 +195,10 @@ ssplayer-wgpu/
 └── examples/                      ← ホスト実装・マルチプラットフォーム動作確認環境
     ├── viewer/                    ✅ Rust ネイティブ viewer（bin, ① rs のホスト例）
     │   └── src/main.rs            winit + wgpu 一式を所有し、借用モデルの SSPlayer を駆動
-    ├── web/                       ✅ WebGPU ブラウザ確認（<ss-player-webgpu>、② js）
+    ├── web/                       ✅ WebGPU ブラウザ確認（② js）
+    │   ├── ss-context.js          ページで1つの SsContextWeb（＋喪失復帰の集約）§10
+    │   ├── ss-player-webgpu.js    <ss-player-webgpu>：1要素=1canvas=1体 の便利ラッパ
+    │   └── index.html             ①要素 と ②1 canvas に N 体（stats 表示）の2デモ
     ├── viewer-dx12-cpp/           ◻ C++ DX12 確認 viewer（Win32 HWND → C-API → backend=DX12）
     ├── viewer-metal-cpp/          ✅ C++ Metal 確認 viewer（Cocoa CAMetalLayer → C-API → Metal）
     │   ├── CMakeLists.txt         cargo build --features ffi を叩き、cdylib＋生成ヘッダを消費
@@ -706,25 +712,44 @@ impl SSPlayer {
 
 ---
 
-## §10 WebGPU / JS 面（② js — Rust API の上のホスト）
+## §10 WebGPU / JS 面（② js — Rust API の上のホスト）— ✅ P7-9 実装済（`libs/ssplayer-wgpu/src/web.rs`）
 
 - **単一 Rust→WASM バイナリ**（ssruntime + 層2 + player を wasm-bindgen で1つに）。wgpu が WebGPU バックエンドを叩く。
-- `libs/ssplayer-wgpu/src/web.rs`（`#[cfg(feature="web")]`）が **canvas から Surface を生成・所有**し、借用モデルの `SSScene`/`SSPlayer`（§9）を駆動する薄いホスト。wasm-bindgen 束縛はこの層。
-- **★P7: device と `SSRenderer` はページで1つ**。旧 `SsPlayerWeb` は `create(canvas)` ごとに adapter/device を要求しており、1ページに N 要素置くと **N 個の GPUDevice** ができていた（device をまたぐとテクスチャも pipeline も共有できず、`restore_device` も N 回走る）。新形:
+- `libs/ssplayer-wgpu/src/web.rs`（`#[cfg(feature="web")]`）が **wgpu 一式を生成・所有**し、借用モデルの `SSScene`/`SSPlayer`（§9）を駆動する薄いホスト。wasm-bindgen 束縛はこの層。
+- **★P7-9: device と `SSRenderer` はページで1つ**。旧 `SsPlayerWeb` は `create(canvas)` ごとに adapter/device を要求しており、1ページに N 要素置くと **N 個の GPUDevice** ができていた（device をまたぐとテクスチャも pipeline も共有できず、`restore_device` も N 回走る）。**§1.2 のスコープ契約をそのまま3オブジェクトに落とす**:
+
+| JS 型 | 個数 | 持つもの |
+|---|---|---|
+| `SsContextWeb` | **ページで1つ** | instance / adapter / device / queue ＋ `SSRenderer`（pipeline ＋ アトラス） |
+| `SsSurfaceWeb` | canvas ごと | `wgpu::Surface` ＋ `SSScene`（投影・フレームアリーナ）＋ その canvas の player 群 |
+| `SsPlayerWeb` | 何体でも | 再生木だけ。**GPU リソースを持たない**ので安い |
 
 ```js
-const ctx    = await SsContextWeb.create();      // adapter + device + SSRenderer（ページで1つ・遅延初期化）
-const surf   = ctx.createSurface(canvas);        // canvas ごと = SSScene ＋ wgpu::Surface
-const player = surf.createPlayer();              // 1 canvas に何体でも
-await player.load(url); player.setAnimation('idle'); player.play();
-player.setTransform({x, y, scaleX, scaleY, rotation}); player.order = 1;
+import { sharedContext } from './ss-context.js';
+
+const ctx     = await sharedContext();          // ページで1回（内部で SsContextWeb.create()）
+const surface = ctx.createSurface(canvas);      // canvas ごと
+const player  = surface.createPlayer();         // 1 canvas に何体でも
+
+player.loadSsab('Basic', bytes);                // ★bytes を受ける（fetch はホストの責務）
+player.setAnimation('idle');                    // 選択＝確保はここだけ
+player.play();                                  // 開始 / pause からの再開（§9.3）
+player.setTransform(x, y, scaleX, scaleY, rotation);
+player.setOrder(1);                             // 小さいほど先に描く
+surface.frame(dt);                              // 1コールで全 player を1パスに
+player.destroy(); surface.destroy();            // ★明示。実体は ctx にあるので GC では消えない
 ```
 
-- **JS 露出は再設計後の ssplayer-webgl（`SSSurface` ＋ N 体の `SSPlayer`）と同型**にする（§0.2）。旧 `<ss-player>` の 1 canvas = 1 player・`play(name)` 1コールには揃えない——参照実装から既に消えているため。
-- `<ss-player-webgpu>` カスタム要素は「1要素 = 1 canvas = 1 player」の**便利ラッパ**として残す（広告のような単体用途はこれが最短）。ただし内部では上記の共有 device を使い、要素を何個置いても device は1つ。
-- ssab は embedded / reference 両対応（§8.1）。**embedded のデコードは `createImageBitmap` ＋ `copy_external_image_to_texture` に寄せ、`image` crate を wasm から外す**（§8——狙いは premultiply の GPU 化とオフスレッドデコード）。
-- ビルド/パッケージは `scripts/release-web.sh` 相当を追加し `pkg/ssplayer-wgpu-web/` を吐く。
-- 注意: WebGPU 未対応ブラウザへのフォールバック方針（WebGL 版へ退避 or エラー表示）を Web Component 層で定義（§14）。
+- **実装は「1つの `Rc<RefCell<WebContext>>` ＋ 世代付きハンドル」**（`roster.rs`、C 面と同じ理由＝§11）。JS は Rust の `&mut` を持てないので名前で引く必要があり、破棄済みハンドルは**後継ではなく「破棄済み」に解決**しなければならない。セルを1つに絞ってあるのは、借用を跨いで別の借用を取る経路を作らないため。
+- **`destroy()` が要る**のは所有が context 側にあるから。JS ラッパを捨てても swapchain は消えないので、要素の `disconnectedCallback` は player → surface の順に明示破棄する。
+- **device 喪失復帰はページで1回**（`ctx.restoreDevice()`）。喪失は device のものなので全 canvas が同時に気づく——`ss-context.js` が同時呼び出しを1本の promise に畳む（畳まないと N 個の置換 device を要求して最後の1つしか残らない）。旧実装はこの復帰を**アトラスの PNG 再デコードごと canvas 数だけ**繰り返していた。
+- **JS 露出は再設計後の ssplayer-webgl（`SSSurface` ＋ N 体の `SSPlayer`）と同型**（§0.2）。旧 `<ss-player>` の 1 canvas = 1 player・`play(name)` 1コールには揃えない——参照実装から既に消えているため。**選択と開始は別コール**（`setAnimation` + `play`）。
+- **`ctx.addTexture(hash, rgba, w, h)`** が reference 形態のテクスチャ供給。**device スコープなので1回で全 canvas・全 player に効く**（だから surface でも player でもなく context にある）。
+- **`surface.stats()`** がフレームカウンタを JS オブジェクトで返す（players / prims / drawCalls / mergeableDraws / redundantTextureBinds / uploadedBytes ＋ `timestamp-query` があれば `gpuPassTimeNs`）。**§14.2 は native でしか測っていない**——ブラウザで同じ数字を取る手段がこれ。`examples/web/index.html` の②が毎フレーム表示する。
+- `<ss-player-webgpu>` カスタム要素は「1要素 = 1 canvas = 1 player」の**便利ラッパ**として残す（広告のような単体用途はこれが最短）。ただし内部では上記の共有 context から surface を1枚取るだけなので、要素を何個置いても device は1つ。
+- ssab は embedded / reference 両対応（§8.1）。**embedded のデコードは `createImageBitmap` ＋ `copy_external_image_to_texture` に寄せ、`image` crate を wasm から外す**余地が残っている（§8——狙いは premultiply の GPU 化とオフスレッドデコード。§14.2 項目 9）。
+- ビルド/パッケージは `scripts/release-web.sh` 相当を追加し `pkg/ssplayer-wgpu-web/` を吐く。◻ 未着手。
+- 注意: WebGPU 未対応ブラウザへのフォールバック方針（WebGL 版へ退避 or エラー表示）を Web Component 層で定義（§14）。現状は `sharedContext()` が非対応を検知して reject し、要素がエラー表示へ落ちるところまで。
 
 ---
 
@@ -767,7 +792,7 @@ const char*  ss_last_error(void);                             // スレッドロ
 
 - **ハンドルの寿命（★実装済の形）**: `ss_player_t*` は「どの scene の、どの slot か」を持つ小さな box。**scene の Vec への生ポインタではない**——Vec は伸びると移動し、slot は再利用されるため。
   - `ss_player_destroy` は **box を解放しない**（scene が破棄されるまで生かす）。おかげで**二重 destroy も、破棄後の呼び出しも安全な no-op** になる。よくある C の間違いを未定義動作にしない。
-  - slot は再利用するが、**世代番号**（`PlayerId { index, generation }`）が付いているので、解放済みの id が「その slot を引き継いだ別の player」を指すことはない（`host.rs` の `PlayerRoster`。ウィンドウ無しで単体テストできるよう `NativeHost` から切り出してある）。
+  - slot は再利用するが、**世代番号**（`SlotId { index, generation }`）が付いているので、解放済みの id が「その slot を引き継いだ別の player」を指すことはない（`roster.rs` の `Roster<T>`。ウィンドウ無しで単体テストできるようホストから切り出してあり、**同じ問題を持つ web 面（§10）が canvas と player の両方に使い回している**）。
   - **シーンを破棄したら配下の player ハンドルは全て無効**（そこだけは use-after-free なので C 側で持ち越さない）。
 
 - **ステータス規約**: `SS_OK`(0) ／ **正 = ssruntime のエラーコード**（`SSRuntimeError::as_code`、SDK の C-API と同番号）／ **負 = Player/ホスト側のエラー**（`SS_ERROR_INVALID_ARGUMENT` = -1、`SS_ERROR_GPU` = -2）。詳細メッセージは `ss_last_error()`。
@@ -792,7 +817,7 @@ const char*  ss_last_error(void);                             // スレッドロ
 | **P4 エフェクト/インスタンス** ✅ | **P0 の次に先行実施**。①内部を `begin_frame`/`append_batch`/`append_effect`/`end_frame` の累積 API＋transform へ（Stage 1）②インスタンス木＝子ごと独立 Context（Stage 2, §7.1）③エフェクト＝EffectSlot/EffectDrawPlan（Stage 3, §7.2） | エフェクト/インスタンスが描画される（実機確認済） |
 | **P5 ネイティブ C-API + C++ viewer（③ ffi）** ✅（Metal） | `ffi` feature ＋ cbindgen（`build.rs`/`cbindgen.toml` → `include/ssplayer_wgpu.h`）、`host.rs` の `NativeHost`（生ハンドル→wgpu 所有）＋ `ffi.rs`（ABI 変換のみ）、`examples/viewer-metal-cpp`（Cocoa/Objective-C++、CMake が cargo を駆動）。再生 API は `set_animation` + 引数なし `play`（§9.3）。◻ 残: `viewer-dx12-cpp`（Windows）・`viewer-vulkan-cpp`（Linux）／P7 で `ss_scene_*` へ作り直し | **macOS 実機で Metal 描画確認済**（Basic / Mask を C-API 経由で描画）。DX12/Vulkan は各実機で要確認 |
 | **P6 統合シェーダ13種** ✅ | ss_shader 全13種（sepia/hsb/step/pix/noise/bmask/outline/blur/wave/move/scatter/circle/spot）を WGSL 移植（`internal.rs` `SS_SHADER_WGSL`）。パーツ属性 SHDR を per-part ディスパッチ：`(id_hash, blend)` 毎に**遅延生成**するシェーダパイプライン＋group(2) の動的オフセット uniform（param0..7 / cell_rect / pixel_size）。各シェーダは straight-alpha の Pixel を計算し `ss_finish`（＝P2 の PartsColor tail）で合成（blur のみ例外）。`ssTex` は逆premul＋`textureSampleLevel`（ループ/discard 後のサンプル可）。**制限（WebGL v1 同）**: map0/map1 未対応・shader×マスク非結合・Normal パーツのみ | Shader.ssab をヘッドレス GPU＋PNG 目視（13種の効果を確認）。shader 無しアニメはコスト0 |
-| **P7 シーン再設計（複数プレイヤー）** 🚧 **進行中**（7-1〜7-7 ✅、残 7-8 と web 面） | 下表の 7-1〜7-8。`SSInternalPlayer` を `SSRenderer`(device) / `SSScene`(ターゲット) へ解体し、`SSPlayer` から GPU リソースを剥がす（§1.2）。**破壊的変更・後方互換は取らない**（プロト段階） | 1つの描画ターゲットに複数体を正しく描ける（マスク持ち同士を含む）。web は device 1個で N 要素。C は 1 window に N 体 |
+| **P7 シーン再設計（複数プレイヤー）** ✅（7-1〜7-7・7-9。**7-8 は計測により保留**） | 下表。`SSInternalPlayer` を `SSRenderer`(device) / `SSScene`(ターゲット) へ解体し、`SSPlayer` から GPU リソースを剥がす（§1.2）。**破壊的変更・後方互換は取らない**（プロト段階） | 1つの描画ターゲットに複数体を正しく描ける（マスク持ち同士を含む）✅。web は device 1個で N 要素 ✅。C は 1 window に N 体 ✅ |
 | （任意）Bevy アダプタ | `ssplayer-wgpu-bevy`（借用モデルの一利用例）。コアに依存を入れず別立て。**前提だった `set_texture` 借用チャネル（§8.2）は P7-5 で入った**ので着手可能 | Bevy の render graph で `SSScene` が描画。テクスチャは `GpuImage` を借用（二重アップロードなし） |
 | **P8（候補）WebGL 由来の設計の解消** 🚧 | **§14.2 の棚卸し 10 件**（**10 = 計測 ✅ 実装済**）。P7-6 が頂点経路に対してやったことを、マスク / ブレンド / draw 発行 / 並列化に対しても行う | 項目ごとに個別。共通の完了条件は「`golden_corpus`（§13）が変更前とビット一致、または差分が意図どおりと説明できる」 |
 | （後回し）Text / Nines | 旧版も未実装 | 必要時 |
@@ -806,14 +831,15 @@ const char*  ss_last_error(void);                             // スレッドロ
                                ↓
 [7-4] SSScene（アリーナ / projection / order 合成 / restore の単位）
                                ↓
-        ┌──────────────────────┼──────────────────────┐
-[7-5] pack 共有 + set_texture   [7-6] SoA パススルー    [7-7] C-API 作り直し
-      借用チャネル（§8.2）            （§5.5）              （ss_scene_*）
-                                       ↓
-                              [7-8] 静的/indexless index buffer
-                                       ↓
-                              render bundle / timestamp query
+        ┌──────────────────────┼───────────┬──────────┐
+[7-5] pack 共有 + set_texture   [7-6] SoA   [7-7] C-API  [7-9] web 面
+      借用チャネル（§8.2）      パススルー  作り直し     作り直し
+                                （§5.5）   （ss_scene_*） （SsContextWeb, §10）
+                                    ↓
+                           [7-8] draw マージ ← ★計測により保留（§14.2）
 ```
+
+**7-7 と 7-9 は同じ作り直しの2面**——「ホストが device と renderer を1つ持ち、その下に N 個のターゲット／N 体の player がぶら下がる」形にするだけで、違うのはウィンドウの取り方だけ。世代付き slot（`roster.rs`）を共有しているのはそのため。
 
 | # | 内容 | 参照 | 単独で入るか |
 |---|---|---|---|
@@ -823,8 +849,9 @@ const char*  ss_last_error(void);                             // スレッドロ
 | 7-4 ✅ **実装済** | `SSScene`（旧 `SSInternalPlayer` を改名）。1 シーンが N プレイヤーを `order` 昇順で1フレームに積む。`SSPlayer` から **GPU 型のフィールドが完全に消えた**（`new()` は引数なし）。投影・アリーナ・復帰はシーン側へ。`internal.rs` を `renderer.rs` / `scene.rs` へ分割済 | §9.2 | 7-3 の後 |
 | 7-5 ✅ **実装済** | `SSPack`（`pack.rs`、CPU のみ・`Arc` 共有・パック名は ssab 由来）＋ `set_texture` / `forget_texture` 借用チャネル ＋ per-texture `AlphaMode`（group(1) の `TexInfo` uniform。テクスチャサイズも同居させ §5.5 の器を先に作った）。埋め込みアトラスは**登録済みならデコードごとスキップ**するので N 体で1回 | §8.2 | 7-3 の後 |
 | 7-6 ✅ **実装済** | SoA パススルー（GPU 頂点展開）。**頂点バッファ / index buffer を撤去**し、group(0) を「シーン」（投影 ＋ `f_arena` ＋ `prims` ＋ `mesh_stream`）に。幾何4種＝頂点エントリ4種（`vs_quad`/`vs_mesh`/`vs_shape`/`vs_effect`）でパイプラインキーに `geom_class` が増えた。**フィクスチャ134枚がビット完全一致**（§13） | §5.5 | 7-4 の後 |
-| 7-7 ✅ **実装済** | C-API を `ss_scene_*`（ウィンドウ）+ `ss_player_*`（1体）の**2ハンドル**へ。`NativeHost` が `PlayerRoster`（世代付き slot）で N 体を持ち、`ss_scene_create_player` / `ss_player_destroy` / `set_transform` / `set_order` / `set_visible` / `set_alpha` を追加。テクスチャ供給は scene 側（`ss_scene_add_texture`）——テクスチャマップが device スコープだから。Metal viewer は**既定で2体**表示し `+/-` で増減 | §11 | 7-4 の後 |
-| 7-8 | draw_call マージ、マスクのランレングス結合（**indexless 化は 7-6 で完了**——index buffer 自体が無くなった） | §5.5 / §6 | 7-6 の後（マージ・ランレングスは単独可） |
+| 7-7 ✅ **実装済** | C-API を `ss_scene_*`（ウィンドウ）+ `ss_player_*`（1体）の**2ハンドル**へ。`NativeHost` が世代付き slot（`roster.rs`）で N 体を持ち、`ss_scene_create_player` / `ss_player_destroy` / `set_transform` / `set_order` / `set_visible` / `set_alpha` を追加。テクスチャ供給は scene 側（`ss_scene_add_texture`）——テクスチャマップが device スコープだから。Metal viewer は**既定で2体**表示し `+/-` で増減 | §11 | 7-4 の後 |
+| 7-9 ✅ **実装済** | web 面を `SsContextWeb`（ページ）/ `SsSurfaceWeb`（canvas）/ `SsPlayerWeb`（体）の3オブジェクトへ。**adapter/device/`SSRenderer` はページで1つ**、canvas ごとに `SSScene`、1 canvas に N 体。喪失復帰もページで1回。`setAnimation` + `play` へ分離し、`surface.stats()` で web 側の計測器を用意（§14.2）。7-7 と `roster.rs` を共有 | §10 | 7-4 の後 |
+| 7-8 ⏸ **保留（計測）** | draw_call マージ、マスクのランレングス結合（**indexless 化は 7-6 で完了**——index buffer 自体が無くなった）。**上限を測ったら 256体で 0.03 ms**（`mergeable_draws` が 31%、encode 自体が 0.09 ms）。ステンシル境界と `shader_slot` を跨げない条件付き実装になるので、§14.2 が項目 7 / 4 を見送ったのと同じ理由で見送る | §5.5 / §6 / §14.2 | — |
 
 **単独で先に入る小改善**（P7 を待たない）: 7-1 / 7-2 / パイプライン遅延生成 / マスク時のランレングス結合 / `position.z` 削除（§5.1） / premul スクラッチ再利用（§8）。
 
@@ -838,12 +865,13 @@ const char*  ss_last_error(void);                             // スレッドロ
 | インスタンス/エフェクト（ヘッドレス） | `libs/ssplayer-wgpu/tests/instance.rs`（probe。frame 推移・quad 生成を GUI 抜きで確認） |
 | マスク/Shape（ヘッドレス） | `libs/ssplayer-wgpu/tests/mask.rs`（planner probe：writer 分類・Shape-mask）＋ `libs/ssplayer-wgpu/tests/render.rs`（GPU offscreen readback：masking on/off 差分・Shape content 描画量。adapter 無ければ skip。PNG 保存で目視も可） |
 | 統合シェーダ（ヘッドレス） | `libs/ssplayer-wgpu/tests/render.rs::render_integration_shaders`（Shader.ssab を描画し、SS WGSL コンパイル＋per-part ディスパッチ＋params で描画量が出ることを確認。adapter 無ければ skip） |
-| WebGPU（主） | `examples/web/`（ブラウザで `<ss-player-webgpu>`）。初回起動計測（取得→wasm初期化→初フレーム ms） |
-| C-API（③ ffi） | `cargo build -p ssplayer-wgpu --features ffi`（cbindgen がヘッダを再生成。**ネイティブの他コマンドではこの面はコンパイルされない**——web feature と同じ死角）＋ **`cargo test -p ssplayer-wgpu --features ffi --lib`**（`host.rs` の `PlayerRoster` 単体テスト：破棄した id が後継を指さないこと、二重 destroy が no-op であること。ハンドル寿命は C 側の未定義動作に直結するので、ここだけは死角に置かない） |
+| WebGPU（主） | `examples/web/`（ブラウザで①`<ss-player-webgpu>`＋②1 canvas に N 体）。**②が要点**——device がページで1つであること・体を増やしてもアップロードが増えないこと・`stats()` の数字を、ブラウザでしか確認できない。初回起動計測（取得→wasm初期化→初フレーム ms） |
+| C-API（③ ffi） | `cargo build -p ssplayer-wgpu --features ffi`（cbindgen がヘッダを再生成。**ネイティブの他コマンドではこの面はコンパイルされない**——web feature と同じ死角）＋ **`cargo test -p ssplayer-wgpu --features ffi --lib`**（`roster.rs` 単体テスト：破棄した id が後継を指さないこと、二重 destroy が no-op であること。ハンドル寿命は C / JS 双方の未定義動作・取り違えに直結するので、ここだけは死角に置かない。`--features web` でも同じテストが走る） |
 | DX12（副） | `examples/viewer-dx12-cpp/`（Windows 実機、backend=DX12 強制） |
 | Metal（副） | `examples/viewer-metal-cpp/`（macOS 実機、backend=Metal 強制）。`cmake -B build && cmake --build build && ./build/ssviewer-metal [asset-dir] [pack]` |
 | Vulkan（将来） | `examples/viewer-vulkan-cpp/`（Linux 実機、backend=Vulkan 強制） |
 | **複数プレイヤー（ヘッドレス）** ✅ P7-1/7-2/7-3 | `libs/ssplayer-wgpu/tests/scene.rs`。**レンダラ共有**は `players_share_one_renderer`（同一 pack の2体目でパイプライン本数が増えないこと）と `pipelines_are_built_on_demand`（構築直後は0本、Basic.ssab で1本、同一フレーム再構築で増えない＝キーが安定）で見る。**ステンシル残留の回帰**は「1 pass に N 体」と「1 体 1 pass（stencil を毎回クリア）」の**ピクセル完全一致**で検出する——後者は構造的に漏れようがないので基準になる。マスク持ち同士（`Mask.ssab` ×2）と混在（`Mask` × `Basic`、順序両方向）。`set_transform` は**同一フレームで**（`update(0.0)` で再構築）整数ピクセル平行移動し、元画像を N px ずらしたものと完全一致することを要求。`set_visible(false)` は描画ゼロ、`set_alpha(0.0)` も描画ゼロ、0.5 はその中間。`order` の並べ替えは `order_decides_who_draws_on_top`（前後入替で composite が変わる ＋ スライス順を逆にしても値順に描く） |
+| **1 レンダラに N ターゲット（ヘッドレス）** ✅ P7-9 | `tests/pack.rs::scenes_share_one_renderer`。web 面が乗っている土台——「レンダラは device スコープでフォーマット非依存」——を native で押さえる。**2枚目の scene はわざと別のカラーフォーマット**（canvas はブラウザの好むフォーマットを取るため）にして、フォーマットが scene のパイプラインキー側にあり renderer 側に無いことを固定する。判定は `texture_upload_count()` が増えないこと ＋ `pipeline_count()` は**増える**こと（増えなければ2枚目が正しく描けているはずがない）＋ 2枚目の後も1枚目が描けること |
 | **pack 共有 / 借用テクスチャ（ヘッドレス）** ✅ P7-5 | `libs/ssplayer-wgpu/tests/pack.rs`。**同一 pack N 体でアップロード1回**は `texture_upload_count()` で見る（`texture_count()` は N 回上書きしても同じ値なので判定にならない）。`set_texture` は同じピクセルで `upload_texture` と**ピクセル完全一致**、`forget_texture` で白フォールバックに落ちること。**`AlphaMode` は合成アトラス（アルファ横ランプ）で検証する**——出荷フィクスチャはほぼ不透明で、premul と straight が一致してしまい**フラグを無視しても通ってしまう**。ランプなら誤申告は 1/α ぶん明るくなり、正しい申告 0.001 に対し 11.6 と桁で開く |
 | **全フィクスチャ回帰（ヘッドレス）** ✅ P7-6 | `libs/ssplayer-wgpu/tests/golden.rs::golden_corpus`（`#[ignore]`）。全パック × 先頭4アニメ × 4フレーム × stencil on/off ＋ 2体構成 = 134 枚を readback し、**変更前のダンプとバイト比較**する。`SS_GOLDEN_DIR=<出力> [SS_GOLDEN_COMPARE=<基準>] cargo test --test golden -- --ignored`。<br>他のレンダリングテストは「描画量」と「特定の不変条件」しか見ないので、**パーツが1px ずれた／色がわずかに変わった**を誰も検出できない——そこを埋めるのがこれ。GPU/ドライバ依存なので基準は**同じマシンで取る**（チェックインしない）。P7-6 の頂点パス総入替はこれで 134/134 ビット一致を確認した |
 | **幾何4クラス（ヘッドレス）** ✅ P7-6 | `tests/scene.rs::every_geometry_class_draws`。Basic/Mesh/Shape/Effect を1本ずつ描き、各クラスの頂点ステージが**何かを出す**ことだけを下限で見る（正確な出力は `golden_corpus` の担当）。頂点エントリが4つに割れた以上、1つ死んでも他は無傷という壊れ方をするため |
@@ -862,16 +890,16 @@ const char*  ss_last_error(void);                             // スレッドロ
 - **premul と WebGPU の非対称（★要注意）**: WebGL は `UNPACK_PREMULTIPLY_ALPHA_WEBGL` でドライバが無料で premultiply するが、**WebGPU の `writeTexture` に等価は無い**。現行は CPU で premul しており、2048² で 16 MB の一時コピーが出る。web は `copy_external_image_to_texture` ＋ `createImageBitmap` へ寄せる（§8）。engine から借りるテクスチャは premul されていないのが普通なので `AlphaMode` フラグで受ける ✅ P7-5（§8.2）。なお `upload_texture` は **`AlphaMode::Straight` で上げれば CPU premul を省ける**が、そうしない——線形補間はアルファ境界で premultiplied のほうが正しく、フチが出るのを避けるため。省くのは供給側が既にその判断をしている `set_texture` 経路だけ。
 - **stencil ターゲット** ✅ 実装済: `SSPlayerConfig.stencil_format`（P7 以降は `SceneConfig`）で opt-in し、ホストが毎 pass に attach（§6）。
 - **INCR/INVERT 混在マスク**は単一ステンシルで近似（厳密解は coverage-bitmap、要検討）。
-- **ステンシル残留**（P7 で解消予定）: `render_node` がフレーム末尾で未消化 writer を巻き戻さないため、**1 pass に複数 Player を積むと A のマスクが B をクリップする**。現状は 1 pass = 1 player ＋ `LoadOp::Clear(0)` で隠れているだけ（§6）。
+- **ステンシル残留** ✅ P7-1 で解消: `render_node` がフレーム末尾で未消化 writer を全て巻き戻す（`unwind_masks`）。これが無いと**1 pass に複数 Player を積んだとき A のマスクが B をクリップ**した。回帰は `tests/scene.rs::stencil_unwind_isolates_players`（§6 / §13）。
 - **WebGPU 非対応環境のフォールバック**方針（WebGL 退避か）未定 → §14.1。
 - **raw-window-handle の FFI 越え** ✅ 実装済: Rust トレイトは C に渡せないため、平坦な `ss_window_handle_t{ kind, screen, window, display }` を C-API に定義し、`ffi.rs` が `raw-window-handle` 型へ組み立てる（§11）。CAMetalLayer だけは rwh に表現が無いので wgpu の `SurfaceTargetUnsafe::CoreAnimationLayer` を使う（Apple ターゲットのみ）。**Win32/Xlib/Wayland の経路は実機未検証**——DX12/Vulkan viewer で確認する。
 - **テクスチャ供給** ✅: embedded（`SSPack::decode_embedded`）/ reference（ホスト供給）/ 借用（`set_texture`）の3経路が `SSRenderer` の1つの hash マップに集約される（§8.1 / §8.2）。
 - **データ所有契約（§1.1）**: ssab は Player 所有→ssruntime へ borrow、FrameData/SoA は ssruntime 所有→Player が borrow。ssab を Context より先に破棄しない／FrameData 借用をフレーム跨ぎで保持しない。
 - **エフェクト blend はコマンド毎**（batch.blend_type ではない）点を実装で取り違えない。
-- **ss_shader 統合シェーダ13種** ✅ 実装済（`internal.rs` `SS_SHADER_WGSL`、WebGL `SSShaderLib.ts` を WGSL 移植）。残課題: map0/map1 セカンダリテクスチャ・shader×マスク結合・GLSL 版との厳密ピクセル一致検証。
+- **ss_shader 統合シェーダ13種** ✅ 実装済（`renderer.rs` `SS_SHADER_WGSL`、WebGL `SSShaderLib.ts` を WGSL 移植）。残課題: map0/map1 セカンダリテクスチャ・shader×マスク結合・GLSL 版との厳密ピクセル一致検証。
 - **WebGL 版からの堅牢性 carry-over（借用モデル前提）** ✅ 実装済: WebGL 版 Player（`SSPlayerForWeb`）で実装済みの広告向け堅牢性を wgpu へ持ち込む対応表。Device/Queue/Surface は**ホスト所有**（§1.1 借用モデル）なので、喪失検知・再生成が**ホスト責務**になる点が WebGL 版との最大の差。
   - **デバイス/サーフェス喪失復帰** ✅ 実装済: **`SSPlayer::restore_device(&Device, &Queue)`**（`player.rs`）が旧デバイス向けの pipeline / buffer / bind group / texture / 投影行列を新デバイスへ全再生成する（WebGL 版 `SSWebGLRenderer.restoreContext()` ＋ `SSWebGLResourceManager.restoreContext()` 相当）。再生状態（ロード済みパック・インスタンス木・現在フレーム）は CPU 側なので無傷——**中断したフレームから再開**する。テクスチャは**生成元を保持して再アップロード**（retained-source）: embedded は Player が所有する `.ssab` から**再デコード**するのでピクセル複製を持たず、ホスト供給分のみ `upload_texture` の straight RGBA を保持する（複製を嫌うホストは `forget_texture_sources()` で破棄し自前で再供給）。**カラー/ステンシルのフォーマットが変わった場合は対象外**——SSPlayer を作り直すこと。
-    - web(§10): `SsPlayerWeb` が `Device::set_device_lost_callback`（wgpu の webgpu バックエンドが `GPUDevice.lost` を購読）で喪失を検知し、`isDeviceLost()` で公開。`restoreDevice()`（async）が adapter/device を再取得 → surface / stencil 再構成 → `SSPlayer::restore_device`。喪失中の `frame()` / `resize()` は GPU に触れない（`resize` はサイズのみ記録し、復帰時に反映）。
+    - web(§10): **`SsContextWeb`**（ページで1つ）が `Device::set_device_lost_callback`（wgpu の webgpu バックエンドが `GPUDevice.lost` を購読）で喪失を検知し、`isDeviceLost()` で公開。`restoreDevice()`（async）が adapter/device を再取得 → renderer → **各 canvas の surface / stencil / scene → 各 player のアトラス**、の順に復帰させる。**喪失は device のものなのでページで1回**——`ss-context.js` が N 個の canvas から同時に来る呼び出しを1本の promise に畳む（畳まないと置換 device を N 個要求して最後の1つしか残らない）。喪失中の `frame()` / `resize()` は GPU に触れない（`resize` はサイズのみ記録し、復帰時に反映）。
     - native(§11): `SurfaceError::Lost/Outdated` は `NativeHost::render` が**サーフェス再構成**（resize と同経路）で吸収済み。全デバイス喪失は稀なので `NativeHost` 側の再生成経路は未実装（必要になれば `SSPlayer::restore_device` を呼ぶだけ）。
     - 検証: `tests/render.rs::restore_device_rebuilds_gpu_state`（**2枚目の Device** へ復帰させ、無中断レンダーとピクセル一致を要求。`forget_texture_sources` 後は不一致になることを negative control として確認）。
   - **可視時のみ描画（pauseWhenHidden・web のみ）** ✅ 実装済: `<ss-player-webgpu>`（`examples/web/ss-player-webgpu.js`）が **IntersectionObserver ＋ visibilitychange** で画面外/裏タブ時に rAF ループを止める（WebGL 版 `SSSurface` の `_shouldRun` / `_syncTicker` と同構造。再開時は時計をリセットして待機時間ぶんの巨大 delta を避ける）。既定 ON、`pause-when-hidden="false"` で明示 opt-out。IntersectionObserver の初回コールバックまでは**非表示扱い**——画面外の初期フレームを描かない。native は winit の `Occluded`/`RedrawRequested` が相当。
@@ -903,12 +931,22 @@ const char*  ss_last_error(void);                             // スレッドロ
 
 |  | ssplayer-wgpu (WebGPU) | ssplayer-webgl | 比 |
 |---|---|---|---|
-| wasm | 577,338 B | 277,601 B（`ssruntime_bg.wasm`） | |
-| JS | 65,146 B（wasm-bindgen glue） | 301,707 B（`ss-player.element.min.js`） | |
-| **raw 合計** | **642,484 B** | **579,308 B** | **1.11×** |
-| **gzip 合計** | **242,517 B** | **147,415 B** | **1.65×** |
+| wasm | 624,883 B | 277,601 B（`ssruntime_bg.wasm`） | |
+| JS | 83,399 B（wasm-bindgen glue） | 301,707 B（`ss-player.element.min.js`） | |
+| **raw 合計** | **708,282 B** | **579,308 B** | **1.22×** |
+| **gzip 合計** | **264,144 B** | **147,415 B** | **1.79×** |
 
 wgpu の WebGPU バックエンドは WGSL をブラウザへそのまま渡すので **naga のバックエンド群が丸ごと落ちる**のが効いている。`image` を外せば（§8）さらに縮む。
+
+**P7-9（3オブジェクト化）のサイズ代償**（同一マシン・同一ツールチェインで前後を測ったもの。表の値もこの実測に更新した）:
+
+|  | 7-9 前 | 7-9 後 | 差 |
+|---|---|---|---|
+| wasm | 599,298 B | 624,883 B | +25,585 |
+| JS glue | 68,445 B | 83,399 B | +14,954 |
+| **gzip 合計** | **253,672 B** | **264,144 B** | **+10,472（+4.1%）** |
+
+エクスポートするクラスが1つから3つになり、メソッド数がおよそ3倍になったぶん。**gzip +10 KB は、canvas を2枚置いた時点で device・パイプライン・アトラスの二重持ちが消えることの対価**として明確に釣り合う（2048² アトラス1枚＝VRAM 16 MB、§1.2）。1要素しか置かない用途でも、払うのは 10 KB だけで損はしない。
 
 > **注意（この訂正の経緯）**: 当初「約10倍・3.8 MB」と書いていたが、それは `build.sh --dev` の成果物だった（wasm-opt 未適用、`name` カスタムセクションだけで 1.76 MB）。**サイズを語るときは必ず release ビルドを測ること。** 計測コマンドは §13。
 
@@ -971,7 +1009,7 @@ draw リストが前フレームと同一なら bundle を再生、変われば�
 - 加えて **bundle は pass の depth/stencil 読み書き属性と一致する必要**があり、ホストの pass 記述子に新しい制約が増える。得るもののほうが小さい。
 - **計測の落とし穴**: `update` と encode を別ループで測ると bundle は 0.0898→0.0003 ms（300倍）に見える。更新しないループでは録り直しが起きないため。**キャッシュ系を測るときは必ず実フレーム順で回すこと。**
 - **成立させる道が1つだけある**: `draw_indirect` で vertex range をバッファへ追い出せば、リストは安定し録り直しがほぼ消える。ただし上限は依然 0.09 ms なので、現状では割に合わない。
-- **web は未計測**。WebGPU では1コマンドが1 JS 呼び出しなので比率が変わる可能性はある。**ブラウザで測ってから**再検討すること。
+- **web は未計測**。WebGPU では1コマンドが1 JS 呼び出しなので比率が変わる可能性はある。**ブラウザで測ってから**再検討すること——計測器は P7-9 で入った（`surface.stats()`、§10）。
 
 **7 / 4 の当たり取り（★GPU 側の実測）**
 
@@ -987,7 +1025,7 @@ draw リストが前フレームと同一なら bundle を再生、変われば�
 - **マージできるのは 31%**。2496 → 1728 draws。
 - **しかし GPU は 256体でも 0.185 ms**。16.6 ms の予算に対して 1.1%。draws を 31% 削っても、削れるのはその一部でしかない。
 - **結論: 7 も 4 も、現状のワークロードでは投資に見合わない。** 4（bindless）は WebGPU で使えず native 分岐が要る話でもあり、**0.1 ms 未満を買うために持ち込む複雑さではない**。
-- **ただし `rebinds` 85% は web では話が変わりうる**（1コマンド＝1 JS 呼び出し）。ブラウザで測ってからにすること。7 は実装も小さいので、web の数字が出たら再考する価値はある。
+- **ただし `rebinds` 85% は web では話が変わりうる**（1コマンド＝1 JS 呼び出し）。ブラウザで測ってからにすること。7 は実装も小さいので、web の数字が出たら再考する価値はある。**取り方は `surface.stats()`**（P7-9、§10）——`examples/web` の②が毎フレーム表示する。
 
 #### 計測
 
@@ -1012,7 +1050,8 @@ draw リストが前フレームと同一なら bundle を再生、変われば�
 - 数字がすべてを説明する: **256体で CPU 1.3 ms ＋ GPU 0.19 ms**。60fps の予算 16.6 ms に対して合計 9%。**P7-6 が CPU 側の仕事を実際に消した**ため、その先に積む最適化は削る対象を失っている。
 - 8（Shape 固定30頂点）・9（CPU premul）も同じ理由で優先度は低い。9 は web でのアップロード一時コピー 16 MB の話なので、**サイズ/メモリの観点**なら別途価値がある。
 - **残る価値は速度ではなく表現力**——1（マスクの厳密化）と 2（背景読みブレンド）は「今できないことができるようになる」項目で、計測とは無関係に効く。**次に着手するならこちら。**
-- **web だけは未計測**。1コマンド＝1 JS 呼び出しなので 5 / 7 の比率は変わりうる。ブラウザで `stats()` を取ってから再考すること。1 / 2 は表現力なので必要になってから。3 は SDK 側の合意が要る。
+- **web だけは未計測**。1コマンド＝1 JS 呼び出しなので 5 / 7 の比率は変わりうる。**`surface.stats()` は P7-9 で JS へ出したので、あとはブラウザで読むだけ**（`examples/web/index.html` の②が表示する）。1 / 2 は表現力なので必要になってから。3 は SDK 側の合意が要る。
+- **7-8（draw マージ・マスクのランレングス結合）もここに合流して保留**。`mergeable_draws` が数えている 31% が上限で、削れるのは encode 0.09 ms のその 31%。項目 7 / 4 と同じ結論になる（§12.1）。
 
 ---
 
@@ -1035,11 +1074,11 @@ draw リストが前フレームと同一なら bundle を再生、変われば�
 - 堅牢性（ロスト復帰/可視制御/精度/属性）: `.../src/SSSurface.ts`・`.../src/SSWebGLResourceManager.ts`・`.../src/programs/PartsColorProgram.ts`
 - コールドスタート雛形: `../SSPlayerForWeb/TYRANO_COLDSTART.md`
 
-**現行 wgpu 実装（P7 の改修対象）**
-- `libs/ssplayer-wgpu/src/internal.rs`（層2。P7 で `renderer.rs` / `scene.rs` へ解体）
-- `libs/ssplayer-wgpu/src/player.rs`（再生木。P7 で GPU リソースを剥がす）
-- `libs/ssplayer-wgpu/src/web.rs`・`host.rs`・`ffi.rs`（各ホスト。P7 で 1 ターゲット N 体へ）
-- `examples/viewer/src/main.rs`（winit+wgpu ループ。P7 で N 体対応）
+**現行 wgpu 実装（P7 完了後）**
+- `libs/ssplayer-wgpu/src/renderer.rs`（層2a・device スコープ）／ `scene.rs`（層2b・ターゲットスコープ）
+- `libs/ssplayer-wgpu/src/player.rs`（再生木。GPU リソースを一切持たない）／ `pack.rs`（`.ssab` の共有単位）
+- `libs/ssplayer-wgpu/src/web.rs`・`host.rs`・`ffi.rs`（各ホスト。いずれも 1 ターゲット N 体）／ `roster.rs`（ハンドル）
+- `examples/viewer/src/main.rs`（winit+wgpu ループ。◻ **まだ 1 体固定**——§13 の「複数プレイヤー（目視）」）
 
 **全体方針**
 - `REDESIGN_ASSESSMENT.ja.md`（頭脳/体、オーバーライド/ミキシング/ステートマシンの将来計画）
