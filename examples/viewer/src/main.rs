@@ -1,4 +1,4 @@
-use ssplayer_wgpu::{SSPlayer, SSPlayerConfig};
+use ssplayer_wgpu::{Retention, SSPlayer, SSPlayerConfig, SSRenderer};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use wgpu::{Device, Queue, Surface, SurfaceConfiguration};
@@ -37,6 +37,10 @@ struct AppState {
     /// Depth/stencil view attached to every render pass, resized with the window.
     stencil_view: wgpu::TextureView,
 
+    /// Device-scoped and host-owned (SPEC §1.2): one renderer serves every
+    /// player on this device, so putting more characters on screen costs no
+    /// extra pipelines or atlas uploads.
+    renderer: SSRenderer,
     player: SSPlayer,
     ssab_paths: Vec<PathBuf>,
     current_ssab_idx: usize,
@@ -65,7 +69,7 @@ impl AppState {
         self.last_update = now;
 
         if !self.is_paused {
-            self.player.update(&self.device, &self.queue, delta);
+            self.player.update(&mut self.renderer, &self.device, &self.queue, delta);
         }
     }
 
@@ -105,7 +109,7 @@ impl AppState {
                 multiview_mask: None,
             });
 
-            let drawn = self.player.draw(&mut rpass);
+            let drawn = self.player.draw(&self.renderer, &mut rpass);
             if drawn > 0 && !self.logged_first_draw {
                 println!("[DIAG] First rendered frame with draw calls. Submitted: {}", drawn);
                 self.logged_first_draw = true;
@@ -214,11 +218,12 @@ impl ApplicationHandler for App {
 
         let stencil_view = create_stencil_view(&device, config.width, config.height);
 
-        let mut player = SSPlayer::new(&device, &SSPlayerConfig { color_format: format, stencil_format: Some(STENCIL_FORMAT) });
+        let mut renderer = SSRenderer::new(&device);
+        let mut player = SSPlayer::new(&device, &renderer, &SSPlayerConfig { color_format: format, stencil_format: Some(STENCIL_FORMAT) });
 
         // Host responsibility (reference-mode ssab): decode atlas PNGs and hand
         // the RGBA to the player keyed by fnv1a hash of the file stem.
-        load_textures(&mut player, &device, &queue, &self.asset_dir);
+        load_textures(&mut renderer, &device, &queue, &self.asset_dir);
 
         // Discover all `.ssab` files in the asset directory.
         let mut ssab_paths = Vec::new();
@@ -264,7 +269,24 @@ impl ApplicationHandler for App {
             }
         }
 
-        let state = AppState { window, device, queue, surface, config, stencil_view, player, ssab_paths, current_ssab_idx, current_anim_idx: 0, anim_names, last_update: std::time::Instant::now(), is_paused: false, y_down: false, logged_first_draw: false };
+        let state = AppState {
+            window,
+            device,
+            queue,
+            surface,
+            config,
+            stencil_view,
+            renderer,
+            player,
+            ssab_paths,
+            current_ssab_idx,
+            current_anim_idx: 0,
+            anim_names,
+            last_update: std::time::Instant::now(),
+            is_paused: false,
+            y_down: false,
+            logged_first_draw: false,
+        };
 
         state.print_status();
         self.state = Some(state);
@@ -373,7 +395,7 @@ impl ApplicationHandler for App {
 
 /// Decode every PNG in `dir` and upload it to the player, keyed by the fnv1a
 /// hash of the file stem (matching the runtime's cellmap texture hashes).
-fn load_textures(player: &mut SSPlayer, device: &Device, queue: &Queue, dir: &Path) {
+fn load_textures(renderer: &mut SSRenderer, device: &Device, queue: &Queue, dir: &Path) {
     let entries = std::fs::read_dir(dir).expect("Failed to read assets directory");
     for entry in entries {
         let entry = entry.expect("Failed to read entry");
@@ -387,7 +409,7 @@ fn load_textures(player: &mut SSPlayer, device: &Device, queue: &Queue, dir: &Pa
             let img = image::open(&path).expect("Failed to open texture image");
             let rgba = img.to_rgba8();
             let (width, height) = rgba.dimensions();
-            player.upload_texture(device, queue, hash, &rgba, width, height);
+            renderer.upload_texture(device, queue, hash, &rgba, (width, height), Retention::Retain);
         }
     }
 }

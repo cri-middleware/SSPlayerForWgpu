@@ -9,6 +9,7 @@
 //! It is plain Rust, so a Rust host that only has a window handle (rather than a
 //! winit `Window`) can use it directly instead of assembling wgpu itself.
 
+use crate::internal::{Retention, SSRenderer};
 use crate::player::{SSPlayer, SSPlayerConfig};
 
 /// Depth/stencil format allocated when masking is enabled. Matches the native
@@ -36,6 +37,9 @@ pub struct NativeHost {
     /// The player. Public because the host adds nothing to playback control —
     /// callers drive `load_ssab` / `play` / … on it directly.
     pub player: SSPlayer,
+    /// Device-scoped renderer (SPEC §1.2). Owned here because the host owns the
+    /// device; every player this host gains at P7-7 will share this one.
+    renderer: SSRenderer,
     surface: wgpu::Surface<'static>,
     device: wgpu::Device,
     queue: wgpu::Queue,
@@ -94,10 +98,11 @@ impl NativeHost {
         surface.configure(&device, &surface_config);
 
         let stencil_view = config.enable_mask.then(|| create_stencil_view(&device, surface_config.width, surface_config.height));
-        let player = SSPlayer::new(&device, &SSPlayerConfig { color_format: format, stencil_format: config.enable_mask.then_some(STENCIL_FORMAT) });
+        let renderer = SSRenderer::new(&device);
+        let player = SSPlayer::new(&device, &renderer, &SSPlayerConfig { color_format: format, stencil_format: config.enable_mask.then_some(STENCIL_FORMAT) });
 
         let c = config.clear_color;
-        let mut host = Self { player, surface, device, queue, config: surface_config, stencil_view, clear_color: wgpu::Color { r: c[0] as f64, g: c[1] as f64, b: c[2] as f64, a: c[3] as f64 }, y_down: config.y_down, _instance: instance };
+        let mut host = Self { player, renderer, surface, device, queue, config: surface_config, stencil_view, clear_color: wgpu::Color { r: c[0] as f64, g: c[1] as f64, b: c[2] as f64, a: c[3] as f64 }, y_down: config.y_down, _instance: instance };
         host.player.set_viewport(&host.queue, host.config.width as f32, host.config.height as f32, host.y_down);
         Ok(host)
     }
@@ -105,12 +110,12 @@ impl NativeHost {
     /// Hand the player a texture for a reference-mode pack, lending it this
     /// host's device+queue (SPEC §8.1).
     pub fn upload_texture(&mut self, hash: u32, rgba: &[u8], width: u32, height: u32) {
-        self.player.upload_texture(&self.device, &self.queue, hash, rgba, width, height);
+        self.renderer.upload_texture(&self.device, &self.queue, hash, rgba, (width, height), Retention::Retain);
     }
 
     /// Advance the playback tree and build this frame's GPU buffers.
     pub fn update(&mut self, delta_secs: f32) {
-        self.player.update(&self.device, &self.queue, delta_secs);
+        self.player.update(&mut self.renderer, &self.device, &self.queue, delta_secs);
     }
 
     /// Acquire the swapchain image, draw the prepared frame, and present.
@@ -146,7 +151,7 @@ impl NativeHost {
                 occlusion_query_set: None,
                 multiview_mask: None,
             });
-            self.player.draw(&mut pass);
+            self.player.draw(&self.renderer, &mut pass);
         }
         self.queue.submit(std::iter::once(encoder.finish()));
         output.present();

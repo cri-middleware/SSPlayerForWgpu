@@ -80,15 +80,9 @@ pub struct BatchInfo {
     pub alpha: f32,
 }
 
-/// What distinguishes one render pipeline from another (SPEC §5.2).
-///
-/// wgpu bakes blend and depth/stencil state into the pipeline, so every
-/// combination the frame actually uses needs its own object. They are built on
-/// first use and cached under this key rather than compiled up front: an
-/// animation touching one blend mode pays for one pipeline instead of the whole
-/// 12 x 3 content matrix.
+/// What a pipeline does, before the render target is taken into account.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
-enum PipelineKey {
+enum PipelineKind {
     /// Ordinary content: blend index (into [`BLEND_ORDER`]) x stencil test.
     Content(usize, StencilTest),
     /// Mask-write geometry: the stencil op it applies. Colour output is masked
@@ -97,6 +91,24 @@ enum PipelineKey {
     /// Integration shader (`ss-*`, SPEC §6): shader id x blend index. Never
     /// stencil-tested — shader parts are not masked in v1.
     Shader(u32, usize),
+}
+
+/// What distinguishes one render pipeline from another (SPEC §5.2).
+///
+/// wgpu bakes blend, depth/stencil state **and the target's formats** into the
+/// pipeline, so every combination a frame uses needs its own object. They are
+/// built on first use and cached under this key rather than compiled up front:
+/// an animation touching one blend mode pays for one pipeline instead of the
+/// whole 12 x 3 content matrix.
+///
+/// The formats are part of the key rather than fixed at construction, which is
+/// what lets a single device-scoped [`SSRenderer`] serve render targets that do
+/// not agree on them (SPEC §9.1).
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+struct PipelineKey {
+    kind: PipelineKind,
+    color_format: wgpu::TextureFormat,
+    stencil_format: Option<wgpu::TextureFormat>,
 }
 
 #[derive(Clone, Debug)]
@@ -115,35 +127,74 @@ struct TextureEntry {
     size: (f32, f32),
 }
 
-/// Layer 2 (rendering): FrameData/DrawBatch/SoA -> wgpu draw commands.
+/// Layer 2a (SPEC §1.2 / §9.1): everything whose useful lifetime is the
+/// **device**, not one player and not one render target.
 ///
-/// Borrow model: owns neither the `Device`/`Queue` nor the render target. It
-/// only holds GPU resources (textures, pipelines, vertex/index buffers).
-pub struct SSInternalPlayer {
-    /// Every pipeline used so far, built on first use (SPEC §5.2). Eager
-    /// construction compiled 12 blends x 3 stencil variants plus 3 mask writers
-    /// before the first frame, whatever the animation actually needed.
+/// Pipelines, bind group layouts, the sampler, the white fallback and the atlas
+/// textures are all valid for any target on the device that created them, so
+/// exactly one of these serves every [`SSInternalPlayer`] and every
+/// [`crate::SSPlayer`] drawing on that device. The host owns it and lends it,
+/// the same way it lends `Device` and `Queue` — putting a copy inside each
+/// player is what made a second character on screen duplicate ~39 pipelines and
+/// every atlas.
+///
+/// Nothing here is format-specific: [`PipelineKey`] carries the target formats,
+/// so targets that disagree share one renderer.
+pub struct SSRenderer {
+    /// Every pipeline used so far, built on first use (SPEC §5.2).
     pipelines: HashMap<PipelineKey, wgpu::RenderPipeline>,
-    /// Whether masking (stencil) is enabled by config.
-    stencil_enabled: bool,
-    /// Target formats the pipelines are baked against.
-    color_format: wgpu::TextureFormat,
-    stencil_format: Option<wgpu::TextureFormat>,
-
     /// Inputs the lazy builder needs: the sprite/mask WGSL module and its layout.
     shader_module: wgpu::ShaderModule,
     pipeline_layout: wgpu::PipelineLayout,
+    /// Compiled module holding all 13 `fs_ss_*` fragment entries + the shared
+    /// vertex stage; shader pipelines are derived from it lazily.
+    ss_shader_module: wgpu::ShaderModule,
+    /// Pipeline layout for shader pipelines: [globals, texture, ss-params].
+    ss_pipeline_layout: wgpu::PipelineLayout,
 
-    uniform_buffer: wgpu::Buffer,
-    uniform_bind_group: wgpu::BindGroup,
+    /// group(0): the projection uniform. The layout is shared; the buffer behind
+    /// it belongs to the target ([`SSInternalPlayer::globals_bind_group`]).
+    globals_bind_group_layout: wgpu::BindGroupLayout,
+    /// group(1): atlas texture + sampler.
     texture_bind_group_layout: wgpu::BindGroupLayout,
+    /// group(2): one dynamic-offset uniform (the per-part `SsParams`).
+    ss_params_bind_group_layout: wgpu::BindGroupLayout,
+
     sampler: wgpu::Sampler,
     /// 1x1 white texture, bound when a draw's texture hash is missing (SPEC §8)
     /// — used by Shape content and textureless mask writers. Filled with white on
-    /// the first `end_frame` (the constructor has no queue to upload with).
+    /// the first frame (the constructor has no queue to upload with).
     white_texture: wgpu::Texture,
     white_bind_group: wgpu::BindGroup,
     white_ready: bool,
+
+    /// Atlas textures by fnv1a hash. Shared, so N players showing the same
+    /// character upload it once (SPEC §1.2).
+    textures: HashMap<u32, TextureEntry>,
+    /// Retained pixels for [`Retention::Retain`] uploads, so a device loss can be
+    /// recovered without the host re-supplying them (SPEC §14).
+    texture_sources: HashMap<u32, (Vec<u8>, u32, u32)>,
+}
+
+/// Layer 2b: the per-target, per-frame half — what one render target's worth of
+/// geometry looks like this frame.
+///
+/// Borrow model: owns neither the `Device`/`Queue`, the render target, nor the
+/// [`SSRenderer`]. It holds the projection (which is a property of the target)
+/// and the frame's vertex/index/draw-call accumulation.
+///
+/// P7-4 renames this to `SSScene` and gives it the list of players drawing into
+/// it; today it is still one per player.
+pub struct SSInternalPlayer {
+    /// Whether masking (stencil) is enabled for this target.
+    stencil_enabled: bool,
+    /// The target's formats. Part of every [`PipelineKey`] this builds.
+    color_format: wgpu::TextureFormat,
+    stencil_format: Option<wgpu::TextureFormat>,
+
+    /// The projection matrix and its bind group (group(0)).
+    globals_buffer: wgpu::Buffer,
+    globals_bind_group: wgpu::BindGroup,
 
     vertex_buffer: Option<wgpu::Buffer>,
     index_buffer: Option<wgpu::Buffer>,
@@ -154,22 +205,25 @@ pub struct SSInternalPlayer {
     vertices: Vec<Vertex>,
     indices: Vec<u32>,
 
-    textures: HashMap<u32, TextureEntry>,
-
     // --- Integration shaders (`ss-*`, SPEC §6). Only touched when a frame has
     // shader parts; shader-free animations never build any of this. ---
-    /// Compiled module holding all 13 `fs_ss_*` fragment entries + the shared
-    /// vertex stage; shader pipelines are derived from it lazily.
-    ss_shader_module: wgpu::ShaderModule,
-    /// Pipeline layout for shader pipelines: [globals, texture, ss-params].
-    ss_pipeline_layout: wgpu::PipelineLayout,
-    /// group(2) layout: one dynamic-offset uniform (the per-part `SsParams`).
-    ss_params_bind_group_layout: wgpu::BindGroupLayout,
     /// Per-frame params blocks (one 256-byte / `SHADER_PARAM_STRIDE_F32`-float
     /// slot per shader draw), uploaded to `ss_params_buffer` in `end_frame`.
     ss_params: Vec<f32>,
     ss_params_buffer: Option<wgpu::Buffer>,
     ss_params_bind_group: Option<wgpu::BindGroup>,
+}
+
+/// Whether [`SSRenderer::upload_texture`] keeps a copy of the pixels for device
+/// loss recovery (SPEC §14).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Retention {
+    /// Keep them. For textures the host supplied and may no longer hold.
+    Retain,
+    /// Do not: the supplier can produce them again. Embedded atlases use this —
+    /// the player re-decodes from the `.ssab` it already owns, so a second
+    /// full-size copy of every atlas would be pure waste.
+    Reproducible,
 }
 
 /// Column-major 4x4 identity. Used as the root transform (children compose their
@@ -706,28 +760,24 @@ fn fs_ss_spot(in: VertexOutput) -> @location(0) vec4<f32> {
 }
 "#;
 
-impl SSInternalPlayer {
-    /// Build pipelines and GPU resources from the borrowed `device`.
-    pub fn new(device: &wgpu::Device, config: &RendererConfig) -> Self {
-        let shader = device.create_shader_module(wgpu::ShaderModuleDescriptor { label: Some("SpriteStudio Shader"), source: wgpu::ShaderSource::Wgsl(WGSL_SHADER.into()) });
+impl SSRenderer {
+    /// Build the device-scoped resources. Cheap: no pipeline is compiled until a
+    /// frame asks for one (SPEC §5.2), so this is two shader modules, three bind
+    /// group layouts, a sampler and a 1x1 texture.
+    ///
+    /// Takes no target formats — those ride in [`PipelineKey`], which is what
+    /// lets one renderer serve every target on the device (SPEC §9.1).
+    pub fn new(device: &wgpu::Device) -> Self {
+        let shader_module = device.create_shader_module(wgpu::ShaderModuleDescriptor { label: Some("SpriteStudio Shader"), source: wgpu::ShaderSource::Wgsl(WGSL_SHADER.into()) });
 
-        // Uniform buffer setup.
-        let uniform_buffer = device.create_buffer(&wgpu::BufferDescriptor {
-            label: Some("SpriteStudio Globals UB"),
-            size: 64, // 16 * 4 bytes for mat4x4
-            usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
-            mapped_at_creation: false,
-        });
-
-        let uniform_bind_group_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
-            label: Some("SpriteStudio Uniform Bind Group Layout"),
+        // group(0): the projection uniform. Only the layout is shared — each
+        // render target owns the buffer behind it.
+        let globals_bind_group_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+            label: Some("SpriteStudio Globals Layout"),
             entries: &[wgpu::BindGroupLayoutEntry { binding: 0, visibility: wgpu::ShaderStages::VERTEX, ty: wgpu::BindingType::Buffer { ty: wgpu::BufferBindingType::Uniform, has_dynamic_offset: false, min_binding_size: None }, count: None }],
         });
 
-        let uniform_bind_group =
-            device.create_bind_group(&wgpu::BindGroupDescriptor { label: Some("SpriteStudio Uniform Bind Group"), layout: &uniform_bind_group_layout, entries: &[wgpu::BindGroupEntry { binding: 0, resource: uniform_buffer.as_entire_binding() }] });
-
-        // Texture bind group layout.
+        // group(1): atlas texture + sampler.
         let texture_bind_group_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
             label: Some("SpriteStudio Texture Bind Group Layout"),
             entries: &[
@@ -749,10 +799,10 @@ impl SSInternalPlayer {
             ..Default::default()
         });
 
-        let pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor { label: Some("SpriteStudio Pipeline Layout"), bind_group_layouts: &[Some(&uniform_bind_group_layout), Some(&texture_bind_group_layout)], immediate_size: 0 });
+        let pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor { label: Some("SpriteStudio Pipeline Layout"), bind_group_layouts: &[Some(&globals_bind_group_layout), Some(&texture_bind_group_layout)], immediate_size: 0 });
 
         // Integration-shader (`ss-*`) resources (SPEC §6). The module is compiled
-        // now; the pipelines are built lazily per (id_hash, blend) on first use.
+        // now; the pipelines are built lazily per key on first use.
         let ss_shader_module = device.create_shader_module(wgpu::ShaderModuleDescriptor { label: Some("SpriteStudio SS Shaders"), source: wgpu::ShaderSource::Wgsl(SS_SHADER_WGSL.into()) });
         let ss_params_bind_group_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
             label: Some("SpriteStudio SS Params Layout"),
@@ -765,20 +815,13 @@ impl SSInternalPlayer {
         });
         let ss_pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
             label: Some("SpriteStudio SS Pipeline Layout"),
-            bind_group_layouts: &[Some(&uniform_bind_group_layout), Some(&texture_bind_group_layout), Some(&ss_params_bind_group_layout)],
+            bind_group_layouts: &[Some(&globals_bind_group_layout), Some(&texture_bind_group_layout), Some(&ss_params_bind_group_layout)],
             immediate_size: 0,
         });
 
-        let stencil_enabled = config.stencil_format.is_some();
-
-        // No pipelines are built here: they are compiled on first use and cached
-        // under a `PipelineKey` (SPEC §5.2). Building the 12 x 3 content matrix
-        // plus 3 mask writers up front cost every animation the price of the
-        // whole table, and shows up directly as time-to-first-frame.
-
         // 1x1 white fallback texture (SPEC §8): used when a draw's texture hash
         // is missing and by textureless mask writers.
-        let white = device.create_texture(&wgpu::TextureDescriptor {
+        let white_texture = device.create_texture(&wgpu::TextureDescriptor {
             label: Some("SpriteStudio White 1x1"),
             size: wgpu::Extent3d { width: 1, height: 1, depth_or_array_layers: 1 },
             mip_level_count: 1,
@@ -788,7 +831,7 @@ impl SSInternalPlayer {
             usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
             view_formats: &[],
         });
-        let white_view = white.create_view(&wgpu::TextureViewDescriptor::default());
+        let white_view = white_texture.create_view(&wgpu::TextureViewDescriptor::default());
         let white_bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
             label: Some("SpriteStudio White Bind Group"),
             layout: &texture_bind_group_layout,
@@ -797,36 +840,20 @@ impl SSInternalPlayer {
 
         Self {
             pipelines: HashMap::new(),
-            shader_module: shader,
+            shader_module,
             pipeline_layout,
-            stencil_enabled,
-            color_format: config.color_format,
-            stencil_format: config.stencil_format,
-            uniform_buffer,
-            uniform_bind_group,
-            texture_bind_group_layout,
-            sampler,
-            white_texture: white,
-            white_bind_group,
-            white_ready: false,
-            vertex_buffer: None,
-            index_buffer: None,
-            draw_calls: Vec::new(),
-            vertices: Vec::new(),
-            indices: Vec::new(),
-            textures: HashMap::new(),
             ss_shader_module,
             ss_pipeline_layout,
+            globals_bind_group_layout,
+            texture_bind_group_layout,
             ss_params_bind_group_layout,
-            ss_params: Vec::new(),
-            ss_params_buffer: None,
-            ss_params_bind_group: None,
+            sampler,
+            white_texture,
+            white_bind_group,
+            white_ready: false,
+            textures: HashMap::new(),
+            texture_sources: HashMap::new(),
         }
-    }
-
-    /// Whether masking (stencil) is enabled for this renderer.
-    pub fn stencil_enabled(&self) -> bool {
-        self.stencil_enabled
     }
 
     /// How many pipelines have been compiled so far (SPEC §5.2). A diagnostic:
@@ -834,21 +861,6 @@ impl SSInternalPlayer {
     /// eager construction used to build before the first frame.
     pub fn pipeline_count(&self) -> usize {
         self.pipelines.len()
-    }
-
-    /// The config this renderer was built from. Retained so a lost device can be
-    /// replaced by a renderer targeting the same formats (SPEC §14) without the
-    /// caller having to remember them.
-    pub fn config(&self) -> RendererConfig {
-        RendererConfig { color_format: self.color_format, stencil_format: self.stencil_format }
-    }
-
-    /// Cache key for a content draw. Without a stencil buffer every draw uses the
-    /// untested variant, so the test is normalised away rather than filling the
-    /// cache with three identical pipelines.
-    fn content_key(&self, blend: BlendType, stencil: StencilTest) -> PipelineKey {
-        let stencil = if self.stencil_enabled { stencil } else { StencilTest::None };
-        PipelineKey::Content(blend_index(blend), stencil)
     }
 
     /// Compile `key`'s pipeline if this is the first frame that needs it. A
@@ -862,7 +874,6 @@ impl SSInternalPlayer {
             self.pipelines.insert(key, pipeline);
         }
     }
-
     /// Build one pipeline. Everything that varies between them — module, fragment
     /// entry, blend, colour write mask, depth/stencil state — is chosen here; the
     /// vertex layout and primitive state are shared by all of them.
@@ -878,8 +889,8 @@ impl SSInternalPlayer {
         }
         let blend_of = |idx: usize| BLEND_ORDER[idx.min(BLEND_ORDER.len() - 1)];
 
-        let recipe = match key {
-            PipelineKey::Content(blend_idx, stencil) => {
+        let recipe = match key.kind {
+            PipelineKind::Content(blend_idx, stencil) => {
                 let blend = blend_of(blend_idx);
                 Recipe {
                     label: format!("Content {} {stencil:?}", blend.variant_name().unwrap_or("Blend")),
@@ -889,10 +900,10 @@ impl SSInternalPlayer {
                     blend: Some(blend_state(blend)),
                     write_mask: wgpu::ColorWrites::ALL,
                     // Content tests coverage; it never writes it.
-                    depth_stencil: depth_stencil_state(self.stencil_format, stencil_compare(stencil), wgpu::StencilOperation::Keep, 0x00),
+                    depth_stencil: depth_stencil_state(key.stencil_format, stencil_compare(stencil), wgpu::StencilOperation::Keep, 0x00),
                 }
             }
-            PipelineKey::Mask(op) => Recipe {
+            PipelineKind::Mask(op) => Recipe {
                 label: format!("Mask Write {op:?}"),
                 module: &self.shader_module,
                 layout: &self.pipeline_layout,
@@ -900,9 +911,9 @@ impl SSInternalPlayer {
                 blend: None,
                 // Coverage only — the fragment's colour is thrown away.
                 write_mask: wgpu::ColorWrites::empty(),
-                depth_stencil: depth_stencil_state(self.stencil_format, wgpu::CompareFunction::Always, stencil_write_op(op), 0xFF),
+                depth_stencil: depth_stencil_state(key.stencil_format, wgpu::CompareFunction::Always, stencil_write_op(op), 0xFF),
             },
-            PipelineKey::Shader(id_hash, blend_idx) => {
+            PipelineKind::Shader(id_hash, blend_idx) => {
                 let entry = ss_shader_entry(id_hash)?;
                 Recipe {
                     label: format!("SS Shader {entry}"),
@@ -912,7 +923,7 @@ impl SSInternalPlayer {
                     blend: Some(blend_state(blend_of(blend_idx))),
                     write_mask: wgpu::ColorWrites::ALL,
                     // Shader parts are never masked in v1, so the stencil is inert.
-                    depth_stencil: depth_stencil_state(self.stencil_format, wgpu::CompareFunction::Always, wgpu::StencilOperation::Keep, 0x00),
+                    depth_stencil: depth_stencil_state(key.stencil_format, wgpu::CompareFunction::Always, wgpu::StencilOperation::Keep, 0x00),
                 }
             }
         };
@@ -924,7 +935,7 @@ impl SSInternalPlayer {
             fragment: Some(wgpu::FragmentState {
                 module: recipe.module,
                 entry_point: Some(recipe.entry),
-                targets: &[Some(wgpu::ColorTargetState { format: self.color_format, blend: recipe.blend, write_mask: recipe.write_mask })],
+                targets: &[Some(wgpu::ColorTargetState { format: key.color_format, blend: recipe.blend, write_mask: recipe.write_mask })],
                 compilation_options: Default::default(),
             }),
             primitive: wgpu::PrimitiveState {
@@ -942,14 +953,6 @@ impl SSInternalPlayer {
             cache: None,
         }))
     }
-
-    /// Update the projection matrix to the target's pixel dimensions.
-    pub fn update_projection(&self, queue: &wgpu::Queue, width: f32, height: f32, y_down: bool) {
-        let scale_y = if y_down { -2.0 / height } else { 2.0 / height };
-        let matrix = [2.0 / width, 0.0, 0.0, 0.0, 0.0, scale_y, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 1.0];
-        queue.write_buffer(&self.uniform_buffer, 0, bytemuck::cast_slice(&matrix));
-    }
-
     /// Provide a texture (SPEC §8). `hash` is the fnv1a hash of the cellmap image
     /// path. Both embedded and reference paths funnel into this single API.
     ///
@@ -957,7 +960,10 @@ impl SSInternalPlayer {
     /// the whole pipeline stays premultiplied (SPEC §5.2, matching WebGL's
     /// `UNPACK_PREMULTIPLY_ALPHA_WEBGL`). The premul shader recovers straight RGB
     /// before applying PartsColor.
-    pub fn upload_texture(&mut self, device: &wgpu::Device, queue: &wgpu::Queue, hash: u32, rgba: &[u8], width: u32, height: u32) {
+    pub fn upload_texture(&mut self, device: &wgpu::Device, queue: &wgpu::Queue, hash: u32, rgba: &[u8], (width, height): (u32, u32), retention: Retention) {
+        if retention == Retention::Retain {
+            self.texture_sources.insert(hash, (rgba.to_vec(), width, height));
+        }
         let size = wgpu::Extent3d { width, height, depth_or_array_layers: 1 };
 
         // Premultiply straight-alpha RGBA in place (rgb *= a/255, rounded).
@@ -991,6 +997,135 @@ impl SSInternalPlayer {
         let bind_group = self.create_texture_bind_group(device, &view);
         self.textures.insert(hash, TextureEntry { bind_group, size: (width as f32, height as f32) });
     }
+    fn create_texture_bind_group(&self, device: &wgpu::Device, view: &wgpu::TextureView) -> wgpu::BindGroup {
+        device.create_bind_group(&wgpu::BindGroupDescriptor {
+            label: Some("SpriteStudio Texture Bind Group"),
+            layout: &self.texture_bind_group_layout,
+            entries: &[wgpu::BindGroupEntry { binding: 0, resource: wgpu::BindingResource::TextureView(view) }, wgpu::BindGroupEntry { binding: 1, resource: wgpu::BindingResource::Sampler(&self.sampler) }],
+        })
+    }
+    /// Pixel size of an uploaded atlas, for normalising the runtime's UVs (which
+    /// arrive in texture pixel space, SPEC §3.2).
+    pub fn texture_size(&self, hash: u32) -> Option<(f32, f32)> {
+        self.textures.get(&hash).map(|t| t.size)
+    }
+
+    /// The bind group for `hash`, or the 1x1 white fallback when it is missing
+    /// (SPEC §8) — Shape content and textureless mask writers rely on this.
+    fn texture_bind_group(&self, hash: u32) -> &wgpu::BindGroup {
+        self.textures.get(&hash).map(|e| &e.bind_group).unwrap_or(&self.white_bind_group)
+    }
+
+    /// Fill the white fallback. Deferred to the first frame because the
+    /// constructor has no `Queue`; a `create_texture` alone leaves it
+    /// transparent black, which would collapse `tex * colour` to zero.
+    fn ensure_white(&mut self, queue: &wgpu::Queue) {
+        if self.white_ready {
+            return;
+        }
+        queue.write_texture(
+            wgpu::TexelCopyTextureInfo { texture: &self.white_texture, mip_level: 0, origin: wgpu::Origin3d::ZERO, aspect: wgpu::TextureAspect::All },
+            &[255u8, 255, 255, 255],
+            wgpu::TexelCopyBufferLayout { offset: 0, bytes_per_row: Some(4), rows_per_image: Some(1) },
+            wgpu::Extent3d { width: 1, height: 1, depth_or_array_layers: 1 },
+        );
+        self.white_ready = true;
+    }
+
+    /// Drop the retained copies of [`Retention::Retain`] uploads (SPEC §14).
+    /// Saves the duplicated pixels when the host keeps its own and would rather
+    /// re-supply them itself; after this, [`SSRenderer::restore_device`] restores
+    /// nothing and every texture must be uploaded again before drawing.
+    pub fn forget_texture_sources(&mut self) {
+        self.texture_sources.clear();
+    }
+
+    /// Rebuild every GPU resource against a freshly created `device` after the
+    /// previous one was lost (SPEC §14).
+    ///
+    /// Because this is device-scoped, **one call covers every scene and player on
+    /// the device** — the old design repeated the whole job, atlas decode
+    /// included, once per player.
+    ///
+    /// Textures uploaded with [`Retention::Retain`] come back from their retained
+    /// pixels. [`Retention::Reproducible`] ones do not: their supplier re-registers
+    /// them (for embedded packs that is [`crate::SSPlayer::restore_device`], which
+    /// re-decodes from the `.ssab` it already owns). Anything holding a
+    /// target-scoped resource — the projection buffer — restores itself.
+    pub fn restore_device(&mut self, device: &wgpu::Device, queue: &wgpu::Queue) {
+        // Lift the sources out *before* replacing self — everything else in here
+        // belonged to the dead device, but these are plain CPU pixels.
+        let sources = std::mem::take(&mut self.texture_sources);
+        *self = Self::new(device);
+        for (hash, (rgba, w, h)) in &sources {
+            // Already held below, so re-uploading must not retain a second copy.
+            self.upload_texture(device, queue, *hash, rgba, (*w, *h), Retention::Reproducible);
+        }
+        self.texture_sources = sources;
+    }
+}
+
+impl SSInternalPlayer {
+    /// Build the target-scoped resources: the projection uniform and its bind
+    /// group, cut against `renderer`'s shared layout.
+    pub fn new(device: &wgpu::Device, renderer: &SSRenderer, config: &RendererConfig) -> Self {
+        let globals_buffer = device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("SpriteStudio Globals UB"),
+            size: 64, // 16 * 4 bytes for mat4x4
+            usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+            mapped_at_creation: false,
+        });
+        let globals_bind_group =
+            device.create_bind_group(&wgpu::BindGroupDescriptor { label: Some("SpriteStudio Globals Bind Group"), layout: &renderer.globals_bind_group_layout, entries: &[wgpu::BindGroupEntry { binding: 0, resource: globals_buffer.as_entire_binding() }] });
+
+        Self {
+            stencil_enabled: config.stencil_format.is_some(),
+            color_format: config.color_format,
+            stencil_format: config.stencil_format,
+            globals_buffer,
+            globals_bind_group,
+            vertex_buffer: None,
+            index_buffer: None,
+            draw_calls: Vec::new(),
+            vertices: Vec::new(),
+            indices: Vec::new(),
+            ss_params: Vec::new(),
+            ss_params_buffer: None,
+            ss_params_bind_group: None,
+        }
+    }
+
+    /// Whether masking (stencil) is enabled for this renderer.
+    pub fn stencil_enabled(&self) -> bool {
+        self.stencil_enabled
+    }
+
+    /// The config this renderer was built from. Retained so a lost device can be
+    /// replaced by a renderer targeting the same formats (SPEC §14) without the
+    /// caller having to remember them.
+    pub fn config(&self) -> RendererConfig {
+        RendererConfig { color_format: self.color_format, stencil_format: self.stencil_format }
+    }
+
+    /// Cache key for a content draw. Without a stencil buffer every draw uses the
+    /// untested variant, so the test is normalised away rather than filling the
+    /// cache with three identical pipelines.
+    fn content_key(&self, blend: BlendType, stencil: StencilTest) -> PipelineKey {
+        let stencil = if self.stencil_enabled { stencil } else { StencilTest::None };
+        self.key(PipelineKind::Content(blend_index(blend), stencil))
+    }
+
+    /// Attach this target's formats to a pipeline kind (SPEC §9.1).
+    fn key(&self, kind: PipelineKind) -> PipelineKey {
+        PipelineKey { kind, color_format: self.color_format, stencil_format: self.stencil_format }
+    }
+
+    /// Update the projection matrix to the target's pixel dimensions.
+    pub fn update_projection(&self, queue: &wgpu::Queue, width: f32, height: f32, y_down: bool) {
+        let scale_y = if y_down { -2.0 / height } else { 2.0 / height };
+        let matrix = [2.0 / width, 0.0, 0.0, 0.0, 0.0, scale_y, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 1.0];
+        queue.write_buffer(&self.globals_buffer, 0, bytemuck::cast_slice(&matrix));
+    }
 
     /// Reset per-frame accumulation. Call once before appending any batches.
     pub fn begin_frame(&mut self) {
@@ -1007,7 +1142,7 @@ impl SSInternalPlayer {
     /// passed in so the caller (SSPlayer) drives batch iteration and can
     /// interleave instance recursion at the right rank. `batch.stencil` selects
     /// the stencil-test content pipeline for masked parts.
-    pub fn append_batch(&mut self, frame: &FrameView, transform: &[f32; 16], batch: &BatchInfo) {
+    pub fn append_batch(&mut self, renderer: &SSRenderer, frame: &FrameView, transform: &[f32; 16], batch: &BatchInfo) {
         let BatchInfo { start_rank, count, texture_hash, blend_type, kind, stencil, alpha } = *batch;
         if frame.frame_data.is_empty() {
             return;
@@ -1022,7 +1157,7 @@ impl SSInternalPlayer {
         }
 
         let key = self.content_key(blend_type, stencil);
-        let tex_size = self.textures.get(&texture_hash).map(|t| t.size);
+        let tex_size = renderer.texture_size(texture_hash);
         let index_start = self.indices.len() as u32;
 
         match kind {
@@ -1085,7 +1220,7 @@ impl SSInternalPlayer {
                     let (call_key, shader_slot) = match has_shader(rank) {
                         Some(attr) => {
                             let slot = self.push_shader_params(&attr, frame, part_idx, tex_size);
-                            (PipelineKey::Shader(attr.id_hash(), blend_index(blend_type)), Some(slot))
+                            (self.key(PipelineKind::Shader(attr.id_hash(), blend_index(blend_type))), Some(slot))
                         }
                         None => (key, None),
                     };
@@ -1195,7 +1330,7 @@ impl SSInternalPlayer {
     /// Append one mask writer's geometry into the frame accumulation, routed to
     /// the mask-write pipeline for `op`. The cutout threshold rides in the
     /// vertex `color[0]` (consumed by `fs_mask`). No-op if masking is disabled.
-    pub fn append_mask_writer(&mut self, frame: &FrameView, transform: &[f32; 16], writer: &MaskWriter, op: MaskOp) {
+    pub fn append_mask_writer(&mut self, renderer: &SSRenderer, frame: &FrameView, transform: &[f32; 16], writer: &MaskWriter, op: MaskOp) {
         use crate::mask::GeomKind;
         if !self.stencil_enabled || frame.frame_data.is_empty() {
             return;
@@ -1203,7 +1338,7 @@ impl SSInternalPlayer {
         if frame.world_matrices.is_empty() {
             return;
         }
-        let tex_size = self.textures.get(&writer.texture_hash).map(|t| t.size);
+        let tex_size = renderer.texture_size(writer.texture_hash);
         let color = [writer.threshold, 0.0, 0.0, 0.0];
         let index_start = self.indices.len() as u32;
 
@@ -1226,7 +1361,7 @@ impl SSInternalPlayer {
 
         let index_end = self.indices.len() as u32;
         if index_end > index_start {
-            self.draw_calls.push(BatchDrawCall { key: PipelineKey::Mask(op), texture_hash: writer.texture_hash, index_start, index_count: index_end - index_start, shader_slot: None });
+            self.draw_calls.push(BatchDrawCall { key: self.key(PipelineKind::Mask(op)), texture_hash: writer.texture_hash, index_start, index_count: index_end - index_start, shader_slot: None });
         }
     }
 
@@ -1447,17 +1582,8 @@ impl SSInternalPlayer {
     }
 
     /// Upload the accumulated geometry to the GPU. Call once after all batches.
-    pub fn end_frame(&mut self, device: &wgpu::Device, queue: &wgpu::Queue) {
-        // One-time fill of the 1x1 white fallback (the constructor has no queue).
-        if !self.white_ready {
-            queue.write_texture(
-                wgpu::TexelCopyTextureInfo { texture: &self.white_texture, mip_level: 0, origin: wgpu::Origin3d::ZERO, aspect: wgpu::TextureAspect::All },
-                &[255u8, 255, 255, 255],
-                wgpu::TexelCopyBufferLayout { offset: 0, bytes_per_row: Some(4), rows_per_image: Some(1) },
-                wgpu::Extent3d { width: 1, height: 1, depth_or_array_layers: 1 },
-            );
-            self.white_ready = true;
-        }
+    pub fn end_frame(&mut self, renderer: &mut SSRenderer, device: &wgpu::Device, queue: &wgpu::Queue) {
+        renderer.ensure_white(queue);
 
         if self.vertices.is_empty() || self.indices.is_empty() {
             return;
@@ -1481,7 +1607,7 @@ impl SSInternalPlayer {
         // than iterated because `ensure_pipeline` needs `&mut self`.
         for i in 0..self.draw_calls.len() {
             let key = self.draw_calls[i].key;
-            self.ensure_pipeline(device, key);
+            renderer.ensure_pipeline(device, key);
         }
 
         // Integration shaders (SPEC §6): upload this frame's per-part params.
@@ -1496,7 +1622,7 @@ impl SSInternalPlayer {
                 // The binding window is one `SsParams` (64 B); the dynamic offset picks the slot.
                 let bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
                     label: Some("SpriteStudio SS Params Bind Group"),
-                    layout: &self.ss_params_bind_group_layout,
+                    layout: &renderer.ss_params_bind_group_layout,
                     entries: &[wgpu::BindGroupEntry { binding: 0, resource: wgpu::BindingResource::Buffer(wgpu::BufferBinding { buffer: &buffer, offset: 0, size: wgpu::BufferSize::new(64) }) }],
                 });
                 self.ss_params_buffer = Some(buffer);
@@ -1510,7 +1636,7 @@ impl SSInternalPlayer {
 
     /// Record draw commands into a RenderPass opened by the host.
     /// Returns the number of draw calls issued.
-    pub fn draw<'a>(&'a self, rpass: &mut wgpu::RenderPass<'a>) -> usize {
+    pub fn draw<'a>(&'a self, renderer: &'a SSRenderer, rpass: &mut wgpu::RenderPass<'a>) -> usize {
         if self.draw_calls.is_empty() {
             return 0;
         }
@@ -1522,7 +1648,7 @@ impl SSInternalPlayer {
 
         rpass.set_vertex_buffer(0, v_buf.slice(..));
         rpass.set_index_buffer(i_buf.slice(..), wgpu::IndexFormat::Uint32);
-        rpass.set_bind_group(0, &self.uniform_bind_group, &[]);
+        rpass.set_bind_group(0, &self.globals_bind_group, &[]);
         if self.stencil_enabled {
             // Stencil ref is always 0; ops/compare are baked into the pipelines.
             rpass.set_stencil_reference(0);
@@ -1531,11 +1657,11 @@ impl SSInternalPlayer {
         let mut issued = 0usize;
         for call in &self.draw_calls {
             // Missing texture -> 1x1 white fallback (SPEC §8).
-            let texture = self.textures.get(&call.texture_hash).map(|e| &e.bind_group).unwrap_or(&self.white_bind_group);
+            let texture = renderer.texture_bind_group(call.texture_hash);
 
             // `end_frame` compiled every key this frame uses, so a miss here means
             // the key was an `ss-*` shader id `build_pipeline` declined to build.
-            let (Some(pipeline), params_bg) = (self.pipelines.get(&call.key), self.ss_params_bind_group.as_ref()) else {
+            let (Some(pipeline), params_bg) = (renderer.pipelines.get(&call.key), self.ss_params_bind_group.as_ref()) else {
                 continue;
             };
             // Integration-shader part (SPEC §6): group(2) carries the part's
@@ -1556,14 +1682,6 @@ impl SSInternalPlayer {
         }
 
         issued
-    }
-
-    fn create_texture_bind_group(&self, device: &wgpu::Device, view: &wgpu::TextureView) -> wgpu::BindGroup {
-        device.create_bind_group(&wgpu::BindGroupDescriptor {
-            label: Some("SpriteStudio Texture Bind Group"),
-            layout: &self.texture_bind_group_layout,
-            entries: &[wgpu::BindGroupEntry { binding: 0, resource: wgpu::BindingResource::TextureView(view) }, wgpu::BindGroupEntry { binding: 1, resource: wgpu::BindingResource::Sampler(&self.sampler) }],
-        })
     }
 
     fn ensure_vertex_buffer(&mut self, device: &wgpu::Device, size: usize) {

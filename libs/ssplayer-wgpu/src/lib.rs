@@ -1,10 +1,16 @@
 //! `ssplayer-wgpu` — a wgpu-based player for SpriteStudio 7 animations.
 //!
-//! Three layers (SPEC): the runtime (`ssruntime`, computation) feeds
-//! [`SSInternalPlayer`] (rendering), which is driven by [`SSPlayer`]
-//! (operation) — the primary public API. The player borrows the host's wgpu
-//! device/queue/target rather than owning them, so it can render into any wgpu
-//! host (a standalone viewer, a browser canvas, or an engine like Bevy).
+//! Three layers (SPEC): the runtime (`ssruntime`, computation) feeds the
+//! rendering layer, which is driven by [`SSPlayer`] (operation) — the primary
+//! public API. The player borrows the host's wgpu device/queue/target rather
+//! than owning them, so it can render into any wgpu host (a standalone viewer,
+//! a browser canvas, or an engine like Bevy).
+//!
+//! The rendering layer is split by how long its resources stay useful (SPEC
+//! §1.2): [`SSRenderer`] holds what belongs to the **device** — pipelines, bind
+//! group layouts, the sampler, the atlas textures — and the host owns exactly
+//! one, lending it like `Device` and `Queue`. [`SSInternalPlayer`] holds what
+//! belongs to one **render target**: the projection and the frame's geometry.
 
 /// The C-ABI face (`ffi` feature): a thin translation layer whose `ss_player_*`
 /// entry points are exported from the cdylib/staticlib and described by the
@@ -23,7 +29,7 @@ mod player;
 mod web;
 
 pub use frame::FrameView;
-pub use internal::{BatchInfo, IDENTITY_TRANSFORM, RendererConfig, SSInternalPlayer, Vertex};
+pub use internal::{BatchInfo, IDENTITY_TRANSFORM, RendererConfig, Retention, SSInternalPlayer, SSRenderer, Vertex};
 pub use mask::{GeomKind, MaskOp, MaskWriter, PartMaskFlags, StencilTest, plan_writers};
 pub use player::{SSPlayer, SSPlayerConfig};
 #[cfg(feature = "web")]

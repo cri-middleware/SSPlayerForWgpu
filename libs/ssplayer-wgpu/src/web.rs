@@ -9,6 +9,7 @@
 //! Embedded ssab (SPEC §8.1) is the natural web form: the atlas PNGs ride inside
 //! the `.ssab`, so a single fetched file renders with no host texture supply.
 
+use crate::internal::SSRenderer;
 use crate::player::{SSPlayer, SSPlayerConfig};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -68,6 +69,10 @@ pub struct SsPlayerWeb {
     queue: wgpu::Queue,
     config: wgpu::SurfaceConfiguration,
     stencil_view: wgpu::TextureView,
+    /// Device-scoped renderer (SPEC §1.2). P7-4 hoists this to a page-shared
+    /// context so N canvases share one device and one renderer; today it is one
+    /// per element, like the device above.
+    renderer: SSRenderer,
     player: SSPlayer,
     /// Kept so a lost device can be replaced without rebuilding the surface
     /// (the canvas context outlives the device it was configured with).
@@ -101,8 +106,9 @@ impl SsPlayerWeb {
         surface.configure(&device, &config);
         let stencil_view = create_stencil_view(&device, width, height);
 
-        let player = SSPlayer::new(&device, &SSPlayerConfig { color_format: format, stencil_format: Some(STENCIL_FORMAT) });
-        let mut me = SsPlayerWeb { surface, device, queue, config, stencil_view, player, instance, device_lost };
+        let renderer = SSRenderer::new(&device);
+        let player = SSPlayer::new(&device, &renderer, &SSPlayerConfig { color_format: format, stencil_format: Some(STENCIL_FORMAT) });
+        let mut me = SsPlayerWeb { surface, device, queue, config, stencil_view, renderer, player, instance, device_lost };
         me.player.set_viewport(&me.queue, width as f32, height as f32, false);
         Ok(me)
     }
@@ -133,7 +139,8 @@ impl SsPlayerWeb {
         self.config.alpha_mode = caps.alpha_modes[0];
         self.surface.configure(&device, &self.config);
         self.stencil_view = create_stencil_view(&device, self.config.width, self.config.height);
-        self.player.restore_device(&device, &queue);
+        self.renderer.restore_device(&device, &queue);
+        self.player.restore_device(&mut self.renderer, &device, &queue);
         // `restore_device` re-applies the viewport the player last saw, which is
         // stale if the canvas was resized while the device was gone (`resize` only
         // records the size then). `config` is authoritative — re-apply from it.
@@ -197,7 +204,7 @@ impl SsPlayerWeb {
         if self.is_device_lost() {
             return Ok(());
         }
-        self.player.update(&self.device, &self.queue, dt);
+        self.player.update(&mut self.renderer, &self.device, &self.queue, dt);
 
         use wgpu::CurrentSurfaceTexture;
         let frame = match self.surface.get_current_texture() {
@@ -223,7 +230,7 @@ impl SsPlayerWeb {
                 occlusion_query_set: None,
                 multiview_mask: None,
             });
-            self.player.draw(&mut rpass);
+            self.player.draw(&self.renderer, &mut rpass);
         }
         self.queue.submit(std::iter::once(encoder.finish()));
         frame.present();

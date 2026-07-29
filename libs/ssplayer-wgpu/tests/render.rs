@@ -4,7 +4,7 @@
 //! enabled must differ from rendering with it disabled (masks ignored). Skips
 //! cleanly when no GPU adapter is available.
 
-use ssplayer_wgpu::{SSPlayer, SSPlayerConfig};
+use ssplayer_wgpu::{Retention, SSPlayer, SSPlayerConfig, SSRenderer};
 use std::path::Path;
 
 const W: u32 = 256;
@@ -18,7 +18,7 @@ fn asset_dir() -> &'static str {
 
 /// Decode every PNG in the asset dir and upload it keyed by fnv1a(stem), like
 /// the viewer's reference-mode texture supply.
-fn load_textures(player: &mut SSPlayer, device: &wgpu::Device, queue: &wgpu::Queue, dir: &Path) {
+fn load_textures(renderer: &mut SSRenderer, device: &wgpu::Device, queue: &wgpu::Queue, dir: &Path) {
     for entry in std::fs::read_dir(dir).unwrap().flatten() {
         let path = entry.path();
         if path.extension().and_then(|s| s.to_str()) != Some("png") {
@@ -28,15 +28,16 @@ fn load_textures(player: &mut SSPlayer, device: &wgpu::Device, queue: &wgpu::Que
         let hash = ssruntime::fnv1a_hash_str(stem);
         let img = image::open(&path).unwrap().to_rgba8();
         let (w, h) = img.dimensions();
-        player.upload_texture(device, queue, hash, &img, w, h);
+        renderer.upload_texture(device, queue, hash, &img, (w, h), Retention::Retain);
     }
 }
 
 /// Build a reference-mode player (host-supplied textures, with/without a stencil
 /// buffer), render `Mask.ssab`/etc. at frame `advance_frames`, return the readback.
 fn render_ssab(device: &wgpu::Device, queue: &wgpu::Queue, stencil: bool, pack: &str, advance_frames: u32) -> Vec<u8> {
-    let mut player = SSPlayer::new(device, &SSPlayerConfig { color_format: COLOR_FORMAT, stencil_format: stencil.then_some(STENCIL_FORMAT) });
-    load_textures(&mut player, device, queue, Path::new(asset_dir()));
+    let mut renderer = SSRenderer::new(device);
+    let mut player = SSPlayer::new(device, &renderer, &SSPlayerConfig { color_format: COLOR_FORMAT, stencil_format: stencil.then_some(STENCIL_FORMAT) });
+    load_textures(&mut renderer, device, queue, Path::new(asset_dir()));
 
     let bytes = std::fs::read(format!("{}/{pack}.ssab", asset_dir())).unwrap();
     player.load_ssab(pack, &bytes).unwrap();
@@ -45,13 +46,13 @@ fn render_ssab(device: &wgpu::Device, queue: &wgpu::Queue, stencil: bool, pack: 
     player.play();
     player.set_viewport(queue, W as f32, H as f32, false);
 
-    render_to_rgba(device, queue, &mut player, stencil, advance_frames)
+    render_to_rgba(device, queue, &mut renderer, &mut player, stencil, advance_frames)
 }
 
 /// Advance an already-loaded, already-playing player and read back one frame.
-fn render_to_rgba(device: &wgpu::Device, queue: &wgpu::Queue, player: &mut SSPlayer, stencil: bool, advance_frames: u32) -> Vec<u8> {
+fn render_to_rgba(device: &wgpu::Device, queue: &wgpu::Queue, renderer: &mut SSRenderer, player: &mut SSPlayer, stencil: bool, advance_frames: u32) -> Vec<u8> {
     for _ in 0..advance_frames {
-        player.update(device, queue, 1.0 / 60.0);
+        player.update(renderer, device, queue, 1.0 / 60.0);
     }
 
     let color = device.create_texture(&wgpu::TextureDescriptor {
@@ -103,7 +104,7 @@ fn render_to_rgba(device: &wgpu::Device, queue: &wgpu::Queue, player: &mut SSPla
             occlusion_query_set: None,
             multiview_mask: None,
         });
-        player.draw(&mut rpass);
+        player.draw(renderer, &mut rpass);
     }
     encoder.copy_texture_to_buffer(
         wgpu::TexelCopyTextureInfo { texture: &color, mip_level: 0, origin: wgpu::Origin3d::ZERO, aspect: wgpu::TextureAspect::All },
@@ -237,18 +238,22 @@ fn restore_device_rebuilds_gpu_state() {
 
     // Reference mode (host-supplied textures): play 10 frames, lose the device,
     // restore onto the replacement, then render frame 11 there.
-    let mut player = SSPlayer::new(&device, &SSPlayerConfig { color_format: COLOR_FORMAT, stencil_format: Some(STENCIL_FORMAT) });
-    load_textures(&mut player, &device, &queue, Path::new(asset_dir()));
+    let mut renderer = SSRenderer::new(&device);
+    let mut player = SSPlayer::new(&device, &renderer, &SSPlayerConfig { color_format: COLOR_FORMAT, stencil_format: Some(STENCIL_FORMAT) });
+    load_textures(&mut renderer, &device, &queue, Path::new(asset_dir()));
     let bytes = std::fs::read(format!("{}/Mask.ssab", asset_dir())).unwrap();
     player.load_ssab("Mask", &bytes).unwrap();
     let anim = player.animation_names().unwrap()[0].clone();
     player.set_animation(&anim).unwrap();
     player.play();
     player.set_viewport(&queue, W as f32, H as f32, false);
-    let _ = render_to_rgba(&device, &queue, &mut player, true, 10);
+    let _ = render_to_rgba(&device, &queue, &mut renderer, &mut player, true, 10);
 
-    player.restore_device(&device2, &queue2);
-    let restored = render_to_rgba(&device2, &queue2, &mut player, true, 1);
+    // The host restores the device-scoped half once, then each player restores
+    // its own target-scoped half (SPEC §14).
+    renderer.restore_device(&device2, &queue2);
+    player.restore_device(&mut renderer, &device2, &queue2);
+    let restored = render_to_rgba(&device2, &queue2, &mut renderer, &mut player, true, 1);
 
     assert!(drawn_pixels(&restored) > 0, "nothing drawn after restore_device — pipelines/projection not rebuilt");
     assert_eq!(restored, expected, "restored render differs from the uninterrupted one — some GPU state was not rebuilt");
@@ -256,9 +261,10 @@ fn restore_device_rebuilds_gpu_state() {
     // Negative control: with the retained sources dropped, the same restore leaves
     // the host textures missing and the render changes. If this passed as equal,
     // the assertion above would prove nothing about texture restoration.
-    player.forget_texture_sources();
-    player.restore_device(&device2, &queue2);
-    let without_sources = render_to_rgba(&device2, &queue2, &mut player, true, 1);
+    renderer.forget_texture_sources();
+    renderer.restore_device(&device2, &queue2);
+    player.restore_device(&mut renderer, &device2, &queue2);
+    let without_sources = render_to_rgba(&device2, &queue2, &mut renderer, &mut player, true, 1);
     assert_ne!(without_sources, restored, "render unchanged after forget_texture_sources — textures are not actually coming from the retained sources");
 
     // Embedded mode (SPEC §8.1) retains no pixels: the atlas is re-decoded from the
@@ -269,25 +275,28 @@ fn restore_device_rebuilds_gpu_state() {
         return;
     };
     let emb_expected = {
-        let mut p = SSPlayer::new(&device, &SSPlayerConfig { color_format: COLOR_FORMAT, stencil_format: None });
+        let mut emb_renderer = SSRenderer::new(&device);
+        let mut p = SSPlayer::new(&device, &emb_renderer, &SSPlayerConfig { color_format: COLOR_FORMAT, stencil_format: None });
         p.load_ssab("Basic", &emb_bytes).unwrap();
         let anim = p.animation_names().unwrap()[0].clone();
         p.set_animation(&anim).unwrap();
         p.play();
         p.set_viewport(&queue, W as f32, H as f32, false);
-        render_to_rgba(&device, &queue, &mut p, false, 11)
+        render_to_rgba(&device, &queue, &mut emb_renderer, &mut p, false, 11)
     };
 
-    let mut emb = SSPlayer::new(&device, &SSPlayerConfig { color_format: COLOR_FORMAT, stencil_format: None });
+    let mut emb_renderer = SSRenderer::new(&device);
+    let mut emb = SSPlayer::new(&device, &emb_renderer, &SSPlayerConfig { color_format: COLOR_FORMAT, stencil_format: None });
     emb.load_ssab("Basic", &emb_bytes).unwrap();
     let anim = emb.animation_names().unwrap()[0].clone();
     emb.set_animation(&anim).unwrap();
     emb.play();
     emb.set_viewport(&queue, W as f32, H as f32, false);
-    let _ = render_to_rgba(&device, &queue, &mut emb, false, 10);
+    let _ = render_to_rgba(&device, &queue, &mut emb_renderer, &mut emb, false, 10);
 
-    emb.restore_device(&device2, &queue2);
-    let emb_restored = render_to_rgba(&device2, &queue2, &mut emb, false, 1);
+    emb_renderer.restore_device(&device2, &queue2);
+    emb.restore_device(&mut emb_renderer, &device2, &queue2);
+    let emb_restored = render_to_rgba(&device2, &queue2, &mut emb_renderer, &mut emb, false, 1);
     assert!(drawn_pixels(&emb_restored) > 5_000, "embedded atlas not re-decoded after restore_device");
     assert_eq!(emb_restored, emb_expected, "restored embedded render differs — the atlas was not re-decoded from the retained .ssab");
 }
@@ -318,13 +327,14 @@ fn render_embedded_ssab() {
 
     let reference = render_ssab(&device, &queue, false, "Basic", 10);
 
-    let mut player = SSPlayer::new(&device, &SSPlayerConfig { color_format: COLOR_FORMAT, stencil_format: None });
+    let mut renderer = SSRenderer::new(&device);
+    let mut player = SSPlayer::new(&device, &renderer, &SSPlayerConfig { color_format: COLOR_FORMAT, stencil_format: None });
     player.load_ssab("Basic", &bytes).unwrap(); // no load_textures — embedded supplies them
     let anim = player.animation_names().unwrap()[0].clone();
     player.set_animation(&anim).unwrap();
     player.play();
     player.set_viewport(&queue, W as f32, H as f32, false);
-    let embedded = render_to_rgba(&device, &queue, &mut player, false, 10);
+    let embedded = render_to_rgba(&device, &queue, &mut renderer, &mut player, false, 10);
 
     let drawn = drawn_pixels(&embedded);
     eprintln!("Basic.ssab embedded drawn pixels: {drawn} (reference {})", drawn_pixels(&reference));

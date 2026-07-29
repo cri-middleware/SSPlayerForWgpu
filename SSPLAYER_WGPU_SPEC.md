@@ -19,7 +19,7 @@
 - **提供3面（ssruntime と同型）**: `rs`(rlib) / `js`(wasm-bindgen) / `ffi`(cbindgen・DX12/Vulkan/Metal)。
 - **データ所有契約**: `.ssab` は Player 所有→ssruntime へ borrow ／ FrameData・SoA は ssruntime 所有→Player が borrow（§1.1）。
 - **ssab は embedded / reference 両対応**（テクスチャ埋め込み／外部参照）。
-- **進捗**: **P0**（3層リファクタ＋借用モデル）✅ ／ **P4**（インスタンス §7.1・エフェクト §7.2）✅ ／ **P3**（マスク・Shape）✅ ／ **P2**（色パリティ: varg・全12ブレンド・premul 厳密化）✅ ／ **P6**（統合シェーダ ss_shader 全13種）✅ ／ **P1**（ssab embedded/reference 両対応・**WebGPU/js**）✅ ブラウザ実機確認済 ／ **P5**（ネイティブ ffi・C-API ＋ Metal C++ viewer）✅ macOS 実機確認済、DX12/Vulkan viewer は未着手 ／ **P7**（シーン再設計：SSRenderer/SSScene 分離・複数プレイヤー・SoA パススルー）🚧 **進行中**——7-1 ステンシル巻き戻し ✅ / 7-2 プレイヤー配置 API ✅、7-3 以降が残り。対応バッチ = Normal / Mesh / Shape / Instance / Effect / Mask。**wgpu 29**（§2.2）。詳細は §12。
+- **進捗**: **P0**（3層リファクタ＋借用モデル）✅ ／ **P4**（インスタンス §7.1・エフェクト §7.2）✅ ／ **P3**（マスク・Shape）✅ ／ **P2**（色パリティ: varg・全12ブレンド・premul 厳密化）✅ ／ **P6**（統合シェーダ ss_shader 全13種）✅ ／ **P1**（ssab embedded/reference 両対応・**WebGPU/js**）✅ ブラウザ実機確認済 ／ **P5**（ネイティブ ffi・C-API ＋ Metal C++ viewer）✅ macOS 実機確認済、DX12/Vulkan viewer は未着手 ／ **P7**（シーン再設計：SSRenderer/SSScene 分離・複数プレイヤー・SoA パススルー）🚧 **進行中**——7-1 ステンシル巻き戻し ✅ / 7-2 プレイヤー配置 API ✅ / 7-3 SSRenderer 分離＋遅延生成 ✅、7-4 以降が残り。対応バッチ = Normal / Mesh / Shape / Instance / Effect / Mask。**wgpu 29**（§2.2）。詳細は §12。
 - **リポジトリ**: SDK monorepo から分離した独立リポ `ssplayer-wgpu`。SDK は git submodule（`SpriteStudio-SDK/`）として取り込み、`ssruntime`/`ssab` を **path 依存**で直リンクする（§2.2）。
 
 ---
@@ -169,13 +169,13 @@ ssplayer-wgpu/
 │   │   └── src/
 │   │       ├── lib.rs             ✅ 層の公開（SSRenderer / SSScene / SSPlayer が主 API）
 │   │       ├── frame.rs           ✅ FrameView … ランタイム所有データへの借用（§1.1）
-│   │       ├── renderer.rs        ◻ P7: 層2a SSRenderer（device スコープ。pipeline 遅延生成
-│   │       │                         ＋ layout/sampler/白 ＋ テクスチャキャッシュ）§9.1
+│   │       ├── renderer.rs        ◻ P7-4: 層2a SSRenderer の置き場。**型は 7-3 で実装済**
+│   │       │                         （現状 internal.rs 内）。ファイル分割は scene.rs と同時
 │   │       ├── scene.rs           ◻ P7: 層2b SSScene（ターゲットスコープ。投影 ＋ 頂点アリーナ
 │   │       │                         ＋ draw_call ＋ ステンシル管理 ＋ order 合成）§9.2
 │   │       ├── pack.rs            ◻ P7: SSPack（.ssab の共有単位。★CPU のみ・GPU 非所有）§8.2
-│   │       ├── internal.rs        ✅→◻ 旧 SSInternalPlayer。P7 で renderer.rs / scene.rs へ**解体**
-│   │       │                         （device スコープ分 → renderer、フレーム蓄積分 → scene）
+│   │       ├── internal.rs        ✅ 7-3 で `SSRenderer`(device) と `SSInternalPlayer`(ターゲット)
+│   │       │                         の2型に分割済。7-4 で2ファイルへ引っ越す
 │   │       ├── player.rs          ✅ 層3 SSPlayer（操作。再生木 ＋ transform/order/visible）
 │   │       │                         ★P7 以降 wgpu 型のフィールドを持たない（§1.2）
 │   │       ├── mask.rs            ✅ MaskPlanner（§6）
@@ -550,7 +550,7 @@ scene.update(&mut renderer, &device, &queue, dt, &mut players);
 }
 ```
 
-### 9.1 SSRenderer（層2a・device スコープ）◻ P7（`libs/ssplayer-wgpu/src/renderer.rs`）
+### 9.1 SSRenderer（層2a・device スコープ）✅ P7-3 実装済（現状 `internal.rs`、7-4 で `renderer.rs` へ）
 
 **device に1個**。フォーマット非依存で、pipeline は使われた組合せだけ遅延生成する（§5.2）。
 
@@ -559,22 +559,38 @@ pub struct SSRenderer { /* lazy pipelines, layouts, sampler, white fallback, tex
 
 impl SSRenderer {
     pub fn new(device: &wgpu::Device) -> Self;                      // ★config を取らない
+    pub fn pipeline_count(&self) -> usize;                          // 診断（§5.2）
 
-    // --- テクスチャ供給（§8.2）。所有ではなく借用チャネル ---
-    pub fn set_texture(&mut self, hash: u32, view: &wgpu::TextureView, size: (u32,u32), alpha: AlphaMode);
-    pub fn forget_texture(&mut self, hash: u32);                    // 借り物を返す（engine 側の解放に追従）
-    pub fn upload_texture(&mut self, device, queue, hash: u32, rgba: &[u8], w: u32, h: u32);  // 便利経路（内部で set_texture）
+    // --- テクスチャ ---
+    pub fn upload_texture(&mut self, device, queue, hash: u32, rgba: &[u8], size: (u32,u32), retention: Retention);
     pub fn texture_size(&self, hash: u32) -> Option<(f32, f32)>;
+    pub fn forget_texture_sources(&mut self);                       // 保持コピーを捨てる（§14）
+    // ◻ 7-5: 所有ではなく借用チャネルへ（§8.2）
+    // pub fn set_texture(&mut self, hash, view: &wgpu::TextureView, size, alpha: AlphaMode);
+    // pub fn forget_texture(&mut self, hash: u32);
 
-    // --- device 喪失復帰（§14）。ここ1回で全 Scene / Player が復帰する ---
+    // --- device 喪失復帰（§14）。ここ1回で device 上の全 Scene / Player が復帰する ---
     pub fn restore_device(&mut self, device: &wgpu::Device, queue: &wgpu::Queue);
 }
+
+/// アップロードしたピクセルを復帰用に保持するか（§14）。
+pub enum Retention {
+    /// 保持する。ホストが供給し、もう持っていないかもしれないテクスチャ用。
+    Retain,
+    /// 保持しない。供給元が作り直せるもの——embedded アトラスは Player が
+    /// 所有する `.ssab` から再デコードするので、2枚目のコピーは純粋な無駄。
+    Reproducible,
+}
 ```
+
+**復帰の責務分界（★7-3 で確定）**: device 喪失時、ホストは **`SSRenderer::restore_device` を1回**呼び、続いて各 Player の `restore_device(&mut renderer, ..)` を呼ぶ。前者が pipeline / テクスチャ（`Retain` 分）を、後者が投影 uniform とフレームアリーナを、そして embedded アトラスの再デコード（`Reproducible` 分）を受け持つ。**旧設計はこの全部を Player ごとに繰り返していた**——アトラスの PNG デコードを含めて。
 
 - パイプラインキャッシュのキーは `(blend, stencil_test, color_format, stencil_format)`。フォーマットをキーに入れることで、**フォーマットの違う複数ターゲットが1つのレンダラを共有できる**。
 - 旧 `SSInternalPlayer` の「`new()` で作られ以後不変」な部分がここに来る。
 
-### 9.2 SSScene（層2b・描画ターゲットスコープ）◻ P7（`libs/ssplayer-wgpu/src/scene.rs`）
+### 9.2 SSScene（層2b・描画ターゲットスコープ）◻ P7-4（`libs/ssplayer-wgpu/src/scene.rs`）
+
+> 7-3 時点では `SSInternalPlayer` がこの役割（投影 uniform ＋ フレームアリーナ）を持ち、まだ Player ごとに1個ある。7-4 で `SSScene` に改名し、アリーナをターゲット単位へ引き上げて players[] を持たせる。
 
 **描画ターゲット1枚に1個**。投影・フレーム頂点アリーナ・draw_call 列・ステンシル管理を持ち、**order 昇順で N 体を1 pass にまとめる**。
 
@@ -739,7 +755,7 @@ const char*  ss_last_error(void);                             // スレッドロ
 | **P4 エフェクト/インスタンス** ✅ | **P0 の次に先行実施**。①内部を `begin_frame`/`append_batch`/`append_effect`/`end_frame` の累積 API＋transform へ（Stage 1）②インスタンス木＝子ごと独立 Context（Stage 2, §7.1）③エフェクト＝EffectSlot/EffectDrawPlan（Stage 3, §7.2） | エフェクト/インスタンスが描画される（実機確認済） |
 | **P5 ネイティブ C-API + C++ viewer（③ ffi）** ✅（Metal） | `ffi` feature ＋ cbindgen（`build.rs`/`cbindgen.toml` → `include/ssplayer_wgpu.h`）、`host.rs` の `NativeHost`（生ハンドル→wgpu 所有）＋ `ffi.rs`（ABI 変換のみ）、`examples/viewer-metal-cpp`（Cocoa/Objective-C++、CMake が cargo を駆動）。再生 API は `set_animation` + 引数なし `play`（§9.3）。◻ 残: `viewer-dx12-cpp`（Windows）・`viewer-vulkan-cpp`（Linux）／P7 で `ss_scene_*` へ作り直し | **macOS 実機で Metal 描画確認済**（Basic / Mask を C-API 経由で描画）。DX12/Vulkan は各実機で要確認 |
 | **P6 統合シェーダ13種** ✅ | ss_shader 全13種（sepia/hsb/step/pix/noise/bmask/outline/blur/wave/move/scatter/circle/spot）を WGSL 移植（`internal.rs` `SS_SHADER_WGSL`）。パーツ属性 SHDR を per-part ディスパッチ：`(id_hash, blend)` 毎に**遅延生成**するシェーダパイプライン＋group(2) の動的オフセット uniform（param0..7 / cell_rect / pixel_size）。各シェーダは straight-alpha の Pixel を計算し `ss_finish`（＝P2 の PartsColor tail）で合成（blur のみ例外）。`ssTex` は逆premul＋`textureSampleLevel`（ループ/discard 後のサンプル可）。**制限（WebGL v1 同）**: map0/map1 未対応・shader×マスク非結合・Normal パーツのみ | Shader.ssab をヘッドレス GPU＋PNG 目視（13種の効果を確認）。shader 無しアニメはコスト0 |
-| **P7 シーン再設計（複数プレイヤー）** 🚧 **進行中**（7-1 / 7-2 ✅） | 下表の 7-1〜7-8。`SSInternalPlayer` を `SSRenderer`(device) / `SSScene`(ターゲット) へ解体し、`SSPlayer` から GPU リソースを剥がす（§1.2）。**破壊的変更・後方互換は取らない**（プロト段階） | 1つの描画ターゲットに複数体を正しく描ける（マスク持ち同士を含む）。web は device 1個で N 要素。C は 1 window に N 体 |
+| **P7 シーン再設計（複数プレイヤー）** 🚧 **進行中**（7-1 / 7-2 / 7-3 ✅） | 下表の 7-1〜7-8。`SSInternalPlayer` を `SSRenderer`(device) / `SSScene`(ターゲット) へ解体し、`SSPlayer` から GPU リソースを剥がす（§1.2）。**破壊的変更・後方互換は取らない**（プロト段階） | 1つの描画ターゲットに複数体を正しく描ける（マスク持ち同士を含む）。web は device 1個で N 要素。C は 1 window に N 体 |
 | （任意）Bevy アダプタ | `ssplayer-wgpu-bevy`（借用モデルの一利用例）。コアに依存を入れず別立て。**P7 の `set_texture` 借用チャネル（§8.2）が前提** | Bevy の render graph で `SSScene` が描画。テクスチャは `GpuImage` を借用（二重アップロードなし） |
 | （後回し）Text / Nines | 旧版も未実装 | 必要時 |
 
@@ -765,7 +781,7 @@ const char*  ss_last_error(void);                             // スレッドロ
 |---|---|---|---|
 | 7-1 ✅ **実装済** | ステンシル完全巻き戻し（不変条件）。`player.rs` の `unwind_masks` | §6 | 単独で入った |
 | 7-2 ✅ **実装済** | `set_transform` / `reset_transform` / `set_order` / `set_visible` / `set_alpha`。`order` は保持のみ（消費するのは 7-4 の `SSScene`）。`tint` は §5.5 後に回す——PartsColor の Mix 式より後段に掛ける必要があり、頂点色への畳み込みでは表現できない | §5.4 / §9.3 | 単独で入った |
-| 7-3 | `SSRenderer` 分離＋**パイプライン遅延生成** | §5.2 / §9.1 | ✅ 遅延生成だけなら単独 |
+| 7-3 ✅ **実装済** | パイプライン遅延生成（39本 eager → 使ったぶんだけ）＋ `SSRenderer` 分離。ホストが所有し `update`/`draw` で貸す。テクスチャ・pipeline・layout・sampler・白フォールバックが device 単位の共有に。**ファイルはまだ `internal.rs`**——`renderer.rs` / `scene.rs` への分割は 7-4 と同時に1回で行う（2度のファイル移動を避けるため） | §5.2 / §9.1 | 遅延生成は単独で先行 |
 | 7-4 | `SSScene`（共有アリーナ・order 合成） | §9.2 | 7-3 の後 |
 | 7-5 | `SSPack` ＋ `set_texture` 借用チャネル | §8.2 | 7-3 の後 |
 | 7-6 | SoA パススルー（GPU 頂点展開） | §5.5 | 7-4 の後 |
@@ -789,7 +805,7 @@ const char*  ss_last_error(void);                             // スレッドロ
 | DX12（副） | `examples/viewer-dx12-cpp/`（Windows 実機、backend=DX12 強制） |
 | Metal（副） | `examples/viewer-metal-cpp/`（macOS 実機、backend=Metal 強制）。`cmake -B build && cmake --build build && ./build/ssviewer-metal [asset-dir] [pack]` |
 | Vulkan（将来） | `examples/viewer-vulkan-cpp/`（Linux 実機、backend=Vulkan 強制） |
-| **複数プレイヤー（ヘッドレス）** ✅ P7-1/7-2 | `libs/ssplayer-wgpu/tests/scene.rs`。**ステンシル残留の回帰**は「1 pass に N 体」と「1 体 1 pass（stencil を毎回クリア）」の**ピクセル完全一致**で検出する——後者は構造的に漏れようがないので基準になる。マスク持ち同士（`Mask.ssab` ×2）と混在（`Mask` × `Basic`、順序両方向）。`set_transform` は**同一フレームで**（`update(0.0)` で再構築）整数ピクセル平行移動し、元画像を N px ずらしたものと完全一致することを要求。`set_visible(false)` は描画ゼロ、`set_alpha(0.0)` も描画ゼロ、0.5 はその中間。◻ 残: `order` の並べ替え、同一 pack N 体のアップロード1回（どちらも P7-4/7-5 で `SSScene`/`SSRenderer` ができてから） |
+| **複数プレイヤー（ヘッドレス）** ✅ P7-1/7-2/7-3 | `libs/ssplayer-wgpu/tests/scene.rs`。**レンダラ共有**は `players_share_one_renderer`（同一 pack の2体目でパイプライン本数が増えないこと）と `pipelines_are_built_on_demand`（構築直後は0本、Basic.ssab で1本、同一フレーム再構築で増えない＝キーが安定）で見る。**ステンシル残留の回帰**は「1 pass に N 体」と「1 体 1 pass（stencil を毎回クリア）」の**ピクセル完全一致**で検出する——後者は構造的に漏れようがないので基準になる。マスク持ち同士（`Mask.ssab` ×2）と混在（`Mask` × `Basic`、順序両方向）。`set_transform` は**同一フレームで**（`update(0.0)` で再構築）整数ピクセル平行移動し、元画像を N px ずらしたものと完全一致することを要求。`set_visible(false)` は描画ゼロ、`set_alpha(0.0)` も描画ゼロ、0.5 はその中間。◻ 残: `order` の並べ替え、同一 pack N 体のアップロード1回（どちらも P7-4/7-5 で `SSScene`/`SSRenderer` ができてから） |
 | **複数プレイヤー（目視）** | ◻ `examples/viewer` を N 体対応にする。現状 1 体固定で、**複数体でのパリティ検証ができない**（マスク・ブレンドの相互干渉は目視でしか気づけない類） |
 | **wasm サイズ** | `cd examples/web && ./build.sh`（**release**。`--dev` は wasm-opt を飛ばすので測ってはいけない）→ `ls -l pkg/*.wasm pkg/*.js` ＋ `gzip -9 -c ... \| wc -c`。§14.1 の表を更新する |
 | WebGL 版との一致 | 同一 ssab を両者で再生し目視/スクリーンショット比較（色・ブレンド・マスク）。**P7 以降は「複数体を置いた画」でも比較する**（ssplayer-webgl も surface+players 構成のため同条件） |

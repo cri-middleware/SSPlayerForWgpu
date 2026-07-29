@@ -11,7 +11,7 @@
 //! resolved by pack name.
 
 use crate::frame::FrameView;
-use crate::internal::{BatchInfo, RendererConfig, SSInternalPlayer};
+use crate::internal::{BatchInfo, RendererConfig, Retention, SSInternalPlayer, SSRenderer};
 use crate::mask::{GeomKind, MaskOp, MaskWriter, PartMaskFlags, StencilTest, plan_writers};
 use ssab::ssab::ss::format::{PartType, root_as_ss_anime_binary_unchecked};
 use ssruntime::error::SSRuntimeError;
@@ -71,14 +71,6 @@ pub struct SSPlayer {
     /// the next `update` (the borrow model means load has no `Device`/`Queue`).
     /// Each entry is `(cellmap name_hash, straight-alpha RGBA, width, height)`.
     pending_textures: Vec<(u32, Vec<u8>, u32, u32)>,
-    /// Retained sources for host-supplied textures, keyed by hash:
-    /// `(straight-alpha RGBA, width, height)`. GPU textures die with the device,
-    /// so [`SSPlayer::restore_device`] re-uploads from here (SPEC §14, the WebGL
-    /// `SSWebGLResourceManager` retained-source scheme). Embedded textures are
-    /// *not* duplicated here — they are re-decoded from the `.ssab` the player
-    /// already owns. Hosts that would rather re-supply their own textures after a
-    /// loss can drop these copies with [`SSPlayer::forget_texture_sources`].
-    host_textures: HashMap<u32, (Vec<u8>, u32, u32)>,
     /// Last viewport passed to [`SSPlayer::set_viewport`], re-applied on restore
     /// (the projection lives in a uniform buffer that dies with the device).
     viewport: Option<(f32, f32, bool)>,
@@ -98,24 +90,12 @@ pub struct SSPlayer {
 }
 
 impl SSPlayer {
-    /// Create a player against a borrowed `device`. The device is not retained.
-    pub fn new(device: &wgpu::Device, config: &SSPlayerConfig) -> Self {
-        let internal = SSInternalPlayer::new(device, &RendererConfig { color_format: config.color_format, stencil_format: config.stencil_format });
-        Self {
-            internal,
-            resources: HashMap::new(),
-            main_pack: None,
-            root: None,
-            current_animation: None,
-            last_root_frame: 0.0,
-            pending_textures: Vec::new(),
-            host_textures: HashMap::new(),
-            viewport: None,
-            transform: IDENTITY,
-            order: 0,
-            visible: true,
-            alpha: 1.0,
-        }
+    /// Create a player against a borrowed `device` and the host's `renderer`.
+    /// Neither is retained (SPEC §1.2): the renderer is device-scoped and shared,
+    /// so it is lent back on every `update` / `draw`.
+    pub fn new(device: &wgpu::Device, renderer: &SSRenderer, config: &SSPlayerConfig) -> Self {
+        let internal = SSInternalPlayer::new(device, renderer, &RendererConfig { color_format: config.color_format, stencil_format: config.stencil_format });
+        Self { internal, resources: HashMap::new(), main_pack: None, root: None, current_animation: None, last_root_frame: 0.0, pending_textures: Vec::new(), viewport: None, transform: IDENTITY, order: 0, visible: true, alpha: 1.0 }
     }
 
     /// Rebuild every GPU resource against a freshly created `device` after the
@@ -134,45 +114,31 @@ impl SSPlayer {
     /// the CPU and is untouched: the animation resumes where it was interrupted.
     ///
     /// A target whose *formats* changed needs a new [`SSPlayer`], not this call.
-    pub fn restore_device(&mut self, device: &wgpu::Device, queue: &wgpu::Queue) {
-        // Pipelines, uniform/vertex/index buffers, bind groups and textures all
-        // belonged to the dead device; the renderer is cheapest to rebuild whole.
-        self.internal = SSInternalPlayer::new(device, &self.internal.config());
+    pub fn restore_device(&mut self, renderer: &mut SSRenderer, device: &wgpu::Device, queue: &wgpu::Queue) {
+        // The projection buffer and the frame arena belonged to the dead device;
+        // the target-scoped half is cheapest to rebuild whole. The renderer's own
+        // pipelines and textures are restored by `SSRenderer::restore_device`,
+        // which the host calls once for the whole device — not once per player.
+        self.internal = SSInternalPlayer::new(device, renderer, &self.internal.config());
 
-        // Anything queued for the old device is stale — the sources below cover it.
+        // Anything queued for the old device is stale — the decode below covers it.
         self.pending_textures.clear();
         // Embedded packs (SPEC §8.1): re-decode from the ssab bytes we still own,
-        // so no pixel copy has to be retained for them. Sorted by pack name because
-        // later packs overwrite earlier ones on a texture-hash collision, and a
-        // restore must not land on a different winner than the last one did.
+        // which is why they upload as `Reproducible` and cost no retained copy.
+        // Sorted by pack name because later packs overwrite earlier ones on a
+        // texture-hash collision, and a restore must not land on a different
+        // winner than the last one did.
         let mut packs: Vec<(&String, &Arc<SsabResource>)> = self.resources.iter().collect();
         packs.sort_by_key(|(name, _)| *name);
         let packs: Vec<Arc<SsabResource>> = packs.into_iter().map(|(_, r)| Arc::clone(r)).collect();
         for resource in &packs {
             self.decode_embedded_textures(resource.data().as_slice());
         }
-        self.flush_pending_textures(device, queue);
-
-        // Host-supplied textures last, so a host override of an embedded hash
-        // survives the restore exactly as it did at load time.
-        let host_textures = std::mem::take(&mut self.host_textures);
-        for (hash, (rgba, w, h)) in &host_textures {
-            self.internal.upload_texture(device, queue, *hash, rgba, *w, *h);
-        }
-        self.host_textures = host_textures;
+        self.flush_pending_textures(renderer, device, queue);
 
         if let Some((width, height, y_down)) = self.viewport {
             self.internal.update_projection(queue, width, height, y_down);
         }
-    }
-
-    /// Drop the retained copies of host-supplied textures (SPEC §14). Saves the
-    /// duplicated pixels when the host keeps its own and would rather re-upload
-    /// them itself; after this, [`SSPlayer::restore_device`] restores only the
-    /// embedded textures and the host must call [`SSPlayer::upload_texture`] again
-    /// for the rest before drawing.
-    pub fn forget_texture_sources(&mut self) {
-        self.host_textures.clear();
     }
 
     /// Register an `.ssab` pack under `pack_name` (used to resolve external
@@ -358,16 +324,6 @@ impl SSPlayer {
         Some((anim_meta.canvas_width, anim_meta.canvas_height))
     }
 
-    /// Provide a decoded texture keyed by fnv1a hash. Forwarded to the renderer.
-    ///
-    /// `rgba` is also retained as a restore source (SPEC §14) so a device loss can
-    /// be recovered without the host re-supplying it; see
-    /// [`SSPlayer::forget_texture_sources`] to opt out of that copy.
-    pub fn upload_texture(&mut self, device: &wgpu::Device, queue: &wgpu::Queue, hash: u32, rgba: &[u8], width: u32, height: u32) {
-        self.internal.upload_texture(device, queue, hash, rgba, width, height);
-        self.host_textures.insert(hash, (rgba.to_vec(), width, height));
-    }
-
     /// Set the projection to the render target's pixel dimensions. Remembered, so
     /// [`SSPlayer::restore_device`] can re-apply it to a rebuilt uniform buffer.
     pub fn set_viewport(&mut self, queue: &wgpu::Queue, width: f32, height: f32, y_down: bool) {
@@ -378,17 +334,19 @@ impl SSPlayer {
     /// Upload everything `decode_embedded_textures` queued. Called at the start of
     /// each `update` (the earliest point the borrow model lends a `Queue`) and by
     /// `restore_device`, which re-queues the packs against the new device.
-    fn flush_pending_textures(&mut self, device: &wgpu::Device, queue: &wgpu::Queue) {
+    fn flush_pending_textures(&mut self, renderer: &mut SSRenderer, device: &wgpu::Device, queue: &wgpu::Queue) {
         for (hash, rgba, w, h) in std::mem::take(&mut self.pending_textures) {
-            self.internal.upload_texture(device, queue, hash, &rgba, w, h);
+            // Reproducible: this player still owns the `.ssab` and can decode the
+            // atlas again, so the renderer need not retain a second copy.
+            renderer.upload_texture(device, queue, hash, &rgba, (w, h), Retention::Reproducible);
         }
     }
 
     /// Advance the tree by `delta_secs` and build GPU buffers for the frame.
-    pub fn update(&mut self, device: &wgpu::Device, queue: &wgpu::Queue, delta_secs: f32) {
+    pub fn update(&mut self, renderer: &mut SSRenderer, device: &wgpu::Device, queue: &wgpu::Queue, delta_secs: f32) {
         // Flush any embedded textures decoded at load time (§8.1); the first
         // `update` is the earliest point the borrow model lends a Queue.
-        self.flush_pending_textures(device, queue);
+        self.flush_pending_textures(renderer, device, queue);
 
         self.internal.begin_frame();
 
@@ -397,7 +355,7 @@ impl SSPlayer {
         // nothing. Textures are still flushed above — a player can be made
         // visible again without re-loading anything.
         if !self.visible {
-            self.internal.end_frame(device, queue);
+            self.internal.end_frame(renderer, device, queue);
             return;
         }
 
@@ -410,22 +368,16 @@ impl SSPlayer {
             let looped = frame_no + 0.5 < self.last_root_frame;
             self.last_root_frame = frame_no;
             let draw = NodeDraw { transform: &self.transform, alpha: self.alpha };
-            render_node(root, &mut self.internal, draw, frame_no, delta_secs, looped, StencilTest::None);
+            let mut build = FrameBuild { internal: &mut self.internal, renderer };
+            render_node(root, &mut build, draw, frame_no, delta_secs, looped, StencilTest::None);
         }
 
-        self.internal.end_frame(device, queue);
+        self.internal.end_frame(renderer, device, queue);
     }
 
     /// Record the prepared frame into a RenderPass opened by the host.
-    pub fn draw<'a>(&'a self, pass: &mut wgpu::RenderPass<'a>) -> usize {
-        self.internal.draw(pass)
-    }
-
-    /// Render pipelines compiled so far (SPEC §5.2). They are built on first use,
-    /// so an animation touching one blend mode holds one rather than the whole
-    /// blend x stencil matrix. A diagnostic, like [`SSPlayer::instance_node_count`].
-    pub fn pipeline_count(&self) -> usize {
-        self.internal.pipeline_count()
+    pub fn draw<'a>(&'a self, renderer: &'a SSRenderer, pass: &mut wgpu::RenderPass<'a>) -> usize {
+        self.internal.draw(renderer, pass)
     }
 
     /// Total number of instance child nodes in the current tree. A non-zero
@@ -510,7 +462,7 @@ const FLAG_MASK_INFLUENCE: u8 = 0x01;
 /// a pure mask's backward scope has ended → remove it (Decr/Invert); a clipping
 /// writer's forward scope has begun → add it (Incr/Invert). Monotonic in
 /// `cursor`; ops are baked per pipeline, so ref is always 0.
-fn sync_masks_to(internal: &mut SSInternalPlayer, frame: &FrameView, transform: &[f32; 16], writers: &[MaskWriter], cursor: &mut usize, up_to_rank: usize) {
+fn sync_masks_to(build: &mut FrameBuild<'_>, frame: &FrameView, transform: &[f32; 16], writers: &[MaskWriter], cursor: &mut usize, up_to_rank: usize) {
     while *cursor < writers.len() && writers[*cursor].rank < up_to_rank {
         let w = &writers[*cursor];
         let op = if w.is_clipping {
@@ -520,9 +472,18 @@ fn sync_masks_to(internal: &mut SSInternalPlayer, frame: &FrameView, transform: 
         } else {
             MaskOp::Decr
         };
-        internal.append_mask_writer(frame, transform, w, op);
+        build.internal.append_mask_writer(build.renderer, frame, transform, w, op);
         *cursor += 1;
     }
+}
+
+/// The two halves of layer 2, bundled for the tree walk: the target-scoped
+/// accumulator being filled, and the device-scoped renderer it reads texture
+/// sizes from. Only `internal` is mutated — pipelines are compiled later, in
+/// `end_frame`, which is where the renderer is borrowed mutably.
+struct FrameBuild<'a> {
+    internal: &'a mut SSInternalPlayer,
+    renderer: &'a SSRenderer,
 }
 
 /// How one node of the tree is drawn: where it sits and how opaque it is.
@@ -555,7 +516,7 @@ struct NodeDraw<'a> {
 /// `draw` carries the owning player's placement and fade down the tree; whatever
 /// coverage this scope writes, it takes back before returning (see
 /// [`unwind_masks`]).
-fn render_node(node: &mut PlaybackNode, internal: &mut SSInternalPlayer, draw: NodeDraw, frame_no: f32, delta_secs: f32, node_looped: bool, inherited_stencil: StencilTest) {
+fn render_node(node: &mut PlaybackNode, build: &mut FrameBuild<'_>, draw: NodeDraw, frame_no: f32, delta_secs: f32, node_looped: bool, inherited_stencil: StencilTest) {
     let NodeDraw { transform, alpha } = draw;
     let frame_data = match node.context.get_frame_data(frame_no) {
         Ok(bytes) => unsafe { std::slice::from_raw_parts(bytes.as_ptr(), bytes.len()) },
@@ -564,14 +525,14 @@ fn render_node(node: &mut PlaybackNode, internal: &mut SSInternalPlayer, draw: N
     let frame = frame_view(&mut node.context, frame_data);
 
     // Own masking runs only at the root scope; a masked sub-animation inherits.
-    let masking = internal.stencil_enabled() && inherited_stencil == StencilTest::None;
+    let masking = build.internal.stencil_enabled() && inherited_stencil == StencilTest::None;
     let writers = if masking { plan_writers(&frame, &node.mask_flags) } else { Vec::new() };
 
     // Pre-write pure masks so they are active for lower-rank content (§2-1).
     for w in &writers {
         if !w.is_clipping {
             let op = if w.op_invert { MaskOp::Invert } else { MaskOp::Incr };
-            internal.append_mask_writer(&frame, transform, w, op);
+            build.internal.append_mask_writer(build.renderer, &frame, transform, w, op);
         }
     }
     let mut cursor = 0usize;
@@ -599,13 +560,13 @@ fn render_node(node: &mut PlaybackNode, internal: &mut SSInternalPlayer, draw: N
                     // Polarity and active coverage vary per part → draw one at a time.
                     for rank in start_rank..start_rank + count {
                         let part_idx = draw_order.get(rank) as usize;
-                        sync_masks_to(internal, &frame, transform, &writers, &mut cursor, rank);
+                        sync_masks_to(build, &frame, transform, &writers, &mut cursor, rank);
                         if is_pure(part_idx) {
                             continue;
                         }
                         let stencil = node.mask_flags.get(part_idx).map(|f| f.polarity()).unwrap_or(StencilTest::None);
                         let info = BatchInfo { start_rank: rank, count: 1, texture_hash: batch.texture_hash(), blend_type: batch.blend_type(), kind, stencil, alpha };
-                        internal.append_batch(&frame, transform, &info);
+                        build.internal.append_batch(build.renderer, &frame, transform, &info);
                     }
                 } else if has_pure {
                     // Non-masked batch that still contains a pure mask: draw the
@@ -616,11 +577,11 @@ fn render_node(node: &mut PlaybackNode, internal: &mut SSInternalPlayer, draw: N
                             continue;
                         }
                         let info = BatchInfo { start_rank: rank, count: 1, texture_hash: batch.texture_hash(), blend_type: batch.blend_type(), kind, stencil: inherited_stencil, alpha };
-                        internal.append_batch(&frame, transform, &info);
+                        build.internal.append_batch(build.renderer, &frame, transform, &info);
                     }
                 } else {
                     let info = BatchInfo { start_rank, count, texture_hash: batch.texture_hash(), blend_type: batch.blend_type(), kind, stencil: inherited_stencil, alpha };
-                    internal.append_batch(&frame, transform, &info);
+                    build.internal.append_batch(build.renderer, &frame, transform, &info);
                 }
             }
             DrawBatchKind::Instance => {
@@ -633,7 +594,7 @@ fn render_node(node: &mut PlaybackNode, internal: &mut SSInternalPlayer, draw: N
                     let child_inherited = if masking && !writers.is_empty() {
                         let f = node.mask_flags.get(part_idx).copied().unwrap_or_default();
                         if f.mask_influence {
-                            sync_masks_to(internal, &frame, transform, &writers, &mut cursor, rank);
+                            sync_masks_to(build, &frame, transform, &writers, &mut cursor, rank);
                             f.polarity()
                         } else {
                             StencilTest::None
@@ -660,7 +621,7 @@ fn render_node(node: &mut PlaybackNode, internal: &mut SSInternalPlayer, draw: N
                         let m: [f32; 16] = frame.world_matrices[part_idx * 16..part_idx * 16 + 16].try_into().unwrap();
                         let child_transform = mat4_mul(transform, &m);
                         let child_draw = NodeDraw { transform: &child_transform, alpha };
-                        render_node(&mut child.node, internal, child_draw, child_frame_no, delta_secs, result.child_looped, child_inherited);
+                        render_node(&mut child.node, build, child_draw, child_frame_no, delta_secs, result.child_looped, child_inherited);
                     }
                 }
             }
@@ -669,7 +630,7 @@ fn render_node(node: &mut PlaybackNode, internal: &mut SSInternalPlayer, draw: N
                 // against the screen-space stencil; sync coverage once at its rank.
                 let eff_stencil = if masked_target {
                     let part_idx = draw_order.get(start_rank) as usize;
-                    sync_masks_to(internal, &frame, transform, &writers, &mut cursor, start_rank);
+                    sync_masks_to(build, &frame, transform, &writers, &mut cursor, start_rank);
                     node.mask_flags.get(part_idx).map(|f| f.polarity()).unwrap_or(StencilTest::None)
                 } else {
                     inherited_stencil
@@ -689,7 +650,7 @@ fn render_node(node: &mut PlaybackNode, internal: &mut SSInternalPlayer, draw: N
                         let plan = unsafe { std::slice::from_raw_parts(r.draw_plan_buf, r.draw_plan_len) };
                         let m: [f32; 16] = frame.world_matrices[part_idx * 16..part_idx * 16 + 16].try_into().unwrap();
                         let eff_transform = mat4_mul(transform, &m);
-                        internal.append_effect(plan, &eff_transform, eff_stencil, alpha);
+                        build.internal.append_effect(plan, &eff_transform, eff_stencil, alpha);
                     }
                 }
             }
@@ -700,7 +661,7 @@ fn render_node(node: &mut PlaybackNode, internal: &mut SSInternalPlayer, draw: N
     }
 
     if masking {
-        unwind_masks(internal, &frame, transform, &writers, cursor);
+        unwind_masks(build, &frame, transform, &writers, cursor);
     }
 }
 
@@ -720,15 +681,15 @@ fn render_node(node: &mut PlaybackNode, internal: &mut SSInternalPlayer, draw: N
 ///
 /// The extra draw calls are bounded by the writer count (at most
 /// [`crate::mask::MAX_MASK_WRITERS`]) and write no colour.
-fn unwind_masks(internal: &mut SSInternalPlayer, frame: &FrameView, transform: &[f32; 16], writers: &[MaskWriter], cursor: usize) {
+fn unwind_masks(build: &mut FrameBuild<'_>, frame: &FrameView, transform: &[f32; 16], writers: &[MaskWriter], cursor: usize) {
     let remove = |w: &MaskWriter| if w.op_invert { MaskOp::Invert } else { MaskOp::Decr };
     // Consumed clipping writers: `sync_masks_to` added their coverage.
     for w in writers[..cursor].iter().filter(|w| w.is_clipping) {
-        internal.append_mask_writer(frame, transform, w, remove(w));
+        build.internal.append_mask_writer(build.renderer, frame, transform, w, remove(w));
     }
     // Unconsumed pure masks: pre-written before the batch loop, never removed.
     for w in writers[cursor..].iter().filter(|w| !w.is_clipping) {
-        internal.append_mask_writer(frame, transform, w, remove(w));
+        build.internal.append_mask_writer(build.renderer, frame, transform, w, remove(w));
     }
 }
 
