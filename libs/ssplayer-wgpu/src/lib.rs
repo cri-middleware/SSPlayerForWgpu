@@ -27,6 +27,9 @@ mod metrics;
 mod pack;
 mod player;
 mod renderer;
+/// Generation-tagged slot storage for the handle-based hosts (SPEC §11).
+#[cfg(any(feature = "ffi", feature = "web"))]
+mod roster;
 mod scene;
 #[cfg(feature = "web")]
 mod web;
@@ -39,4 +42,4 @@ pub use player::SSPlayer;
 pub use renderer::{AlphaMode, Retention, SSRenderer};
 pub use scene::{BatchInfo, FrameChunk, IDENTITY_TRANSFORM, NodeSlot, SSScene, SceneConfig};
 #[cfg(feature = "web")]
-pub use web::SsPlayerWeb;
+pub use web::{SsContextWeb, SsPlayerWeb, SsSurfaceWeb};

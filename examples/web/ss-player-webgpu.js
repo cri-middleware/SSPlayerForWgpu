@@ -1,18 +1,17 @@
 // A `<ss-player-webgpu>` custom element: renders a SpriteStudio `.ssab` to a
-// WebGPU canvas via the wasm-bindgen wrapper (`SsPlayerWeb`, from core's `web`
-// feature). Attributes: `src` (embedded .ssab URL), `pack` (name, default from
-// the file), `anim` (animation name, default = first), `pause-when-hidden`
+// WebGPU canvas. Attributes: `src` (embedded .ssab URL), `pack` (name, default
+// from the file), `anim` (animation name, default = first), `pause-when-hidden`
 // (default on — opt out with `pause-when-hidden="false"`).
 //
+// This is the **convenience wrapper**: one element = one canvas = one player,
+// which is the shortest path for a single-character use like an ad creative
+// (SPEC §10). It is not the shape of the API — underneath, the element takes a
+// surface from the page's shared context and adds one player to it, so putting
+// ten of these on a page still costs one `GPUDevice` and one atlas upload. For a
+// canvas with several characters, drive `SsContextWeb` directly (see index.html).
+//
 // Build the wasm package first with ./build.sh (outputs ./pkg).
-import init, { SsPlayerWeb } from './pkg/ssplayer_wgpu.js';
-
-// The wasm module is initialised once and shared by every element on the page.
-let wasmReady = null;
-function ensureWasm() {
-  if (!wasmReady) wasmReady = init();
-  return wasmReady;
-}
+import { sharedContext, restoreSharedDevice } from './ss-context.js';
 
 export class SsPlayerWebGPU extends HTMLElement {
   connectedCallback() {
@@ -48,6 +47,12 @@ export class SsPlayerWebGPU extends HTMLElement {
       document.removeEventListener('visibilitychange', this._onVisibilityChange);
       this._onVisibilityChange = null;
     }
+    // The surface and the player live in the page's shared context, not in these
+    // wrappers, so dropping the references would leak a swapchain per element
+    // that ever existed. The context itself stays — other elements share it.
+    this.player?.destroy();
+    this.surface?.destroy();
+    this.player = this.surface = null;
   }
 
   /**
@@ -76,7 +81,7 @@ export class SsPlayerWebGPU extends HTMLElement {
 
   /** Whether the rAF loop should run right now. */
   get _shouldRun() {
-    if (!this._wantTicker || this._restoring || this.player?.isDeviceLost()) return false;
+    if (!this._wantTicker || this._restoring || this.ctx?.isDeviceLost()) return false;
     // With the gating off nothing listens for visibility, so nothing would ever
     // restart the loop — don't let it stop on visibility either.
     return !this._gated || (this._intersecting && !document.hidden);
@@ -92,14 +97,14 @@ export class SsPlayerWebGPU extends HTMLElement {
         const dt = Math.min((now - this._last) / 1000, 0.05); // clamp long gaps
         this._last = now;
         try {
-          this.player.frame(dt);
+          this.surface.frame(dt);
         } catch (e) {
           this._fail(e);
           return;
         }
         // The browser can take the device at any time (backgrounded tab, GPU
         // process crash). Rebuild rather than leaving a blank canvas forever.
-        if (this.player.isDeviceLost()) {
+        if (this.ctx.isDeviceLost()) {
           this._raf = 0;
           void this._restoreDevice();
           return;
@@ -114,15 +119,16 @@ export class SsPlayerWebGPU extends HTMLElement {
   }
 
   /**
-   * Recover from a lost WebGPU device: the wrapper re-requests adapter+device and
-   * rebuilds every GPU object from its retained source, so playback resumes on the
-   * frame it was interrupted on.
+   * Recover from a lost WebGPU device: the context re-requests adapter+device and
+   * rebuilds every GPU object on the page from its retained source, so playback
+   * resumes on the frame it was interrupted on. Shared across elements — the
+   * device is the page's, so the first one to notice recovers for everyone.
    */
   async _restoreDevice() {
     if (this._restoring) return;
     this._restoring = true;
     try {
-      await this.player.restoreDevice();
+      await restoreSharedDevice(this.ctx);
     } catch (e) {
       this._fail(e);
       return;
@@ -133,13 +139,13 @@ export class SsPlayerWebGPU extends HTMLElement {
   }
 
   async _start() {
-    if (!('gpu' in navigator)) {
-      this._fail('このブラウザは WebGPU 非対応です（Chrome / Edge 113+ など）。');
-      return;
-    }
     try {
-      await ensureWasm();
-      this.player = await SsPlayerWeb.create(this.canvas);
+      this.ctx = await sharedContext();
+      // Disconnected while the context was initialising: don't take a swapchain
+      // nobody will release.
+      if (!this.isConnected) return;
+      this.surface = this.ctx.createSurface(this.canvas);
+      this.player = this.surface.createPlayer();
       const src = this.getAttribute('src');
       if (src) await this.loadSrc(src, this.getAttribute('pack'), this.getAttribute('anim'));
       this._wantTicker = true;
@@ -149,14 +155,18 @@ export class SsPlayerWebGPU extends HTMLElement {
     }
   }
 
-  /** Fetch + play an embedded `.ssab`. Can be called to switch animations. */
+  /** Fetch + play an embedded `.ssab`. Can be called to switch packs. */
   async loadSrc(src, pack, anim) {
     if (!this.player) return;
     const bytes = new Uint8Array(await (await fetch(src)).arrayBuffer());
     const name = pack || src.split('/').pop().replace(/\.ssab$/, '');
     this.player.loadSsab(name, bytes);
     const names = this.player.animationNames();
-    this.player.play(anim || names[0]);
+    // Selecting and starting are separate calls (SPEC §9.3): `setAnimation` is
+    // the allocating step, `play` is transport. The old single `play(name)` is
+    // deliberately not carried over.
+    this.player.setAnimation(anim || names[0]);
+    this.player.play();
     return names;
   }
 

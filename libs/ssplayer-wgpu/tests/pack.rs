@@ -113,6 +113,12 @@ fn play(pack: &SSPack) -> SSPlayer {
 
 /// Advance `players` through `frames` and read the scene back as RGBA8.
 fn render(device: &wgpu::Device, queue: &wgpu::Queue, renderer: &mut SSRenderer, scene: &mut SSScene, players: &mut [&mut SSPlayer], frames: u32) -> Vec<u8> {
+    render_to(device, queue, renderer, scene, players, frames, COLOR_FORMAT)
+}
+
+/// As [`render`], but into a target of `format` — the scene's pipelines are baked
+/// against a colour format, so a second format is how a second *canvas* differs.
+fn render_to(device: &wgpu::Device, queue: &wgpu::Queue, renderer: &mut SSRenderer, scene: &mut SSScene, players: &mut [&mut SSPlayer], frames: u32, format: wgpu::TextureFormat) -> Vec<u8> {
     for _ in 0..frames {
         scene.update(renderer, device, queue, 1.0 / 60.0, players);
     }
@@ -123,7 +129,7 @@ fn render(device: &wgpu::Device, queue: &wgpu::Queue, renderer: &mut SSRenderer,
         mip_level_count: 1,
         sample_count: 1,
         dimension: wgpu::TextureDimension::D2,
-        format: COLOR_FORMAT,
+        format,
         usage: wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::COPY_SRC,
         view_formats: &[],
     });
@@ -241,6 +247,64 @@ fn a_shared_pack_uploads_its_atlas_once() {
     assert_eq!(renderer.texture_upload_count(), atlas_count, "the second player uploaded the atlas again — the pack is not being shared");
     assert_eq!(renderer.texture_count(), atlas_count, "the texture map grew for the second player");
     assert!(drawn_pixels(&two) > drawn_pixels(&one), "the second player added nothing to the frame, so the sharing claim is untested");
+}
+
+/// SPEC §1.2 / §9.1: the renderer is scoped to the **device**, not to a render
+/// target, and it is format-independent — so several canvases share one of it,
+/// and one atlas upload covers all of them.
+///
+/// This is the claim the web face rests on (§10). Its predecessor requested an
+/// adapter and a device per canvas, which put every canvas on its own device;
+/// nothing is shared across a device, so N canvases of the same character meant N
+/// atlas uploads and N sets of pipelines. Two scenes here, deliberately with
+/// **different colour formats** (a canvas takes whatever its browser prefers), to
+/// pin down that the format lives in the scene's pipeline key rather than in the
+/// renderer.
+#[test]
+fn scenes_share_one_renderer() {
+    let Some((device, queue)) = gpu() else {
+        eprintln!("no GPU adapter available, skipping headless render test");
+        return;
+    };
+    let path = format!("{}/Basic.ssab", embedded_dir());
+    let Ok(bytes) = std::fs::read(&path) else {
+        eprintln!("embedded fixture missing ({path}); run scripts/deploy-examples.sh to generate it. skipping.");
+        return;
+    };
+
+    const SECOND_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Bgra8Unorm;
+    let pack = SSPack::load(&bytes).unwrap();
+    let atlas_count = pack.required_textures().len();
+    assert!(atlas_count > 0, "the pack asks for no textures — nothing to share");
+
+    // One renderer for the whole "page".
+    let mut renderer = SSRenderer::new(&device);
+
+    let mut first_canvas = scene_for(&device, &queue);
+    let mut first = play(&pack);
+    let one = render(&device, &queue, &mut renderer, &mut first_canvas, &mut [&mut first], 10);
+    assert!(drawn_pixels(&one) > 5_000, "the first canvas drew nothing — the embedded atlas never reached the GPU");
+    assert_eq!(renderer.texture_upload_count(), atlas_count, "the first canvas did not upload exactly the pack's atlases");
+    let after_one = renderer.pipeline_count();
+    assert!(after_one > 0, "the first canvas compiled nothing — the comparison below would be vacuous");
+
+    // A second canvas, in a different colour format, on the same renderer.
+    let mut second_canvas = SSScene::new(&device, &SceneConfig { color_format: SECOND_FORMAT, stencil_format: None });
+    second_canvas.set_viewport(&queue, W as f32, H as f32, false);
+    let mut second = play(&pack);
+    let two = render_to(&device, &queue, &mut renderer, &mut second_canvas, &mut [&mut second], 10, SECOND_FORMAT);
+    assert!(drawn_pixels(&two) > 5_000, "the second canvas drew nothing — a renderer shared across formats is broken");
+
+    // The expensive thing — the atlas — is not paid for twice. Pipelines are, and
+    // must be: they are baked against a colour format (§5.2).
+    assert_eq!(renderer.texture_upload_count(), atlas_count, "the second canvas uploaded the atlas again — the renderer is not shared across targets");
+    assert_eq!(renderer.texture_count(), atlas_count, "the texture map grew for the second canvas");
+    assert!(renderer.pipeline_count() > after_one, "the second format compiled no pipeline of its own, so the two canvases cannot both be drawing correctly");
+
+    // And the first canvas still works afterwards: the second one did not take
+    // the renderer's state with it.
+    let again = render(&device, &queue, &mut renderer, &mut first_canvas, &mut [&mut first], 1);
+    assert!(drawn_pixels(&again) > 5_000, "the first canvas stopped drawing once a second one shared its renderer");
 }
 
 /// SPEC §8.2: `set_texture` borrows a view the supplier owns and builds nothing
