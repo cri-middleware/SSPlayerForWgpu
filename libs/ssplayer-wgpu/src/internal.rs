@@ -80,26 +80,34 @@ pub struct BatchInfo {
     pub alpha: f32,
 }
 
-/// An integration-shader (`ss-*`) draw: resolves to a lazily-built shader
-/// pipeline and binds the part's params at `slot` in the dynamic-offset buffer.
-#[derive(Clone, Copy, Debug)]
-struct ShaderDraw {
-    id_hash: u32,
-    blend_idx: usize,
-    /// Index of this part's 256-byte block in the shader-params buffer.
-    slot: u32,
+/// What distinguishes one render pipeline from another (SPEC §5.2).
+///
+/// wgpu bakes blend and depth/stencil state into the pipeline, so every
+/// combination the frame actually uses needs its own object. They are built on
+/// first use and cached under this key rather than compiled up front: an
+/// animation touching one blend mode pays for one pipeline instead of the whole
+/// 12 x 3 content matrix.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+enum PipelineKey {
+    /// Ordinary content: blend index (into [`BLEND_ORDER`]) x stencil test.
+    Content(usize, StencilTest),
+    /// Mask-write geometry: the stencil op it applies. Colour output is masked
+    /// off, so blend does not vary.
+    Mask(MaskOp),
+    /// Integration shader (`ss-*`, SPEC §6): shader id x blend index. Never
+    /// stencil-tested — shader parts are not masked in v1.
+    Shader(u32, usize),
 }
 
 #[derive(Clone, Debug)]
 struct BatchDrawCall {
-    /// Index into the flat `pipelines` vec (ignored when `shader` is `Some`).
-    pipeline_idx: usize,
+    key: PipelineKey,
     texture_hash: u32,
     index_start: u32,
     index_count: u32,
-    /// `Some` for `ss-*` integration-shader parts (SPEC §6): use the shader
-    /// pipeline for `(id_hash, blend)` and bind group(2) at `slot`.
-    shader: Option<ShaderDraw>,
+    /// Index of this part's block in the shader-params buffer, for
+    /// [`PipelineKey::Shader`] draws — the dynamic offset for bind group(2).
+    shader_slot: Option<u32>,
 }
 
 struct TextureEntry {
@@ -112,20 +120,19 @@ struct TextureEntry {
 /// Borrow model: owns neither the `Device`/`Queue` nor the render target. It
 /// only holds GPU resources (textures, pipelines, vertex/index buffers).
 pub struct SSInternalPlayer {
-    /// Flat pipeline list: content pipelines first (`BLEND_COUNT * content_stride`),
-    /// then the mask-write pipelines (`mask_base..`). See [`Self::content_idx`] /
-    /// [`Self::mask_idx`].
-    pipelines: Vec<wgpu::RenderPipeline>,
-    /// Number of stencil variants per blend mode: 3 (None/Inside/Outside) when
-    /// masking is enabled, else 1.
-    content_stride: usize,
-    /// Flat index where the mask-write pipelines begin.
-    mask_base: usize,
+    /// Every pipeline used so far, built on first use (SPEC §5.2). Eager
+    /// construction compiled 12 blends x 3 stencil variants plus 3 mask writers
+    /// before the first frame, whatever the animation actually needed.
+    pipelines: HashMap<PipelineKey, wgpu::RenderPipeline>,
     /// Whether masking (stencil) is enabled by config.
     stencil_enabled: bool,
-    /// Target formats (kept for lazily building shader pipelines in `end_frame`).
+    /// Target formats the pipelines are baked against.
     color_format: wgpu::TextureFormat,
     stencil_format: Option<wgpu::TextureFormat>,
+
+    /// Inputs the lazy builder needs: the sprite/mask WGSL module and its layout.
+    shader_module: wgpu::ShaderModule,
+    pipeline_layout: wgpu::PipelineLayout,
 
     uniform_buffer: wgpu::Buffer,
     uniform_bind_group: wgpu::BindGroup,
@@ -158,8 +165,6 @@ pub struct SSInternalPlayer {
     ss_pipeline_layout: wgpu::PipelineLayout,
     /// group(2) layout: one dynamic-offset uniform (the per-part `SsParams`).
     ss_params_bind_group_layout: wgpu::BindGroupLayout,
-    /// Lazily-built shader pipelines, keyed by `(id_hash, blend_idx)`.
-    ss_pipelines: HashMap<(u32, usize), wgpu::RenderPipeline>,
     /// Per-frame params blocks (one 256-byte / `SHADER_PARAM_STRIDE_F32`-float
     /// slot per shader draw), uploaded to `ss_params_buffer` in `end_frame`.
     ss_params: Vec<f32>,
@@ -253,13 +258,40 @@ fn parts_color_flags(blend: BlendType) -> (f32, f32, f32) {
     }
 }
 
-/// Stencil test -> offset within a blend's pipeline group (0 when disabled).
-fn stencil_offset(stencil: StencilTest) -> usize {
+/// Stencil comparison a content pipeline uses for a given test (mask doc §2-4).
+fn stencil_compare(stencil: StencilTest) -> wgpu::CompareFunction {
     match stencil {
-        StencilTest::None => 0,
-        StencilTest::Inside => 1,
-        StencilTest::Outside => 2,
+        StencilTest::None => wgpu::CompareFunction::Always,
+        StencilTest::Inside => wgpu::CompareFunction::NotEqual,
+        StencilTest::Outside => wgpu::CompareFunction::Equal,
     }
+}
+
+/// The stencil write a mask writer performs.
+fn stencil_write_op(op: MaskOp) -> wgpu::StencilOperation {
+    match op {
+        MaskOp::Incr => wgpu::StencilOperation::IncrementClamp,
+        MaskOp::Decr => wgpu::StencilOperation::DecrementClamp,
+        MaskOp::Invert => wgpu::StencilOperation::Invert,
+    }
+}
+
+/// Baked stencil face for a compare + pass op (front == back; ref is always 0).
+fn stencil_face(compare: wgpu::CompareFunction, pass_op: wgpu::StencilOperation) -> wgpu::StencilFaceState {
+    wgpu::StencilFaceState { compare, fail_op: wgpu::StencilOperation::Keep, depth_fail_op: wgpu::StencilOperation::Keep, pass_op }
+}
+
+/// Depth/stencil state for a pipeline that only *tests* coverage (content), or
+/// only *writes* it (mask writers, `write_mask` 0xFF). The depth aspect is
+/// inert throughout: never written, always passing (SPEC §6).
+fn depth_stencil_state(format: Option<wgpu::TextureFormat>, compare: wgpu::CompareFunction, pass_op: wgpu::StencilOperation, write_mask: u32) -> Option<wgpu::DepthStencilState> {
+    format.map(|format| wgpu::DepthStencilState {
+        format,
+        depth_write_enabled: Some(false),
+        depth_compare: Some(wgpu::CompareFunction::Always),
+        stencil: wgpu::StencilState { front: stencil_face(compare, pass_op), back: stencil_face(compare, pass_op), read_mask: 0xFF, write_mask },
+        bias: wgpu::DepthBiasState::default(),
+    })
 }
 
 const WGSL_SHADER: &str = r#"
@@ -739,76 +771,10 @@ impl SSInternalPlayer {
 
         let stencil_enabled = config.stencil_format.is_some();
 
-        // Baked stencil face for a given compare + op (front == back; ref is
-        // always 0). Content tests never write (write_mask 0); mask writers
-        // always pass the test (compare Always) and apply their op on pass.
-        let stencil_face = |compare: wgpu::CompareFunction, pass_op: wgpu::StencilOperation| wgpu::StencilFaceState { compare, fail_op: wgpu::StencilOperation::Keep, depth_fail_op: wgpu::StencilOperation::Keep, pass_op };
-
-        // depth_stencil state for content pipelines with a given stencil compare.
-        let content_ds = |compare: wgpu::CompareFunction| {
-            config.stencil_format.map(|format| wgpu::DepthStencilState {
-                format,
-                depth_write_enabled: Some(false),
-                depth_compare: Some(wgpu::CompareFunction::Always),
-                stencil: wgpu::StencilState { front: stencil_face(compare, wgpu::StencilOperation::Keep), back: stencil_face(compare, wgpu::StencilOperation::Keep), read_mask: 0xFF, write_mask: 0x00 },
-                bias: wgpu::DepthBiasState::default(),
-            })
-        };
-
-        let make_pipeline = |label: &str, entry: &str, blend: Option<wgpu::BlendState>, write_mask: wgpu::ColorWrites, depth_stencil: Option<wgpu::DepthStencilState>| {
-            device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
-                label: Some(label),
-                layout: Some(&pipeline_layout),
-                vertex: wgpu::VertexState { module: &shader, entry_point: Some("vs_main"), buffers: &[Vertex::desc()], compilation_options: Default::default() },
-                fragment: Some(wgpu::FragmentState { module: &shader, entry_point: Some(entry), targets: &[Some(wgpu::ColorTargetState { format: config.color_format, blend, write_mask })], compilation_options: Default::default() }),
-                primitive: wgpu::PrimitiveState {
-                    topology: wgpu::PrimitiveTopology::TriangleList,
-                    strip_index_format: None,
-                    front_face: wgpu::FrontFace::Ccw,
-                    cull_mode: None,
-                    polygon_mode: wgpu::PolygonMode::Fill,
-                    unclipped_depth: false,
-                    conservative: false,
-                },
-                depth_stencil,
-                multisample: wgpu::MultisampleState::default(),
-                multiview_mask: None,
-                cache: None,
-            })
-        };
-
-        // --- Content pipelines: blend x stencil test ---
-        // Stencil variants: None (Always), Inside (NotEqual,0), Outside (Equal,0).
-        // When disabled, only the None variant is built (content_stride = 1).
-        let content_stride = if stencil_enabled { 3 } else { 1 };
-        let mut pipelines: Vec<wgpu::RenderPipeline> = Vec::new();
-        for blend in BLEND_ORDER {
-            let name = blend.variant_name().unwrap_or("Blend");
-            let state = blend_state(blend);
-            // Order within a blend group must match `stencil_offset`.
-            pipelines.push(make_pipeline(&format!("Content {name} None"), "fs_main", Some(state), wgpu::ColorWrites::ALL, content_ds(wgpu::CompareFunction::Always)));
-            if stencil_enabled {
-                pipelines.push(make_pipeline(&format!("Content {name} Inside"), "fs_main", Some(state), wgpu::ColorWrites::ALL, content_ds(wgpu::CompareFunction::NotEqual)));
-                pipelines.push(make_pipeline(&format!("Content {name} Outside"), "fs_main", Some(state), wgpu::ColorWrites::ALL, content_ds(wgpu::CompareFunction::Equal)));
-            }
-        }
-
-        // --- Mask-write pipelines: Incr / Decr / Invert (order matches mask_idx) ---
-        let mask_base = pipelines.len();
-        if stencil_enabled {
-            let write_ds = |op: wgpu::StencilOperation| {
-                config.stencil_format.map(|format| wgpu::DepthStencilState {
-                    format,
-                    depth_write_enabled: Some(false),
-                    depth_compare: Some(wgpu::CompareFunction::Always),
-                    stencil: wgpu::StencilState { front: stencil_face(wgpu::CompareFunction::Always, op), back: stencil_face(wgpu::CompareFunction::Always, op), read_mask: 0xFF, write_mask: 0xFF },
-                    bias: wgpu::DepthBiasState::default(),
-                })
-            };
-            pipelines.push(make_pipeline("Mask Write Incr", "fs_mask", None, wgpu::ColorWrites::empty(), write_ds(wgpu::StencilOperation::IncrementClamp)));
-            pipelines.push(make_pipeline("Mask Write Decr", "fs_mask", None, wgpu::ColorWrites::empty(), write_ds(wgpu::StencilOperation::DecrementClamp)));
-            pipelines.push(make_pipeline("Mask Write Invert", "fs_mask", None, wgpu::ColorWrites::empty(), write_ds(wgpu::StencilOperation::Invert)));
-        }
+        // No pipelines are built here: they are compiled on first use and cached
+        // under a `PipelineKey` (SPEC §5.2). Building the 12 x 3 content matrix
+        // plus 3 mask writers up front cost every animation the price of the
+        // whole table, and shows up directly as time-to-first-frame.
 
         // 1x1 white fallback texture (SPEC §8): used when a draw's texture hash
         // is missing and by textureless mask writers.
@@ -830,9 +796,9 @@ impl SSInternalPlayer {
         });
 
         Self {
-            pipelines,
-            content_stride,
-            mask_base,
+            pipelines: HashMap::new(),
+            shader_module: shader,
+            pipeline_layout,
             stencil_enabled,
             color_format: config.color_format,
             stencil_format: config.stencil_format,
@@ -852,7 +818,6 @@ impl SSInternalPlayer {
             ss_shader_module,
             ss_pipeline_layout,
             ss_params_bind_group_layout,
-            ss_pipelines: HashMap::new(),
             ss_params: Vec::new(),
             ss_params_buffer: None,
             ss_params_bind_group: None,
@@ -864,6 +829,13 @@ impl SSInternalPlayer {
         self.stencil_enabled
     }
 
+    /// How many pipelines have been compiled so far (SPEC §5.2). A diagnostic:
+    /// it counts what the animation actually asked for, against the 39 that
+    /// eager construction used to build before the first frame.
+    pub fn pipeline_count(&self) -> usize {
+        self.pipelines.len()
+    }
+
     /// The config this renderer was built from. Retained so a lost device can be
     /// replaced by a renderer targeting the same formats (SPEC §14) without the
     /// caller having to remember them.
@@ -871,20 +843,104 @@ impl SSInternalPlayer {
         RendererConfig { color_format: self.color_format, stencil_format: self.stencil_format }
     }
 
-    /// Flat index of a content pipeline for `(blend, stencil)`.
-    fn content_idx(&self, blend: BlendType, stencil: StencilTest) -> usize {
-        let off = if self.stencil_enabled { stencil_offset(stencil) } else { 0 };
-        blend_index(blend) * self.content_stride + off
+    /// Cache key for a content draw. Without a stencil buffer every draw uses the
+    /// untested variant, so the test is normalised away rather than filling the
+    /// cache with three identical pipelines.
+    fn content_key(&self, blend: BlendType, stencil: StencilTest) -> PipelineKey {
+        let stencil = if self.stencil_enabled { stencil } else { StencilTest::None };
+        PipelineKey::Content(blend_index(blend), stencil)
     }
 
-    /// Flat index of a mask-write pipeline for `op`.
-    fn mask_idx(&self, op: MaskOp) -> usize {
-        let off = match op {
-            MaskOp::Incr => 0,
-            MaskOp::Decr => 1,
-            MaskOp::Invert => 2,
+    /// Compile `key`'s pipeline if this is the first frame that needs it. A
+    /// [`PipelineKey::Shader`] whose id is not a built-in `ss-*` shader stays
+    /// absent; [`Self::draw`] skips draws whose pipeline is missing.
+    fn ensure_pipeline(&mut self, device: &wgpu::Device, key: PipelineKey) {
+        if self.pipelines.contains_key(&key) {
+            return;
+        }
+        if let Some(pipeline) = self.build_pipeline(device, key) {
+            self.pipelines.insert(key, pipeline);
+        }
+    }
+
+    /// Build one pipeline. Everything that varies between them — module, fragment
+    /// entry, blend, colour write mask, depth/stencil state — is chosen here; the
+    /// vertex layout and primitive state are shared by all of them.
+    fn build_pipeline(&self, device: &wgpu::Device, key: PipelineKey) -> Option<wgpu::RenderPipeline> {
+        struct Recipe<'a> {
+            label: String,
+            module: &'a wgpu::ShaderModule,
+            layout: &'a wgpu::PipelineLayout,
+            entry: &'a str,
+            blend: Option<wgpu::BlendState>,
+            write_mask: wgpu::ColorWrites,
+            depth_stencil: Option<wgpu::DepthStencilState>,
+        }
+        let blend_of = |idx: usize| BLEND_ORDER[idx.min(BLEND_ORDER.len() - 1)];
+
+        let recipe = match key {
+            PipelineKey::Content(blend_idx, stencil) => {
+                let blend = blend_of(blend_idx);
+                Recipe {
+                    label: format!("Content {} {stencil:?}", blend.variant_name().unwrap_or("Blend")),
+                    module: &self.shader_module,
+                    layout: &self.pipeline_layout,
+                    entry: "fs_main",
+                    blend: Some(blend_state(blend)),
+                    write_mask: wgpu::ColorWrites::ALL,
+                    // Content tests coverage; it never writes it.
+                    depth_stencil: depth_stencil_state(self.stencil_format, stencil_compare(stencil), wgpu::StencilOperation::Keep, 0x00),
+                }
+            }
+            PipelineKey::Mask(op) => Recipe {
+                label: format!("Mask Write {op:?}"),
+                module: &self.shader_module,
+                layout: &self.pipeline_layout,
+                entry: "fs_mask",
+                blend: None,
+                // Coverage only — the fragment's colour is thrown away.
+                write_mask: wgpu::ColorWrites::empty(),
+                depth_stencil: depth_stencil_state(self.stencil_format, wgpu::CompareFunction::Always, stencil_write_op(op), 0xFF),
+            },
+            PipelineKey::Shader(id_hash, blend_idx) => {
+                let entry = ss_shader_entry(id_hash)?;
+                Recipe {
+                    label: format!("SS Shader {entry}"),
+                    module: &self.ss_shader_module,
+                    layout: &self.ss_pipeline_layout,
+                    entry,
+                    blend: Some(blend_state(blend_of(blend_idx))),
+                    write_mask: wgpu::ColorWrites::ALL,
+                    // Shader parts are never masked in v1, so the stencil is inert.
+                    depth_stencil: depth_stencil_state(self.stencil_format, wgpu::CompareFunction::Always, wgpu::StencilOperation::Keep, 0x00),
+                }
+            }
         };
-        self.mask_base + off
+
+        Some(device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+            label: Some(&recipe.label),
+            layout: Some(recipe.layout),
+            vertex: wgpu::VertexState { module: recipe.module, entry_point: Some("vs_main"), buffers: &[Vertex::desc()], compilation_options: Default::default() },
+            fragment: Some(wgpu::FragmentState {
+                module: recipe.module,
+                entry_point: Some(recipe.entry),
+                targets: &[Some(wgpu::ColorTargetState { format: self.color_format, blend: recipe.blend, write_mask: recipe.write_mask })],
+                compilation_options: Default::default(),
+            }),
+            primitive: wgpu::PrimitiveState {
+                topology: wgpu::PrimitiveTopology::TriangleList,
+                strip_index_format: None,
+                front_face: wgpu::FrontFace::Ccw,
+                cull_mode: None,
+                polygon_mode: wgpu::PolygonMode::Fill,
+                unclipped_depth: false,
+                conservative: false,
+            },
+            depth_stencil: recipe.depth_stencil,
+            multisample: wgpu::MultisampleState::default(),
+            multiview_mask: None,
+            cache: None,
+        }))
     }
 
     /// Update the projection matrix to the target's pixel dimensions.
@@ -965,7 +1021,7 @@ impl SSInternalPlayer {
             return;
         }
 
-        let pipeline_idx = self.content_idx(blend_type, stencil);
+        let key = self.content_key(blend_type, stencil);
         let tex_size = self.textures.get(&texture_hash).map(|t| t.size);
         let index_start = self.indices.len() as u32;
 
@@ -1024,11 +1080,16 @@ impl SSInternalPlayer {
                     if call_end == call_start {
                         continue;
                     }
-                    let shader = has_shader(rank).map(|attr| {
-                        let slot = self.push_shader_params(&attr, frame, part_idx, tex_size);
-                        ShaderDraw { id_hash: attr.id_hash(), blend_idx: blend_index(blend_type), slot }
-                    });
-                    self.draw_calls.push(BatchDrawCall { pipeline_idx, texture_hash, index_start: call_start, index_count: call_end - call_start, shader });
+                    // A shader part gets its own pipeline and params slot; a plain
+                    // part sharing the batch falls back to the content pipeline.
+                    let (call_key, shader_slot) = match has_shader(rank) {
+                        Some(attr) => {
+                            let slot = self.push_shader_params(&attr, frame, part_idx, tex_size);
+                            (PipelineKey::Shader(attr.id_hash(), blend_index(blend_type)), Some(slot))
+                        }
+                        None => (key, None),
+                    };
+                    self.draw_calls.push(BatchDrawCall { key: call_key, texture_hash, index_start: call_start, index_count: call_end - call_start, shader_slot });
                 }
                 if shader_dispatch {
                     // Per-part draw calls already emitted; skip the aggregate push.
@@ -1099,7 +1160,7 @@ impl SSInternalPlayer {
 
         let index_end = self.indices.len() as u32;
         if index_end > index_start {
-            self.draw_calls.push(BatchDrawCall { pipeline_idx, texture_hash, index_start, index_count: index_end - index_start, shader: None });
+            self.draw_calls.push(BatchDrawCall { key, texture_hash, index_start, index_count: index_end - index_start, shader_slot: None });
         }
     }
 
@@ -1129,47 +1190,6 @@ impl SSInternalPlayer {
         block[13] = py;
         self.ss_params.extend_from_slice(&block);
         slot
-    }
-
-    /// Lazily build (and cache) the shader pipeline for `(id_hash, blend_idx)`.
-    /// No-op if `id_hash` is not a built-in `ss-*` shader. Stencil-test variants
-    /// are unnecessary: shader parts are never masked (v1), so the pipeline uses
-    /// a keep/Always depth-stencil state when the target has one.
-    fn ensure_shader_pipeline(&mut self, device: &wgpu::Device, id_hash: u32, blend_idx: usize) {
-        if self.ss_pipelines.contains_key(&(id_hash, blend_idx)) {
-            return;
-        }
-        let Some(entry) = ss_shader_entry(id_hash) else {
-            return;
-        };
-        let blend = blend_state(BLEND_ORDER[blend_idx.min(BLEND_ORDER.len() - 1)]);
-        let depth_stencil =
-            self.stencil_format.map(|format| wgpu::DepthStencilState { format, depth_write_enabled: Some(false), depth_compare: Some(wgpu::CompareFunction::Always), stencil: wgpu::StencilState::default(), bias: wgpu::DepthBiasState::default() });
-        let pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
-            label: Some("SpriteStudio SS Pipeline"),
-            layout: Some(&self.ss_pipeline_layout),
-            vertex: wgpu::VertexState { module: &self.ss_shader_module, entry_point: Some("vs_main"), buffers: &[Vertex::desc()], compilation_options: Default::default() },
-            fragment: Some(wgpu::FragmentState {
-                module: &self.ss_shader_module,
-                entry_point: Some(entry),
-                targets: &[Some(wgpu::ColorTargetState { format: self.color_format, blend: Some(blend), write_mask: wgpu::ColorWrites::ALL })],
-                compilation_options: Default::default(),
-            }),
-            primitive: wgpu::PrimitiveState {
-                topology: wgpu::PrimitiveTopology::TriangleList,
-                strip_index_format: None,
-                front_face: wgpu::FrontFace::Ccw,
-                cull_mode: None,
-                polygon_mode: wgpu::PolygonMode::Fill,
-                unclipped_depth: false,
-                conservative: false,
-            },
-            depth_stencil,
-            multisample: wgpu::MultisampleState::default(),
-            multiview_mask: None,
-            cache: None,
-        });
-        self.ss_pipelines.insert((id_hash, blend_idx), pipeline);
     }
 
     /// Append one mask writer's geometry into the frame accumulation, routed to
@@ -1206,7 +1226,7 @@ impl SSInternalPlayer {
 
         let index_end = self.indices.len() as u32;
         if index_end > index_start {
-            self.draw_calls.push(BatchDrawCall { pipeline_idx: self.mask_idx(op), texture_hash: writer.texture_hash, index_start, index_count: index_end - index_start, shader: None });
+            self.draw_calls.push(BatchDrawCall { key: PipelineKey::Mask(op), texture_hash: writer.texture_hash, index_start, index_count: index_end - index_start, shader_slot: None });
         }
     }
 
@@ -1390,7 +1410,7 @@ impl SSInternalPlayer {
             let particle_offset = cmd.particle_offset() as usize;
             // 0 = Mix pipeline, 1 = Add pipeline (per-command, not per-batch).
             let blend = if cmd.blend() == 1 { BlendType::Add } else { BlendType::Mix };
-            let pipeline_idx = self.content_idx(blend, stencil);
+            let key = self.content_key(blend, stencil);
 
             let index_start = self.indices.len() as u32;
             let base_vert = self.vertices.len() as u32;
@@ -1421,7 +1441,7 @@ impl SSInternalPlayer {
 
             let index_end = self.indices.len() as u32;
             if index_end > index_start {
-                self.draw_calls.push(BatchDrawCall { pipeline_idx, texture_hash, index_start, index_count: index_end - index_start, shader: None });
+                self.draw_calls.push(BatchDrawCall { key, texture_hash, index_start, index_count: index_end - index_start, shader_slot: None });
             }
         }
     }
@@ -1455,15 +1475,18 @@ impl SSInternalPlayer {
             queue.write_buffer(buffer, 0, bytemuck::cast_slice(&self.indices));
         }
 
-        // Integration shaders (SPEC §6): build any missing (id_hash, blend)
-        // pipeline lazily, then upload this frame's per-part params. Nothing here
-        // runs for shader-free frames (`ss_params` stays empty).
-        if !self.ss_params.is_empty() {
-            let needed: Vec<(u32, usize)> = self.draw_calls.iter().filter_map(|c| c.shader.map(|s| (s.id_hash, s.blend_idx))).collect();
-            for (id_hash, blend_idx) in needed {
-                self.ensure_shader_pipeline(device, id_hash, blend_idx);
-            }
+        // Compile whatever this frame draws with and has not drawn with before
+        // (SPEC §5.2). After the first few frames every key is a cache hit, so
+        // this is a walk over the draw list and nothing more. Indexed rather
+        // than iterated because `ensure_pipeline` needs `&mut self`.
+        for i in 0..self.draw_calls.len() {
+            let key = self.draw_calls[i].key;
+            self.ensure_pipeline(device, key);
+        }
 
+        // Integration shaders (SPEC §6): upload this frame's per-part params.
+        // Nothing here runs for shader-free frames (`ss_params` stays empty).
+        if !self.ss_params.is_empty() {
             let bytes: &[u8] = bytemuck::cast_slice(&self.ss_params);
             let needed_size = bytes.len() as u64;
             let current = self.ss_params_buffer.as_ref().map(|b| b.size()).unwrap_or(0);
@@ -1505,31 +1528,34 @@ impl SSInternalPlayer {
             rpass.set_stencil_reference(0);
         }
 
+        let mut issued = 0usize;
         for call in &self.draw_calls {
             // Missing texture -> 1x1 white fallback (SPEC §8).
             let texture = self.textures.get(&call.texture_hash).map(|e| &e.bind_group).unwrap_or(&self.white_bind_group);
 
-            match call.shader {
-                // Integration-shader part (SPEC §6): shader pipeline + group(2)
-                // params at the part's dynamic offset. Skip if the pipeline failed
-                // to build (unknown id_hash filtered earlier, so normally present).
-                Some(sd) => {
-                    let (Some(pipeline), Some(params_bg)) = (self.ss_pipelines.get(&(sd.id_hash, sd.blend_idx)), self.ss_params_bind_group.as_ref()) else {
-                        continue;
-                    };
-                    rpass.set_pipeline(pipeline);
-                    rpass.set_bind_group(1, texture, &[]);
-                    rpass.set_bind_group(2, params_bg, &[sd.slot * SHADER_PARAM_STRIDE as u32]);
-                }
-                None => {
-                    rpass.set_pipeline(&self.pipelines[call.pipeline_idx]);
-                    rpass.set_bind_group(1, texture, &[]);
-                }
+            // `end_frame` compiled every key this frame uses, so a miss here means
+            // the key was an `ss-*` shader id `build_pipeline` declined to build.
+            let (Some(pipeline), params_bg) = (self.pipelines.get(&call.key), self.ss_params_bind_group.as_ref()) else {
+                continue;
+            };
+            // Integration-shader part (SPEC §6): group(2) carries the part's
+            // params at its dynamic offset.
+            let params = match (call.shader_slot, params_bg) {
+                (Some(slot), Some(bg)) => Some((slot, bg)),
+                (Some(_), None) => continue, // params buffer missing — cannot draw
+                (None, _) => None,
+            };
+
+            rpass.set_pipeline(pipeline);
+            rpass.set_bind_group(1, texture, &[]);
+            if let Some((slot, bg)) = params {
+                rpass.set_bind_group(2, bg, &[slot * SHADER_PARAM_STRIDE as u32]);
             }
             rpass.draw_indexed(call.index_start..call.index_start + call.index_count, 0, 0..1);
+            issued += 1;
         }
 
-        self.draw_calls.len()
+        issued
     }
 
     fn create_texture_bind_group(&self, device: &wgpu::Device, view: &wgpu::TextureView) -> wgpu::BindGroup {

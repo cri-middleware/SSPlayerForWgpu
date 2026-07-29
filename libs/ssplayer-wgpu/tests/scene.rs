@@ -320,6 +320,33 @@ fn invisible_player_draws_nothing() {
     assert!(drawn_pixels(&render_one_pass(&device, &queue, &[&player])) > 0, "the player did not come back when made visible again");
 }
 
+/// SPEC §5.2: pipelines are compiled on first use, not up front. Eager
+/// construction built the whole 12 blends x 3 stencil variants plus 3 mask
+/// writers — 39 objects — before the first frame, whatever the animation needed.
+/// That cost is paid per player today and, once several players share one
+/// `SSRenderer` (P7-3), would have been paid per device.
+#[test]
+fn pipelines_are_built_on_demand() {
+    let Some((device, queue)) = gpu() else {
+        eprintln!("no GPU adapter available, skipping headless render test");
+        return;
+    };
+
+    let mut player = make_player(&device, &queue, "Basic", true);
+    assert_eq!(player.pipeline_count(), 0, "constructing a player compiled pipelines before it had anything to draw");
+
+    advance(&mut player, &device, &queue, 10);
+    let after = player.pipeline_count();
+    eprintln!("Basic.ssab compiled {after} pipelines (eager construction built 39)");
+    assert!(after > 0, "nothing was compiled — the player drew nothing, so this test proves nothing");
+    assert!(after < 39, "compiled {after} pipelines; on-demand building is supposed to stay well under the eager 39");
+
+    // Re-drawing the same frame must not compile anything new. A key that varies
+    // between two identical frames would grow the cache without bound.
+    rebuild(&mut player, &device, &queue);
+    assert_eq!(player.pipeline_count(), after, "rebuilding the same frame compiled more pipelines — the cache key is not stable");
+}
+
 /// `set_alpha` fades the whole player. The target is cleared to opaque black and
 /// the blend table is premultiplied throughout, so alpha 0 leaves the backdrop
 /// untouched under every blend mode and a half fade lands strictly in between.

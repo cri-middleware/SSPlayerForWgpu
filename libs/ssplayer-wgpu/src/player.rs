@@ -421,6 +421,13 @@ impl SSPlayer {
         self.internal.draw(pass)
     }
 
+    /// Render pipelines compiled so far (SPEC §5.2). They are built on first use,
+    /// so an animation touching one blend mode holds one rather than the whole
+    /// blend x stencil matrix. A diagnostic, like [`SSPlayer::instance_node_count`].
+    pub fn pipeline_count(&self) -> usize {
+        self.internal.pipeline_count()
+    }
+
     /// Total number of instance child nodes in the current tree. A non-zero
     /// count confirms external references were resolved and the tree was built.
     pub fn instance_node_count(&self) -> usize {

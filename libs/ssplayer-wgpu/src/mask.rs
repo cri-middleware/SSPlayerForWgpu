@@ -23,7 +23,9 @@ pub const MAX_MASK_WRITERS: usize = 24;
 
 /// Stencil test mode baked into a content pipeline. Selected per masked part
 /// from the target's `visible_inside_mask` polarity (mask doc §2-4).
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+///
+/// Hashable because it is half of the renderer's pipeline cache key (SPEC §5.2).
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum StencilTest {
     /// Not masked — compare `Always` (draw everywhere, ignore stencil).
     None,
@@ -36,7 +38,9 @@ pub enum StencilTest {
 /// Stencil write operation, resolved by the caller from a writer's op and
 /// whether it is being added or removed from coverage (mask doc §2-3). Increment
 /// pairs with decrement (its inverse); invert is its own inverse.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+///
+/// Hashable because it keys a mask-write pipeline in the renderer cache.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum MaskOp {
     /// `stencil + 1` (increment, clamped).
     Incr,
