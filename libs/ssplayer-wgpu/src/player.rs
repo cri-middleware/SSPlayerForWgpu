@@ -11,8 +11,9 @@
 //! resolved by pack name.
 
 use crate::frame::FrameView;
-use crate::internal::{BatchInfo, Retention, SSRenderer, SSScene};
 use crate::mask::{GeomKind, MaskOp, MaskWriter, PartMaskFlags, StencilTest, plan_writers};
+use crate::renderer::{Retention, SSRenderer};
+use crate::scene::{BatchInfo, SSScene};
 use ssab::ssab::ss::format::{PartType, root_as_ss_anime_binary_unchecked};
 use ssruntime::error::SSRuntimeError;
 use ssruntime::runtime::framedata::ss::runtime::{DrawBatchKind, root_as_frame_data_unchecked};
@@ -223,7 +224,7 @@ impl SSPlayer {
     /// into the root transform of its tree.
     ///
     /// This is the per-player half of SPEC §5.4 — the projection belongs to the
-    /// render target ([`SSPlayer::set_viewport`]), the placement to the player.
+    /// render target ([`SSScene::set_viewport`]), the placement to the player.
     /// It costs nothing extra to draw: the tree walk already composes an
     /// arbitrary parent matrix for every instance child, so a non-identity root
     /// simply rides along.
@@ -256,8 +257,8 @@ impl SSPlayer {
         self.order
     }
 
-    /// Skip this player entirely when false: [`SSPlayer::update`] advances no
-    /// timeline and produces no geometry, so [`SSPlayer::draw`] records nothing.
+    /// Skip this player entirely when false: `SSScene::update` advances no
+    /// timeline and produces no geometry, so `SSScene::draw` records nothing.
     ///
     /// Distinct from `set_alpha(0.0)`, which is an author-facing fade that keeps
     /// the timeline running. This one is for a host that knows the player cannot

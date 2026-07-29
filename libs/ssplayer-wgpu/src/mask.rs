@@ -135,7 +135,7 @@ pub struct MaskWriter {
 /// Plan the frame's stencil writers by walking `draw_batches`, mirroring the
 /// WebGL `MaskPlanner.plan`. `mask_flags` is indexed by part index (static
 /// ssab data). Returns writers in ascending rank order, capped at
-/// [`MAX_MASK_WRITERS`].
+/// `MAX_MASK_WRITERS` (this module's cap on writers per frame).
 ///
 /// A writer's `texture_hash` comes from the *batch* it belongs to (like WebGL):
 /// pure `Mask` batches carry `texture_hash == 0` (→ no cutout, whole geometry),

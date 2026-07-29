@@ -169,13 +169,11 @@ ssplayer-wgpu/
 │   │   └── src/
 │   │       ├── lib.rs             ✅ 層の公開（SSRenderer / SSScene / SSPlayer が主 API）
 │   │       ├── frame.rs           ✅ FrameView … ランタイム所有データへの借用（§1.1）
-│   │       ├── renderer.rs        ◻ P7-4: 層2a SSRenderer の置き場。**型は 7-3 で実装済**
-│   │       │                         （現状 internal.rs 内）。ファイル分割は scene.rs と同時
-│   │       ├── scene.rs           ◻ P7: 層2b SSScene（ターゲットスコープ。投影 ＋ 頂点アリーナ
-│   │       │                         ＋ draw_call ＋ ステンシル管理 ＋ order 合成）§9.2
+│   │       ├── renderer.rs        ✅ 層2a SSRenderer（device スコープ。pipeline 遅延生成 ＋
+│   │       │                         layout/sampler/白 ＋ テクスチャ ＋ WGSL・頂点形式）§9.1
+│   │       ├── scene.rs           ✅ 層2b SSScene（ターゲットスコープ。投影 ＋ 頂点アリーナ ＋
+│   │       │                         draw_call ＋ order 昇順で N プレイヤーを1フレームに）§9.2
 │   │       ├── pack.rs            ◻ P7: SSPack（.ssab の共有単位。★CPU のみ・GPU 非所有）§8.2
-│   │       ├── internal.rs        ✅ 7-3 で `SSRenderer`(device) と `SSInternalPlayer`(ターゲット)
-│   │       │                         の2型に分割済。7-4 で2ファイルへ引っ越す
 │   │       ├── player.rs          ✅ 層3 SSPlayer（操作。再生木 ＋ transform/order/visible）
 │   │       │                         ★P7 以降 wgpu 型のフィールドを持たない（§1.2）
 │   │       ├── mask.rs            ✅ MaskPlanner（§6）
@@ -300,7 +298,7 @@ FlatBuffers 側から読む: `draw_order`（`[ushort]` parts インデックス�
 ### 4.3 BlendType（全12値）
 
 `Mix, Mul, Add, Sub, Mulalpha, Screen, Exclusion, Invert, Mul2, Div2, Screen2, Overlay2`。
-**✅ 全12種を起動時に事前生成**（`internal.rs` `BLEND_ORDER` / `blend_state`、premul 係数）。GPU ネイティブ等価のない `Div2/Overlay2` は Mix、`Mulalpha/Mul2` は Mul、`Screen2` は Screen へフォールバック（ssplayer-pixi 準拠、要検証分は SS6PlayerForUnity と照合予定）。stencil 有効時は各ブレンド × 3（None/Inside/Outside）。
+**✅ 全12種に対応（P7-3 以降は使ったものだけ遅延生成）**（`renderer.rs` `BLEND_ORDER` / `blend_state`、premul 係数）。GPU ネイティブ等価のない `Div2/Overlay2` は Mix、`Mulalpha/Mul2` は Mul、`Screen2` は Screen へフォールバック（ssplayer-pixi 準拠、要検証分は SS6PlayerForUnity と照合予定）。stencil 有効時は各ブレンド × 3（None/Inside/Outside）。
 
 ---
 
@@ -355,7 +353,7 @@ Normal パーツは builder が index を出さないので、5頂点（TL,TR,BL
 
 alpha は全モード `src=One, dst=OneMinusSrcAlpha`（premul 前提）。**✅ 実装済**（`blend_state`）。**premul 厳密化**: テクスチャは `upload_texture` で CPU premultiply（WebGL の `UNPACK_PREMULTIPLY_ALPHA_WEBGL` 相当）、シェーダは逆premul→カラー演算→再premul、ブレンド係数も premul の三位一体。既存フィクスチャ（Mask/Shape）のピクセル数は P2 前後で不変を確認（premul は完全不透明/フラット色では往復ロスレス）。
 
-### 5.3 カラーブレンド WGSL（WebGL の `PartsColorProgram` を直訳）— ✅ 実装済（`internal.rs` `fs_main`）
+### 5.3 カラーブレンド WGSL（WebGL の `PartsColorProgram` を直訳）— ✅ 実装済（`renderer.rs` `fs_main`）
 
 テクスチャは premul 済みなので**逆premul→カラー演算→再premul→階層α畳み込み**：
 
@@ -410,7 +408,7 @@ ssruntime は `world_matrices` / `local_vertices` / `local_uvs` / `mesh_*` を**
 
 ---
 
-## §6 マスク（ステンシル）✅ 実装済（`libs/ssplayer-wgpu/src/mask.rs` ＋ `internal.rs`/`player.rs`）
+## §6 マスク（ステンシル）✅ 実装済（`libs/ssplayer-wgpu/src/mask.rs` ＋ `scene.rs`/`player.rs`）
 
 - **`MaskPlanner`（WebGL 版 core・エンジン非依存）の rank 昇順スコープ replay ロジックを Rust に移植**（`libs/ssplayer-wgpu/src/mask.rs`：`plan_writers`/`MaskWriter`/`PartMaskFlags`/`StencilTest`/`MaskOp`）。ライタごとに rank / OP(INCR|INVERT) / cutout閾値 / clipping フラグを持つ。**ライタの texture は所属 DrawBatch から取る**（pure Mask batch は `tex=0`→閾値 -1＝カットアウト無しで全ジオメトリ、clipping は content の実 texture）。
 - **wgpu では stencil op もパイプラインに焼く**：write 用（IncrementClamp/DecrementClamp/Invert）と test 用（NotEqual/Equal, `stencil write_mask=0`）で別パイプライン。ステンシル ref は常に 0（ops/compare をパイプラインに焼くため動的変更不要）。content パイプラインは `blend×stencil_test(None/Inside/Outside)` のマトリクス、カットアウト閾値は mask-write 頂点の `color[0]` に載せ `fs_mask` が discard。
@@ -461,7 +459,7 @@ Godot / Unity のネイティブプレイヤー実績と C-API 契約から、�
 - `EffectDrawPlan`（`root_as_effect_draw_plan_unchecked`）: `commands`（`cellmap_hash`/`quad_count`/`particle_offset`/`blend` 0=Mix 1=Add）、`vert_stride`、`verts`/`uvs`/`colors`/`indices`。スライス式（`po=particle_offset`）: verts `[po*4*stride..(po+qc)*4*stride]` / uvs `[po*4*2..]` / colors `[po*4*4..]` / indices `[po*6..]`（**quad-local 0基点、rebase 不要**）。
 - **★エフェクト UV は正規化済み(0..1)**: スプライト/メッシュの pixel UV と違い、**tex_size で割ってはいけない**（probe で確認・当初バグを修正）。colors も正規化。
 - verts は **slot-relative** → エフェクトパーツの world 行列を transform 合成（`mat4_mul(transform, effectPartWorld)`）。
-- **1 command = 1 draw call**（`cmd.blend` でパイプライン切替、`cmd.cellmap_hash` でテクスチャ）。エフェクトは PartsColor を持たず、plan の色が既存 tex*color シェーダを変調するので varg 不要。実装: `libs/ssplayer-wgpu/src/internal.rs::append_effect`。
+- **1 command = 1 draw call**（`cmd.blend` でパイプライン切替、`cmd.cellmap_hash` でテクスチャ）。エフェクトは PartsColor を持たず、plan の色が既存 tex*color シェーダを変調するので varg 不要。実装: `libs/ssplayer-wgpu/src/scene.rs::append_effect`。
 
 ---
 
@@ -550,7 +548,7 @@ scene.update(&mut renderer, &device, &queue, dt, &mut players);
 }
 ```
 
-### 9.1 SSRenderer（層2a・device スコープ）✅ P7-3 実装済（現状 `internal.rs`、7-4 で `renderer.rs` へ）
+### 9.1 SSRenderer（層2a・device スコープ）✅ 実装済（`libs/ssplayer-wgpu/src/renderer.rs`）
 
 **device に1個**。フォーマット非依存で、pipeline は使われた組合せだけ遅延生成する（§5.2）。
 
@@ -588,7 +586,7 @@ pub enum Retention {
 - パイプラインキャッシュのキーは `(blend, stencil_test, color_format, stencil_format)`。フォーマットをキーに入れることで、**フォーマットの違う複数ターゲットが1つのレンダラを共有できる**。
 - 旧 `SSInternalPlayer` の「`new()` で作られ以後不変」な部分がここに来る。
 
-### 9.2 SSScene（層2b・描画ターゲットスコープ）✅ P7-4 実装済（現状 `internal.rs`、ファイル分割は残タスク）
+### 9.2 SSScene（層2b・描画ターゲットスコープ）✅ 実装済（`libs/ssplayer-wgpu/src/scene.rs`）
 
 **描画ターゲット1枚に1個**。投影・フレーム頂点アリーナ・draw_call 列・ステンシル管理を持ち、**order 昇順で N 体を1 pass にまとめる**。
 
@@ -780,7 +778,7 @@ const char*  ss_last_error(void);                             // スレッドロ
 | 7-1 ✅ **実装済** | ステンシル完全巻き戻し（不変条件）。`player.rs` の `unwind_masks` | §6 | 単独で入った |
 | 7-2 ✅ **実装済** | `set_transform` / `reset_transform` / `set_order` / `set_visible` / `set_alpha`。`order` は保持のみ（消費するのは 7-4 の `SSScene`）。`tint` は §5.5 後に回す——PartsColor の Mix 式より後段に掛ける必要があり、頂点色への畳み込みでは表現できない | §5.4 / §9.3 | 単独で入った |
 | 7-3 ✅ **実装済** | パイプライン遅延生成（39本 eager → 使ったぶんだけ）＋ `SSRenderer` 分離。ホストが所有し `update`/`draw` で貸す。テクスチャ・pipeline・layout・sampler・白フォールバックが device 単位の共有に。**ファイルはまだ `internal.rs`**——`renderer.rs` / `scene.rs` への分割は 7-4 と同時に1回で行う（2度のファイル移動を避けるため） | §5.2 / §9.1 | 遅延生成は単独で先行 |
-| 7-4 ✅ **実装済** | `SSScene`（旧 `SSInternalPlayer` を改名）。1 シーンが N プレイヤーを `order` 昇順で1フレームに積む。`SSPlayer` から **GPU 型のフィールドが完全に消えた**（`new()` は引数なし）。投影・アリーナ・復帰はシーン側へ。◻ 残: ファイル分割（`renderer.rs` / `scene.rs`） | §9.2 | 7-3 の後 |
+| 7-4 ✅ **実装済** | `SSScene`（旧 `SSInternalPlayer` を改名）。1 シーンが N プレイヤーを `order` 昇順で1フレームに積む。`SSPlayer` から **GPU 型のフィールドが完全に消えた**（`new()` は引数なし）。投影・アリーナ・復帰はシーン側へ。`internal.rs` を `renderer.rs` / `scene.rs` へ分割済 | §9.2 | 7-3 の後 |
 | 7-5 | `SSPack` ＋ `set_texture` 借用チャネル | §8.2 | 7-3 の後 |
 | 7-6 | SoA パススルー（GPU 頂点展開） | §5.5 | 7-4 の後 |
 | 7-7 | C-API を `ss_scene_*` + `ss_player_*` へ | §11 | 7-4 の後 |

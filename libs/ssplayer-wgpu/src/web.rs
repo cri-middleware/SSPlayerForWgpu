@@ -9,8 +9,9 @@
 //! Embedded ssab (SPEC §8.1) is the natural web form: the atlas PNGs ride inside
 //! the `.ssab`, so a single fetched file renders with no host texture supply.
 
-use crate::internal::{SSRenderer, SSScene, SceneConfig};
 use crate::player::SSPlayer;
+use crate::renderer::SSRenderer;
+use crate::scene::{SSScene, SceneConfig};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use wasm_bindgen::prelude::*;

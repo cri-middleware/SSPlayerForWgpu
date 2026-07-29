@@ -9,7 +9,7 @@
 //! The rendering layer is split by how long its resources stay useful (SPEC
 //! §1.2): [`SSRenderer`] holds what belongs to the **device** — pipelines, bind
 //! group layouts, the sampler, the atlas textures — and the host owns exactly
-//! one, lending it like `Device` and `Queue`. [`SSScene`] holds what
+//! one, lending it like `Device` and `Queue`. `SSScene` holds what
 //! belongs to one **render target**: the projection and the frame's geometry.
 
 /// The C-ABI face (`ffi` feature): a thin translation layer whose `ss_player_*`
@@ -22,15 +22,17 @@ mod frame;
 /// Rust callers that have a raw window handle rather than a winit `Window`.
 #[cfg(feature = "ffi")]
 pub mod host;
-mod internal;
 mod mask;
 mod player;
+mod renderer;
+mod scene;
 #[cfg(feature = "web")]
 mod web;
 
 pub use frame::FrameView;
-pub use internal::{BatchInfo, IDENTITY_TRANSFORM, Retention, SSRenderer, SSScene, SceneConfig, Vertex};
 pub use mask::{GeomKind, MaskOp, MaskWriter, PartMaskFlags, StencilTest, plan_writers};
 pub use player::SSPlayer;
+pub use renderer::{Retention, SSRenderer, Vertex};
+pub use scene::{BatchInfo, IDENTITY_TRANSFORM, SSScene, SceneConfig};
 #[cfg(feature = "web")]
 pub use web::SsPlayerWeb;

@@ -9,8 +9,9 @@
 //! It is plain Rust, so a Rust host that only has a window handle (rather than a
 //! winit `Window`) can use it directly instead of assembling wgpu itself.
 
-use crate::internal::{Retention, SSRenderer, SSScene, SceneConfig};
 use crate::player::SSPlayer;
+use crate::renderer::{Retention, SSRenderer};
+use crate::scene::{SSScene, SceneConfig};
 
 /// Depth/stencil format allocated when masking is enabled. Matches the native
 /// viewer and the web host; the depth aspect is unused (SPEC §6).
