@@ -857,6 +857,13 @@ impl SSInternalPlayer {
         self.stencil_enabled
     }
 
+    /// The config this renderer was built from. Retained so a lost device can be
+    /// replaced by a renderer targeting the same formats (SPEC §14) without the
+    /// caller having to remember them.
+    pub fn config(&self) -> RendererConfig {
+        RendererConfig { color_format: self.color_format, stencil_format: self.stencil_format }
+    }
+
     /// Flat index of a content pipeline for `(blend, stencil)`.
     fn content_idx(&self, blend: BlendType, stencil: StencilTest) -> usize {
         let off = if self.stencil_enabled { stencil_offset(stencil) } else { 0 };

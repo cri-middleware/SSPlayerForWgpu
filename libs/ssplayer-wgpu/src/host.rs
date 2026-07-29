@@ -97,7 +97,7 @@ impl NativeHost {
         let player = SSPlayer::new(&device, &SSPlayerConfig { color_format: format, stencil_format: config.enable_mask.then_some(STENCIL_FORMAT) });
 
         let c = config.clear_color;
-        let host = Self { player, surface, device, queue, config: surface_config, stencil_view, clear_color: wgpu::Color { r: c[0] as f64, g: c[1] as f64, b: c[2] as f64, a: c[3] as f64 }, y_down: config.y_down, _instance: instance };
+        let mut host = Self { player, surface, device, queue, config: surface_config, stencil_view, clear_color: wgpu::Color { r: c[0] as f64, g: c[1] as f64, b: c[2] as f64, a: c[3] as f64 }, y_down: config.y_down, _instance: instance };
         host.player.set_viewport(&host.queue, host.config.width as f32, host.config.height as f32, host.y_down);
         Ok(host)
     }

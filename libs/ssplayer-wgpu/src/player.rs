@@ -71,13 +71,81 @@ pub struct SSPlayer {
     /// the next `update` (the borrow model means load has no `Device`/`Queue`).
     /// Each entry is `(cellmap name_hash, straight-alpha RGBA, width, height)`.
     pending_textures: Vec<(u32, Vec<u8>, u32, u32)>,
+    /// Retained sources for host-supplied textures, keyed by hash:
+    /// `(straight-alpha RGBA, width, height)`. GPU textures die with the device,
+    /// so [`SSPlayer::restore_device`] re-uploads from here (SPEC §14, the WebGL
+    /// `SSWebGLResourceManager` retained-source scheme). Embedded textures are
+    /// *not* duplicated here — they are re-decoded from the `.ssab` the player
+    /// already owns. Hosts that would rather re-supply their own textures after a
+    /// loss can drop these copies with [`SSPlayer::forget_texture_sources`].
+    host_textures: HashMap<u32, (Vec<u8>, u32, u32)>,
+    /// Last viewport passed to [`SSPlayer::set_viewport`], re-applied on restore
+    /// (the projection lives in a uniform buffer that dies with the device).
+    viewport: Option<(f32, f32, bool)>,
 }
 
 impl SSPlayer {
     /// Create a player against a borrowed `device`. The device is not retained.
     pub fn new(device: &wgpu::Device, config: &SSPlayerConfig) -> Self {
         let internal = SSInternalPlayer::new(device, &RendererConfig { color_format: config.color_format, stencil_format: config.stencil_format });
-        Self { internal, resources: HashMap::new(), main_pack: None, root: None, current_animation: None, last_root_frame: 0.0, pending_textures: Vec::new() }
+        Self { internal, resources: HashMap::new(), main_pack: None, root: None, current_animation: None, last_root_frame: 0.0, pending_textures: Vec::new(), host_textures: HashMap::new(), viewport: None }
+    }
+
+    /// Rebuild every GPU resource against a freshly created `device` after the
+    /// previous one was lost (SPEC §14 — the counterpart of the WebGL player's
+    /// `SSWebGLRenderer.restoreContext()` + `SSWebGLResourceManager.restoreContext()`).
+    ///
+    /// The borrow model puts device creation on the host, so device loss is the
+    /// host's to detect (`GPUDevice.lost` on the web, `wgpu::Device::set_device_lost_callback`
+    /// natively) and its to recover from: create a new device, reconfigure the
+    /// surface, then call this. Pipelines, buffers and bind groups are rebuilt for
+    /// the same target formats the player was constructed with, every texture is
+    /// re-uploaded from its retained source, and the last viewport is re-applied —
+    /// so the next `update`/`draw` pair renders the same frame it would have.
+    ///
+    /// Playback state (loaded packs, the instance tree, the current frame) lives on
+    /// the CPU and is untouched: the animation resumes where it was interrupted.
+    ///
+    /// A target whose *formats* changed needs a new [`SSPlayer`], not this call.
+    pub fn restore_device(&mut self, device: &wgpu::Device, queue: &wgpu::Queue) {
+        // Pipelines, uniform/vertex/index buffers, bind groups and textures all
+        // belonged to the dead device; the renderer is cheapest to rebuild whole.
+        self.internal = SSInternalPlayer::new(device, &self.internal.config());
+
+        // Anything queued for the old device is stale — the sources below cover it.
+        self.pending_textures.clear();
+        // Embedded packs (SPEC §8.1): re-decode from the ssab bytes we still own,
+        // so no pixel copy has to be retained for them. Sorted by pack name because
+        // later packs overwrite earlier ones on a texture-hash collision, and a
+        // restore must not land on a different winner than the last one did.
+        let mut packs: Vec<(&String, &Arc<SsabResource>)> = self.resources.iter().collect();
+        packs.sort_by_key(|(name, _)| *name);
+        let packs: Vec<Arc<SsabResource>> = packs.into_iter().map(|(_, r)| Arc::clone(r)).collect();
+        for resource in &packs {
+            self.decode_embedded_textures(resource.data().as_slice());
+        }
+        self.flush_pending_textures(device, queue);
+
+        // Host-supplied textures last, so a host override of an embedded hash
+        // survives the restore exactly as it did at load time.
+        let host_textures = std::mem::take(&mut self.host_textures);
+        for (hash, (rgba, w, h)) in &host_textures {
+            self.internal.upload_texture(device, queue, *hash, rgba, *w, *h);
+        }
+        self.host_textures = host_textures;
+
+        if let Some((width, height, y_down)) = self.viewport {
+            self.internal.update_projection(queue, width, height, y_down);
+        }
+    }
+
+    /// Drop the retained copies of host-supplied textures (SPEC §14). Saves the
+    /// duplicated pixels when the host keeps its own and would rather re-upload
+    /// them itself; after this, [`SSPlayer::restore_device`] restores only the
+    /// embedded textures and the host must call [`SSPlayer::upload_texture`] again
+    /// for the rest before drawing.
+    pub fn forget_texture_sources(&mut self) {
+        self.host_textures.clear();
     }
 
     /// Register an `.ssab` pack under `pack_name` (used to resolve external
@@ -202,22 +270,36 @@ impl SSPlayer {
     }
 
     /// Provide a decoded texture keyed by fnv1a hash. Forwarded to the renderer.
+    ///
+    /// `rgba` is also retained as a restore source (SPEC §14) so a device loss can
+    /// be recovered without the host re-supplying it; see
+    /// [`SSPlayer::forget_texture_sources`] to opt out of that copy.
     pub fn upload_texture(&mut self, device: &wgpu::Device, queue: &wgpu::Queue, hash: u32, rgba: &[u8], width: u32, height: u32) {
         self.internal.upload_texture(device, queue, hash, rgba, width, height);
+        self.host_textures.insert(hash, (rgba.to_vec(), width, height));
     }
 
-    /// Set the projection to the render target's pixel dimensions.
-    pub fn set_viewport(&self, queue: &wgpu::Queue, width: f32, height: f32, y_down: bool) {
+    /// Set the projection to the render target's pixel dimensions. Remembered, so
+    /// [`SSPlayer::restore_device`] can re-apply it to a rebuilt uniform buffer.
+    pub fn set_viewport(&mut self, queue: &wgpu::Queue, width: f32, height: f32, y_down: bool) {
         self.internal.update_projection(queue, width, height, y_down);
+        self.viewport = Some((width, height, y_down));
+    }
+
+    /// Upload everything `decode_embedded_textures` queued. Called at the start of
+    /// each `update` (the earliest point the borrow model lends a `Queue`) and by
+    /// `restore_device`, which re-queues the packs against the new device.
+    fn flush_pending_textures(&mut self, device: &wgpu::Device, queue: &wgpu::Queue) {
+        for (hash, rgba, w, h) in std::mem::take(&mut self.pending_textures) {
+            self.internal.upload_texture(device, queue, hash, &rgba, w, h);
+        }
     }
 
     /// Advance the tree by `delta_secs` and build GPU buffers for the frame.
     pub fn update(&mut self, device: &wgpu::Device, queue: &wgpu::Queue, delta_secs: f32) {
         // Flush any embedded textures decoded at load time (§8.1); the first
         // `update` is the earliest point the borrow model lends a Queue.
-        for (hash, rgba, w, h) in self.pending_textures.drain(..) {
-            self.internal.upload_texture(device, queue, hash, &rgba, w, h);
-        }
+        self.flush_pending_textures(device, queue);
 
         self.internal.begin_frame();
 
