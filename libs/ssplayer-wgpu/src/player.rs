@@ -1,7 +1,7 @@
 //! Layer 3 (operation): SSPlayer — the primary public API.
 //!
 //! Owns a tree of runtime `Context`s (one per animation instance) and a single
-//! shared `SSInternalPlayer`. Borrow model: it holds no `Device`/`Queue`/
+//! shared `SSScene`. Borrow model: it holds no `Device`/`Queue`/
 //! `Surface`; the host lends them on every `update`/`draw`.
 //!
 //! Instance parts reference a sub-animation in another `.ssab` pack. Each
@@ -11,7 +11,7 @@
 //! resolved by pack name.
 
 use crate::frame::FrameView;
-use crate::internal::{BatchInfo, RendererConfig, Retention, SSInternalPlayer, SSRenderer};
+use crate::internal::{BatchInfo, Retention, SSRenderer, SSScene};
 use crate::mask::{GeomKind, MaskOp, MaskWriter, PartMaskFlags, StencilTest, plan_writers};
 use ssab::ssab::ss::format::{PartType, root_as_ss_anime_binary_unchecked};
 use ssruntime::error::SSRuntimeError;
@@ -25,17 +25,6 @@ const IDENTITY: [f32; 16] = [1.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 1
 
 /// Guards against cyclic instance references blowing the stack.
 const MAX_INSTANCE_DEPTH: u32 = 12;
-
-/// Construction config for [`SSPlayer`], matched to the host's render target.
-pub struct SSPlayerConfig {
-    /// Target color format. Forwarded to the renderer so pipelines match.
-    pub color_format: wgpu::TextureFormat,
-    /// Depth/stencil format of the host's render target, or `None` to run
-    /// without masking (SPEC §6). When `Some`, the host must attach a matching
-    /// depth/stencil buffer to every render pass, and mask batches are
-    /// rasterised into the stencil buffer.
-    pub stencil_format: Option<wgpu::TextureFormat>,
-}
 
 /// One node in the playback tree: a runtime context plus its instance children
 /// and effect slots.
@@ -58,7 +47,6 @@ struct InstanceChild {
 
 /// The SpriteStudio player. One instance owns one animation-instance tree.
 pub struct SSPlayer {
-    internal: SSInternalPlayer,
     /// All registered packs, keyed by pack name (matches `ref_anime_pack`).
     resources: HashMap<String, Arc<SsabResource>>,
     main_pack: Option<String>,
@@ -71,9 +59,6 @@ pub struct SSPlayer {
     /// the next `update` (the borrow model means load has no `Device`/`Queue`).
     /// Each entry is `(cellmap name_hash, straight-alpha RGBA, width, height)`.
     pending_textures: Vec<(u32, Vec<u8>, u32, u32)>,
-    /// Last viewport passed to [`SSPlayer::set_viewport`], re-applied on restore
-    /// (the projection lives in a uniform buffer that dies with the device).
-    viewport: Option<(f32, f32, bool)>,
     /// Where this player sits in the scene — the root transform of its tree
     /// (SPEC §5.4). Composed by [`SSPlayer::set_transform`]; only the matrix is
     /// kept because nothing yet re-composes it. A future `box` (§9.3, the
@@ -89,42 +74,33 @@ pub struct SSPlayer {
     alpha: f32,
 }
 
+impl Default for SSPlayer {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl SSPlayer {
-    /// Create a player against a borrowed `device` and the host's `renderer`.
-    /// Neither is retained (SPEC §1.2): the renderer is device-scoped and shared,
-    /// so it is lent back on every `update` / `draw`.
-    pub fn new(device: &wgpu::Device, renderer: &SSRenderer, config: &SSPlayerConfig) -> Self {
-        let internal = SSInternalPlayer::new(device, renderer, &RendererConfig { color_format: config.color_format, stencil_format: config.stencil_format });
-        Self { internal, resources: HashMap::new(), main_pack: None, root: None, current_animation: None, last_root_frame: 0.0, pending_textures: Vec::new(), viewport: None, transform: IDENTITY, order: 0, visible: true, alpha: 1.0 }
+    /// Create a player. Takes nothing: a player holds no GPU resource at all
+    /// (SPEC §1.2), which is what makes putting a hundred of them in a scene
+    /// cheap. The device-scoped [`SSRenderer`] and the target-scoped
+    /// [`SSScene`] are lent to it per frame by [`SSScene::update`].
+    pub fn new() -> Self {
+        Self { resources: HashMap::new(), main_pack: None, root: None, current_animation: None, last_root_frame: 0.0, pending_textures: Vec::new(), transform: IDENTITY, order: 0, visible: true, alpha: 1.0 }
     }
 
-    /// Rebuild every GPU resource against a freshly created `device` after the
-    /// previous one was lost (SPEC §14 — the counterpart of the WebGL player's
-    /// `SSWebGLRenderer.restoreContext()` + `SSWebGLResourceManager.restoreContext()`).
+    /// Re-register this player's embedded atlases after a device loss (SPEC §14).
     ///
-    /// The borrow model puts device creation on the host, so device loss is the
-    /// host's to detect (`GPUDevice.lost` on the web, `wgpu::Device::set_device_lost_callback`
-    /// natively) and its to recover from: create a new device, reconfigure the
-    /// surface, then call this. Pipelines, buffers and bind groups are rebuilt for
-    /// the same target formats the player was constructed with, every texture is
-    /// re-uploaded from its retained source, and the last viewport is re-applied —
-    /// so the next `update`/`draw` pair renders the same frame it would have.
+    /// The player itself has nothing to rebuild — it owns no GPU resource. What it
+    /// does own is the `.ssab`, which is the only place a [`Retention::Reproducible`]
+    /// texture can come back from, so the host calls this once per player after
+    /// [`SSRenderer::restore_device`] and [`SSScene::restore_device`].
     ///
-    /// Playback state (loaded packs, the instance tree, the current frame) lives on
-    /// the CPU and is untouched: the animation resumes where it was interrupted.
-    ///
-    /// A target whose *formats* changed needs a new [`SSPlayer`], not this call.
-    pub fn restore_device(&mut self, renderer: &mut SSRenderer, device: &wgpu::Device, queue: &wgpu::Queue) {
-        // The projection buffer and the frame arena belonged to the dead device;
-        // the target-scoped half is cheapest to rebuild whole. The renderer's own
-        // pipelines and textures are restored by `SSRenderer::restore_device`,
-        // which the host calls once for the whole device — not once per player.
-        self.internal = SSInternalPlayer::new(device, renderer, &self.internal.config());
-
+    /// Playback state (packs, the instance tree, the current frame) is CPU-side and
+    /// was never affected: the animation resumes where it was interrupted.
+    pub fn restore_textures(&mut self, renderer: &mut SSRenderer, device: &wgpu::Device, queue: &wgpu::Queue) {
         // Anything queued for the old device is stale — the decode below covers it.
         self.pending_textures.clear();
-        // Embedded packs (SPEC §8.1): re-decode from the ssab bytes we still own,
-        // which is why they upload as `Reproducible` and cost no retained copy.
         // Sorted by pack name because later packs overwrite earlier ones on a
         // texture-hash collision, and a restore must not land on a different
         // winner than the last one did.
@@ -135,10 +111,6 @@ impl SSPlayer {
             self.decode_embedded_textures(resource.data().as_slice());
         }
         self.flush_pending_textures(renderer, device, queue);
-
-        if let Some((width, height, y_down)) = self.viewport {
-            self.internal.update_projection(queue, width, height, y_down);
-        }
     }
 
     /// Register an `.ssab` pack under `pack_name` (used to resolve external
@@ -324,13 +296,6 @@ impl SSPlayer {
         Some((anim_meta.canvas_width, anim_meta.canvas_height))
     }
 
-    /// Set the projection to the render target's pixel dimensions. Remembered, so
-    /// [`SSPlayer::restore_device`] can re-apply it to a rebuilt uniform buffer.
-    pub fn set_viewport(&mut self, queue: &wgpu::Queue, width: f32, height: f32, y_down: bool) {
-        self.internal.update_projection(queue, width, height, y_down);
-        self.viewport = Some((width, height, y_down));
-    }
-
     /// Upload everything `decode_embedded_textures` queued. Called at the start of
     /// each `update` (the earliest point the borrow model lends a `Queue`) and by
     /// `restore_device`, which re-queues the packs against the new device.
@@ -342,42 +307,35 @@ impl SSPlayer {
         }
     }
 
-    /// Advance the tree by `delta_secs` and build GPU buffers for the frame.
-    pub fn update(&mut self, renderer: &mut SSRenderer, device: &wgpu::Device, queue: &wgpu::Queue, delta_secs: f32) {
-        // Flush any embedded textures decoded at load time (§8.1); the first
-        // `update` is the earliest point the borrow model lends a Queue.
+    /// Advance this player by `delta_secs` and append its geometry to `scene`.
+    ///
+    /// Called by [`SSScene::update`] for each player in draw order — the scene
+    /// owns the frame boundary (`begin_frame` / `end_frame`), because one frame
+    /// now spans every player sharing the target.
+    pub(crate) fn build_frame(&mut self, scene: &mut SSScene, renderer: &mut SSRenderer, device: &wgpu::Device, queue: &wgpu::Queue, delta_secs: f32) {
+        // Flush any embedded textures decoded at load time (§8.1); this is the
+        // earliest point the borrow model lends a Queue.
         self.flush_pending_textures(renderer, device, queue);
 
-        self.internal.begin_frame();
-
         // `visible == false` means "this player cannot be seen": no timeline
-        // advance and no geometry, so the frame ends empty and `draw` records
-        // nothing. Textures are still flushed above — a player can be made
-        // visible again without re-loading anything.
+        // advance and no geometry. Textures are still flushed above, so it can be
+        // made visible again without re-loading anything.
         if !self.visible {
-            self.internal.end_frame(renderer, device, queue);
             return;
         }
 
-        if let Some(root) = &mut self.root {
-            // The runtime works in milliseconds for the primary context.
-            root.context.update(delta_secs * 1000.0);
-            let frame_no = root.context.get_frame_no();
-            // Detect the loop edge (forward playback wrapping past the end) so
-            // instance slots can persist/re-arm their children correctly.
-            let looped = frame_no + 0.5 < self.last_root_frame;
-            self.last_root_frame = frame_no;
-            let draw = NodeDraw { transform: &self.transform, alpha: self.alpha };
-            let mut build = FrameBuild { internal: &mut self.internal, renderer };
-            render_node(root, &mut build, draw, frame_no, delta_secs, looped, StencilTest::None);
-        }
+        let Some(root) = &mut self.root else { return };
+        // The runtime works in milliseconds for the primary context.
+        root.context.update(delta_secs * 1000.0);
+        let frame_no = root.context.get_frame_no();
+        // Detect the loop edge (forward playback wrapping past the end) so
+        // instance slots can persist/re-arm their children correctly.
+        let looped = frame_no + 0.5 < self.last_root_frame;
+        self.last_root_frame = frame_no;
 
-        self.internal.end_frame(renderer, device, queue);
-    }
-
-    /// Record the prepared frame into a RenderPass opened by the host.
-    pub fn draw<'a>(&'a self, renderer: &'a SSRenderer, pass: &mut wgpu::RenderPass<'a>) -> usize {
-        self.internal.draw(renderer, pass)
+        let draw = NodeDraw { transform: &self.transform, alpha: self.alpha };
+        let mut build = FrameBuild { scene, renderer };
+        render_node(root, &mut build, draw, frame_no, delta_secs, looped, StencilTest::None);
     }
 
     /// Total number of instance child nodes in the current tree. A non-zero
@@ -472,17 +430,17 @@ fn sync_masks_to(build: &mut FrameBuild<'_>, frame: &FrameView, transform: &[f32
         } else {
             MaskOp::Decr
         };
-        build.internal.append_mask_writer(build.renderer, frame, transform, w, op);
+        build.scene.append_mask_writer(build.renderer, frame, transform, w, op);
         *cursor += 1;
     }
 }
 
-/// The two halves of layer 2, bundled for the tree walk: the target-scoped
-/// accumulator being filled, and the device-scoped renderer it reads texture
-/// sizes from. Only `internal` is mutated — pipelines are compiled later, in
+/// The two halves of layer 2, bundled for the tree walk: the scene being
+/// filled, and the device-scoped renderer it reads texture
+/// sizes from. Only the scene is mutated — pipelines are compiled later, in
 /// `end_frame`, which is where the renderer is borrowed mutably.
 struct FrameBuild<'a> {
-    internal: &'a mut SSInternalPlayer,
+    scene: &'a mut SSScene,
     renderer: &'a SSRenderer,
 }
 
@@ -525,14 +483,14 @@ fn render_node(node: &mut PlaybackNode, build: &mut FrameBuild<'_>, draw: NodeDr
     let frame = frame_view(&mut node.context, frame_data);
 
     // Own masking runs only at the root scope; a masked sub-animation inherits.
-    let masking = build.internal.stencil_enabled() && inherited_stencil == StencilTest::None;
+    let masking = build.scene.stencil_enabled() && inherited_stencil == StencilTest::None;
     let writers = if masking { plan_writers(&frame, &node.mask_flags) } else { Vec::new() };
 
     // Pre-write pure masks so they are active for lower-rank content (§2-1).
     for w in &writers {
         if !w.is_clipping {
             let op = if w.op_invert { MaskOp::Invert } else { MaskOp::Incr };
-            build.internal.append_mask_writer(build.renderer, &frame, transform, w, op);
+            build.scene.append_mask_writer(build.renderer, &frame, transform, w, op);
         }
     }
     let mut cursor = 0usize;
@@ -566,7 +524,7 @@ fn render_node(node: &mut PlaybackNode, build: &mut FrameBuild<'_>, draw: NodeDr
                         }
                         let stencil = node.mask_flags.get(part_idx).map(|f| f.polarity()).unwrap_or(StencilTest::None);
                         let info = BatchInfo { start_rank: rank, count: 1, texture_hash: batch.texture_hash(), blend_type: batch.blend_type(), kind, stencil, alpha };
-                        build.internal.append_batch(build.renderer, &frame, transform, &info);
+                        build.scene.append_batch(build.renderer, &frame, transform, &info);
                     }
                 } else if has_pure {
                     // Non-masked batch that still contains a pure mask: draw the
@@ -577,11 +535,11 @@ fn render_node(node: &mut PlaybackNode, build: &mut FrameBuild<'_>, draw: NodeDr
                             continue;
                         }
                         let info = BatchInfo { start_rank: rank, count: 1, texture_hash: batch.texture_hash(), blend_type: batch.blend_type(), kind, stencil: inherited_stencil, alpha };
-                        build.internal.append_batch(build.renderer, &frame, transform, &info);
+                        build.scene.append_batch(build.renderer, &frame, transform, &info);
                     }
                 } else {
                     let info = BatchInfo { start_rank, count, texture_hash: batch.texture_hash(), blend_type: batch.blend_type(), kind, stencil: inherited_stencil, alpha };
-                    build.internal.append_batch(build.renderer, &frame, transform, &info);
+                    build.scene.append_batch(build.renderer, &frame, transform, &info);
                 }
             }
             DrawBatchKind::Instance => {
@@ -650,7 +608,7 @@ fn render_node(node: &mut PlaybackNode, build: &mut FrameBuild<'_>, draw: NodeDr
                         let plan = unsafe { std::slice::from_raw_parts(r.draw_plan_buf, r.draw_plan_len) };
                         let m: [f32; 16] = frame.world_matrices[part_idx * 16..part_idx * 16 + 16].try_into().unwrap();
                         let eff_transform = mat4_mul(transform, &m);
-                        build.internal.append_effect(plan, &eff_transform, eff_stencil, alpha);
+                        build.scene.append_effect(plan, &eff_transform, eff_stencil, alpha);
                     }
                 }
             }
@@ -685,11 +643,11 @@ fn unwind_masks(build: &mut FrameBuild<'_>, frame: &FrameView, transform: &[f32;
     let remove = |w: &MaskWriter| if w.op_invert { MaskOp::Invert } else { MaskOp::Decr };
     // Consumed clipping writers: `sync_masks_to` added their coverage.
     for w in writers[..cursor].iter().filter(|w| w.is_clipping) {
-        build.internal.append_mask_writer(build.renderer, frame, transform, w, remove(w));
+        build.scene.append_mask_writer(build.renderer, frame, transform, w, remove(w));
     }
     // Unconsumed pure masks: pre-written before the batch loop, never removed.
     for w in writers[cursor..].iter().filter(|w| !w.is_clipping) {
-        build.internal.append_mask_writer(build.renderer, frame, transform, w, remove(w));
+        build.scene.append_mask_writer(build.renderer, frame, transform, w, remove(w));
     }
 }
 

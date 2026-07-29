@@ -1,4 +1,4 @@
-use ssplayer_wgpu::{Retention, SSPlayer, SSPlayerConfig, SSRenderer};
+use ssplayer_wgpu::{Retention, SSPlayer, SSRenderer, SSScene, SceneConfig};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use wgpu::{Device, Queue, Surface, SurfaceConfiguration};
@@ -41,6 +41,9 @@ struct AppState {
     /// player on this device, so putting more characters on screen costs no
     /// extra pipelines or atlas uploads.
     renderer: SSRenderer,
+    /// One scene per render target; it owns the frame arena and draws every
+    /// player into a single pass (SPEC §9.2).
+    scene: SSScene,
     player: SSPlayer,
     ssab_paths: Vec<PathBuf>,
     current_ssab_idx: usize,
@@ -69,7 +72,7 @@ impl AppState {
         self.last_update = now;
 
         if !self.is_paused {
-            self.player.update(&mut self.renderer, &self.device, &self.queue, delta);
+            self.scene.update(&mut self.renderer, &self.device, &self.queue, delta, &mut [&mut self.player]);
         }
     }
 
@@ -88,7 +91,7 @@ impl AppState {
 
         // Match the projection to the current window size.
         let size = self.window.inner_size();
-        self.player.set_viewport(&self.queue, size.width as f32, size.height as f32, self.y_down);
+        self.scene.set_viewport(&self.queue, size.width as f32, size.height as f32, self.y_down);
 
         {
             let mut rpass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
@@ -109,7 +112,7 @@ impl AppState {
                 multiview_mask: None,
             });
 
-            let drawn = self.player.draw(&self.renderer, &mut rpass);
+            let drawn = self.scene.draw(&self.renderer, &mut rpass);
             if drawn > 0 && !self.logged_first_draw {
                 println!("[DIAG] First rendered frame with draw calls. Submitted: {}", drawn);
                 self.logged_first_draw = true;
@@ -219,7 +222,8 @@ impl ApplicationHandler for App {
         let stencil_view = create_stencil_view(&device, config.width, config.height);
 
         let mut renderer = SSRenderer::new(&device);
-        let mut player = SSPlayer::new(&device, &renderer, &SSPlayerConfig { color_format: format, stencil_format: Some(STENCIL_FORMAT) });
+        let scene = SSScene::new(&device, &renderer, &SceneConfig { color_format: format, stencil_format: Some(STENCIL_FORMAT) });
+        let mut player = SSPlayer::new();
 
         // Host responsibility (reference-mode ssab): decode atlas PNGs and hand
         // the RGBA to the player keyed by fnv1a hash of the file stem.
@@ -277,6 +281,7 @@ impl ApplicationHandler for App {
             config,
             stencil_view,
             renderer,
+            scene,
             player,
             ssab_paths,
             current_ssab_idx,

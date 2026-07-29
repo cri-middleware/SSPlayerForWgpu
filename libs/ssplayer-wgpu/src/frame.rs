@@ -6,7 +6,7 @@
 //! and may be invalidated by the next frame fetch, so they must not be held
 //! across frames.
 
-/// Everything SSInternalPlayer needs to draw one frame, as borrows into
+/// Everything SSScene needs to draw one frame, as borrows into
 /// runtime-owned data.
 ///
 /// `frame_data` is the FlatBuffers-encoded `FrameData`. The layout and meaning

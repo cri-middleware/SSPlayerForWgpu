@@ -14,7 +14,7 @@
 //!
 //! Every test skips cleanly when no GPU adapter is available.
 
-use ssplayer_wgpu::{Retention, SSPlayer, SSPlayerConfig, SSRenderer};
+use ssplayer_wgpu::{Retention, SSPlayer, SSRenderer, SSScene, SceneConfig};
 use std::path::Path;
 
 const W: u32 = 256;
@@ -51,34 +51,37 @@ fn load_textures(renderer: &mut SSRenderer, device: &wgpu::Device, queue: &wgpu:
     }
 }
 
-/// A reference-mode player playing `pack`'s first animation, positioned for a
-/// W x H target. Every player in a test shares the caller's `renderer` — that is
-/// the point of P7-3, and it is also how the atlas gets uploaded once rather
-/// than once per player.
-fn make_player(device: &wgpu::Device, queue: &wgpu::Queue, renderer: &mut SSRenderer, pack: &str, stencil: bool) -> SSPlayer {
-    let mut player = SSPlayer::new(device, renderer, &SSPlayerConfig { color_format: COLOR_FORMAT, stencil_format: stencil.then_some(STENCIL_FORMAT) });
-    load_textures(renderer, device, queue, Path::new(asset_dir()));
+/// A scene sized for the W x H offscreen target.
+fn make_scene(device: &wgpu::Device, queue: &wgpu::Queue, renderer: &SSRenderer, stencil: bool) -> SSScene {
+    let mut scene = SSScene::new(device, renderer, &SceneConfig { color_format: COLOR_FORMAT, stencil_format: stencil.then_some(STENCIL_FORMAT) });
+    scene.set_viewport(queue, W as f32, H as f32, false);
+    scene
+}
 
+/// A reference-mode player playing `pack`'s first animation. Holds no GPU
+/// resource of its own (SPEC §1.2) — the atlas goes to the caller's shared
+/// `renderer`, which is why several players cost one upload between them.
+fn make_player(device: &wgpu::Device, queue: &wgpu::Queue, renderer: &mut SSRenderer, pack: &str) -> SSPlayer {
+    load_textures(renderer, device, queue, Path::new(asset_dir()));
+    let mut player = SSPlayer::new();
     let bytes = std::fs::read(format!("{}/{pack}.ssab", asset_dir())).unwrap();
     player.load_ssab(pack, &bytes).unwrap();
     let anim = player.animation_names().unwrap()[0].clone();
     player.set_animation(&anim).unwrap();
     player.play();
-    player.set_viewport(queue, W as f32, H as f32, false);
     player
 }
 
-fn advance(player: &mut SSPlayer, renderer: &mut SSRenderer, device: &wgpu::Device, queue: &wgpu::Queue, frames: u32) {
+fn advance(scene: &mut SSScene, renderer: &mut SSRenderer, device: &wgpu::Device, queue: &wgpu::Queue, players: &mut [&mut SSPlayer], frames: u32) {
     for _ in 0..frames {
-        player.update(renderer, device, queue, 1.0 / 60.0);
+        scene.update(renderer, device, queue, 1.0 / 60.0, players);
     }
 }
 
 /// Rebuild the frame's geometry without moving the timeline, so two renders can
-/// be compared pixel for pixel with only the player property under test
-/// differing between them.
-fn rebuild(player: &mut SSPlayer, renderer: &mut SSRenderer, device: &wgpu::Device, queue: &wgpu::Queue) {
-    player.update(renderer, device, queue, 0.0);
+/// be compared pixel for pixel with only the property under test differing.
+fn rebuild(scene: &mut SSScene, renderer: &mut SSRenderer, device: &wgpu::Device, queue: &wgpu::Queue, players: &mut [&mut SSPlayer]) {
+    scene.update(renderer, device, queue, 0.0, players);
 }
 
 fn offscreen_target(device: &wgpu::Device) -> (wgpu::Texture, wgpu::TextureView, wgpu::TextureView) {
@@ -140,48 +143,29 @@ fn readback(device: &wgpu::Device, queue: &wgpu::Queue, encoder: wgpu::CommandEn
     data
 }
 
-/// Draw every player into a **single** render pass, in the given order.
-fn render_one_pass(device: &wgpu::Device, queue: &wgpu::Queue, renderer: &SSRenderer, players: &[&SSPlayer]) -> Vec<u8> {
-    let (color, color_view, stencil_view) = offscreen_target(device);
-    let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor { label: None });
-    {
-        let mut rpass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
-            label: Some("one pass, N players"),
-            color_attachments: &[Some(wgpu::RenderPassColorAttachment {
-                view: &color_view,
-                resolve_target: None,
-                ops: wgpu::Operations { load: wgpu::LoadOp::Clear(wgpu::Color { r: 0.0, g: 0.0, b: 0.0, a: 1.0 }), store: wgpu::StoreOp::Store },
-                depth_slice: None,
-            })],
-            depth_stencil_attachment: Some(depth_stencil_attachment(&stencil_view)),
-            timestamp_writes: None,
-            occlusion_query_set: None,
-            multiview_mask: None,
-        });
-        for player in players {
-            player.draw(renderer, &mut rpass);
-        }
-    }
-    readback(device, queue, encoder, &color)
+/// Draw one scene — that is, every player it was updated with — into a single
+/// render pass.
+fn render(device: &wgpu::Device, queue: &wgpu::Queue, renderer: &SSRenderer, scene: &SSScene) -> Vec<u8> {
+    render_scenes(device, queue, renderer, &[scene])
 }
 
-/// Draw each player into its **own** render pass, accumulating colour and
-/// clearing the stencil every time. No player can see another's coverage here,
-/// which is what makes this the reference.
-fn render_pass_per_player(device: &wgpu::Device, queue: &wgpu::Queue, renderer: &SSRenderer, players: &[&SSPlayer]) -> Vec<u8> {
+/// Draw each scene into its **own** render pass, accumulating colour and
+/// clearing the stencil every time. No scene can see another's coverage here,
+/// which is what makes a per-scene split the reference a shared scene must match.
+fn render_scenes(device: &wgpu::Device, queue: &wgpu::Queue, renderer: &SSRenderer, scenes: &[&SSScene]) -> Vec<u8> {
     let (color, color_view, stencil_view) = offscreen_target(device);
     let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor { label: None });
-    for (i, player) in players.iter().enumerate() {
+    for (i, scene) in scenes.iter().enumerate() {
         let load = if i == 0 { wgpu::LoadOp::Clear(wgpu::Color { r: 0.0, g: 0.0, b: 0.0, a: 1.0 }) } else { wgpu::LoadOp::Load };
         let mut rpass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
-            label: Some("one pass per player"),
+            label: Some("scene pass"),
             color_attachments: &[Some(wgpu::RenderPassColorAttachment { view: &color_view, resolve_target: None, ops: wgpu::Operations { load, store: wgpu::StoreOp::Store }, depth_slice: None })],
             depth_stencil_attachment: Some(depth_stencil_attachment(&stencil_view)),
             timestamp_writes: None,
             occlusion_query_set: None,
             multiview_mask: None,
         });
-        player.draw(renderer, &mut rpass);
+        scene.draw(renderer, &mut rpass);
     }
     readback(device, queue, encoder, &color)
 }
@@ -207,32 +191,47 @@ fn luminance_sum(rgba: &[u8]) -> u64 {
 /// Before the unwind existed this failed: `render_node` pre-wrote every pure
 /// mask but only removed the ones the scoped replay reached, so the first
 /// player's leftover coverage inverted the second one's polarity tests.
+/// SPEC §6: a player restores the stencil buffer before it returns, so putting
+/// two of them in one scene is identical to giving each its own scene and pass.
+///
+/// Both players run `Mask.ssab` deliberately: the second one has to *test*
+/// against the stencil for leaked coverage to be visible at all. A mask-free
+/// second player would draw through `CompareFunction::Always` and pass this test
+/// even with the bug present.
 #[test]
 fn stencil_unwind_isolates_players() {
     let Some((device, queue)) = gpu() else {
         eprintln!("no GPU adapter available, skipping headless render test");
         return;
     };
-
     let mut renderer = SSRenderer::new(&device);
-    let mut a = make_player(&device, &queue, &mut renderer, "Mask", true);
-    let mut b = make_player(&device, &queue, &mut renderer, "Mask", true);
-    advance(&mut a, &mut renderer, &device, &queue, 10);
-    advance(&mut b, &mut renderer, &device, &queue, 10);
 
-    let one_pass = render_one_pass(&device, &queue, &renderer, &[&a, &b]);
-    let per_pass = render_pass_per_player(&device, &queue, &renderer, &[&a, &b]);
+    // Subject: one scene holding both players.
+    let mut shared = make_scene(&device, &queue, &renderer, true);
+    let mut a = make_player(&device, &queue, &mut renderer, "Mask");
+    let mut b = make_player(&device, &queue, &mut renderer, "Mask");
+    advance(&mut shared, &mut renderer, &device, &queue, &mut [&mut a, &mut b], 10);
+    let one_scene = render(&device, &queue, &renderer, &shared);
 
-    let drawn = drawn_pixels(&one_pass);
-    eprintln!("two masked players: one_pass drew {drawn} px, reference drew {}", drawn_pixels(&per_pass));
+    // Reference: a scene each, a pass each — coverage cannot leak by construction.
+    let mut scene_a = make_scene(&device, &queue, &renderer, true);
+    let mut scene_b = make_scene(&device, &queue, &renderer, true);
+    let mut a2 = make_player(&device, &queue, &mut renderer, "Mask");
+    let mut b2 = make_player(&device, &queue, &mut renderer, "Mask");
+    advance(&mut scene_a, &mut renderer, &device, &queue, &mut [&mut a2], 10);
+    advance(&mut scene_b, &mut renderer, &device, &queue, &mut [&mut b2], 10);
+    let split = render_scenes(&device, &queue, &renderer, &[&scene_a, &scene_b]);
+
+    let drawn = drawn_pixels(&one_scene);
+    eprintln!("two masked players: shared scene drew {drawn} px, reference drew {}", drawn_pixels(&split));
     assert!(drawn > 0, "nothing was drawn — fixture or texture problem, the comparison below would be vacuous");
 
-    let differing = one_pass.chunks_exact(4).zip(per_pass.chunks_exact(4)).filter(|(x, y)| x != y).count();
-    assert_eq!(differing, 0, "{differing} px differ: stacking two players in one pass is not equivalent to one pass each — stencil coverage leaked between them (SPEC §6)");
+    let differing = one_scene.chunks_exact(4).zip(split.chunks_exact(4)).filter(|(x, y)| x != y).count();
+    assert_eq!(differing, 0, "{differing} px differ: sharing a scene is not equivalent to one scene each — stencil coverage leaked between players (SPEC §6)");
 }
 
-/// The same invariant, order reversed. Coverage must not leak in either
-/// direction, and a mask-free player must not be disturbed either.
+/// The same invariant with a mask-free player in the mix, in both orders.
+/// Coverage must not leak in either direction.
 #[test]
 fn stencil_unwind_survives_mixed_players() {
     let Some((device, queue)) = gpu() else {
@@ -240,55 +239,93 @@ fn stencil_unwind_survives_mixed_players() {
         return;
     };
 
-    let mut renderer = SSRenderer::new(&device);
-    let mut masked = make_player(&device, &queue, &mut renderer, "Mask", true);
-    let mut plain = make_player(&device, &queue, &mut renderer, "Basic", true);
-    advance(&mut masked, &mut renderer, &device, &queue, 10);
-    advance(&mut plain, &mut renderer, &device, &queue, 10);
+    for (label, first_pack, second_pack) in [("mask first", "Mask", "Basic"), ("plain first", "Basic", "Mask")] {
+        let mut renderer = SSRenderer::new(&device);
 
-    for (label, order) in [("mask first", [&masked, &plain]), ("plain first", [&plain, &masked])] {
-        let one_pass = render_one_pass(&device, &queue, &renderer, &order);
-        let per_pass = render_pass_per_player(&device, &queue, &renderer, &order);
-        assert_eq!(one_pass, per_pass, "{label}: one pass differs from one-pass-per-player — stencil coverage leaked");
+        let mut shared = make_scene(&device, &queue, &renderer, true);
+        let mut p1 = make_player(&device, &queue, &mut renderer, first_pack);
+        let mut p2 = make_player(&device, &queue, &mut renderer, second_pack);
+        advance(&mut shared, &mut renderer, &device, &queue, &mut [&mut p1, &mut p2], 10);
+        let one_scene = render(&device, &queue, &renderer, &shared);
+
+        let mut scene_1 = make_scene(&device, &queue, &renderer, true);
+        let mut scene_2 = make_scene(&device, &queue, &renderer, true);
+        let mut q1 = make_player(&device, &queue, &mut renderer, first_pack);
+        let mut q2 = make_player(&device, &queue, &mut renderer, second_pack);
+        advance(&mut scene_1, &mut renderer, &device, &queue, &mut [&mut q1], 10);
+        advance(&mut scene_2, &mut renderer, &device, &queue, &mut [&mut q2], 10);
+        let split = render_scenes(&device, &queue, &renderer, &[&scene_1, &scene_2]);
+
+        assert_eq!(one_scene, split, "{label}: a shared scene differs from one scene each — stencil coverage leaked");
     }
+}
+
+/// SPEC §9.2: the scene draws its players in ascending `order`, so swapping the
+/// two changes which one ends up on top. Both are opaque and overlapping here,
+/// so the composite genuinely differs.
+#[test]
+fn order_decides_who_draws_on_top() {
+    let Some((device, queue)) = gpu() else {
+        eprintln!("no GPU adapter available, skipping headless render test");
+        return;
+    };
+    let mut renderer = SSRenderer::new(&device);
+    let mut scene = make_scene(&device, &queue, &renderer, true);
+
+    let mut back = make_player(&device, &queue, &mut renderer, "Basic");
+    let mut front = make_player(&device, &queue, &mut renderer, "Mask");
+    back.set_order(0);
+    front.set_order(1);
+    advance(&mut scene, &mut renderer, &device, &queue, &mut [&mut back, &mut front], 10);
+    let basic_behind = render(&device, &queue, &renderer, &scene);
+
+    // Swap the order at the same animation frame; nothing else changes.
+    back.set_order(1);
+    front.set_order(0);
+    rebuild(&mut scene, &mut renderer, &device, &queue, &mut [&mut back, &mut front]);
+    let basic_in_front = render(&device, &queue, &renderer, &scene);
+
+    assert!(drawn_pixels(&basic_behind) > 0, "nothing drawn — fixture problem");
+    assert_ne!(basic_behind, basic_in_front, "swapping `order` did not change the composite — the scene is not sorting by it");
+
+    // And the sort is by value, not by the order the slice happened to be in:
+    // handing the same players over reversed must reproduce the first image.
+    back.set_order(0);
+    front.set_order(1);
+    rebuild(&mut scene, &mut renderer, &device, &queue, &mut [&mut front, &mut back]);
+    assert_eq!(render(&device, &queue, &renderer, &scene), basic_behind, "the scene drew in slice order rather than `order` order");
 }
 
 /// `set_transform` places a player in the scene (SPEC §5.4). The projection is
 /// `2/width` about a centred origin, so one world unit is one pixel and a whole-
 /// pixel translation must reproduce the original image shifted by exactly that
 /// many columns — same geometry, same rasterisation, no resampling.
-///
-/// Both renders are taken at the same animation frame (`rebuild`, not
-/// `advance`), so the only difference between them is the transform.
 #[test]
 fn set_transform_moves_the_player() {
     let Some((device, queue)) = gpu() else {
         eprintln!("no GPU adapter available, skipping headless render test");
         return;
     };
-
     const SHIFT: usize = 20;
 
-    // Stencil on: the shared render helpers always attach one, and a pipeline
-    // built without a depth-stencil state cannot be used in such a pass.
     let mut renderer = SSRenderer::new(&device);
-    let mut player = make_player(&device, &queue, &mut renderer, "Basic", true);
-    advance(&mut player, &mut renderer, &device, &queue, 10);
-    let at_origin = render_one_pass(&device, &queue, &renderer, &[&player]);
+    let mut scene = make_scene(&device, &queue, &renderer, true);
+    let mut player = make_player(&device, &queue, &mut renderer, "Basic");
+    advance(&mut scene, &mut renderer, &device, &queue, &mut [&mut player], 10);
+    let at_origin = render(&device, &queue, &renderer, &scene);
     assert!(drawn_pixels(&at_origin) > 0, "nothing drawn at the origin — fixture problem");
 
+    // Same animation frame, only the transform differs.
     player.set_transform(SHIFT as f32, 0.0, 1.0, 1.0, 0.0);
-    rebuild(&mut player, &mut renderer, &device, &queue);
-    let shifted = render_one_pass(&device, &queue, &renderer, &[&player]);
+    rebuild(&mut scene, &mut renderer, &device, &queue, &mut [&mut player]);
+    let shifted = render(&device, &queue, &renderer, &scene);
     assert_ne!(at_origin, shifted, "set_transform did not change the output at all");
 
     let row = W as usize;
     let mut differing = 0usize;
     for y in 0..H as usize {
         for x in 0..row - SHIFT {
-            let src = &at_origin[(y * row + x) * 4..][..4];
-            let dst = &shifted[(y * row + x + SHIFT) * 4..][..4];
-            if src != dst {
+            if at_origin[(y * row + x) * 4..][..4] != shifted[(y * row + x + SHIFT) * 4..][..4] {
                 differing += 1;
             }
         }
@@ -296,10 +333,9 @@ fn set_transform_moves_the_player() {
     eprintln!("translation by {SHIFT} px: {differing} px mismatched out of {}", (row - SHIFT) * H as usize);
     assert_eq!(differing, 0, "the shifted render is not the original moved {SHIFT} px right");
 
-    // And the placement is reversible.
     player.reset_transform();
-    rebuild(&mut player, &mut renderer, &device, &queue);
-    assert_eq!(render_one_pass(&device, &queue, &renderer, &[&player]), at_origin, "reset_transform did not restore the original placement");
+    rebuild(&mut scene, &mut renderer, &device, &queue, &mut [&mut player]);
+    assert_eq!(render(&device, &queue, &renderer, &scene), at_origin, "reset_transform did not restore the original placement");
 }
 
 /// `set_visible(false)` skips the player entirely — no timeline advance, no
@@ -310,40 +346,37 @@ fn invisible_player_draws_nothing() {
         eprintln!("no GPU adapter available, skipping headless render test");
         return;
     };
-
-    // Stencil on: the shared render helpers always attach one, and a pipeline
-    // built without a depth-stencil state cannot be used in such a pass.
     let mut renderer = SSRenderer::new(&device);
-    let mut player = make_player(&device, &queue, &mut renderer, "Basic", true);
-    advance(&mut player, &mut renderer, &device, &queue, 10);
-    assert!(drawn_pixels(&render_one_pass(&device, &queue, &renderer, &[&player])) > 0, "nothing drawn while visible — fixture problem");
+    let mut scene = make_scene(&device, &queue, &renderer, true);
+    let mut player = make_player(&device, &queue, &mut renderer, "Basic");
+
+    advance(&mut scene, &mut renderer, &device, &queue, &mut [&mut player], 10);
+    assert!(drawn_pixels(&render(&device, &queue, &renderer, &scene)) > 0, "nothing drawn while visible — fixture problem");
 
     player.set_visible(false);
-    advance(&mut player, &mut renderer, &device, &queue, 1);
-    assert_eq!(drawn_pixels(&render_one_pass(&device, &queue, &renderer, &[&player])), 0, "an invisible player still drew");
+    rebuild(&mut scene, &mut renderer, &device, &queue, &mut [&mut player]);
+    assert_eq!(drawn_pixels(&render(&device, &queue, &renderer, &scene)), 0, "an invisible player still drew");
 
     player.set_visible(true);
-    advance(&mut player, &mut renderer, &device, &queue, 1);
-    assert!(drawn_pixels(&render_one_pass(&device, &queue, &renderer, &[&player])) > 0, "the player did not come back when made visible again");
+    rebuild(&mut scene, &mut renderer, &device, &queue, &mut [&mut player]);
+    assert!(drawn_pixels(&render(&device, &queue, &renderer, &scene)) > 0, "the player did not come back when made visible again");
 }
 
 /// SPEC §5.2: pipelines are compiled on first use, not up front. Eager
 /// construction built the whole 12 blends x 3 stencil variants plus 3 mask
 /// writers — 39 objects — before the first frame, whatever the animation needed.
-/// That cost is paid per player today and, once several players share one
-/// `SSRenderer` (P7-3), would have been paid per device.
 #[test]
 fn pipelines_are_built_on_demand() {
     let Some((device, queue)) = gpu() else {
         eprintln!("no GPU adapter available, skipping headless render test");
         return;
     };
-
     let mut renderer = SSRenderer::new(&device);
-    let mut player = make_player(&device, &queue, &mut renderer, "Basic", true);
-    assert_eq!(renderer.pipeline_count(), 0, "constructing a player compiled pipelines before it had anything to draw");
+    assert_eq!(renderer.pipeline_count(), 0, "constructing a renderer compiled pipelines before anything had been drawn");
 
-    advance(&mut player, &mut renderer, &device, &queue, 10);
+    let mut scene = make_scene(&device, &queue, &renderer, true);
+    let mut player = make_player(&device, &queue, &mut renderer, "Basic");
+    advance(&mut scene, &mut renderer, &device, &queue, &mut [&mut player], 10);
     let after = renderer.pipeline_count();
     eprintln!("Basic.ssab compiled {after} pipelines (eager construction built 39)");
     assert!(after > 0, "nothing was compiled — the player drew nothing, so this test proves nothing");
@@ -351,40 +384,37 @@ fn pipelines_are_built_on_demand() {
 
     // Re-drawing the same frame must not compile anything new. A key that varies
     // between two identical frames would grow the cache without bound.
-    rebuild(&mut player, &mut renderer, &device, &queue);
+    rebuild(&mut scene, &mut renderer, &device, &queue, &mut [&mut player]);
     assert_eq!(renderer.pipeline_count(), after, "rebuilding the same frame compiled more pipelines — the cache key is not stable");
 }
 
 /// SPEC §1.2: the renderer is device-scoped, so a second player on the same
 /// device costs no extra pipelines and no extra atlas upload.
 ///
-/// Before P7-3 each player owned an `SSInternalPlayer` outright, so two
-/// characters on one screen meant two copies of every pipeline and every atlas —
-/// 16 MB of VRAM for one 2048² page, doubled.
+/// Before P7-3 each player owned its renderer outright, so two characters on one
+/// screen meant two copies of every pipeline and every atlas — 16 MB of VRAM for
+/// one 2048² page, doubled.
 #[test]
 fn players_share_one_renderer() {
     let Some((device, queue)) = gpu() else {
         eprintln!("no GPU adapter available, skipping headless render test");
         return;
     };
-
     let mut renderer = SSRenderer::new(&device);
+    let mut scene = make_scene(&device, &queue, &renderer, true);
 
-    let mut first = make_player(&device, &queue, &mut renderer, "Mask", true);
-    advance(&mut first, &mut renderer, &device, &queue, 10);
+    let mut first = make_player(&device, &queue, &mut renderer, "Mask");
+    advance(&mut scene, &mut renderer, &device, &queue, &mut [&mut first], 10);
     let after_one = renderer.pipeline_count();
 
-    let mut second = make_player(&device, &queue, &mut renderer, "Mask", true);
-    advance(&mut second, &mut renderer, &device, &queue, 10);
+    let mut second = make_player(&device, &queue, &mut renderer, "Mask");
+    advance(&mut scene, &mut renderer, &device, &queue, &mut [&mut first, &mut second], 10);
     let after_two = renderer.pipeline_count();
 
     eprintln!("pipelines: one player {after_one}, two players {after_two}");
     assert!(after_one > 0, "the first player compiled nothing — the comparison below would be vacuous");
     assert_eq!(after_one, after_two, "a second player of the same pack compiled {} more pipelines — it is not sharing the renderer", after_two - after_one);
-
-    // And both still draw: sharing must not have cost either of them anything.
-    assert!(drawn_pixels(&render_one_pass(&device, &queue, &renderer, &[&first])) > 0, "the first player stopped drawing");
-    assert!(drawn_pixels(&render_one_pass(&device, &queue, &renderer, &[&second])) > 0, "the second player never drew");
+    assert!(drawn_pixels(&render(&device, &queue, &renderer, &scene)) > 0, "the shared scene drew nothing");
 }
 
 /// `set_alpha` fades the whole player. The target is cleared to opaque black and
@@ -396,21 +426,21 @@ fn set_alpha_fades_the_player() {
         eprintln!("no GPU adapter available, skipping headless render test");
         return;
     };
-
-    // Stencil on: the shared render helpers always attach one, and a pipeline
-    // built without a depth-stencil state cannot be used in such a pass.
     let mut renderer = SSRenderer::new(&device);
-    let mut player = make_player(&device, &queue, &mut renderer, "Basic", true);
-    advance(&mut player, &mut renderer, &device, &queue, 10);
-    let opaque = luminance_sum(&render_one_pass(&device, &queue, &renderer, &[&player]));
+    let mut scene = make_scene(&device, &queue, &renderer, true);
+    let mut player = make_player(&device, &queue, &mut renderer, "Basic");
 
+    advance(&mut scene, &mut renderer, &device, &queue, &mut [&mut player], 10);
+    let opaque = luminance_sum(&render(&device, &queue, &renderer, &scene));
+
+    // Same animation frame for all three, so only alpha differs.
     player.set_alpha(0.5);
-    advance(&mut player, &mut renderer, &device, &queue, 1);
-    let half = luminance_sum(&render_one_pass(&device, &queue, &renderer, &[&player]));
+    rebuild(&mut scene, &mut renderer, &device, &queue, &mut [&mut player]);
+    let half = luminance_sum(&render(&device, &queue, &renderer, &scene));
 
     player.set_alpha(0.0);
-    advance(&mut player, &mut renderer, &device, &queue, 1);
-    let clear = render_one_pass(&device, &queue, &renderer, &[&player]);
+    rebuild(&mut scene, &mut renderer, &device, &queue, &mut [&mut player]);
+    let clear = render(&device, &queue, &renderer, &scene);
 
     eprintln!("luminance: alpha=1 {opaque}, alpha=0.5 {half}, alpha=0 {}", luminance_sum(&clear));
     assert!(opaque > 0, "nothing drawn at full alpha — fixture problem");

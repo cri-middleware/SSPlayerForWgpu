@@ -9,7 +9,7 @@
 //! The rendering layer is split by how long its resources stay useful (SPEC
 //! §1.2): [`SSRenderer`] holds what belongs to the **device** — pipelines, bind
 //! group layouts, the sampler, the atlas textures — and the host owns exactly
-//! one, lending it like `Device` and `Queue`. [`SSInternalPlayer`] holds what
+//! one, lending it like `Device` and `Queue`. [`SSScene`] holds what
 //! belongs to one **render target**: the projection and the frame's geometry.
 
 /// The C-ABI face (`ffi` feature): a thin translation layer whose `ss_player_*`
@@ -29,8 +29,8 @@ mod player;
 mod web;
 
 pub use frame::FrameView;
-pub use internal::{BatchInfo, IDENTITY_TRANSFORM, RendererConfig, Retention, SSInternalPlayer, SSRenderer, Vertex};
+pub use internal::{BatchInfo, IDENTITY_TRANSFORM, Retention, SSRenderer, SSScene, SceneConfig, Vertex};
 pub use mask::{GeomKind, MaskOp, MaskWriter, PartMaskFlags, StencilTest, plan_writers};
-pub use player::{SSPlayer, SSPlayerConfig};
+pub use player::SSPlayer;
 #[cfg(feature = "web")]
 pub use web::SsPlayerWeb;

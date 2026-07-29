@@ -9,8 +9,8 @@
 //! Embedded ssab (SPEC §8.1) is the natural web form: the atlas PNGs ride inside
 //! the `.ssab`, so a single fetched file renders with no host texture supply.
 
-use crate::internal::SSRenderer;
-use crate::player::{SSPlayer, SSPlayerConfig};
+use crate::internal::{SSRenderer, SSScene, SceneConfig};
+use crate::player::SSPlayer;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use wasm_bindgen::prelude::*;
@@ -73,6 +73,9 @@ pub struct SsPlayerWeb {
     /// context so N canvases share one device and one renderer; today it is one
     /// per element, like the device above.
     renderer: SSRenderer,
+    /// One scene per canvas (SPEC §9.2). P7 hoists the device and renderer to a
+    /// page-shared context so N canvases stop making N devices.
+    scene: SSScene,
     player: SSPlayer,
     /// Kept so a lost device can be replaced without rebuilding the surface
     /// (the canvas context outlives the device it was configured with).
@@ -107,9 +110,10 @@ impl SsPlayerWeb {
         let stencil_view = create_stencil_view(&device, width, height);
 
         let renderer = SSRenderer::new(&device);
-        let player = SSPlayer::new(&device, &renderer, &SSPlayerConfig { color_format: format, stencil_format: Some(STENCIL_FORMAT) });
-        let mut me = SsPlayerWeb { surface, device, queue, config, stencil_view, renderer, player, instance, device_lost };
-        me.player.set_viewport(&me.queue, width as f32, height as f32, false);
+        let scene = SSScene::new(&device, &renderer, &SceneConfig { color_format: format, stencil_format: Some(STENCIL_FORMAT) });
+        let player = SSPlayer::new();
+        let mut me = SsPlayerWeb { surface, device, queue, config, stencil_view, renderer, scene, player, instance, device_lost };
+        me.scene.set_viewport(&me.queue, width as f32, height as f32, false);
         Ok(me)
     }
 
@@ -139,12 +143,14 @@ impl SsPlayerWeb {
         self.config.alpha_mode = caps.alpha_modes[0];
         self.surface.configure(&device, &self.config);
         self.stencil_view = create_stencil_view(&device, self.config.width, self.config.height);
+        // Device-scoped first, then the target, then each player's atlases (§14).
         self.renderer.restore_device(&device, &queue);
-        self.player.restore_device(&mut self.renderer, &device, &queue);
+        self.scene.restore_device(&self.renderer, &device, &queue);
+        self.player.restore_textures(&mut self.renderer, &device, &queue);
         // `restore_device` re-applies the viewport the player last saw, which is
         // stale if the canvas was resized while the device was gone (`resize` only
         // records the size then). `config` is authoritative — re-apply from it.
-        self.player.set_viewport(&queue, self.config.width as f32, self.config.height as f32, false);
+        self.scene.set_viewport(&queue, self.config.width as f32, self.config.height as f32, false);
 
         self.device = device;
         self.queue = queue;
@@ -192,7 +198,7 @@ impl SsPlayerWeb {
         }
         self.surface.configure(&self.device, &self.config);
         self.stencil_view = create_stencil_view(&self.device, self.config.width, self.config.height);
-        self.player.set_viewport(&self.queue, self.config.width as f32, self.config.height as f32, false);
+        self.scene.set_viewport(&self.queue, self.config.width as f32, self.config.height as f32, false);
     }
 
     /// Advance by `dt` seconds and render one frame to the canvas.
@@ -204,7 +210,7 @@ impl SsPlayerWeb {
         if self.is_device_lost() {
             return Ok(());
         }
-        self.player.update(&mut self.renderer, &self.device, &self.queue, dt);
+        self.scene.update(&mut self.renderer, &self.device, &self.queue, dt, &mut [&mut self.player]);
 
         use wgpu::CurrentSurfaceTexture;
         let frame = match self.surface.get_current_texture() {
@@ -230,7 +236,7 @@ impl SsPlayerWeb {
                 occlusion_query_set: None,
                 multiview_mask: None,
             });
-            self.player.draw(&self.renderer, &mut rpass);
+            self.scene.draw(&self.renderer, &mut rpass);
         }
         self.queue.submit(std::iter::once(encoder.finish()));
         frame.present();

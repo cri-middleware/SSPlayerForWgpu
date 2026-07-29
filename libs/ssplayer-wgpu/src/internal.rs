@@ -1,4 +1,4 @@
-//! Layer 2 (rendering / "body"): SSInternalPlayer.
+//! Layer 2 (rendering / "body"): SSScene.
 //!
 //! Turns the runtime's FrameData / DrawBatch / SoA buffers into wgpu vertices,
 //! indices and draw commands. Borrow model: it never owns the `Device`, `Queue`
@@ -48,9 +48,9 @@ impl Vertex {
     }
 }
 
-/// Construction config for SSInternalPlayer, matched to the host's render target.
+/// Construction config for SSScene, matched to the host's render target.
 #[derive(Clone, Copy, Debug)]
-pub struct RendererConfig {
+pub struct SceneConfig {
     /// Target color format. Pipelines are baked against this.
     pub color_format: wgpu::TextureFormat,
     /// Depth/stencil format of the host's render target, or `None` to run
@@ -132,7 +132,7 @@ struct TextureEntry {
 ///
 /// Pipelines, bind group layouts, the sampler, the white fallback and the atlas
 /// textures are all valid for any target on the device that created them, so
-/// exactly one of these serves every [`SSInternalPlayer`] and every
+/// exactly one of these serves every [`SSScene`] and every
 /// [`crate::SSPlayer`] drawing on that device. The host owns it and lends it,
 /// the same way it lends `Device` and `Queue` — putting a copy inside each
 /// player is what made a second character on screen duplicate ~39 pipelines and
@@ -153,7 +153,7 @@ pub struct SSRenderer {
     ss_pipeline_layout: wgpu::PipelineLayout,
 
     /// group(0): the projection uniform. The layout is shared; the buffer behind
-    /// it belongs to the target ([`SSInternalPlayer::globals_bind_group`]).
+    /// it belongs to the target ([`SSScene::globals_bind_group`]).
     globals_bind_group_layout: wgpu::BindGroupLayout,
     /// group(1): atlas texture + sampler.
     texture_bind_group_layout: wgpu::BindGroupLayout,
@@ -185,7 +185,7 @@ pub struct SSRenderer {
 ///
 /// P7-4 renames this to `SSScene` and gives it the list of players drawing into
 /// it; today it is still one per player.
-pub struct SSInternalPlayer {
+pub struct SSScene {
     /// Whether masking (stencil) is enabled for this target.
     stencil_enabled: bool,
     /// The target's formats. Part of every [`PipelineKey`] this builds.
@@ -195,6 +195,9 @@ pub struct SSInternalPlayer {
     /// The projection matrix and its bind group (group(0)).
     globals_buffer: wgpu::Buffer,
     globals_bind_group: wgpu::BindGroup,
+    /// Last viewport passed to [`SSScene::set_viewport`], re-applied on restore
+    /// (the projection lives in a buffer that dies with the device).
+    viewport: Option<(f32, f32, bool)>,
 
     vertex_buffer: Option<wgpu::Buffer>,
     index_buffer: Option<wgpu::Buffer>,
@@ -1065,10 +1068,10 @@ impl SSRenderer {
     }
 }
 
-impl SSInternalPlayer {
+impl SSScene {
     /// Build the target-scoped resources: the projection uniform and its bind
     /// group, cut against `renderer`'s shared layout.
-    pub fn new(device: &wgpu::Device, renderer: &SSRenderer, config: &RendererConfig) -> Self {
+    pub fn new(device: &wgpu::Device, renderer: &SSRenderer, config: &SceneConfig) -> Self {
         let globals_buffer = device.create_buffer(&wgpu::BufferDescriptor {
             label: Some("SpriteStudio Globals UB"),
             size: 64, // 16 * 4 bytes for mat4x4
@@ -1084,6 +1087,7 @@ impl SSInternalPlayer {
             stencil_format: config.stencil_format,
             globals_buffer,
             globals_bind_group,
+            viewport: None,
             vertex_buffer: None,
             index_buffer: None,
             draw_calls: Vec::new(),
@@ -1103,8 +1107,8 @@ impl SSInternalPlayer {
     /// The config this renderer was built from. Retained so a lost device can be
     /// replaced by a renderer targeting the same formats (SPEC §14) without the
     /// caller having to remember them.
-    pub fn config(&self) -> RendererConfig {
-        RendererConfig { color_format: self.color_format, stencil_format: self.stencil_format }
+    pub fn config(&self) -> SceneConfig {
+        SceneConfig { color_format: self.color_format, stencil_format: self.stencil_format }
     }
 
     /// Cache key for a content draw. Without a stencil buffer every draw uses the
@@ -1120,11 +1124,50 @@ impl SSInternalPlayer {
         PipelineKey { kind, color_format: self.color_format, stencil_format: self.stencil_format }
     }
 
+    /// Set the projection to the render target's pixel dimensions. Remembered, so
+    /// [`SSScene::restore_device`] can re-apply it to a rebuilt buffer.
+    pub fn set_viewport(&mut self, queue: &wgpu::Queue, width: f32, height: f32, y_down: bool) {
+        self.update_projection(queue, width, height, y_down);
+        self.viewport = Some((width, height, y_down));
+    }
+
+    /// Rebuild this target's GPU state against a freshly created `device` after
+    /// the previous one was lost (SPEC §14). The host calls
+    /// [`SSRenderer::restore_device`] first — that covers pipelines and textures
+    /// for the whole device — then this once per render target, then
+    /// [`crate::SSPlayer::restore_textures`] once per player.
+    pub fn restore_device(&mut self, renderer: &SSRenderer, device: &wgpu::Device, queue: &wgpu::Queue) {
+        let viewport = self.viewport;
+        *self = Self::new(device, renderer, &SceneConfig { color_format: self.color_format, stencil_format: self.stencil_format });
+        if let Some((width, height, y_down)) = viewport {
+            self.set_viewport(queue, width, height, y_down);
+        }
+    }
+
     /// Update the projection matrix to the target's pixel dimensions.
-    pub fn update_projection(&self, queue: &wgpu::Queue, width: f32, height: f32, y_down: bool) {
+    fn update_projection(&self, queue: &wgpu::Queue, width: f32, height: f32, y_down: bool) {
         let scale_y = if y_down { -2.0 / height } else { 2.0 / height };
         let matrix = [2.0 / width, 0.0, 0.0, 0.0, 0.0, scale_y, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 1.0];
         queue.write_buffer(&self.globals_buffer, 0, bytemuck::cast_slice(&matrix));
+    }
+
+    /// Advance every player and build this target's frame (SPEC §9.2).
+    ///
+    /// This is the frame boundary: one `begin_frame` / `end_frame` pair spans
+    /// **all** the players sharing the target, so their geometry lands in one
+    /// vertex buffer and their draws can be recorded back to back.
+    ///
+    /// Players are drawn in ascending [`crate::SSPlayer::order`], ties keeping the
+    /// order the caller passed them in (the sort is stable). The scene borrows
+    /// them rather than owning them (SPEC §1.2), so they can live wherever the
+    /// host keeps them — a `Vec`, an ECS, an engine's scene graph.
+    pub fn update(&mut self, renderer: &mut SSRenderer, device: &wgpu::Device, queue: &wgpu::Queue, delta_secs: f32, players: &mut [&mut crate::SSPlayer]) {
+        self.begin_frame();
+        players.sort_by_key(|p| p.order());
+        for player in players.iter_mut() {
+            player.build_frame(self, renderer, device, queue, delta_secs);
+        }
+        self.end_frame(renderer, device, queue);
     }
 
     /// Reset per-frame accumulation. Call once before appending any batches.

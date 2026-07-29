@@ -9,8 +9,8 @@
 //! It is plain Rust, so a Rust host that only has a window handle (rather than a
 //! winit `Window`) can use it directly instead of assembling wgpu itself.
 
-use crate::internal::{Retention, SSRenderer};
-use crate::player::{SSPlayer, SSPlayerConfig};
+use crate::internal::{Retention, SSRenderer, SSScene, SceneConfig};
+use crate::player::SSPlayer;
 
 /// Depth/stencil format allocated when masking is enabled. Matches the native
 /// viewer and the web host; the depth aspect is unused (SPEC §6).
@@ -40,6 +40,8 @@ pub struct NativeHost {
     /// Device-scoped renderer (SPEC §1.2). Owned here because the host owns the
     /// device; every player this host gains at P7-7 will share this one.
     renderer: SSRenderer,
+    /// One scene per window. P7-7 turns `player` into a `Vec` drawn through it.
+    scene: SSScene,
     surface: wgpu::Surface<'static>,
     device: wgpu::Device,
     queue: wgpu::Queue,
@@ -99,11 +101,12 @@ impl NativeHost {
 
         let stencil_view = config.enable_mask.then(|| create_stencil_view(&device, surface_config.width, surface_config.height));
         let renderer = SSRenderer::new(&device);
-        let player = SSPlayer::new(&device, &renderer, &SSPlayerConfig { color_format: format, stencil_format: config.enable_mask.then_some(STENCIL_FORMAT) });
+        let scene = SSScene::new(&device, &renderer, &SceneConfig { color_format: format, stencil_format: config.enable_mask.then_some(STENCIL_FORMAT) });
+        let player = SSPlayer::new();
 
         let c = config.clear_color;
-        let mut host = Self { player, renderer, surface, device, queue, config: surface_config, stencil_view, clear_color: wgpu::Color { r: c[0] as f64, g: c[1] as f64, b: c[2] as f64, a: c[3] as f64 }, y_down: config.y_down, _instance: instance };
-        host.player.set_viewport(&host.queue, host.config.width as f32, host.config.height as f32, host.y_down);
+        let mut host = Self { player, renderer, scene, surface, device, queue, config: surface_config, stencil_view, clear_color: wgpu::Color { r: c[0] as f64, g: c[1] as f64, b: c[2] as f64, a: c[3] as f64 }, y_down: config.y_down, _instance: instance };
+        host.scene.set_viewport(&host.queue, host.config.width as f32, host.config.height as f32, host.y_down);
         Ok(host)
     }
 
@@ -115,7 +118,7 @@ impl NativeHost {
 
     /// Advance the playback tree and build this frame's GPU buffers.
     pub fn update(&mut self, delta_secs: f32) {
-        self.player.update(&mut self.renderer, &self.device, &self.queue, delta_secs);
+        self.scene.update(&mut self.renderer, &self.device, &self.queue, delta_secs, &mut [&mut self.player]);
     }
 
     /// Acquire the swapchain image, draw the prepared frame, and present.
@@ -151,7 +154,7 @@ impl NativeHost {
                 occlusion_query_set: None,
                 multiview_mask: None,
             });
-            self.player.draw(&self.renderer, &mut pass);
+            self.scene.draw(&self.renderer, &mut pass);
         }
         self.queue.submit(std::iter::once(encoder.finish()));
         output.present();
@@ -170,7 +173,7 @@ impl NativeHost {
         if self.stencil_view.is_some() {
             self.stencil_view = Some(create_stencil_view(&self.device, width, height));
         }
-        self.player.set_viewport(&self.queue, width as f32, height as f32, self.y_down);
+        self.scene.set_viewport(&self.queue, width as f32, height as f32, self.y_down);
     }
 }
 
