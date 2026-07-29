@@ -2489,14 +2489,14 @@ dependencies = [
 
 [[package]]
 name = "ssab"
-version = "7.0.0-alpha.1"
+version = "7.0.0-beta.1"
 dependencies = [
  "flatbuffers",
 ]
 
 [[package]]
 name = "ssinterpolate"
-version = "7.0.0-alpha.1"
+version = "7.0.0-beta.1"
 dependencies = [
  "libm",
  "wide",
@@ -2534,7 +2534,7 @@ dependencies = [
 
 [[package]]
 name = "ssruntime"
-version = "7.0.0-alpha.1"
+version = "7.0.0-beta.1"
 dependencies = [
  "cbindgen",
  "csbindgen",
