@@ -150,6 +150,37 @@ typedef struct {
     bool y_down;
 } ss_scene_desc_t;
 
+/*
+ What the last frame cost (SPEC §14.2 item 10), flattened for the ABI.
+
+ `gpu_pass_time_ns` is 0 when the adapter has no timestamp query, or before
+ the first measurement has come back — it is read without stalling the
+ pipeline, so it lags a frame or two.
+ */
+typedef struct {
+    /*
+     Players that contributed geometry this frame.
+     */
+    uint32_t players;
+    /*
+     Primitives in the frame: parts, shape fans and effect particles.
+     */
+    uint32_t prims;
+    /*
+     Draw calls recorded. The gap from `prims` is draw-call merging headroom.
+     */
+    uint32_t draw_calls;
+    uint32_t _reserved;
+    /*
+     Bytes written to the frame's storage buffers.
+     */
+    uint64_t uploaded_bytes;
+    /*
+     GPU time for the last timed render pass, in nanoseconds. 0 = no reading.
+     */
+    uint64_t gpu_pass_time_ns;
+} ss_scene_stats_t;
+
 #ifdef __cplusplus
 extern "C" {
 #endif // __cplusplus
@@ -413,6 +444,15 @@ void ss_scene_update(ss_scene_t *scene, float delta_seconds);
  `scene` must be a live handle or null.
  */
 int32_t ss_scene_render(ss_scene_t *scene);
+
+/*
+ What the last frame cost (SPEC §14.2 item 10). Writes `out` and returns
+ `SS_OK`, or leaves it untouched and reports the reason.
+
+ # Safety
+ `out` must point at a writable `ss_scene_stats_t`.
+ */
+int32_t ss_scene_stats(ss_scene_t *scene, ss_scene_stats_t *out);
 
 /*
  Resize the swapchain, the depth/stencil buffer and the projection to a new

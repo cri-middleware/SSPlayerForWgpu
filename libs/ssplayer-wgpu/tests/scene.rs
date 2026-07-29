@@ -447,6 +447,59 @@ fn every_geometry_class_draws() {
     }
 }
 
+/// SPEC §14.2 item 10: a frame reports what it cost. Every remaining item in
+/// that section is a claim about issuing less work, and none of them can be
+/// judged against a player that reports nothing.
+///
+/// The counters are the part that is always available (GPU timing needs a device
+/// feature and lags a frame, so it cannot be asserted on here). They have to
+/// track the scene rather than be plausible constants, so this checks them
+/// against changes whose direction is known: a second player adds primitives, an
+/// invisible one contributes none.
+#[test]
+fn a_frame_reports_what_it_cost() {
+    let Some((device, queue)) = gpu() else {
+        eprintln!("no GPU adapter available, skipping headless render test");
+        return;
+    };
+    let mut renderer = SSRenderer::new(&device);
+    let mut scene = make_scene(&device, &queue, true);
+    let mut one = make_player(&device, &queue, &mut renderer, "Basic");
+
+    advance(&mut scene, &mut renderer, &device, &queue, &mut [&mut one], 10);
+    let single = scene.stats();
+    eprintln!("one player: {} prims, {} draws, {} B", single.prims, single.draw_calls, single.uploaded_bytes);
+    assert_eq!(single.players, 1);
+    assert!(single.prims > 0, "a frame that drew something reported no primitives");
+    assert!(single.draw_calls > 0, "a frame that drew something reported no draw calls");
+    assert!(single.draw_calls <= single.prims, "more draw calls than primitives — every draw covers at least one");
+    assert!(single.uploaded_bytes > 0, "geometry reached the GPU but no bytes were counted");
+
+    // A second player of the same pack roughly doubles the geometry. Exactness
+    // is not the point; tracking is.
+    let mut two = make_player(&device, &queue, &mut renderer, "Basic");
+    advance(&mut scene, &mut renderer, &device, &queue, &mut [&mut one, &mut two], 10);
+    let pair = scene.stats();
+    assert_eq!(pair.players, 2);
+    assert!(pair.prims > single.prims, "a second player added no primitives ({} vs {})", pair.prims, single.prims);
+    assert!(pair.uploaded_bytes > single.uploaded_bytes, "a second player uploaded nothing");
+
+    // Hiding one takes its share back out rather than merely skipping the draw.
+    // Compared against the same frame with the player simply absent — the part
+    // count varies along the timeline, so `single` above is not the reference.
+    two.set_visible(false);
+    rebuild(&mut scene, &mut renderer, &device, &queue, &mut [&mut one, &mut two]);
+    let hidden = scene.stats();
+
+    two.set_visible(true);
+    rebuild(&mut scene, &mut renderer, &device, &queue, &mut [&mut one]);
+    let solo = scene.stats();
+
+    assert_eq!(hidden.players, 1, "an invisible player was still counted as drawing");
+    assert_eq!(hidden.prims, solo.prims, "an invisible player still contributed primitives");
+    assert_eq!(hidden.uploaded_bytes, solo.uploaded_bytes, "an invisible player still uploaded geometry");
+}
+
 /// `set_alpha` fades the whole player. The target is cleared to opaque black and
 /// the blend table is premultiplied throughout, so alpha 0 leaves the backdrop
 /// untouched under every blend mode and a half fade lands strictly in between.

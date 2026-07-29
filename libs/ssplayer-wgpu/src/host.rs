@@ -156,7 +156,11 @@ impl NativeHost {
 
         let adapter = pollster::block_on(instance.request_adapter(&wgpu::RequestAdapterOptions { power_preference: wgpu::PowerPreference::default(), compatible_surface, force_fallback_adapter: false }))
             .map_err(|e| format!("no GPU adapter for the requested backend: {e}"))?;
-        let (device, queue) = pollster::block_on(adapter.request_device(&wgpu::DeviceDescriptor::default())).map_err(|e| format!("request_device: {e}"))?;
+        // Ask for GPU timing when the adapter has it (SPEC §14.2 item 10). It has
+        // to be requested here or never; `SSScene` reports nothing without it,
+        // and an adapter that lacks it still works — it just cannot be measured.
+        let device_desc = wgpu::DeviceDescriptor { required_features: adapter.features() & wgpu::Features::TIMESTAMP_QUERY, ..Default::default() };
+        let (device, queue) = pollster::block_on(adapter.request_device(&device_desc)).map_err(|e| format!("request_device: {e}"))?;
 
         let caps = surface.get_capabilities(&adapter);
         let &first = caps.formats.first().ok_or("the adapter cannot present to this surface")?;
@@ -222,6 +226,11 @@ impl NativeHost {
         self.players.len()
     }
 
+    /// What the last frame cost (SPEC §14.2 item 10).
+    pub fn stats(&self) -> crate::SceneStats {
+        self.scene.stats()
+    }
+
     /// Register a texture for a reference-mode pack, lending the renderer this
     /// host's device+queue (SPEC §8.1). Shared by every player in the window.
     pub fn upload_texture(&mut self, hash: u32, rgba: &[u8], width: u32, height: u32) {
@@ -264,12 +273,13 @@ impl NativeHost {
                     depth_ops: Some(wgpu::Operations { load: wgpu::LoadOp::Clear(1.0), store: wgpu::StoreOp::Store }),
                     stencil_ops: Some(wgpu::Operations { load: wgpu::LoadOp::Clear(0), store: wgpu::StoreOp::Store }),
                 }),
-                timestamp_writes: None,
+                timestamp_writes: self.scene.timestamp_writes(),
                 occlusion_query_set: None,
                 multiview_mask: None,
             });
             self.scene.draw(&self.renderer, &mut pass);
         }
+        self.scene.resolve_timestamps(&mut encoder);
         self.queue.submit(std::iter::once(encoder.finish()));
         output.present();
         Ok(())

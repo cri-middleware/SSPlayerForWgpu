@@ -33,4 +33,5 @@ exclude = ["IDENTITY_TRANSFORM", "MAX_MASK_WRITERS"]
 "SsScene" = "ss_scene_t"
 "SsPlayer" = "ss_player_t"
 "SsSceneDesc" = "ss_scene_desc_t"
+"SsSceneStats" = "ss_scene_stats_t"
 "SsWindowHandle" = "ss_window_handle_t"

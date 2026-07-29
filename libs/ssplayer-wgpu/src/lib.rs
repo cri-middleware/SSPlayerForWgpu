@@ -23,6 +23,7 @@ mod frame;
 #[cfg(feature = "ffi")]
 pub mod host;
 mod mask;
+mod metrics;
 mod pack;
 mod player;
 mod renderer;
@@ -32,9 +33,10 @@ mod web;
 
 pub use frame::FrameView;
 pub use mask::{GeomKind, MaskOp, MaskWriter, PartMaskFlags, StencilTest, plan_writers};
+pub use metrics::SceneStats;
 pub use pack::{EmbeddedTexture, SSPack};
 pub use player::SSPlayer;
 pub use renderer::{AlphaMode, Retention, SSRenderer};
-pub use scene::{BatchInfo, IDENTITY_TRANSFORM, NodeSlot, SSScene, SceneConfig};
+pub use scene::{BatchInfo, FrameChunk, IDENTITY_TRANSFORM, NodeSlot, SSScene, SceneConfig};
 #[cfg(feature = "web")]
 pub use web::SsPlayerWeb;
