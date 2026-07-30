@@ -1,6 +1,31 @@
-use ssplayer_wgpu::{Retention, SSPlayer, SSRenderer, SSScene, SceneConfig};
+// Native development viewer for `ssplayer-wgpu` (SPEC §13).
+//
+// The viewer is a host: it owns the whole wgpu stack (instance / device / queue
+// / surface) and lends it to the borrow-model player each frame (SPEC §1).
+//
+// **It shows a cast, not a character.** One `SSRenderer` (device-scoped), one
+// `SSScene` (this window), and N `SSPlayer`s built into a single render pass —
+// which is what P7 rebuilt the drawing layer to allow. The multi-player faults
+// that only the eye catches live here: one player's mask clipping the next (the
+// `Stack` layout piles them on top of each other on purpose), a blend reading
+// through a neighbour, and who ends up in front when `order` is reversed.
+// `tests/scene.rs` pins those headless as pixel counts; this is where you look
+// at them.
+//
+//   Space       pause / resume            +/-     add / remove a player
+//   Left/Right  previous / next .ssab     Tab     cycle focus (all / #1 / #2 …)
+//   Up/Down     previous / next animation V       toggle visibility
+//   R           restart animation         [ / ]   alpha down / up
+//   L           layout: Row / Stack       O       reverse draw order
+//   F           toggle Y-axis flip        Escape  quit
+//
+// The pack, animation, visibility and alpha keys act on the **focused** member;
+// focus starts at "all", so they drive the whole cast until you press Tab.
+
+use ssplayer_wgpu::{Retention, SSPack, SSPlayer, SSRenderer, SSScene, SceneConfig};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
+use std::time::{Duration, Instant};
 use wgpu::{Device, Queue, Surface, SurfaceConfiguration};
 use winit::application::ApplicationHandler;
 use winit::event::WindowEvent;
@@ -10,6 +35,49 @@ use winit::window::{Window, WindowAttributes};
 /// Depth/stencil format the host attaches so the player can rasterise masks
 /// (SPEC §6). The depth aspect is unused (compare Always, no write).
 const STENCIL_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Depth24PlusStencil8;
+
+/// Cast size at startup. Two, because one is the case that worked before P7 —
+/// starting there means a regression in player isolation is on screen from the
+/// first frame rather than behind a keypress.
+const INITIAL_CAST: usize = 2;
+/// Most players `+` will go to. Throughput is `tests/scale.rs`'s job; this is
+/// for looking at interference, and past a handful there is nothing to see.
+const MAX_CAST: usize = 8;
+
+/// Canvas size assumed for a member with no animation selected yet, so the
+/// layout has something to fit.
+const FALLBACK_CANVAS: (f32, f32) = (320.0, 320.0);
+
+/// How the cast is arranged on screen.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Layout {
+    /// Side by side, each scaled to its own slot. For reading one character.
+    Row,
+    /// Piled at the centre with a small stagger, so they overlap almost
+    /// completely. Interference between players only shows where they overlap.
+    Stack,
+}
+
+impl Layout {
+    fn name(self) -> &'static str {
+        match self {
+            Layout::Row => "Row",
+            Layout::Stack => "Stack (overlapping)",
+        }
+    }
+}
+
+/// One character in the scene: a player plus which pack and animation it is on.
+///
+/// A player holds no GPU resource at all (SPEC §1.2), so the cast is a plain
+/// `Vec` and the whole of it is lent to the scene once per frame.
+struct Member {
+    player: SSPlayer,
+    /// Index into [`AppState::packs`].
+    pack_idx: usize,
+    /// Index into [`AppState::pack_anims`]`[pack_idx]`.
+    anim_idx: usize,
+}
 
 /// (Re)create the depth/stencil render target at the given size.
 fn create_stencil_view(device: &Device, width: u32, height: u32) -> wgpu::TextureView {
@@ -27,7 +95,7 @@ fn create_stencil_view(device: &Device, width: u32, height: u32) -> wgpu::Textur
 }
 
 /// The viewer is a host: it owns the whole wgpu stack (instance/device/queue/
-/// surface) and drives the borrow-model [`SSPlayer`] each frame.
+/// surface) and drives the borrow-model players each frame.
 struct AppState {
     window: Arc<Window>,
     device: Device,
@@ -44,18 +112,35 @@ struct AppState {
     /// One scene per render target; it owns the frame arena and draws every
     /// player into a single pass (SPEC §9.2).
     scene: SSScene,
-    player: SSPlayer,
-    ssab_paths: Vec<PathBuf>,
-    current_ssab_idx: usize,
-    current_anim_idx: usize,
-    anim_names: Vec<String>,
 
-    last_update: std::time::Instant,
+    /// Every `.ssab` in the asset directory, parsed once. Members share them by
+    /// `Arc` (SPEC §8.2), so a cast of N on one pack costs one parse and one
+    /// atlas upload between them, not N.
+    packs: Vec<SSPack>,
+    /// Animation names per pack, in `packs` order.
+    pack_anims: Vec<Vec<String>>,
+    /// The characters in the scene, in the order they were added. Draw order is
+    /// `set_order`, not this (see `layout_cast`).
+    cast: Vec<Member>,
+    /// Which member the pack / animation / appearance keys drive. `None` is
+    /// "all of them", which keeps the single-character key bindings behaving as
+    /// they always did.
+    focus: Option<usize>,
+    layout: Layout,
+    /// Draw the cast back to front instead of front to back (SPEC §9.3). Only
+    /// visible where they overlap, which is what `Layout::Stack` is for.
+    reverse_order: bool,
+
+    last_update: Instant,
     is_paused: bool,
     y_down: bool,
     logged_first_draw: bool,
     /// Wall time of the last `SSScene::update`, in milliseconds.
     last_update_ms: f64,
+    /// When the status block was last drawn. It refreshes on a timer as well as
+    /// on keypresses, so the frame counters on it stay live (SPEC §14.2 item 10
+    /// — these numbers are the only evidence a change made the frame cheaper).
+    last_status: Instant,
 }
 
 impl AppState {
@@ -65,20 +150,26 @@ impl AppState {
             self.config.height = new_size.height;
             self.surface.configure(&self.device, &self.config);
             self.stencil_view = create_stencil_view(&self.device, new_size.width, new_size.height);
+            // Placement is in projection units, which are the target's pixels.
+            self.layout_cast();
         }
     }
 
     fn update(&mut self) {
-        let now = std::time::Instant::now();
+        let now = Instant::now();
         let delta = now.duration_since(self.last_update).as_secs_f32();
         self.last_update = now;
 
         if !self.is_paused {
+            // The whole cast goes into one `update`, so one `begin_frame` /
+            // `end_frame` pair spans it and the draws end up back to back in a
+            // single pass (SPEC §9.2).
+            let mut players: Vec<&mut SSPlayer> = self.cast.iter_mut().map(|m| &mut m.player).collect();
             // The CPU half of the frame. The scene deliberately does not time
             // itself (SPEC §14.2 item 10) — `Instant` is not portable to wasm,
             // and a host needs one line to do it.
-            let started = std::time::Instant::now();
-            self.scene.update(&mut self.renderer, &self.device, &self.queue, delta, &mut [&mut self.player]);
+            let started = Instant::now();
+            self.scene.update(&mut self.renderer, &self.device, &self.queue, delta, &mut players);
             self.last_update_ms = started.elapsed().as_secs_f64() * 1.0e3;
         }
     }
@@ -101,6 +192,10 @@ impl AppState {
         self.scene.set_viewport(&self.queue, size.width as f32, size.height as f32, self.y_down);
 
         {
+            // One pass for the whole cast. Clearing the stencil here would hide
+            // a player failing to unwind its own mask coverage, which is the
+            // regression `tests/scene.rs::stencil_unwind_isolates_players`
+            // guards headless — but the eye catches it here first (SPEC §6).
             let mut rpass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
                 label: Some("Render Pass"),
                 color_attachments: &[Some(wgpu::RenderPassColorAttachment {
@@ -133,24 +228,136 @@ impl AppState {
         Ok(())
     }
 
-    fn load_ssab_file(&mut self, path: &Path) {
-        println!("Loading SSAB: {:?}", path);
-        let bytes = std::fs::read(path).expect("Failed to read SSAB file");
-        // Pack name = file stem (external instance refs are resolved by pack name).
-        let pack = path.file_stem().and_then(|s| s.to_str()).unwrap_or_default();
-        self.player.load_ssab(pack, &bytes).expect("Failed to load SSAB in Player");
+    // --- cast ------------------------------------------------------------
 
-        let anims = self.player.animation_names().unwrap_or_default();
-        println!("Animations found: {:?}", anims);
-        if !anims.is_empty() {
-            self.player.set_animation(&anims[0]).expect("Failed to select animation");
-            self.player.play();
-            self.anim_names = anims;
-            self.current_anim_idx = 0;
-        } else {
-            self.anim_names = Vec::new();
-            self.current_anim_idx = 0;
+    /// Add one character to the scene, playing the same thing as the last one.
+    fn add_member(&mut self) {
+        if self.cast.len() >= MAX_CAST {
+            return;
         }
+        let (pack_idx, anim_idx) = self.cast.last().map(|m| (m.pack_idx, m.anim_idx)).unwrap_or((0, 0));
+        self.spawn_member(pack_idx, anim_idx);
+    }
+
+    /// Build a player, register every pack with it, and put it on screen.
+    fn spawn_member(&mut self, pack_idx: usize, anim_idx: usize) {
+        let mut player = SSPlayer::new();
+        // Register every pack up front: external instance parts resolve their
+        // source animation by pack name (SPEC §7.1), and registration is an
+        // `Arc` bump, not a parse.
+        for pack in &self.packs {
+            player.add_pack(pack);
+        }
+        self.cast.push(Member { player, pack_idx, anim_idx });
+
+        let idx = self.cast.len() - 1;
+        self.apply_pack(idx, pack_idx);
+    }
+
+    /// Drop the last character. One always stays, or there is nothing to look at.
+    fn remove_member(&mut self) {
+        if self.cast.len() <= 1 {
+            return;
+        }
+        self.cast.pop();
+        if self.focus.is_some_and(|i| i >= self.cast.len()) {
+            self.focus = None;
+        }
+        self.layout_cast();
+    }
+
+    /// The members the pack / animation / appearance keys act on.
+    fn targets(&self) -> Vec<usize> {
+        match self.focus {
+            Some(i) if i < self.cast.len() => vec![i],
+            _ => (0..self.cast.len()).collect(),
+        }
+    }
+
+    /// Point one member at a pack and start playing from it.
+    fn apply_pack(&mut self, idx: usize, pack_idx: usize) {
+        if pack_idx >= self.packs.len() {
+            return;
+        }
+        {
+            let pack = &self.packs[pack_idx];
+            let member = &mut self.cast[idx];
+            member.pack_idx = pack_idx;
+            // `set_pack` clears the selection — selecting an animation and
+            // starting it are separate calls (SPEC §9.3) — so `apply_anim`
+            // below is not optional.
+            member.player.set_pack(pack);
+        }
+        let anim_idx = self.cast[idx].anim_idx.min(self.pack_anims[pack_idx].len().saturating_sub(1));
+        self.apply_anim(idx, anim_idx);
+        // Packs differ in canvas size, so the fit has to be recomputed.
+        self.layout_cast();
+    }
+
+    /// Select and play an animation on one member. `anim_idx` wraps, so callers
+    /// can hand it `current + 1` without knowing how many there are.
+    fn apply_anim(&mut self, idx: usize, anim_idx: usize) {
+        let pack_idx = self.cast[idx].pack_idx;
+        let names = self.pack_anims.get(pack_idx).map(Vec::as_slice).unwrap_or(&[]);
+        if names.is_empty() {
+            return;
+        }
+        let anim_idx = anim_idx % names.len();
+        let name = names[anim_idx].clone();
+
+        let member = &mut self.cast[idx];
+        member.anim_idx = anim_idx;
+        if let Err(e) = member.player.set_animation(&name) {
+            eprintln!("Failed to select animation {name:?}: {e:?}");
+            return;
+        }
+        member.player.play();
+    }
+
+    /// Place the cast and stack it front to back.
+    ///
+    /// Placement is per player (SPEC §5.4) — the projection belongs to the
+    /// scene — so this is only a root matrix per member, and re-running it every
+    /// time the window or the cast changes costs nothing.
+    fn layout_cast(&mut self) {
+        let count = self.cast.len();
+        if count == 0 {
+            return;
+        }
+        let (width, height) = (self.config.width as f32, self.config.height as f32);
+        let (layout, reverse) = (self.layout, self.reverse_order);
+        let last = (count - 1) as f32;
+
+        for (i, member) in self.cast.iter_mut().enumerate() {
+            // Fit each member to the space it has: the demo packs disagree about
+            // canvas size, and showing them all at authored scale puts some of
+            // them off-screen.
+            let (cw, ch) = member.player.canvas_size().unwrap_or(FALLBACK_CANVAS);
+            let (cw, ch) = (cw.max(1.0), ch.max(1.0));
+            let offset = i as f32 - last * 0.5;
+
+            let (x, y, scale) = match layout {
+                Layout::Row => {
+                    let slot = width / count as f32;
+                    (offset * slot, 0.0, (slot * 0.9 / cw).min(height * 0.9 / ch).clamp(0.05, 1.0))
+                }
+                Layout::Stack => {
+                    // Enough stagger to tell them apart, little enough that they
+                    // still cover each other.
+                    let step = (width * 0.04).min(48.0);
+                    (offset * step, -offset * step, (width * 0.5 / cw).min(height * 0.8 / ch).clamp(0.05, 1.5))
+                }
+            };
+            member.player.set_transform(x, y, scale, scale, 0.0);
+            member.player.set_order(if reverse { (count - 1 - i) as i32 } else { i as i32 });
+        }
+    }
+
+    // --- status ----------------------------------------------------------
+
+    fn refresh_status(&mut self) {
+        self.last_status = Instant::now();
+        self.print_status();
     }
 
     fn print_status(&self) {
@@ -159,17 +366,21 @@ impl AppState {
         println!("====================================================");
         println!("         SpriteStudio 7 wgpu Player Viewer");
         println!("====================================================");
-        if !self.ssab_paths.is_empty() {
-            println!("  Active File:      {:?} ({}/{})", self.ssab_paths[self.current_ssab_idx].file_name().unwrap_or_default(), self.current_ssab_idx + 1, self.ssab_paths.len());
-        } else {
-            println!("  Active File:      None");
+
+        let focus = match self.focus {
+            Some(i) => format!("#{}", i + 1),
+            None => "all".to_string(),
+        };
+        println!("  Cast:             {} player(s) in 1 pass, focus {focus}", self.cast.len());
+        println!("  Layout:           {}{}", self.layout.name(), if self.reverse_order { ", draw order reversed" } else { "" });
+        for (i, member) in self.cast.iter().enumerate() {
+            let marker = if self.focus == Some(i) { '>' } else { ' ' };
+            let pack = self.packs.get(member.pack_idx).map(SSPack::name).unwrap_or("none");
+            let anim = self.pack_anims.get(member.pack_idx).and_then(|names| names.get(member.anim_idx)).map(String::as_str).unwrap_or("none");
+            let hidden = if member.player.is_visible() { "" } else { "  [hidden]" };
+            println!("  {marker} #{}  {pack} / {anim}   order {}  alpha {:.2}  nodes {}{hidden}", i + 1, member.player.order(), member.player.alpha(), member.player.instance_node_count());
         }
-        if !self.anim_names.is_empty() {
-            println!("  Animation:        {} ({}/{})", self.anim_names[self.current_anim_idx], self.current_anim_idx + 1, self.anim_names.len());
-        } else {
-            println!("  Animation:        None");
-        }
-        println!("  Instance nodes:   {}", self.player.instance_node_count());
+
         // SPEC §14.2 item 10: what the frame cost. `prims` vs `draw_calls` is the
         // headroom draw-call merging has; `gpu` is absent when the adapter has no
         // timestamp query, and lags a frame or two when it does.
@@ -178,18 +389,20 @@ impl AppState {
             Some(ns) => format!("{:.3} ms", ns as f64 / 1.0e6),
             None => "n/a (no timestamp query)".to_string(),
         };
-        println!("  Frame:            {} prims / {} draws / {:.1} KiB uploaded", stats.prims, stats.draw_calls, stats.uploaded_bytes as f64 / 1024.0);
+        println!("----------------------------------------------------");
+        println!("  Frame:            {} drawn / {} prims / {} draws / {:.1} KiB uploaded", stats.players, stats.prims, stats.draw_calls, stats.uploaded_bytes as f64 / 1024.0);
+        println!("  Draw list:        {} mergeable / {} redundant texture binds", stats.mergeable_draws, stats.redundant_texture_binds);
         println!("  GPU pass:         {gpu}  (cpu update {:.3} ms)", self.last_update_ms);
         println!("  Playback:         {}", if self.is_paused { "Paused" } else { "Playing" });
         println!("  Y-Axis Mode:      {}", if self.y_down { "Y-Down (flipped)" } else { "Y-Up (standard)" });
         println!("----------------------------------------------------");
-        println!("  Controls:");
-        println!("    Space       - Pause / Resume");
-        println!("    Right/Left  - Next / Prev SSAB File");
-        println!("    Up/Down     - Next / Prev Animation");
-        println!("    R           - Restart Animation");
-        println!("    F           - Toggle Y-Axis Flip");
-        println!("    Escape      - Exit");
+        println!("  Controls (pack / animation / V / [ ] act on the focus):");
+        println!("    Space       - Pause / Resume        +/-   - Add / Remove player");
+        println!("    Right/Left  - Next / Prev SSAB      Tab   - Cycle focus");
+        println!("    Up/Down     - Next / Prev animation V     - Toggle visibility");
+        println!("    R           - Restart animation     [ / ] - Alpha down / up");
+        println!("    L           - Row / Stack layout    O     - Reverse draw order");
+        println!("    F           - Toggle Y-Axis Flip    Esc   - Exit");
         println!("====================================================");
     }
 }
@@ -205,7 +418,8 @@ impl ApplicationHandler for App {
             return;
         }
 
-        let window = Arc::new(event_loop.create_window(WindowAttributes::default().with_title("SpriteStudio 7 wgpu Viewer")).expect("Failed to create window"));
+        let attributes = WindowAttributes::default().with_title("SpriteStudio 7 wgpu Viewer").with_inner_size(winit::dpi::LogicalSize::new(960.0, 540.0));
+        let window = Arc::new(event_loop.create_window(attributes).expect("Failed to create window"));
 
         let mut instance_desc = wgpu::InstanceDescriptor::new_without_display_handle();
         instance_desc.backends = wgpu::Backends::METAL;
@@ -250,57 +464,17 @@ impl ApplicationHandler for App {
 
         let mut renderer = SSRenderer::new(&device);
         let scene = SSScene::new(&device, &SceneConfig { color_format: format, stencil_format: Some(STENCIL_FORMAT) });
-        let mut player = SSPlayer::new();
 
         // Host responsibility (reference-mode ssab): decode atlas PNGs and hand
-        // the RGBA to the player keyed by fnv1a hash of the file stem.
+        // the RGBA to the renderer keyed by fnv1a hash of the file stem. Device
+        // scope, so this happens once no matter how big the cast gets.
         load_textures(&mut renderer, &device, &queue, &self.asset_dir);
 
-        // Discover all `.ssab` files in the asset directory.
-        let mut ssab_paths = Vec::new();
-        if let Ok(entries) = std::fs::read_dir(&self.asset_dir) {
-            for entry in entries.flatten() {
-                let path = entry.path();
-                if path.is_file() && path.extension().and_then(|s| s.to_str()) == Some("ssab") {
-                    ssab_paths.push(path);
-                }
-            }
-        }
-        ssab_paths.sort();
+        let (packs, pack_anims) = load_packs(&self.asset_dir);
+        // Prefer "Basic" as the initial pack, otherwise the first one.
+        let initial_pack = packs.iter().position(|p| p.name() == "Basic").unwrap_or(0);
 
-        // Register every pack up front so external instance references (which
-        // point at other .ssab files by pack name) can be resolved.
-        for path in &ssab_paths {
-            if let (Ok(bytes), Some(pack)) = (std::fs::read(path), path.file_stem().and_then(|s| s.to_str()))
-                && let Err(e) = player.add_ssab(pack, &bytes)
-            {
-                eprintln!("Failed to register {:?}: {:?}", path, e);
-            }
-        }
-
-        let mut current_ssab_idx = 0;
-        let mut anim_names = Vec::new();
-
-        // Prefer "Basic.ssab" as the initial file, otherwise the first one.
-        if !ssab_paths.is_empty() {
-            if let Some(idx) = ssab_paths.iter().position(|p| p.file_name().and_then(|s| s.to_str()) == Some("Basic.ssab")) {
-                current_ssab_idx = idx;
-            }
-
-            let path = &ssab_paths[current_ssab_idx];
-            println!("Loading initial SSAB: {:?}", path);
-            let bytes = std::fs::read(path).expect("Failed to read SSAB file");
-            let pack = path.file_stem().and_then(|s| s.to_str()).unwrap_or_default();
-            player.load_ssab(pack, &bytes).expect("Failed to load SSAB in Player");
-
-            anim_names = player.animation_names().unwrap_or_default();
-            if !anim_names.is_empty() {
-                player.set_animation(&anim_names[0]).expect("Failed to select animation");
-                player.play();
-            }
-        }
-
-        let state = AppState {
+        let mut state = AppState {
             window,
             device,
             queue,
@@ -309,19 +483,25 @@ impl ApplicationHandler for App {
             stencil_view,
             renderer,
             scene,
-            player,
-            ssab_paths,
-            current_ssab_idx,
-            current_anim_idx: 0,
-            anim_names,
-            last_update: std::time::Instant::now(),
+            packs,
+            pack_anims,
+            cast: Vec::new(),
+            focus: None,
+            layout: Layout::Row,
+            reverse_order: false,
+            last_update: Instant::now(),
             is_paused: false,
             y_down: false,
             logged_first_draw: false,
             last_update_ms: 0.0,
+            last_status: Instant::now(),
         };
 
-        state.print_status();
+        for _ in 0..INITIAL_CAST {
+            state.spawn_member(initial_pack, 0);
+        }
+
+        state.refresh_status();
         self.state = Some(state);
     }
 
@@ -358,6 +538,11 @@ impl ApplicationHandler for App {
                         event_loop.exit();
                     }
                 }
+                // Keep the frame counters on screen current without redrawing
+                // the block 60 times a second.
+                if state.last_status.elapsed() >= Duration::from_millis(500) {
+                    state.refresh_status();
+                }
             }
             WindowEvent::KeyboardInput { event: winit::event::KeyEvent { logical_key, state: winit::event::ElementState::Pressed, .. }, .. } => match logical_key {
                 winit::keyboard::Key::Named(winit::keyboard::NamedKey::Escape) => {
@@ -365,53 +550,99 @@ impl ApplicationHandler for App {
                 }
                 winit::keyboard::Key::Character(ref c) if c == " " => {
                     state.is_paused = !state.is_paused;
-                    state.print_status();
+                    state.refresh_status();
+                }
+                // Focus picks who the pack/animation/appearance keys drive:
+                // all → #1 → … → #N → all.
+                winit::keyboard::Key::Named(winit::keyboard::NamedKey::Tab) => {
+                    state.focus = match state.focus {
+                        None if !state.cast.is_empty() => Some(0),
+                        Some(i) if i + 1 < state.cast.len() => Some(i + 1),
+                        _ => None,
+                    };
+                    state.refresh_status();
                 }
                 // Horizontal: switch SSAB file (matches Ren'Py's key mapping).
-                winit::keyboard::Key::Named(winit::keyboard::NamedKey::ArrowRight) if !state.ssab_paths.is_empty() => {
-                    state.current_ssab_idx = (state.current_ssab_idx + 1) % state.ssab_paths.len();
-                    let path = state.ssab_paths[state.current_ssab_idx].clone();
-                    state.load_ssab_file(&path);
-                    state.print_status();
-                }
-                winit::keyboard::Key::Named(winit::keyboard::NamedKey::ArrowLeft) if !state.ssab_paths.is_empty() => {
-                    if state.current_ssab_idx == 0 {
-                        state.current_ssab_idx = state.ssab_paths.len() - 1;
-                    } else {
-                        state.current_ssab_idx -= 1;
+                winit::keyboard::Key::Named(winit::keyboard::NamedKey::ArrowRight) if !state.packs.is_empty() => {
+                    for idx in state.targets() {
+                        let next = (state.cast[idx].pack_idx + 1) % state.packs.len();
+                        state.apply_pack(idx, next);
                     }
-                    let path = state.ssab_paths[state.current_ssab_idx].clone();
-                    state.load_ssab_file(&path);
-                    state.print_status();
+                    state.refresh_status();
+                }
+                winit::keyboard::Key::Named(winit::keyboard::NamedKey::ArrowLeft) if !state.packs.is_empty() => {
+                    for idx in state.targets() {
+                        let next = (state.cast[idx].pack_idx + state.packs.len() - 1) % state.packs.len();
+                        state.apply_pack(idx, next);
+                    }
+                    state.refresh_status();
                 }
                 // Vertical: switch animation within the current file.
-                winit::keyboard::Key::Named(winit::keyboard::NamedKey::ArrowDown) if !state.anim_names.is_empty() => {
-                    state.current_anim_idx = (state.current_anim_idx + 1) % state.anim_names.len();
-                    let name = state.anim_names[state.current_anim_idx].clone();
-                    state.player.set_animation(&name).unwrap();
-                    state.player.play();
-                    state.print_status();
-                }
-                winit::keyboard::Key::Named(winit::keyboard::NamedKey::ArrowUp) if !state.anim_names.is_empty() => {
-                    if state.current_anim_idx == 0 {
-                        state.current_anim_idx = state.anim_names.len() - 1;
-                    } else {
-                        state.current_anim_idx -= 1;
+                winit::keyboard::Key::Named(winit::keyboard::NamedKey::ArrowDown) => {
+                    for idx in state.targets() {
+                        let next = state.cast[idx].anim_idx + 1;
+                        state.apply_anim(idx, next);
                     }
-                    let name = state.anim_names[state.current_anim_idx].clone();
-                    state.player.set_animation(&name).unwrap();
-                    state.player.play();
-                    state.print_status();
+                    state.refresh_status();
                 }
-                winit::keyboard::Key::Character(ref c) if c.eq_ignore_ascii_case("r") && !state.anim_names.is_empty() => {
-                    let name = state.anim_names[state.current_anim_idx].clone();
-                    state.player.set_animation(&name).unwrap();
-                    state.player.play();
-                    state.print_status();
+                winit::keyboard::Key::Named(winit::keyboard::NamedKey::ArrowUp) => {
+                    for idx in state.targets() {
+                        let member = &state.cast[idx];
+                        let count = state.pack_anims.get(member.pack_idx).map(Vec::len).unwrap_or(0);
+                        if count == 0 {
+                            continue;
+                        }
+                        let next = member.anim_idx + count - 1;
+                        state.apply_anim(idx, next);
+                    }
+                    state.refresh_status();
+                }
+                winit::keyboard::Key::Character(ref c) if c.eq_ignore_ascii_case("r") => {
+                    for idx in state.targets() {
+                        let current = state.cast[idx].anim_idx;
+                        state.apply_anim(idx, current);
+                    }
+                    state.refresh_status();
+                }
+                // "=" as well as "+", so the key works without Shift.
+                winit::keyboard::Key::Character(ref c) if c == "+" || c == "=" => {
+                    state.add_member();
+                    state.refresh_status();
+                }
+                winit::keyboard::Key::Character(ref c) if c == "-" => {
+                    state.remove_member();
+                    state.refresh_status();
+                }
+                winit::keyboard::Key::Character(ref c) if c.eq_ignore_ascii_case("l") => {
+                    state.layout = if state.layout == Layout::Row { Layout::Stack } else { Layout::Row };
+                    state.layout_cast();
+                    state.refresh_status();
+                }
+                winit::keyboard::Key::Character(ref c) if c.eq_ignore_ascii_case("o") => {
+                    state.reverse_order = !state.reverse_order;
+                    state.layout_cast();
+                    state.refresh_status();
+                }
+                winit::keyboard::Key::Character(ref c) if c.eq_ignore_ascii_case("v") => {
+                    for idx in state.targets() {
+                        let member = &mut state.cast[idx];
+                        let visible = member.player.is_visible();
+                        member.player.set_visible(!visible);
+                    }
+                    state.refresh_status();
+                }
+                winit::keyboard::Key::Character(ref c) if c == "]" || c == "[" => {
+                    let step = if c == "]" { 0.1 } else { -0.1 };
+                    for idx in state.targets() {
+                        let member = &mut state.cast[idx];
+                        let alpha = member.player.alpha();
+                        member.player.set_alpha(alpha + step);
+                    }
+                    state.refresh_status();
                 }
                 winit::keyboard::Key::Character(ref c) if c.eq_ignore_ascii_case("f") => {
                     state.y_down = !state.y_down;
-                    state.print_status();
+                    state.refresh_status();
                 }
                 _ => {}
             },
@@ -426,7 +657,48 @@ impl ApplicationHandler for App {
     }
 }
 
-/// Decode every PNG in `dir` and upload it to the player, keyed by the fnv1a
+/// Parse every `.ssab` in `dir` once, and collect the animation names of each.
+///
+/// One [`SSPack`] per file, shared by the whole cast: cloning a pack is an `Arc`
+/// bump, so N characters on one pack hold one parse and one copy of the bytes
+/// between them (SPEC §8.2).
+fn load_packs(dir: &Path) -> (Vec<SSPack>, Vec<Vec<String>>) {
+    let mut paths = Vec::new();
+    if let Ok(entries) = std::fs::read_dir(dir) {
+        for entry in entries.flatten() {
+            let path = entry.path();
+            if path.is_file() && path.extension().and_then(|s| s.to_str()) == Some("ssab") {
+                paths.push(path);
+            }
+        }
+    }
+    paths.sort();
+
+    let mut packs = Vec::new();
+    for path in &paths {
+        // Pack name = file stem (external instance refs are resolved by pack name).
+        let Some(name) = path.file_stem().and_then(|s| s.to_str()) else { continue };
+        let bytes = match std::fs::read(path) {
+            Ok(bytes) => bytes,
+            Err(e) => {
+                eprintln!("Failed to read {:?}: {:?}", path, e);
+                continue;
+            }
+        };
+        match SSPack::load_named(name, &bytes) {
+            Ok(pack) => {
+                println!("Loaded SSAB: {:?}", path);
+                packs.push(pack);
+            }
+            Err(e) => eprintln!("Failed to parse {:?}: {:?}", path, e),
+        }
+    }
+
+    let pack_anims = packs.iter().map(SSPack::animation_names).collect();
+    (packs, pack_anims)
+}
+
+/// Decode every PNG in `dir` and upload it to the renderer, keyed by the fnv1a
 /// hash of the file stem (matching the runtime's cellmap texture hashes).
 fn load_textures(renderer: &mut SSRenderer, device: &Device, queue: &Queue, dir: &Path) {
     let entries = std::fs::read_dir(dir).expect("Failed to read assets directory");

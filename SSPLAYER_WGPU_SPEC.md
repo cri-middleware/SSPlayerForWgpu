@@ -875,7 +875,7 @@ const char*  ss_last_error(void);                             // スレッドロ
 | **pack 共有 / 借用テクスチャ（ヘッドレス）** ✅ P7-5 | `libs/ssplayer-wgpu/tests/pack.rs`。**同一 pack N 体でアップロード1回**は `texture_upload_count()` で見る（`texture_count()` は N 回上書きしても同じ値なので判定にならない）。`set_texture` は同じピクセルで `upload_texture` と**ピクセル完全一致**、`forget_texture` で白フォールバックに落ちること。**`AlphaMode` は合成アトラス（アルファ横ランプ）で検証する**——出荷フィクスチャはほぼ不透明で、premul と straight が一致してしまい**フラグを無視しても通ってしまう**。ランプなら誤申告は 1/α ぶん明るくなり、正しい申告 0.001 に対し 11.6 と桁で開く |
 | **全フィクスチャ回帰（ヘッドレス）** ✅ P7-6 | `libs/ssplayer-wgpu/tests/golden.rs::golden_corpus`（`#[ignore]`）。全パック × 先頭4アニメ × 4フレーム × stencil on/off ＋ 2体構成 = 134 枚を readback し、**変更前のダンプとバイト比較**する。`SS_GOLDEN_DIR=<出力> [SS_GOLDEN_COMPARE=<基準>] cargo test --test golden -- --ignored`。<br>他のレンダリングテストは「描画量」と「特定の不変条件」しか見ないので、**パーツが1px ずれた／色がわずかに変わった**を誰も検出できない——そこを埋めるのがこれ。GPU/ドライバ依存なので基準は**同じマシンで取る**（チェックインしない）。P7-6 の頂点パス総入替はこれで 134/134 ビット一致を確認した |
 | **幾何4クラス（ヘッドレス）** ✅ P7-6 | `tests/scene.rs::every_geometry_class_draws`。Basic/Mesh/Shape/Effect を1本ずつ描き、各クラスの頂点ステージが**何かを出す**ことだけを下限で見る（正確な出力は `golden_corpus` の担当）。頂点エントリが4つに割れた以上、1つ死んでも他は無傷という壊れ方をするため |
-| **複数プレイヤー（目視）** | ◻ `examples/viewer` を N 体対応にする。現状 1 体固定で、**複数体でのパリティ検証ができない**（マスク・ブレンドの相互干渉は目視でしか気づけない類） |
+| **複数プレイヤー（目視）** ✅ | `examples/viewer` が **1 パスに N 体**（既定2体、`+/-` で 1〜8）。要点は**重ねられること**——`L` で Row / Stack（中央に重ねる）を切り替え、`O` で描画順を反転する。相互干渉は重なりの上でしか起きないので、Row だけでは 1 体固定と同じものしか見えない。`Tab` の focus で**体ごとに別の `.ssab`／アニメ**を選べるので、`Mask` × `Basic` を重ねて「先の体のマスクが後の体をクリップしない」（`unwind_masks`、§6）が一目で分かる。`V` / `[` `]` は per-player の `set_visible` / `set_alpha`。パックは `SSPack` を1回パースして全体で共有する（§8.2）。ステータス欄は 0.5 秒ごとに `stats()` を出し直すので、体数を変えながら `players` / `prims` / `draw_calls` / GPU 時間の動きが読める |
 | **体数スケール（計測）** ✅ P8-6 | `tests/scale.rs::update_cost_by_player_count`（`#[ignore]`、**release で**）。1〜256体の `update` 実測。`PARALLEL_THRESHOLD` はこの数字で決めた。`update` の中身を変えたら再測定して閾値を動かすこと |
 | **フレームコスト** ✅ P8-10 | `SSScene::stats()`（`tests/scene.rs::a_frame_reports_what_it_cost` / `gpu_pass_time_comes_back`）。viewer と Metal viewer が毎フレーム表示する。**§14.2 の 4〜9 に着手する前後で必ずここを比べること**——「速くなるはず」で入れた変更が実際どうだったかは、これ以外に判定材料が無い |
 | **wasm サイズ** | `cd examples/web && ./build.sh`（**release**。`--dev` は wasm-opt を飛ばすので測ってはいけない）→ `ls -l pkg/*.wasm pkg/*.js` ＋ `gzip -9 -c ... \| wc -c`。§14.1 の表を更新する |
@@ -1078,7 +1078,7 @@ draw リストが前フレームと同一なら bundle を再生、変われば�
 - `libs/ssplayer-wgpu/src/renderer.rs`（層2a・device スコープ）／ `scene.rs`（層2b・ターゲットスコープ）
 - `libs/ssplayer-wgpu/src/player.rs`（再生木。GPU リソースを一切持たない）／ `pack.rs`（`.ssab` の共有単位）
 - `libs/ssplayer-wgpu/src/web.rs`・`host.rs`・`ffi.rs`（各ホスト。いずれも 1 ターゲット N 体）／ `roster.rs`（ハンドル）
-- `examples/viewer/src/main.rs`（winit+wgpu ループ。◻ **まだ 1 体固定**——§13 の「複数プレイヤー（目視）」）
+- `examples/viewer/src/main.rs`（winit+wgpu ループ。1 パスに N 体、体ごとにパック/アニメを選べる目視ツール——§13 の「複数プレイヤー（目視）」）
 
 **全体方針**
 - `REDESIGN_ASSESSMENT.ja.md`（頭脳/体、オーバーライド/ミキシング/ステートマシンの将来計画）
