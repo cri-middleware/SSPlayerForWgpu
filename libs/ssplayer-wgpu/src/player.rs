@@ -126,6 +126,96 @@ pub struct MissingAsset {
     pub hash: u32,
 }
 
+/// Which way the playhead walks the animation.
+///
+/// Deliberately a type of this crate rather than a re-export of the runtime's:
+/// the runtime discriminates `Forward = 1 / Backward = -1` (it multiplies by
+/// them), while every other face of every Player — the C API, the wasm build,
+/// and so the sibling Players — uses `0 / 1`. Re-exporting would leak `-1` into
+/// the `js` and `ffi` faces and silently disagree with all of them, so the wire
+/// value is pinned here and converted at the runtime boundary.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum PlaybackDirection {
+    Forward,
+    Backward,
+}
+
+impl PlaybackDirection {
+    /// The value crossing the `js` / `ffi` faces: `0` forward, `1` backward.
+    pub fn as_wire(self) -> i32 {
+        match self {
+            Self::Forward => 0,
+            Self::Backward => 1,
+        }
+    }
+
+    /// Anything other than `1` reads as forward, matching the C API's own
+    /// `direction == 0` test rather than rejecting unknown input.
+    pub fn from_wire(value: i32) -> Self {
+        if value == 1 { Self::Backward } else { Self::Forward }
+    }
+}
+
+impl From<PlaybackDirection> for ssruntime::core::playback_controller::PlaybackDirection {
+    fn from(value: PlaybackDirection) -> Self {
+        match value {
+            PlaybackDirection::Forward => Self::Forward,
+            PlaybackDirection::Backward => Self::Backward,
+        }
+    }
+}
+
+impl From<ssruntime::core::playback_controller::PlaybackDirection> for PlaybackDirection {
+    fn from(value: ssruntime::core::playback_controller::PlaybackDirection) -> Self {
+        match value {
+            ssruntime::core::playback_controller::PlaybackDirection::Forward => Self::Forward,
+            ssruntime::core::playback_controller::PlaybackDirection::Backward => Self::Backward,
+        }
+    }
+}
+
+/// What happens when the playhead reaches the far end of the range.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum PlaybackStyle {
+    /// Jump back to the start, or stop, according to the loop count.
+    Normal,
+    /// Turn around and walk back, so one loop is a full round trip.
+    PingPong,
+}
+
+impl PlaybackStyle {
+    /// See [`PlaybackDirection::as_wire`].
+    pub fn as_wire(self) -> i32 {
+        match self {
+            Self::Normal => 0,
+            Self::PingPong => 1,
+        }
+    }
+
+    /// See [`PlaybackDirection::from_wire`].
+    pub fn from_wire(value: i32) -> Self {
+        if value == 1 { Self::PingPong } else { Self::Normal }
+    }
+}
+
+impl From<PlaybackStyle> for ssruntime::core::playback_controller::PlaybackStyle {
+    fn from(value: PlaybackStyle) -> Self {
+        match value {
+            PlaybackStyle::Normal => Self::Normal,
+            PlaybackStyle::PingPong => Self::PingPong,
+        }
+    }
+}
+
+impl From<ssruntime::core::playback_controller::PlaybackStyle> for PlaybackStyle {
+    fn from(value: ssruntime::core::playback_controller::PlaybackStyle) -> Self {
+        match value {
+            ssruntime::core::playback_controller::PlaybackStyle::Normal => Self::Normal,
+            ssruntime::core::playback_controller::PlaybackStyle::PingPong => Self::PingPong,
+        }
+    }
+}
+
 /// Everything in `path` up to the last `/`, with the separator — the directory a
 /// pack's siblings are named relative to (SPEC §8.1).
 ///
@@ -549,6 +639,152 @@ impl SSPlayer {
 
     pub fn is_playing(&self) -> bool {
         self.root.as_ref().map(|r| r.context.is_playing()).unwrap_or(false)
+    }
+
+    /// Held in place rather than stopped: [`SSPlayer::is_playing`] stays true.
+    pub fn is_paused(&self) -> bool {
+        self.root.as_ref().map(|r| r.context.is_pausing()).unwrap_or(false)
+    }
+
+    /// Every configured loop has played. Sticky until the next play or
+    /// [`SSPlayer::set_animation`], and never true under an infinite loop.
+    pub fn is_finished(&self) -> bool {
+        self.root.as_ref().map(|r| r.context.is_finished()).unwrap_or(false)
+    }
+
+    /// The last [`SSScene::update`] crossed a loop boundary. An edge, cleared at
+    /// the top of every update, so it only reads true inside the tick that
+    /// crossed.
+    ///
+    /// [`SSScene::update`]: crate::SSScene::update
+    pub fn is_looped(&self) -> bool {
+        self.root.as_ref().map(|r| r.context.is_looped()).unwrap_or(false)
+    }
+
+    // --- Playhead ----------------------------------------------------------
+    //
+    // Everything below reads or writes the ROOT context only. Instance children
+    // run their own clocks, driven by their slots from the root's frame (SPEC
+    // §7.1), so seeking the root carries them with it on the next update.
+
+    /// Jump to `frame`. Fractional values are honoured — the tree is evaluated
+    /// at the sub-frame position on the next update.
+    pub fn seek(&mut self, frame: f32) {
+        if let Some(root) = &mut self.root {
+            root.context.set_frame_no(frame);
+        }
+    }
+
+    /// Current playhead position, fractional. Zero before an animation is set.
+    pub fn frame_no(&self) -> f32 {
+        self.root.as_ref().map(|r| r.context.get_frame_no()).unwrap_or(0.0)
+    }
+
+    /// First and last frame of the range being played, and its length
+    /// (`end - start + 1`, both ends inclusive). All zero before an animation is
+    /// set. These follow [`SSPlayer::set_animation_section`], so they describe
+    /// what the transport actually walks rather than what the pack contains.
+    pub fn start_frame(&self) -> i32 {
+        self.root.as_ref().map(|r| r.context.get_start_frame()).unwrap_or(0)
+    }
+
+    /// See [`SSPlayer::start_frame`].
+    pub fn end_frame(&self) -> i32 {
+        self.root.as_ref().map(|r| r.context.get_end_frame()).unwrap_or(0)
+    }
+
+    /// See [`SSPlayer::start_frame`].
+    pub fn total_frames(&self) -> i32 {
+        match &self.root {
+            Some(root) => root.context.get_end_frame() - root.context.get_start_frame() + 1,
+            None => 0,
+        }
+    }
+
+    // --- Playback shape ----------------------------------------------------
+    //
+    // NOTE: `set_animation` rebuilds the tree from scratch, so it resets every
+    // setting here (and `set_speed`) to the pack's defaults. Re-apply whatever
+    // you chose after each call. Caching them on the player, as the Flutter and
+    // Unity Players do, is deliberately left out of this layer for now — see the
+    // note in SPEC §9.3.
+
+    /// `count` cycles then stop; `-1` (or `0`) loops forever. Under
+    /// [`PlaybackStyle::PingPong`] one cycle is a full round trip.
+    pub fn set_loop_count(&mut self, count: i32) {
+        if let Some(root) = &mut self.root {
+            root.context.set_loop(count);
+        }
+    }
+
+    /// The configured count, and how many cycles are left of it.
+    pub fn loop_count(&self) -> i32 {
+        self.root.as_ref().map(|r| r.context.get_loops()).unwrap_or(0)
+    }
+
+    /// See [`SSPlayer::loop_count`].
+    pub fn remaining_loops(&self) -> i32 {
+        self.root.as_ref().map(|r| r.context.get_remain_loops()).unwrap_or(0)
+    }
+
+    /// Override the advance rate. The pack's authored rate otherwise — prefer
+    /// [`SSPlayer::set_speed`], which scales playback without replacing it.
+    pub fn set_frame_rate(&mut self, fps: i32) {
+        if let Some(root) = &mut self.root {
+            root.context.set_frame_rate(fps);
+        }
+    }
+
+    /// See [`SSPlayer::set_frame_rate`]. Zero before an animation is set.
+    pub fn frame_rate(&self) -> i32 {
+        self.root.as_ref().map(|r| r.context.get_fps()).unwrap_or(0)
+    }
+
+    /// Restrict playback to `start..=end` of the current animation, so looping
+    /// and ping-pong turn around inside that range. Reflected by
+    /// [`SSPlayer::start_frame`] / [`SSPlayer::end_frame`].
+    ///
+    /// Call it *after* [`SSPlayer::set_animation`]: frame numbers only mean
+    /// something inside the animation they were measured in, and setting an
+    /// animation rebuilds the tree and takes the section with it.
+    pub fn set_animation_section(&mut self, start: i32, end: i32) {
+        if let Some(root) = &mut self.root {
+            root.context.set_animation_section(start, end);
+        }
+    }
+
+    /// Which way the playhead walks, and what it does at the far end. Taken
+    /// together because the runtime sets them as a pair — pass the current value
+    /// for whichever you are not changing.
+    pub fn set_playback_direction(&mut self, direction: PlaybackDirection, style: PlaybackStyle) {
+        if let Some(root) = &mut self.root {
+            root.context.set_playback_direction(direction.into(), style.into());
+        }
+    }
+
+    /// See [`SSPlayer::set_playback_direction`].
+    pub fn playback_direction(&self) -> PlaybackDirection {
+        self.root.as_ref().map(|r| r.context.get_playback_direction().into()).unwrap_or(PlaybackDirection::Forward)
+    }
+
+    /// See [`SSPlayer::set_playback_direction`].
+    pub fn playback_style(&self) -> PlaybackStyle {
+        self.root.as_ref().map(|r| r.context.get_playback_style().into()).unwrap_or(PlaybackStyle::Normal)
+    }
+
+    /// How a long tick is spent. On (the default) advances by the elapsed time
+    /// and drops the frames in between, keeping playback on the wall clock; off
+    /// advances exactly one frame per update, so nothing is skipped but a
+    /// stalled host plays in slow motion.
+    pub fn set_skip_frames(&mut self, skip: bool) {
+        if let Some(root) = &mut self.root {
+            root.context.set_skip_frames(skip);
+        }
+    }
+
+    /// See [`SSPlayer::set_skip_frames`].
+    pub fn skip_frames(&self) -> bool {
+        self.root.as_ref().map(|r| r.context.get_skip_frames()).unwrap_or(true)
     }
 
     /// Place this player: translation, scale, then rotation in radians, composed
