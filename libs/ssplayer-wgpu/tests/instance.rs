@@ -50,14 +50,15 @@ fn probe(anim: &str, frames: usize) {
     child.setup_animation(&ref_anime).unwrap();
 
     let mut slot = InstanceSlot::new();
-    let mut last_parent = 0.0f32;
     let dt = 1.0 / 60.0;
 
     for f in 0..frames {
         parent.update(dt * 1000.0);
         let pf = parent.get_frame_no();
-        let parent_looped = pf + 0.5 < last_parent;
-        last_parent = pf;
+        // The controller's own pulse, read right after the `update` that raised
+        // it — the same rule `SSPlayer::build_frame` follows. It is cleared on
+        // entry to every `update`, so it cannot be polled later.
+        let parent_looped = parent.is_looped();
         let _ = parent.get_frame_data(pf);
         let ev = parent.get_active_event_instance(part_idx as u32);
         let r = slot.step(ev, &mut child, pf, dt, parent_looped);
