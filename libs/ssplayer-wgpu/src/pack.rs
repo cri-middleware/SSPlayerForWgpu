@@ -253,9 +253,7 @@ impl SSPack {
         }
         // SAFETY: as in `build` — the resource owns the buffer being read.
         let ab = unsafe { root_as_ss_anime_binary_unchecked(self.resource.data().as_slice()) };
-        let (Some(cellmaps), Some(assets)) = (ab.cellmaps(), ab.embedded_assets()) else {
-            return Vec::new();
-        };
+        let Some(assets) = ab.embedded_assets() else { return Vec::new() };
         let mut bytes_by_hash: HashMap<u32, &[u8]> = HashMap::new();
         for asset in assets {
             if let Some(bytes) = asset.data() {
@@ -263,10 +261,17 @@ impl SSPack {
             }
         }
 
+        // Each table on its own: a pack can have one and not the other. An
+        // embedded pack whose parts only draw TextureChange targets has no
+        // cellmaps at all (`assets/overall_emb/Instance.ssab` is one), and
+        // requiring both here left it carrying nothing — every part on the white
+        // fallback, with its atlas sitting unread inside the file.
         let mut out = Vec::new();
-        for cm in cellmaps {
-            if let Some(&bytes) = bytes_by_hash.get(&cm.image_path_hash()) {
-                out.push(EmbeddedImage { hash: cm.name_hash(), bytes });
+        if let Some(cellmaps) = ab.cellmaps() {
+            for cm in cellmaps {
+                if let Some(&bytes) = bytes_by_hash.get(&cm.image_path_hash()) {
+                    out.push(EmbeddedImage { hash: cm.name_hash(), bytes });
+                }
             }
         }
         // TextureChange targets, keyed by file name — which for an
