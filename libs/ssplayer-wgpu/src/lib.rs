@@ -16,6 +16,7 @@
 /// the decoder) and a target that has a filesystem.
 #[cfg(all(feature = "embedded", not(target_arch = "wasm32")))]
 mod assets;
+mod events;
 /// The C-ABI face (`ffi` feature): a thin translation layer whose `ss_player_*`
 /// entry points are exported from the cdylib/staticlib and described by the
 /// generated `ssplayer_wgpu.h`. The work it delegates to lives in [`host`].
@@ -38,6 +39,7 @@ mod scene;
 #[cfg(feature = "web")]
 mod web;
 
+pub use events::{AudioEvent, SignalEvent, SignalParam, SignalValue, SsEvent, UserDataEvent};
 pub use frame::FrameView;
 pub use mask::{GeomKind, MaskOp, MaskWriter, PartMaskFlags, StencilTest, plan_writers};
 pub use metrics::SceneStats;

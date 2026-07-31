@@ -1,0 +1,264 @@
+//! Timeline events and the end-of-playback notifications (SPEC §9.5).
+//!
+//! These pin the two things the SDK's Player porting guide singles out, because
+//! both are invisible until they are wrong and both have bitten sibling Players:
+//!
+//! 1. **Events on frames that frame skipping jumped over must still fire.** A
+//!    slow tick advances several frames at once; the runtime records every frame
+//!    it stepped through, and the Player has to read *that* rather than looking
+//!    at the frame it landed on.
+//! 2. **`finished` is an edge, not a state.** The runtime's flag is sticky until
+//!    the next play, so reporting it raw fires every frame afterwards, and
+//!    forgetting to re-arm the latch in `play` loses the *next* completion.
+//!
+//! The event tests run against packs that actually carry events and **fail if
+//! none of them produced any**. `Basic.ssab` has no timeline events at all, so
+//! an earlier draft of this file passed while asserting nothing.
+//!
+//! Advancing needs a device (stepping the tree is `SSScene::update`'s job), so
+//! these skip when no adapter is available, as the other GPU tests do.
+
+use ssplayer_wgpu::{SSPlayer, SSRenderer, SSScene, SceneConfig, SsEvent};
+
+/// Packs authored with timeline events, one per kind.
+const EVENT_PACKS: [&str; 3] = ["overall/UserData.ssab", "overall/Signal.ssab", "overall/Sound.ssab"];
+
+fn asset_root() -> &'static str {
+    concat!(env!("CARGO_MANIFEST_DIR"), "/../../assets")
+}
+
+fn gpu() -> Option<(wgpu::Device, wgpu::Queue)> {
+    let instance = wgpu::Instance::new(wgpu::InstanceDescriptor::new_without_display_handle());
+    let adapter = pollster::block_on(instance.request_adapter(&wgpu::RequestAdapterOptions { power_preference: wgpu::PowerPreference::default(), compatible_surface: None, force_fallback_adapter: false })).ok()?;
+    let (device, queue) = pollster::block_on(adapter.request_device(&wgpu::DeviceDescriptor::default())).ok()?;
+    Some((device, queue))
+}
+
+/// A scene to drive players through. `update` is what advances the clock.
+fn scene(device: &wgpu::Device, queue: &wgpu::Queue) -> SSScene {
+    let mut scene = SSScene::new(device, &SceneConfig { color_format: wgpu::TextureFormat::Rgba8Unorm, stencil_format: None });
+    scene.set_viewport(queue, 256.0, 256.0, false);
+    scene
+}
+
+/// Load a pack and select its first animation, without starting it.
+fn player_for(pack: &str) -> Option<SSPlayer> {
+    let mut player = SSPlayer::new();
+    player.load(format!("{}/{}", asset_root(), pack)).ok()?;
+    let name = player.animation_names()?.first()?.clone();
+    player.set_animation(&name).ok()?;
+    Some(player)
+}
+
+/// Play `pack` to completion at `delta` seconds per tick, returning everything
+/// it reported. `None` when the pack is not on disk.
+fn play_through(renderer: &mut SSRenderer, device: &wgpu::Device, queue: &wgpu::Queue, pack: &str, delta: f32) -> Option<Vec<SsEvent>> {
+    let mut scene = scene(device, queue);
+    let mut player = player_for(pack)?;
+    player.set_loop_count(1);
+    player.play();
+
+    let mut seen = Vec::new();
+    for _ in 0..4000 {
+        scene.update(renderer, device, queue, delta, &mut [&mut player]);
+        seen.extend(player.events().iter().cloned());
+        if player.finished_last_update() {
+            break;
+        }
+    }
+    Some(seen)
+}
+
+#[test]
+fn a_player_with_no_animation_reports_nothing() {
+    let player = SSPlayer::new();
+
+    assert!(player.events().is_empty());
+    assert!(!player.looped_last_update());
+    assert!(!player.finished_last_update());
+}
+
+#[test]
+fn finished_is_an_edge_and_survives_a_replay() {
+    let Some((device, queue)) = gpu() else {
+        eprintln!("no adapter — skipping");
+        return;
+    };
+    let mut renderer = SSRenderer::new(&device);
+    let mut scene = scene(&device, &queue);
+    let Some(mut player) = player_for(EVENT_PACKS[0]) else {
+        eprintln!("{} missing — skipping", EVENT_PACKS[0]);
+        return;
+    };
+
+    player.set_loop_count(1);
+    player.play();
+
+    // Run until it completes, counting how many updates report the edge.
+    let mut edges = 0;
+    for _ in 0..4000 {
+        scene.update(&mut renderer, &device, &queue, 1.0 / 60.0, &mut [&mut player]);
+        if player.finished_last_update() {
+            edges += 1;
+        }
+        if player.is_finished() && edges > 0 {
+            break;
+        }
+    }
+    assert_eq!(edges, 1, "finished must be reported exactly once");
+    assert!(player.is_finished(), "and the sticky state should now be set");
+
+    // The sticky flag stays true; the edge does not fire again. Reporting the
+    // runtime's flag directly instead of the edge is what would fire forever.
+    for _ in 0..5 {
+        scene.update(&mut renderer, &device, &queue, 1.0 / 60.0, &mut [&mut player]);
+        assert!(!player.finished_last_update(), "the edge must not repeat");
+    }
+
+    // Replaying re-arms the latch. Without that, this second completion would be
+    // compared against a leftover `true` and silently never reported.
+    player.play();
+    let mut second = 0;
+    for _ in 0..4000 {
+        scene.update(&mut renderer, &device, &queue, 1.0 / 60.0, &mut [&mut player]);
+        if player.finished_last_update() {
+            second += 1;
+            break;
+        }
+    }
+    assert_eq!(second, 1, "a replay must be able to complete again");
+}
+
+#[test]
+fn an_infinite_loop_loops_and_never_finishes() {
+    let Some((device, queue)) = gpu() else {
+        eprintln!("no adapter — skipping");
+        return;
+    };
+    let mut renderer = SSRenderer::new(&device);
+    let mut scene = scene(&device, &queue);
+    let Some(mut player) = player_for(EVENT_PACKS[0]) else {
+        eprintln!("{} missing — skipping", EVENT_PACKS[0]);
+        return;
+    };
+
+    player.set_loop_count(-1);
+    player.play();
+
+    let mut loops = 0;
+    for _ in 0..4000 {
+        scene.update(&mut renderer, &device, &queue, 1.0 / 60.0, &mut [&mut player]);
+        if player.looped_last_update() {
+            loops += 1;
+        }
+        assert!(!player.finished_last_update(), "an infinite loop never completes");
+    }
+    assert!(loops > 0, "an infinite loop should have come round at least once");
+}
+
+#[test]
+fn frame_skipping_does_not_drop_events() {
+    let Some((device, queue)) = gpu() else {
+        eprintln!("no adapter — skipping");
+        return;
+    };
+    let mut renderer = SSRenderer::new(&device);
+
+    let mut compared = 0;
+    for pack in EVENT_PACKS {
+        // A play-through at 60fps, then the same one in ticks long enough that
+        // most frames are jumped over entirely.
+        let Some(per_frame) = play_through(&mut renderer, &device, &queue, pack, 1.0 / 60.0) else {
+            eprintln!("{pack} missing — skipping");
+            continue;
+        };
+        if per_frame.is_empty() {
+            continue;
+        }
+        let skipped = play_through(&mut renderer, &device, &queue, pack, 0.5).unwrap();
+
+        assert_eq!(skipped, per_frame, "{pack}: frame skipping changed the events — {} at 60fps vs {} in long ticks", per_frame.len(), skipped.len());
+        compared += 1;
+    }
+
+    // Without this the test would pass on packs that carry nothing, which is
+    // exactly how the first version of it proved nothing at all.
+    assert!(compared > 0, "no pack produced any events; this test proved nothing");
+}
+
+#[test]
+fn every_event_kind_decodes() {
+    let Some((device, queue)) = gpu() else {
+        eprintln!("no adapter — skipping");
+        return;
+    };
+    let mut renderer = SSRenderer::new(&device);
+
+    let (mut user_data, mut signals, mut audios) = (0, 0, 0);
+    for pack in EVENT_PACKS {
+        let Some(events) = play_through(&mut renderer, &device, &queue, pack, 1.0 / 60.0) else {
+            eprintln!("{pack} missing — skipping");
+            continue;
+        };
+        for event in &events {
+            match event {
+                SsEvent::UserData(u) => {
+                    user_data += 1;
+                    // A marker with nothing set at all would mean the decode read
+                    // the wrong fields — the animator has to have filled in one.
+                    assert!(u.integer.is_some() || u.rect.is_some() || u.point.is_some() || u.text.is_some(), "{pack}: a UserData marker decoded with every field empty");
+                }
+                SsEvent::Signal(s) => {
+                    signals += 1;
+                    // `command_id` is `required` in the schema, so an empty one
+                    // means the decode landed on the wrong field.
+                    assert!(!s.command_id.is_empty(), "{pack}: a signal decoded without its command");
+                }
+                SsEvent::Audio(a) => {
+                    audios += 1;
+                    assert!(!a.sound_name.is_empty(), "{pack}: an audio trigger decoded without its sound name");
+                    // A play count, never zero — SpriteStudio has no infinite audio loop.
+                    assert!(a.loop_num > 0, "{pack}: audio loop_num should be a play count, got {}", a.loop_num);
+                }
+            }
+        }
+    }
+
+    assert!(user_data > 0, "no UserData events decoded (UserData.ssab should carry some)");
+    assert!(signals > 0, "no Signal events decoded (Signal.ssab should carry some)");
+    assert!(audios > 0, "no Audio events decoded (Sound.ssab should carry some)");
+}
+
+#[test]
+fn events_describe_only_the_tick_that_just_ran() {
+    let Some((device, queue)) = gpu() else {
+        eprintln!("no adapter — skipping");
+        return;
+    };
+    let mut renderer = SSRenderer::new(&device);
+    let mut scene = scene(&device, &queue);
+    let Some(mut player) = player_for(EVENT_PACKS[0]) else {
+        eprintln!("{} missing — skipping", EVENT_PACKS[0]);
+        return;
+    };
+
+    player.set_loop_count(-1);
+    player.play();
+
+    // The list is refilled per tick, never appended to: a looping animation runs
+    // its events past again every cycle, so an accumulating list would grow
+    // without bound.
+    let mut peak = 0;
+    let mut ticks_with_events = 0;
+    for _ in 0..2000 {
+        scene.update(&mut renderer, &device, &queue, 1.0 / 60.0, &mut [&mut player]);
+        let n = player.events().len();
+        if n > 0 {
+            ticks_with_events += 1;
+        }
+        peak = peak.max(n);
+    }
+
+    assert!(ticks_with_events > 1, "expected a looping pack to raise events on several ticks");
+    assert!(peak < 64, "events accumulated across ticks (peaked at {peak} in one tick)");
+}

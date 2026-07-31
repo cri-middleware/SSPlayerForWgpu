@@ -10,6 +10,7 @@
 //! host registers every pack via [`SSPlayer::add_ssab`]; external references are
 //! resolved by pack name.
 
+use crate::events::{SsEvent, decode_events};
 use crate::frame::FrameView;
 use crate::mask::{GeomKind, MaskOp, MaskWriter, PartMaskFlags, StencilTest, plan_writers};
 use crate::pack::{EmbeddedImage, SSPack, TextureRef};
@@ -301,6 +302,29 @@ fn parent_of(path: &str) -> String {
     }
 }
 
+/// Refill `out` with the timeline events the node's last update crossed.
+///
+/// Cleared first, so it always describes the tick that just ran and never
+/// accumulates. Bails before touching the `.ssab` when the runtime reports
+/// nothing, which is the overwhelmingly common case — a frame with no events
+/// costs one integer read.
+fn collect_events(node: &PlaybackNode, animation: Option<&str>, out: &mut Vec<SsEvent>) {
+    out.clear();
+    let indices = node.context.get_passed_event_indices();
+    if indices.is_empty() {
+        return;
+    }
+    let (Some(animation), Some(ssab_bytes)) = (animation, node.context.get_ssab_data()) else {
+        return;
+    };
+    // SAFETY: the same buffer the node was built from, already validated there.
+    let ab = unsafe { root_as_ss_anime_binary_unchecked(ssab_bytes) };
+    let Some(anim) = ab.animations().iter().find(|a| a.name() == animation) else {
+        return;
+    };
+    decode_events(&anim, indices, out);
+}
+
 /// Guards against cyclic instance references blowing the stack.
 const MAX_INSTANCE_DEPTH: u32 = 12;
 
@@ -371,6 +395,26 @@ pub struct SSPlayer {
     /// What the last load could not get (SPEC §8.1). Reset by each
     /// [`SSPlayer::load_with`], appended to as the walk gives up on a file.
     missing: Vec<MissingAsset>,
+    /// Timeline events the last `build_frame` crossed. Cleared and refilled per
+    /// update, and reused rather than reallocated — a frame with no events costs
+    /// nothing beyond the `passed_event_count` read.
+    events: Vec<SsEvent>,
+    /// Whether the last update crossed a loop boundary. A pulse the runtime
+    /// clears on entry to every update, so it is captured there and mirrored
+    /// here for the host to read afterwards.
+    looped: bool,
+    /// Whether the last update *completed* playback — the rising edge of the
+    /// runtime's sticky `is_finished`, not the flag itself.
+    finished_edge: bool,
+    /// The latch that makes `finished_edge` an edge.
+    ///
+    /// Held explicitly, as the SDK's Player porting guide asks: the alternative
+    /// is to lean on some earlier `is_playing` guard, which works until someone
+    /// moves the guard. The guide lists "notifying `is_finished` directly"
+    /// (fires every frame afterwards) and "not resetting the latch in `play`"
+    /// (the *next* completion goes missing) as defects that really happened in
+    /// sibling Players.
+    prev_finished: bool,
     /// Where this player sits in the scene — the root transform of its tree
     /// (SPEC §5.4). Composed by [`SSPlayer::set_transform`]; only the matrix is
     /// kept because nothing yet re-composes it. A future `box` (§9.3, the
@@ -398,7 +442,23 @@ impl SSPlayer {
     /// cheap. The device-scoped [`SSRenderer`] and the target-scoped
     /// [`SSScene`] are lent to it per frame by [`SSScene::update`].
     pub fn new() -> Self {
-        Self { packs: HashMap::new(), main_pack: None, root: None, current_animation: None, packs_awaiting_textures: Vec::new(), pending_images: Vec::new(), missing: Vec::new(), transform: IDENTITY, order: 0, visible: true, alpha: 1.0 }
+        Self {
+            packs: HashMap::new(),
+            main_pack: None,
+            root: None,
+            current_animation: None,
+            packs_awaiting_textures: Vec::new(),
+            pending_images: Vec::new(),
+            missing: Vec::new(),
+            events: Vec::new(),
+            looped: false,
+            finished_edge: false,
+            prev_finished: false,
+            transform: IDENTITY,
+            order: 0,
+            visible: true,
+            alpha: 1.0,
+        }
     }
 
     /// Re-offer this player's embedded atlases after a device loss (SPEC §14).
@@ -687,6 +747,11 @@ impl SSPlayer {
     /// Start — or, after [`SSPlayer::pause`], resume — the selected animation.
     /// No-op until [`SSPlayer::set_animation`] has succeeded.
     pub fn play(&mut self) {
+        // Re-arm the completion latch. Without this, replaying an animation that
+        // already finished would compare against a `true` left over from the
+        // previous run and the *next* completion would never be reported — one of
+        // the defects the SDK's porting guide records from sibling Players.
+        self.prev_finished = false;
         if let Some(root) = &mut self.root {
             root.context.play();
         }
@@ -965,6 +1030,57 @@ impl SSPlayer {
         }
     }
 
+    // --- Events (SPEC §9.5) -------------------------------------------------
+    //
+    // Polled, not called back. The borrow model has the host lending the player
+    // its device per frame and driving the clock, so "read what happened after
+    // update" is the shape that already fits — and it is the only shape that
+    // survives being wrapped by both `js` and `ffi` without becoming a different
+    // API on each.
+    //
+    // All three read the tick that `SSScene::update` just ran, and are replaced
+    // by the next one.
+
+    /// Whether the last update crossed a loop boundary.
+    ///
+    /// One report per update however many cycles were crossed, since a long tick
+    /// under frame skipping can complete several. Use it for "the walk cycle came
+    /// round"; use [`SSPlayer::finished_last_update`] for "the animation is over".
+    ///
+    /// [`SSScene::update`]: crate::SSScene::update
+    pub fn looped_last_update(&self) -> bool {
+        self.looped
+    }
+
+    /// Whether the last update **completed** playback: the rising edge of the
+    /// runtime's sticky finished state, so it reads true for exactly one update.
+    ///
+    /// Never true under an infinite loop, and **not raised by
+    /// [`SSPlayer::stop`]** — it means "every configured cycle has played", not
+    /// "playback is no longer running". Counting loops, or calling `stop`
+    /// yourself, is how you end an infinite one.
+    ///
+    /// The related trap is deriving completion from `!is_playing` or from
+    /// reaching the last frame; both are wrong in ways the SDK's porting guide
+    /// records from sibling Players, which is why neither is offered here.
+    pub fn finished_last_update(&self) -> bool {
+        self.finished_edge
+    }
+
+    /// Timeline events the last update crossed, in the order the runtime
+    /// reported the frames carrying them.
+    ///
+    /// **Frames skipped over are still represented.** The runtime records every
+    /// frame it stepped through, so a footstep on a frame that a slow tick
+    /// jumped past still appears here — which it would not if the host looked
+    /// only at the frame that was landed on.
+    ///
+    /// Empty on a tick that crossed nothing, and on a player that is not
+    /// [`visible`](SSPlayer::set_visible), which does not advance at all.
+    pub fn events(&self) -> &[SsEvent] {
+        &self.events
+    }
+
     // --- Part read-outs (SPEC §9.5) ----------------------------------------
 
     /// How many parts the root animation has. Zero before one is set up.
@@ -1174,6 +1290,19 @@ impl SSPlayer {
         // "the frame went backwards" instead is wrong under reverse and
         // ping-pong playback, where the frame goes backwards every tick.
         let looped = root.context.is_looped();
+
+        // Collect what the host reacts to before anything that could skip work:
+        // events must fire whenever the runtime reports them, whether or not
+        // this tick also draws. The Godot Player gated event handling on the
+        // integer draw frame changing and lost frame-0 events on the first tick
+        // after `play()` as a result.
+        let finished = root.context.is_finished();
+        collect_events(root, self.current_animation.as_deref(), &mut self.events);
+        self.looped = looped;
+        self.finished_edge = finished && !self.prev_finished;
+        self.prev_finished = finished;
+
+        let root = self.root.as_mut().expect("checked above");
 
         // Advance every slot first, then draw. The two are separate walks for a
         // reason — see `step_slots`.
