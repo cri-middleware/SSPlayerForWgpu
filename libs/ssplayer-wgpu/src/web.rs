@@ -37,8 +37,8 @@
 //! `extractEmbeddedTextures` + `ssplayer-webgl`'s `loadTextureFromBytes`, and the
 //! reason this face is ~30% smaller over the wire than one that bundles `image`.
 
-use crate::pack::{SSPack, TextureRef};
-use crate::player::SSPlayer;
+use crate::pack::SSPack;
+use crate::player::{AssetLoader, SSPlayer};
 use crate::renderer::{AlphaMode, Retention, SSRenderer};
 use crate::roster::{Roster, SlotId};
 use crate::scene::{SSScene, SceneConfig};
@@ -699,6 +699,48 @@ macro_rules! with_player {
     }};
 }
 
+/// The web half of [`AssetLoader`] (SPEC §8.1): `fetch` for files,
+/// `createImageBitmap` for images.
+///
+/// The counterpart of the filesystem loader behind [`SSPlayer::load`], and the
+/// reason the walk itself —
+/// both texture tables, deduplication by file, transitive instance packs — is
+/// written once in [`SSPlayer::load`] rather than twice. What differs is only
+/// what a browser can do that a filesystem cannot, and the other way round.
+///
+/// Holds the context by `Rc` and takes its `RefMut` for a moment at a time,
+/// never across an await: JS re-enters through rAF callbacks, and a borrow held
+/// over a yield point would still be held when it does.
+struct WebAssetLoader {
+    ctx: Rc<RefCell<WebContext>>,
+    /// What the pack's relative paths resolve against — the `.ssab`'s own URL.
+    /// `None` falls back to the document's.
+    base_url: Option<String>,
+}
+
+impl AssetLoader for WebAssetLoader {
+    /// One `fetch` per path, settled together: this is the face where overlapping
+    /// the waiting is the difference between one round trip and N.
+    async fn read(&mut self, paths: &[String]) -> Vec<Option<Vec<u8>>> {
+        let fetched = fetch_files(paths, self.base_url.as_deref()).await;
+        paths.iter().map(|path| fetched.get(path).map(|bytes| bytes.to_vec())).collect()
+    }
+
+    async fn supply_texture(&mut self, hash: u32, encoded: &[u8]) {
+        if let Err(e) = upload_encoded(&self.ctx, hash, Rc::from(encoded)).await {
+            self.warn(&format!("an image for {hash:#010x} could not be decoded: {e:?}"));
+        }
+    }
+
+    fn has_texture(&self, hash: u32) -> bool {
+        self.ctx.borrow().renderer.texture_size(hash).is_some()
+    }
+
+    fn warn(&self, message: &str) {
+        warn(&format!("[ssplayer-wgpu] {message}"));
+    }
+}
+
 impl SsPlayerWeb {
     /// Parse `bytes` and register the pack, selecting it when `select`.
     ///
@@ -719,98 +761,38 @@ impl SsPlayerWeb {
         Ok(pack)
     }
 
-    /// Load every atlas `pack` asks for that the renderer does not already have.
+    /// Run `body` on this handle's player, **outside** the context's `RefCell`.
     ///
-    /// The web edition of `SS6PlayerForGodot`'s `_loadTextures`: both `cellmaps()`
-    /// and `external_textures()` (that is [`SSPack::textures`]'s job), embedded
-    /// bytes taken from the pack and reference-mode ones fetched, all landing in
-    /// the device-scoped texture map under the hash a draw batch will ask for.
+    /// [`SSPlayer::load`] holds `&mut SSPlayer` across its awaits, and on this
+    /// face the player lives inside the one cell everything else borrows — so it
+    /// is lifted out for the duration and put back after. The slot keeps a blank
+    /// player meanwhile, which draws nothing: it has no animation yet, which is
+    /// the only state a load can be in.
     ///
-    /// Asking the renderer what is missing *first* is what keeps N players of one
-    /// pack to one load between them ("registered wins", SPEC §8.2) — the same
-    /// job the native path does with the predicate it runs before decoding.
-    async fn load_textures(&self, pack: &SSPack, base_url: Option<&str>) -> Result<(), JsValue> {
-        let wanted: Vec<TextureRef> = {
-            let ctx = self.ctx.borrow();
-            pack.textures().iter().filter(|t| ctx.renderer.texture_size(t.hash).is_none()).cloned().collect()
+    /// If the handle is destroyed while the load is in flight, the finished
+    /// player is dropped rather than written back over its successor — the same
+    /// rule the generation-tagged slots exist for (SPEC §11).
+    async fn with_player_detached<F, Fut, T>(&self, body: F) -> Result<T, JsValue>
+    where
+        F: FnOnce(SSPlayer) -> Fut,
+        Fut: core::future::Future<Output = (SSPlayer, T)>,
+    {
+        let taken = {
+            let ctx = &mut *self.ctx.borrow_mut();
+            let entry = ctx.surfaces.get_mut(self.surface).ok_or_else(|| gone("surface"))?;
+            let slot = entry.players.get_mut(self.id).ok_or_else(|| gone("player"))?;
+            core::mem::take(slot)
         };
-        if wanted.is_empty() {
-            return Ok(());
+
+        let (player, out) = body(taken).await;
+
+        let ctx = &mut *self.ctx.borrow_mut();
+        if let Some(entry) = ctx.surfaces.get_mut(self.surface)
+            && let Some(slot) = entry.players.get_mut(self.id)
+        {
+            *slot = player;
         }
-
-        let carried: HashMap<u32, Rc<[u8]>> = pack.embedded_images().into_iter().filter(|i| wanted.iter().any(|t| t.hash == i.hash)).map(|i| (i.hash, Rc::from(i.bytes))).collect();
-        let mut to_fetch: Vec<String> = wanted.iter().filter(|t| !carried.contains_key(&t.hash)).map(|t| t.path.clone()).collect();
-        to_fetch.sort();
-        to_fetch.dedup();
-        let fetched = if to_fetch.is_empty() { HashMap::new() } else { fetch_files(&to_fetch, base_url).await };
-
-        // Decoding stays sequential: the uploads behind it take the context's one
-        // `RefMut` each, so overlapping them would buy nothing but a borrow panic.
-        // The fetches — the part that actually waits — already ran in parallel.
-        for texture in &wanted {
-            let Some(bytes) = carried.get(&texture.hash).or_else(|| fetched.get(&texture.path)) else { continue };
-            if let Err(e) = upload_encoded(&self.ctx, texture.hash, Rc::clone(bytes)).await {
-                warn(&format!("[ssplayer-wgpu] atlas {} could not be decoded: {e:?}", texture.path));
-            }
-        }
-        Ok(())
-    }
-
-    /// Fetch and register every pack `root`'s instance parts play from, and every
-    /// pack *those* reference, with their textures (SPEC §7.1).
-    ///
-    /// `SS6PlayerForGodot`'s `_load_external_ssabs` and `ssplayer-core`'s
-    /// `resolveInstancePacks` do the same thing by the same rule: the exporter
-    /// writes the referenced pack's own name, so it is both the file's stem and
-    /// the key `ref_anime_pack` resolves against, and `<the .ssab's
-    /// directory>/<name>.ssab` finds it. Godot reaches the deeper levels by
-    /// giving each child player its own resource; a player here holds one flat
-    /// pack table, so the walk is transitive instead.
-    ///
-    /// One level per round trip, all of a level's packs fetched together — the
-    /// depth is the number of waits, not the count. A pack already registered is
-    /// not fetched again, which is also what stops two packs referencing each
-    /// other from looping.
-    async fn load_instance_packs(&self, root: &SSPack, base_url: Option<&str>) -> Result<(), JsValue> {
-        let mut queue = root.instance_packs();
-        while !queue.is_empty() {
-            let missing: Result<Vec<String>, JsValue> = with_player!(self, |p| {
-                let mut missing: Vec<String> = queue.drain(..).filter(|name| !p.has_pack(name)).collect();
-                missing.sort();
-                missing.dedup();
-                missing
-            });
-            let missing = missing?;
-            if missing.is_empty() {
-                return Ok(());
-            }
-
-            let files: Vec<String> = missing.iter().map(|name| format!("{name}.ssab")).collect();
-            let fetched = fetch_files(&files, base_url).await;
-
-            let mut loaded = Vec::new();
-            for (name, file) in missing.iter().zip(&files) {
-                let Some(bytes) = fetched.get(file) else {
-                    warn(&format!("[ssplayer-wgpu] instance pack \"{name}\" could not be loaded; parts that play it will not appear"));
-                    continue;
-                };
-                // Never renamed: `ref_anime_pack` is matched against the name the
-                // exporter wrote, so overriding it here would be a reference that
-                // resolves to nothing.
-                match SSPack::load(bytes) {
-                    Ok(pack) => loaded.push(pack),
-                    Err(e) => warn(&format!("[ssplayer-wgpu] instance pack \"{name}\": {e:?}")),
-                }
-            }
-
-            for pack in &loaded {
-                let registered: Result<(), JsValue> = with_player!(self, |p| p.add_pack(pack));
-                registered?;
-                self.load_textures(pack, base_url).await?;
-                queue.extend(pack.instance_packs());
-            }
-        }
-        Ok(())
+        Ok(out)
     }
 }
 
@@ -845,9 +827,16 @@ impl SsPlayerWeb {
     /// `console.warn`: one missing image should not cost you the character.
     #[wasm_bindgen(js_name = loadSsab)]
     pub async fn load_ssab(&self, bytes: Vec<u8>, pack: Option<String>, base_url: Option<String>) -> Result<(), JsValue> {
-        let pack = self.register(&bytes, pack, true)?;
-        self.load_textures(&pack, base_url.as_deref()).await?;
-        self.load_instance_packs(&pack, base_url.as_deref()).await
+        let registered = self.register(&bytes, pack, true)?;
+        let mut loader = WebAssetLoader { ctx: Rc::clone(&self.ctx), base_url };
+        let name = registered.name().to_string();
+        self.with_player_detached(|mut player| async move {
+            // The pack is registered; only the assets around it are left, so the
+            // walk starts from what is already loaded rather than re-reading it.
+            player.load_assets(&mut loader, &name, "").await;
+            (player, ())
+        })
+        .await
     }
 
     /// Fetch a `.ssab` **and everything it needs**, then select it (SPEC §8.1, §7.1).
@@ -858,31 +847,45 @@ impl SsPlayerWeb {
     /// absolute or relative (resolved against the document, like any URL a page
     /// uses), and the pack keeps the name the exporter gave it.
     ///
-    /// Use [`SsPlayerWeb::load_ssab`] when the bytes come from somewhere that is
-    /// not URL-addressable — a drop, a bundler, an archive — and pass `baseUrl`
-    /// if that pack still has siblings to find.
+    /// This is [`SSPlayer::load`] with the browser's loader plugged in — the same
+    /// call, the same walk, as a native host makes with
+    /// [`SSPlayer::load`]. Use [`SsPlayerWeb::load_ssab`] when the bytes
+    /// come from somewhere that is not URL-addressable — a drop, a bundler, an
+    /// archive — and pass `baseUrl` if that pack still has siblings to find.
     pub async fn load(&self, src: &str) -> Result<(), JsValue> {
-        let fetched = fetch_files(std::slice::from_ref(&src.to_owned()), None).await;
-        let bytes = fetched.get(src).ok_or_else(|| JsValue::from_str(&format!("could not load {src}")))?;
-        let pack = self.register(bytes, None, true)?;
-        // Resolved once here so siblings resolve against the `.ssab` rather than
-        // against the document, which are different whenever `src` is relative.
-        let base = web_sys::window().and_then(|w| w.document()).and_then(|d| d.url().ok()).and_then(|doc| web_sys::Url::new_with_base(src, &doc).ok()).map(|url| url.href());
-        self.load_textures(&pack, base.as_deref()).await?;
-        self.load_instance_packs(&pack, base.as_deref()).await
+        // No base of our own: `src` is already what the document resolves, and the
+        // walk joins the pack's siblings onto its directory before asking. Giving
+        // the loader the `.ssab`'s own URL instead would resolve `src` against
+        // itself — `assets/assets/Basic.ssab` — which is what
+        // `SSPlayer::load` avoids by rooting its loader at the same place the path
+        // is relative to.
+        let mut loader = WebAssetLoader { ctx: Rc::clone(&self.ctx), base_url: None };
+        let src = src.to_owned();
+        self.with_player_detached(|mut player| async move {
+            let out = player.load_with(&mut loader, &src).await;
+            (player, out)
+        })
+        .await?
+        .map_err(js_err)
     }
 
     /// [`SsPlayerWeb::load_ssab`] without changing what plays: registers an
     /// additional pack for external instance references, and loads its assets
     /// too — a sub-animation's cells come out of its own pack's atlases.
     ///
-    /// Rarely needed now that [`SsPlayerWeb::load_ssab`] resolves those
-    /// references itself; it remains for packs that are not URL-addressable, the
-    /// case `ssplayer-core` covers with its `InstancePackProvider` hook.
+    /// Rarely needed now that [`SsPlayerWeb::load`] resolves those references
+    /// itself; it remains for packs that are not URL-addressable, the case
+    /// `ssplayer-core` covers with its `InstancePackProvider` hook.
     #[wasm_bindgen(js_name = addSsab)]
     pub async fn add_ssab(&self, bytes: Vec<u8>, pack: Option<String>, base_url: Option<String>) -> Result<(), JsValue> {
-        let pack = self.register(&bytes, pack, false)?;
-        self.load_textures(&pack, base_url.as_deref()).await
+        let registered = self.register(&bytes, pack, false)?;
+        let mut loader = WebAssetLoader { ctx: Rc::clone(&self.ctx), base_url };
+        let name = registered.name().to_string();
+        self.with_player_detached(|mut player| async move {
+            player.load_assets(&mut loader, &name, "").await;
+            (player, ())
+        })
+        .await
     }
 
     /// The animation names in the loaded pack.

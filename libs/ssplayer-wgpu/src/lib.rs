@@ -12,6 +12,10 @@
 //! one, lending it like `Device` and `Queue`. `SSScene` holds what
 //! belongs to one **render target**: the projection and the frame's geometry.
 
+/// The filesystem behind [`SSPlayer::load`]. Needs the `embedded` feature (for
+/// the decoder) and a target that has a filesystem.
+#[cfg(all(feature = "embedded", not(target_arch = "wasm32")))]
+mod assets;
 /// The C-ABI face (`ffi` feature): a thin translation layer whose `ss_player_*`
 /// entry points are exported from the cdylib/staticlib and described by the
 /// generated `ssplayer_wgpu.h`. The work it delegates to lives in [`host`].
@@ -38,7 +42,7 @@ pub use frame::FrameView;
 pub use mask::{GeomKind, MaskOp, MaskWriter, PartMaskFlags, StencilTest, plan_writers};
 pub use metrics::SceneStats;
 pub use pack::{EmbeddedImage, EmbeddedTexture, SSPack, TextureRef};
-pub use player::SSPlayer;
+pub use player::{AssetLoader, SSPlayer};
 pub use renderer::{AlphaMode, Retention, SSRenderer};
 pub use scene::{BatchInfo, FrameChunk, IDENTITY_TRANSFORM, NodeSlot, SSScene, SceneConfig};
 #[cfg(feature = "web")]

@@ -6,17 +6,17 @@
 // (host.rs) builds the wgpu stack behind the ABI, with backend=Metal forced so
 // this really exercises Metal rather than whatever wgpu would pick.
 //
-// It starts on the embedded-mode packs from assets/overall_emb, so the atlases
-// ride inside the .ssab and no texture supply is needed (SPEC §8.1).
+// It starts on the reference-mode packs from assets/overall, matching the Rust
+// viewer; the embedded set is in assets/overall_emb and can be passed as argv[1].
 //
 // **Drop a .ssab (or a folder of them) on the window to play it**, whichever way
-// it was exported. Reference-mode packs keep their atlases as sibling files, and
-// where those sit is the .ssab's own business: `ss_player_texture_at` reports the
-// path the exporter wrote, relative to the file, and this viewer joins it with
-// the directory the drop came from and hands the bytes to
-// `ss_scene_add_texture_png`. That is the same division of labour the sibling
-// players use — the pack says what it needs and from where, the host reads it
-// (SPEC §8.2).
+// it was exported. `ss_player_load(player, path)` is the whole of loading — the
+// pack, its atlases in either export mode, and the sibling .ssab files its
+// instance parts play from, all resolved against the directory the drop came
+// from (SPEC §8.1, §7.1). This viewer used to walk `ss_player_texture_at` and
+// call `ss_scene_add_texture_png` per image; that loop is what the one call
+// replaced. Those entry points remain for a host whose assets are not files —
+// an archive, a platform asset manager (SPEC §8.2).
 //
 // **It shows two characters at once by default** (SPEC §11, phase P7-7). That
 // used to be impossible through this API: the handle fused the window and the
@@ -44,7 +44,7 @@
 /// Where scripts/deploy-examples.sh puts the embedded demo packs. Baked in by
 /// CMake so the viewer runs from any working directory; argv[1] overrides it.
 #ifndef SS_DEFAULT_ASSET_DIR
-#define SS_DEFAULT_ASSET_DIR "assets/overall_emb"
+#define SS_DEFAULT_ASSET_DIR "assets/overall"
 #endif
 
 /// Collect the `.ssab` files behind a drop: the files themselves, plus the ones
@@ -135,7 +135,6 @@ static const NSUInteger kMaxPlayers = 6;
     NSMutableArray<NSString *> *_packs; // .ssab paths: the asset dir, then whatever was dropped
     /// Cellmap hashes already handed to the scene, so a second pack sharing an
     /// atlas (most of the demo set shares `common.png`) does not re-read it.
-    NSMutableSet<NSNumber *> *_suppliedTextures;
     NSUInteger _packIndex;
     NSArray<NSString *> *_anims; // animation names of the current pack
     NSUInteger _animIndex;
@@ -199,7 +198,6 @@ static const NSUInteger kMaxPlayers = 6;
     }
 
     _packs = [NSMutableArray array];
-    _suppliedTextures = [NSMutableSet set];
     _players = [NSMutableArray array];
     for (NSUInteger i = 0; i < kInitialPlayers; i++) {
         [self addPlayer];
@@ -246,11 +244,9 @@ static const NSUInteger kMaxPlayers = 6;
         return;
     }
     [_players addObject:[NSValue valueWithPointer:player]];
-    // Registration is per player (SPEC §7.1), so a character added later — or
-    // after a drop — still resolves every instance reference the others can.
-    for (NSString *path in _packs) {
-        [self registerPackAtPath:path onPlayer:player];
-    }
+    // Nothing to register: the caller follows with `loadPackAtIndex`, and that
+    // one call brings the pack, its atlases and the packs its instance parts
+    // play from (SPEC §8.1, §7.1).
     [self layOutPlayers];
 }
 
@@ -278,77 +274,15 @@ static const NSUInteger kMaxPlayers = 6;
 
 // --- assets --------------------------------------------------------------
 
-/// Register one .ssab with one player, without changing what plays. Every player
-/// needs every pack: instance parts resolve their sub-animation by pack name,
-/// per player (SPEC §7.1).
-- (BOOL)registerPackAtPath:(NSString *)path onPlayer:(ss_player_t *)player {
-    NSData *data = [NSData dataWithContentsOfFile:path];
-    if (data == nil) {
-        fprintf(stderr, "cannot read %s\n", path.UTF8String);
-        return NO;
-    }
-    NSString *pack = path.lastPathComponent.stringByDeletingPathExtension;
-    if (ss_player_add_ssab(player, pack.UTF8String, (const uint8_t *)data.bytes, data.length) != SS_OK) {
-        fprintf(stderr, "add_ssab %s: %s\n", pack.UTF8String, ss_last_error());
-        return NO;
-    }
-    return YES;
-}
-
-/// Supply the atlases a registered pack needs but does not carry — the host half
-/// of reference-mode texture supply (SPEC §8.1).
+/// Whether `path` is worth putting in the list the Left/Right keys walk.
 ///
-/// **Where the images are is the pack's own answer**, not a guess about the
-/// directory: `ss_player_texture_at` reports the path the exporter wrote,
-/// relative to the .ssab, so joining it with the file's directory locates the
-/// atlas wherever the pack was dropped from. Embedded entries are skipped —
-/// their bytes ride inside the file and reach the GPU on the next update.
-///
-/// Registered on the **scene**, because the texture map is device-scoped: one
-/// upload serves every player, and the shared-hash guard means a set of packs
-/// over one atlas reads it once.
-- (void)supplyTexturesForPackAtPath:(NSString *)path {
-    if (_players.count == 0) {
-        return;
-    }
-    ss_player_t *player = [self playerAt:0];
-    NSString *pack = path.lastPathComponent.stringByDeletingPathExtension;
-    NSString *dir = path.stringByDeletingLastPathComponent;
-
-    uint32_t count = ss_player_texture_count(player, pack.UTF8String);
-    for (uint32_t i = 0; i < count; i++) {
-        ss_texture_ref_t texture;
-        if (ss_player_texture_at(player, pack.UTF8String, i, &texture) != SS_OK) {
-            fprintf(stderr, "texture %u of %s: %s\n", i, pack.UTF8String, ss_last_error());
-            continue;
-        }
-        if (texture.embedded || [_suppliedTextures containsObject:@(texture.hash)]) {
-            continue;
-        }
-        NSString *image = [dir stringByAppendingPathComponent:@(texture.path)];
-        NSData *png = [NSData dataWithContentsOfFile:image];
-        if (png == nil) {
-            fprintf(stderr, "%s needs %s, which could not be read\n", pack.UTF8String, image.UTF8String);
-            continue;
-        }
-        if (ss_scene_add_texture_png(_scene, texture.hash, (const uint8_t *)png.bytes, png.length) != SS_OK) {
-            fprintf(stderr, "add_texture_png %s: %s\n", image.UTF8String, ss_last_error());
-            continue;
-        }
-        [_suppliedTextures addObject:@(texture.hash)];
-    }
-}
-
-/// Register a .ssab with every player and make sure its atlases are on the GPU.
+/// Only a readability check now: loading is `loadPackAtIndex`'s job, and it takes
+/// the path rather than bytes, so nothing needs registering up front.
 - (BOOL)adoptPackAtPath:(NSString *)path {
-    BOOL ok = YES;
-    for (NSValue *entry in _players) {
-        ok &= [self registerPackAtPath:path onPlayer:(ss_player_t *)entry.pointerValue];
+    if (![path.pathExtension isEqualToString:@"ssab"] || ![[NSFileManager defaultManager] isReadableFileAtPath:path]) {
+        fprintf(stderr, "not a readable .ssab: %s\n", path.UTF8String);
+        return NO;
     }
-    if (!ok) {
-        return NO; // unreadable or not a .ssab: leave it out of the list entirely
-    }
-    [self supplyTexturesForPackAtPath:path];
     return YES;
 }
 
@@ -369,10 +303,6 @@ static const NSUInteger kMaxPlayers = 6;
     if (_packs.count == 0) {
         fprintf(stderr, "no .ssab files in %s\n", _assetDir.UTF8String);
         return NO;
-    }
-
-    for (NSString *path in _packs) {
-        [self adoptPackAtPath:path];
     }
 
     // Show the pack named on the command line, else Basic.ssab like the Rust viewer.
@@ -415,18 +345,17 @@ static const NSUInteger kMaxPlayers = 6;
     return YES;
 }
 
-/// Make one registered pack the main pack and play its first animation.
+/// Play one of the listed packs on every player.
+///
+/// `ss_player_load` is the whole of it: the pack, its atlases in either export
+/// mode, and the sibling .ssab files its instance parts play from. This viewer
+/// used to walk `ss_player_texture_at` and call `ss_scene_add_texture_png` per
+/// image, and that loop is what the call replaced (SPEC §8.1).
 - (void)loadPackAtIndex:(NSUInteger)index {
     NSString *path = _packs[index];
-    NSData *data = [NSData dataWithContentsOfFile:path];
-    NSString *pack = path.lastPathComponent.stringByDeletingPathExtension;
-    if (data == nil) {
-        fprintf(stderr, "cannot read %s\n", path.UTF8String);
-        return;
-    }
     for (NSValue *entry in _players) {
-        if (ss_player_load_ssab((ss_player_t *)entry.pointerValue, pack.UTF8String, (const uint8_t *)data.bytes, data.length) != SS_OK) {
-            fprintf(stderr, "load_ssab %s: %s\n", pack.UTF8String, ss_last_error());
+        if (ss_player_load((ss_player_t *)entry.pointerValue, path.UTF8String) != SS_OK) {
+            fprintf(stderr, "load %s: %s\n", path.UTF8String, ss_last_error());
             return;
         }
     }
@@ -602,7 +531,7 @@ static void InstallMenuBar(void) {
     NSApp.mainMenu = menuBar;
 }
 
-/// argv[1], else the directory CMake baked in, else assets/overall_emb walking
+/// argv[1], else the directory CMake baked in, else assets/overall walking
 /// up from the working directory.
 static NSString *FindAssetDir(int argc, const char *argv[]) {
     NSFileManager *fm = NSFileManager.defaultManager;
@@ -612,7 +541,7 @@ static NSString *FindAssetDir(int argc, const char *argv[]) {
     }
     [candidates addObject:@SS_DEFAULT_ASSET_DIR];
     for (NSString *prefix in @[ @"", @"../", @"../../" ]) {
-        [candidates addObject:[prefix stringByAppendingString:@"assets/overall_emb"]];
+        [candidates addObject:[prefix stringByAppendingString:@"assets/overall"]];
     }
 
     BOOL isDir = NO;

@@ -24,6 +24,71 @@ use std::collections::HashMap;
 /// Column-major 4x4 identity.
 const IDENTITY: [f32; 16] = [1.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 1.0];
 
+/// The three things the loading walk cannot do for itself: reach a file, decode
+/// an image, and know what the renderer already holds (SPEC §8.2).
+///
+/// **This is the whole of the platform-specific part of loading.** Everything
+/// else — reading both texture tables, deduplicating by file, walking instance
+/// references transitively — is the same everywhere and lives in
+/// [`SSPlayer::load_with`], so a face cannot quietly implement half of it. That is the
+/// same line `SS6PlayerForCPP` draws between `Common/` and `Platform/`, and the
+/// one `ssplayer-core` draws with `IResourceManager`.
+///
+/// Two implementations ship: the filesystem behind [`SSPlayer::load`], and the
+/// web face's (`fetch` + `createImageBitmap`, whose pixels reach the GPU without
+/// passing through wasm memory at all, SPEC §10). An engine integration writes a
+/// third and gets the walk for free — which it must, because an exported Godot
+/// project keeps its resources in a `.pck` and a Unity one in an APK, where no
+/// `File::open` will reach them.
+///
+/// `async` because a browser leaves no choice; a native implementation simply
+/// does not await anything, and its caller blocks on the future.
+// No `Send` bound: the web implementation holds `Rc`, and nothing here is
+// spawned onto another thread.
+#[allow(async_fn_in_trait)]
+pub trait AssetLoader {
+    /// Read every path — **all of them at once**, so an implementation that can
+    /// overlap the waiting does (the web one issues one `fetch` per path and
+    /// settles them together). Results are positional; `None` is "this one did
+    /// not arrive", which is never fatal to the rest.
+    ///
+    /// Paths arrive relative to whatever the caller passed [`SSPlayer::load_with`]
+    /// as `src`, already joined against its directory — resolving that against a
+    /// base directory or URL is the implementation's business.
+    async fn read(&mut self, paths: &[String]) -> Vec<Option<Vec<u8>>>;
+
+    /// Decode `encoded` (a PNG, as the exporter wrote it) and register it under
+    /// `hash` — the key a draw batch will ask for (SPEC §8.1).
+    async fn supply_texture(&mut self, hash: u32, encoded: &[u8]);
+
+    /// Whether an atlas is already registered for `hash` — a hint, used to skip
+    /// reading a file nobody will need.
+    ///
+    /// Best effort: a loader that cannot see the renderer answers `false` and
+    /// lets the flush make the real decision. The texture map is device-scoped
+    /// (SPEC §1.2), so the authoritative check is the one that keeps N players of
+    /// one pack to one decode and one upload between them.
+    fn has_texture(&self, hash: u32) -> bool;
+
+    /// Report a file that could not be loaded. One missing atlas or sub-pack
+    /// costs you that one thing, not the character, so this is a diagnostic
+    /// rather than an error — the same call `SS6PlayerForGodot` makes with
+    /// `ERR_PRINT` and `ssplayer-core` with `console.warn`.
+    fn warn(&self, message: &str);
+}
+
+/// Everything in `path` up to the last `/`, with the separator — the directory a
+/// pack's siblings are named relative to (SPEC §8.1).
+///
+/// Deliberately string surgery rather than `Path`: the same joins have to hold
+/// for a URL, and `'/'` is the separator in both worlds (Windows accepts it too).
+fn parent_of(path: &str) -> String {
+    match path.rfind('/') {
+        Some(cut) => path[..=cut].to_string(),
+        None => String::new(),
+    }
+}
+
 /// Guards against cyclic instance references blowing the stack.
 const MAX_INSTANCE_DEPTH: u32 = 12;
 
@@ -81,6 +146,16 @@ pub struct SSPlayer {
     /// waits until then too, so a pack whose atlas is already registered is never
     /// decoded at all.
     packs_awaiting_textures: Vec<String>,
+    /// Atlases a host-side load read but has not handed to a renderer yet, still
+    /// **encoded** (SPEC §8.1).
+    ///
+    /// The reference-mode twin of `packs_awaiting_textures`, and deliberately the
+    /// same mechanism: [`SSPlayer::load`] borrows no `Device`/`Queue` — the borrow
+    /// model gives it none until `update` — so what it reads waits here for the
+    /// same flush that decodes the embedded ones. Encoded rather than decoded
+    /// because a 2048² atlas is a few hundred KB here against 16 MB of pixels,
+    /// and because it puts both routes on one timeline.
+    pending_images: Vec<(u32, Vec<u8>)>,
     /// Where this player sits in the scene — the root transform of its tree
     /// (SPEC §5.4). Composed by [`SSPlayer::set_transform`]; only the matrix is
     /// kept because nothing yet re-composes it. A future `box` (§9.3, the
@@ -108,7 +183,7 @@ impl SSPlayer {
     /// cheap. The device-scoped [`SSRenderer`] and the target-scoped
     /// [`SSScene`] are lent to it per frame by [`SSScene::update`].
     pub fn new() -> Self {
-        Self { packs: HashMap::new(), main_pack: None, root: None, current_animation: None, packs_awaiting_textures: Vec::new(), transform: IDENTITY, order: 0, visible: true, alpha: 1.0 }
+        Self { packs: HashMap::new(), main_pack: None, root: None, current_animation: None, packs_awaiting_textures: Vec::new(), pending_images: Vec::new(), transform: IDENTITY, order: 0, visible: true, alpha: 1.0 }
     }
 
     /// Re-offer this player's embedded atlases after a device loss (SPEC §14).
@@ -123,6 +198,170 @@ impl SSPlayer {
     pub fn restore_textures(&mut self, renderer: &mut SSRenderer, device: &wgpu::Device, queue: &wgpu::Queue) {
         self.packs_awaiting_textures = self.packs.values().filter(|p| p.has_embedded_textures()).map(|p| p.name().to_string()).collect();
         self.flush_textures(renderer, device, queue);
+    }
+
+    /// Load a `.ssab` **and everything it depends on**, then select it
+    /// (SPEC §8.1, §7.1).
+    ///
+    /// One call is the whole of loading: the pack, both of its texture tables in
+    /// either export mode, and — transitively — the sibling packs its instance
+    /// parts play from, with their textures. Nothing is left for the caller to
+    /// discover and fetch by hand, which is the point: a host that has to walk
+    /// `textures()` itself will sooner or later miss `external_textures()` and
+    /// ship white silhouettes.
+    ///
+    /// `src` is where the pack is, in whatever terms `loader` understands — a
+    /// path for [`SSPlayer::load`], a URL for the web face. Everything the
+    /// pack names is resolved against its **directory**, because that is what the
+    /// exporter wrote the paths relative to.
+    ///
+    /// A pack keeps the name inside the `.ssab`. That is the name instance
+    /// references are matched against (`ref_anime_pack`), and the same string is
+    /// the sibling file's stem, which is what makes those siblings findable at
+    /// all — the rule `SS6PlayerForGodot`'s `_load_external_ssabs` and
+    /// `ssplayer-core`'s `resolveInstancePacks` also follow. Use
+    /// [`SSPlayer::load_ssab`] to name a pack yourself, and expect external
+    /// references to it to stop resolving.
+    ///
+    /// Only the pack itself is worth an error: everything else is reported
+    /// through [`AssetLoader::warn`] and skipped, so one unreadable atlas does
+    /// not cost you the character.
+    ///
+    /// [`SSPlayer::load`] is this call with the filesystem plugged in; reach for
+    /// this one when the bytes live somewhere a `File::open` cannot reach — a
+    /// `.pck`, an APK, an engine's asset server, a URL.
+    ///
+    /// [`SSPlayer::load`]: crate::SSPlayer::load
+    pub async fn load_with(&mut self, loader: &mut impl AssetLoader, src: &str) -> Result<(), SSRuntimeError> {
+        let Some(bytes) = loader.read(std::slice::from_ref(&src.to_owned())).await.into_iter().next().flatten() else {
+            loader.warn(&format!("could not read {src}"));
+            return Err(SSRuntimeError::NotLoaded);
+        };
+        let pack = SSPack::load(&bytes)?;
+        let name = pack.name().to_string();
+        self.set_pack(&pack);
+        self.load_assets(loader, &name, &parent_of(src)).await;
+        Ok(())
+    }
+
+    /// Load a `.ssab` off the filesystem **and everything it depends on**, then
+    /// select it (SPEC §8.1, §7.1).
+    ///
+    /// The whole of loading, in one call and with no wgpu state in sight:
+    ///
+    /// ```no_run
+    /// # use ssplayer_wgpu::SSPlayer;
+    /// # fn go() -> Result<(), Box<dyn std::error::Error>> {
+    /// let mut player = SSPlayer::new();
+    /// player.load("assets/overall/Instance.ssab")?;
+    /// player.set_animation("anime_1")?;
+    /// player.play();
+    /// # Ok(()) }
+    /// ```
+    ///
+    /// It borrows no `Device` or `Queue` because the borrow model lends none
+    /// until the frame starts: what it reads is decoded and uploaded by the first
+    /// `SSScene::update`, on exactly the timeline an embedded atlas already
+    /// takes. So nothing is on the GPU when this returns, and nothing needs to be.
+    ///
+    /// `path` is resolved by the process's working directory; everything the pack
+    /// names — its atlases, the sibling packs its instance parts play from — is
+    /// resolved against **the `.ssab`'s own directory**, because that is what the
+    /// exporter wrote those paths relative to.
+    ///
+    /// Use [`SSPlayer::load_with`] where a `File::open` cannot reach the bytes: a
+    /// Godot `.pck`, an APK, an engine's asset server, a browser (SPEC §8.2).
+    #[cfg(all(feature = "embedded", not(target_arch = "wasm32")))]
+    pub fn load(&mut self, path: impl AsRef<std::path::Path>) -> Result<(), SSRuntimeError> {
+        let path = path.as_ref();
+        let mut loader = crate::assets::FsLoader::new("");
+        let out = crate::assets::block_on(self.load_with(&mut loader, &path.to_string_lossy()));
+        // Queued rather than uploaded: see the note on `pending_images`.
+        self.pending_images.append(&mut loader.images);
+        out
+    }
+
+    /// The half of [`SSPlayer::load`] that runs on an **already registered**
+    /// pack: its atlases, and the packs it plays from, transitively.
+    ///
+    /// For a host that got the bytes some other way — a drop, a bundler, an
+    /// archive — and registered them with [`SSPlayer::load_ssab`]. `base` is what
+    /// the pack's relative paths resolve against, in the loader's terms; pass
+    /// `""` when the loader is already rooted there.
+    pub async fn load_assets(&mut self, loader: &mut impl AssetLoader, pack_name: &str, base: &str) {
+        let Some(pack) = self.packs.get(pack_name).cloned() else {
+            loader.warn(&format!("no pack named \"{pack_name}\" is registered"));
+            return;
+        };
+        self.load_textures(loader, &pack, base).await;
+
+        // Breadth first, one round trip per level: `read` takes the whole level
+        // at once so an implementation that can overlap the waiting does. A pack
+        // already registered is not fetched again, which is also what stops two
+        // packs referencing each other from looping.
+        let mut queue = pack.instance_packs();
+        while !queue.is_empty() {
+            let mut wanted: Vec<String> = queue.drain(..).filter(|name| !self.has_pack(name)).collect();
+            wanted.sort();
+            wanted.dedup();
+            if wanted.is_empty() {
+                break;
+            }
+
+            let paths: Vec<String> = wanted.iter().map(|name| format!("{base}{name}.ssab")).collect();
+            let fetched = loader.read(&paths).await;
+            for ((name, path), bytes) in wanted.iter().zip(&paths).zip(fetched) {
+                let Some(bytes) = bytes else {
+                    loader.warn(&format!("instance pack \"{name}\" ({path}) did not load; parts that play it will not appear"));
+                    continue;
+                };
+                // Never renamed: `ref_anime_pack` is matched against the name the
+                // exporter wrote, so an override here would be a reference that
+                // resolves to nothing.
+                match SSPack::load(&bytes) {
+                    Ok(sub) => {
+                        self.add_pack(&sub);
+                        self.load_textures(loader, &sub, base).await;
+                        queue.extend(sub.instance_packs());
+                    }
+                    Err(e) => loader.warn(&format!("instance pack \"{name}\" ({path}) is not a valid .ssab: {e:?}")),
+                }
+            }
+        }
+    }
+
+    /// Supply every atlas `pack` asks for that the renderer does not already
+    /// hold — both texture tables, either export mode (SPEC §8.1).
+    ///
+    /// Embedded images come out of the pack; the rest are read through `loader`,
+    /// **once per file**: `external_textures()` can name an image a cellmap
+    /// already named, under a different hash, and that must not become two reads.
+    async fn load_textures(&mut self, loader: &mut impl AssetLoader, pack: &SSPack, base: &str) {
+        let wanted: Vec<TextureRef> = pack.textures().iter().filter(|t| !loader.has_texture(t.hash)).cloned().collect();
+        if wanted.is_empty() {
+            return;
+        }
+
+        let carried: HashMap<u32, Vec<u8>> = pack.embedded_images().into_iter().filter(|i| wanted.iter().any(|t| t.hash == i.hash)).map(|i| (i.hash, i.bytes.to_vec())).collect();
+        let mut paths: Vec<String> = wanted.iter().filter(|t| !carried.contains_key(&t.hash)).map(|t| format!("{base}{}", t.path)).collect();
+        paths.sort();
+        paths.dedup();
+        let fetched: HashMap<&String, Option<Vec<u8>>> = paths.iter().zip(loader.read(&paths).await).collect();
+
+        for texture in &wanted {
+            let joined = format!("{base}{}", texture.path);
+            let bytes = match carried.get(&texture.hash) {
+                Some(bytes) => bytes.as_slice(),
+                None => match fetched.get(&joined).and_then(|b| b.as_deref()) {
+                    Some(bytes) => bytes,
+                    None => {
+                        loader.warn(&format!("atlas {joined} did not load; parts that use it will draw white"));
+                        continue;
+                    }
+                },
+            };
+            loader.supply_texture(texture.hash, bytes).await;
+        }
     }
 
     /// Whether a pack is registered under `name` — what an instance part's
@@ -336,6 +575,16 @@ impl SSPlayer {
     /// image for a hash keeps it. A host that wants the embedded pixels instead
     /// calls [`SSRenderer::forget_texture`] first.
     pub(crate) fn flush_textures(&mut self, renderer: &mut SSRenderer, device: &wgpu::Device, queue: &wgpu::Queue) {
+        // Host-read atlases first, so a reference-mode image wins over an
+        // embedded one for the same hash — the order [`SSPlayer::load`] read them
+        // in. Both routes skip a hash the renderer already holds, which is what
+        // keeps N players of one pack to one upload between them.
+        for (hash, encoded) in std::mem::take(&mut self.pending_images) {
+            if renderer.texture_size(hash).is_some() {
+                continue;
+            }
+            decode_and_upload(renderer, device, queue, hash, &encoded);
+        }
         if self.packs_awaiting_textures.is_empty() {
             return;
         }
@@ -813,3 +1062,24 @@ unsafe fn slice_u32<'a>(ptr: *const u32, len: usize) -> &'a [u32] {
 unsafe fn slice_i32<'a>(ptr: *const i32, len: usize) -> &'a [i32] {
     if ptr.is_null() || len == 0 { &[] } else { unsafe { std::slice::from_raw_parts(ptr, len) } }
 }
+
+/// Decode an encoded atlas and register it (SPEC §8.1).
+///
+/// Retained rather than reproducible: unlike an embedded atlas, this player holds
+/// nothing it could decode again — the bytes came from outside — so a device loss
+/// has to be recoverable from the renderer's own copy (SPEC §14).
+#[cfg(feature = "embedded")]
+fn decode_and_upload(renderer: &mut SSRenderer, device: &wgpu::Device, queue: &wgpu::Queue, hash: u32, encoded: &[u8]) {
+    let Ok(decoded) = image::load_from_memory(encoded) else {
+        eprintln!("[ssplayer-wgpu] an image for {hash:#010x} could not be decoded");
+        return;
+    };
+    let rgba = decoded.to_rgba8();
+    let (width, height) = rgba.dimensions();
+    renderer.upload_texture(device, queue, hash, &rgba, (width, height), Retention::Retain);
+}
+
+/// Without a decoder there is nothing to do here: on that build the host supplies
+/// textures itself (the web face decodes with `createImageBitmap`, SPEC §10).
+#[cfg(not(feature = "embedded"))]
+fn decode_and_upload(_: &mut SSRenderer, _: &wgpu::Device, _: &wgpu::Queue, _: u32, _: &[u8]) {}

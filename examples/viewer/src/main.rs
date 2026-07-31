@@ -23,7 +23,7 @@
 // The pack, animation, visibility and alpha keys act on the **focused** member;
 // focus starts at "all", so they drive the whole cast until you press Tab.
 
-use ssplayer_wgpu::{Retention, SSPack, SSPlayer, SSRenderer, SSScene, SceneConfig};
+use ssplayer_wgpu::{SSPack, SSPlayer, SSRenderer, SSScene, SceneConfig};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
@@ -118,6 +118,10 @@ struct AppState {
     /// `Arc` (SPEC §8.2), so a cast of N on one pack costs one parse and one
     /// atlas upload between them, not N.
     packs: Vec<SSPack>,
+    /// Where each pack was read from. `SSPlayer::load` takes the path, not the
+    /// bytes — it is what lets the player find the pack's atlases and the packs
+    /// its instance parts play from (SPEC §8.1, §7.1).
+    pack_paths: Vec<PathBuf>,
     /// Animation names per pack, in `packs` order.
     pack_anims: Vec<Vec<String>>,
     /// The characters in the scene, in the order they were added. Draw order is
@@ -240,16 +244,11 @@ impl AppState {
         self.spawn_member(pack_idx, anim_idx);
     }
 
-    /// Build a player, register every pack with it, and put it on screen.
+    /// Build a player and put it on screen. It arrives empty: `apply_pack` below
+    /// loads what it plays, and that call brings the pack's atlases and the packs
+    /// its instance parts reference with it (SPEC §8.1, §7.1).
     fn spawn_member(&mut self, pack_idx: usize, anim_idx: usize) {
-        let mut player = SSPlayer::new();
-        // Register every pack up front: external instance parts resolve their
-        // source animation by pack name (SPEC §7.1), and registration is an
-        // `Arc` bump, not a parse.
-        for pack in &self.packs {
-            player.add_pack(pack);
-        }
-        self.cast.push(Member { player, pack_idx, anim_idx });
+        self.cast.push(Member { player: SSPlayer::new(), pack_idx, anim_idx });
 
         let idx = self.cast.len() - 1;
         self.apply_pack(idx, pack_idx);
@@ -293,18 +292,17 @@ impl AppState {
         }
 
         let mut first = None;
-        for path in &paths {
-            // Pack name = file stem, as `load_packs` does: external instance refs
-            // are resolved by pack name.
-            let Some(name) = path.file_stem().and_then(|s| s.to_str()) else { continue };
-            let bytes = match std::fs::read(path) {
+        for path in paths {
+            let bytes = match std::fs::read(&path) {
                 Ok(bytes) => bytes,
                 Err(e) => {
                     eprintln!("Failed to read {:?}: {:?}", path, e);
                     continue;
                 }
             };
-            let pack = match SSPack::load_named(name, &bytes) {
+            // Parsed for the picker only, and never renamed — the name inside the
+            // `.ssab` is what instance references resolve against (SPEC §7.1).
+            let pack = match SSPack::load(&bytes) {
                 Ok(pack) => pack,
                 Err(e) => {
                     eprintln!("Failed to parse {:?}: {:?}", path, e);
@@ -315,19 +313,14 @@ impl AppState {
 
             let idx = self.packs.iter().position(|p| p.name() == pack.name()).unwrap_or(self.packs.len());
             if idx == self.packs.len() {
-                self.packs.push(pack.clone());
-                self.pack_anims.push(pack.animation_names());
+                self.packs.push(pack);
+                self.pack_anims.push(self.packs[idx].animation_names());
+                self.pack_paths.push(path);
             } else {
-                self.packs[idx] = pack.clone();
                 self.pack_anims[idx] = pack.animation_names();
+                self.packs[idx] = pack;
+                self.pack_paths[idx] = path;
             }
-
-            // Registration is per player (SPEC §7.1), and an `Arc` bump each.
-            for member in &mut self.cast {
-                member.player.add_pack(&pack);
-            }
-            let dir = path.parent().unwrap_or(Path::new("."));
-            load_textures(&mut self.renderer, &self.device, &self.queue, dir, std::slice::from_ref(&pack));
             first.get_or_insert(idx);
         }
 
@@ -353,13 +346,19 @@ impl AppState {
             return;
         }
         {
-            let pack = &self.packs[pack_idx];
+            let path = self.pack_paths[pack_idx].clone();
             let member = &mut self.cast[idx];
             member.pack_idx = pack_idx;
-            // `set_pack` clears the selection — selecting an animation and
-            // starting it are separate calls (SPEC §9.3) — so `apply_anim`
-            // below is not optional.
-            member.player.set_pack(pack);
+            // One call: the pack, its atlases (either export mode) and the packs
+            // its instance parts play from. `load` clears the selection —
+            // selecting an animation and starting it are separate calls
+            // (SPEC §9.3) — so `apply_anim` below is not optional. Atlases the
+            // renderer already holds are dropped at the flush, so switching packs
+            // on a cast of eight does not re-upload anything.
+            if let Err(e) = member.player.load(&path) {
+                eprintln!("Failed to load {:?}: {:?}", path, e);
+                return;
+            }
         }
         let anim_idx = self.cast[idx].anim_idx.min(self.pack_anims[pack_idx].len().saturating_sub(1));
         self.apply_anim(idx, anim_idx);
@@ -536,15 +535,13 @@ impl ApplicationHandler for App {
 
         let stencil_view = create_stencil_view(&device, config.width, config.height);
 
-        let mut renderer = SSRenderer::new(&device);
+        let renderer = SSRenderer::new(&device);
         let scene = SSScene::new(&device, &SceneConfig { color_format: format, stencil_format: Some(STENCIL_FORMAT) });
 
-        let (packs, pack_anims) = load_packs(&self.asset_dir);
-
-        // Host responsibility (reference-mode ssab): load the atlases the packs
-        // name and hand the RGBA to the renderer, keyed by cellmap hash. Device
-        // scope, so this happens once no matter how big the cast gets.
-        load_textures(&mut renderer, &device, &queue, &self.asset_dir, &packs);
+        // Only the catalogue: every player loads what it plays from its path, and
+        // that one call brings the atlases and the referenced packs with it
+        // (SPEC §8.1). There is no separate texture pass here any more.
+        let (packs, pack_anims, pack_paths) = load_packs(&self.asset_dir);
 
         // Prefer "Basic" as the initial pack, otherwise the first one.
         let initial_pack = packs.iter().position(|p| p.name() == "Basic").unwrap_or(0);
@@ -559,6 +556,7 @@ impl ApplicationHandler for App {
             renderer,
             scene,
             packs,
+            pack_paths,
             pack_anims,
             cast: Vec::new(),
             focus: None,
@@ -740,7 +738,7 @@ impl ApplicationHandler for App {
 /// One [`SSPack`] per file, shared by the whole cast: cloning a pack is an `Arc`
 /// bump, so N characters on one pack hold one parse and one copy of the bytes
 /// between them (SPEC §8.2).
-fn load_packs(dir: &Path) -> (Vec<SSPack>, Vec<Vec<String>>) {
+fn load_packs(dir: &Path) -> (Vec<SSPack>, Vec<Vec<String>>, Vec<PathBuf>) {
     let mut paths = Vec::new();
     if let Ok(entries) = std::fs::read_dir(dir) {
         for entry in entries.flatten() {
@@ -752,68 +750,33 @@ fn load_packs(dir: &Path) -> (Vec<SSPack>, Vec<Vec<String>>) {
     }
     paths.sort();
 
+    // Parsed here only to fill the picker — what the pack is called and what it
+    // can play. The players load from the path (`SSPlayer::load`), which is also
+    // what brings the atlases and the referenced packs with it.
     let mut packs = Vec::new();
-    for path in &paths {
-        // Pack name = file stem (external instance refs are resolved by pack name).
-        let Some(name) = path.file_stem().and_then(|s| s.to_str()) else { continue };
-        let bytes = match std::fs::read(path) {
+    let mut kept = Vec::new();
+    for path in paths {
+        let bytes = match std::fs::read(&path) {
             Ok(bytes) => bytes,
             Err(e) => {
                 eprintln!("Failed to read {:?}: {:?}", path, e);
                 continue;
             }
         };
-        match SSPack::load_named(name, &bytes) {
+        // Never renamed: the name inside the `.ssab` is what `ref_anime_pack`
+        // resolves against (SPEC §7.1).
+        match SSPack::load(&bytes) {
             Ok(pack) => {
-                println!("Loaded SSAB: {:?}", path);
+                println!("Found SSAB: {:?}", path);
                 packs.push(pack);
+                kept.push(path);
             }
             Err(e) => eprintln!("Failed to parse {:?}: {:?}", path, e),
         }
     }
 
     let pack_anims = packs.iter().map(SSPack::animation_names).collect();
-    (packs, pack_anims)
-}
-
-/// Load the atlases `packs` ask for and register them with the renderer — the
-/// host's half of reference-mode texture supply (SPEC §8.1 / §8.2).
-///
-/// **Where each image lives is the `.ssab`'s own business.** `SSPack::textures()`
-/// reports the path the exporter wrote, relative to the file it came from, so
-/// nothing here guesses from directory contents; before that this globbed every
-/// PNG next to the packs and derived the hash from the file stem, which only
-/// worked because the converter happens to name its output after the cellmap.
-fn load_textures(renderer: &mut SSRenderer, device: &Device, queue: &Queue, dir: &Path, packs: &[SSPack]) {
-    // Hashes already registered. Packs share atlases (`common.png` backs most of
-    // the demo set), and the renderer is device-scoped, so one load covers every
-    // pack and every member of the cast.
-    for pack in packs {
-        for texture in pack.textures() {
-            // Embedded packs carry their atlases; the player hands those over on
-            // the next update (SPEC §8.1). A hash the renderer already holds is
-            // done too — packs share atlases (`common.png` backs most of the demo
-            // set) and the renderer is device-scoped, so one load covers every
-            // pack, the whole cast, and anything dropped in later.
-            if texture.embedded || renderer.texture_size(texture.hash).is_some() {
-                continue;
-            }
-            // The path comes out of the `.ssab` itself, relative to where the file
-            // was read from — the same resolution rule the sibling players use.
-            let path = dir.join(&texture.path);
-            let img = match image::open(&path) {
-                Ok(img) => img,
-                Err(e) => {
-                    eprintln!("Pack {} needs {:?}, which did not load: {e}", pack.name(), path);
-                    continue;
-                }
-            };
-            println!("Loading texture: {:?} (hash: {})", path, texture.hash);
-            let rgba = img.to_rgba8();
-            let (width, height) = rgba.dimensions();
-            renderer.upload_texture(device, queue, texture.hash, &rgba, (width, height), Retention::Retain);
-        }
-    }
+    (packs, pack_anims, kept)
 }
 
 /// Locate the converted demo assets, which `scripts/deploy-examples.sh` writes to

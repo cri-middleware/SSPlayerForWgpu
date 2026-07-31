@@ -12,9 +12,12 @@ it, and they share one device, one renderer and one atlas upload. Before the
 split a handle was both at once, so a second character meant a second surface on
 the same window and the two presented over each other.
 
-The packs it starts on come from `assets/overall_emb`, i.e. **embedded-mode**
-`.ssab` whose atlases ride inside the file, so nothing has to supply textures
-([SPEC §8.1](../../SSPLAYER_WGPU_SPEC.md)).
+The packs it starts on come from `assets/overall` — **reference-mode** `.ssab`
+that name their atlases as sibling files, matching the Rust viewer. Either mode
+is one call: `ss_player_load(player, path)` brings the pack, its atlases and the
+sibling `.ssab` files its instance parts play from
+([SPEC §8.1](../../SSPLAYER_WGPU_SPEC.md)). Pass `assets/overall_emb` as `argv[1]`
+for the embedded set.
 
 ## Drop a `.ssab` on the window
 

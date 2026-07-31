@@ -282,6 +282,34 @@ void ss_player_destroy(ss_player_t *handle);
 uint32_t ss_scene_player_count(ss_scene_t *scene);
 
 /*
+ Load a `.ssab` from `path` **and everything it depends on**, then select it
+ (SPEC §8.1, §7.1).
+
+ The whole of loading in one call: the pack, both of its texture tables in
+ either export mode, and the sibling packs its instance parts play from,
+ transitively. Nothing is left for the caller to discover — no
+ `ss_player_texture_at` loop, no `ss_scene_add_texture_png` per atlas.
+
+ ```c
+ ss_player_load(player, "assets/Instance.ssab");
+ ss_player_set_animation(player, "anime_1");
+ ss_player_play(player);
+ ```
+
+ Everything the pack names is resolved against **the `.ssab`'s own directory**,
+ which is what the exporter wrote those paths relative to. Atlases reach the
+ GPU on the next `ss_scene_update`, the same moment an embedded pack's do.
+
+ A host whose assets are not files — a pack file, an archive, a platform asset
+ manager — keeps using `ss_player_load_ssab` plus `ss_scene_add_texture_png`,
+ which is why those remain.
+
+ # Safety
+ `path` must be a NUL-terminated UTF-8 string. It is not retained beyond the call.
+ */
+int32_t ss_player_load(ss_player_t *handle, const char *path);
+
+/*
  Register an `.ssab` pack under `pack_name` without changing what plays.
 
  Every pack an animation can reference must be registered before

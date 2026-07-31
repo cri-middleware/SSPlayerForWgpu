@@ -34,7 +34,7 @@ python3 -m http.server   # serve THIS directory
 
 ```html
 <script type="module" src="ss-player-webgpu.js"></script>
-<ss-player-webgpu src="assets/Basic.ssab" style="width:360px;height:360px"></ss-player-webgpu>
+<ss-player-webgpu src="assets-ref/Basic.ssab" style="width:360px;height:360px"></ss-player-webgpu>
 ```
 
 The element makes its own canvas, takes a surface from the page's shared context
@@ -67,7 +67,7 @@ const ctx     = await sharedContext();        // once for the page
 const surface = ctx.createSurface(canvas);    // once per canvas
 const player  = surface.createPlayer();       // as many as you like
 
-await player.load('assets/Basic.ssab');       // pack + assets (see below)
+await player.load('assets-ref/Basic.ssab');   // pack + assets (see below)
 player.setAnimation('idle');                  // selecting allocates …
 player.play();                                // … starting does not (SPEC §9.3)
 player.setTransform(x, y, scaleX, scaleY, rotation);
