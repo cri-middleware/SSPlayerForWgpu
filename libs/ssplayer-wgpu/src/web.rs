@@ -38,7 +38,7 @@
 //! reason this face is ~30% smaller over the wire than one that bundles `image`.
 
 use crate::pack::SSPack;
-use crate::player::{AssetLoader, MissingKind, SSPlayer};
+use crate::player::{AssetLoader, MissingKind, PlaybackDirection, PlaybackStyle, SSPlayer};
 use crate::renderer::{AlphaMode, Retention, SSRenderer};
 use crate::roster::{Roster, SlotId};
 use crate::scene::{SSScene, SceneConfig};
@@ -1015,6 +1015,128 @@ impl SsPlayerWeb {
     #[wasm_bindgen(js_name = isPlaying)]
     pub fn is_playing(&self) -> Result<bool, JsValue> {
         with_player!(self, |p| p.is_playing())
+    }
+
+    /// Held in place rather than stopped: `isPlaying` stays true.
+    #[wasm_bindgen(js_name = isPaused)]
+    pub fn is_paused(&self) -> Result<bool, JsValue> {
+        with_player!(self, |p| p.is_paused())
+    }
+
+    /// Every configured loop has played. Sticky, and never true under an
+    /// infinite loop.
+    #[wasm_bindgen(js_name = isFinished)]
+    pub fn is_finished(&self) -> Result<bool, JsValue> {
+        with_player!(self, |p| p.is_finished())
+    }
+
+    /// The last `frame()` crossed a loop boundary — an edge, true only inside
+    /// the tick that crossed.
+    #[wasm_bindgen(js_name = isLooped)]
+    pub fn is_looped(&self) -> Result<bool, JsValue> {
+        with_player!(self, |p| p.is_looped())
+    }
+
+    /// Jump to `frame`. Fractional values are honoured.
+    pub fn seek(&self, frame: f32) -> Result<(), JsValue> {
+        with_player!(self, |p| p.seek(frame))
+    }
+
+    /// Current playhead position, fractional.
+    #[wasm_bindgen(js_name = frameNo)]
+    pub fn frame_no(&self) -> Result<f32, JsValue> {
+        with_player!(self, |p| p.frame_no())
+    }
+
+    /// First frame of the range being played. Follows `setAnimationSection`.
+    #[wasm_bindgen(js_name = startFrame)]
+    pub fn start_frame(&self) -> Result<i32, JsValue> {
+        with_player!(self, |p| p.start_frame())
+    }
+
+    /// Last frame of the range being played.
+    #[wasm_bindgen(js_name = endFrame)]
+    pub fn end_frame(&self) -> Result<i32, JsValue> {
+        with_player!(self, |p| p.end_frame())
+    }
+
+    /// Length of that range, both ends inclusive — feed it to a scrubber.
+    #[wasm_bindgen(js_name = totalFrames)]
+    pub fn total_frames(&self) -> Result<i32, JsValue> {
+        with_player!(self, |p| p.total_frames())
+    }
+
+    /// `count` cycles then stop; `-1` (or `0`) loops forever. Under ping-pong
+    /// one cycle is a full round trip.
+    #[wasm_bindgen(js_name = setLoopCount)]
+    pub fn set_loop_count(&self, count: i32) -> Result<(), JsValue> {
+        with_player!(self, |p| p.set_loop_count(count))
+    }
+
+    /// The configured loop count.
+    #[wasm_bindgen(js_name = loopCount)]
+    pub fn loop_count(&self) -> Result<i32, JsValue> {
+        with_player!(self, |p| p.loop_count())
+    }
+
+    /// How many cycles are left of it.
+    #[wasm_bindgen(js_name = remainingLoops)]
+    pub fn remaining_loops(&self) -> Result<i32, JsValue> {
+        with_player!(self, |p| p.remaining_loops())
+    }
+
+    /// Override the advance rate in fps. Prefer `setSpeed`, which scales
+    /// playback without replacing the authored rate.
+    #[wasm_bindgen(js_name = setFrameRate)]
+    pub fn set_frame_rate(&self, fps: i32) -> Result<(), JsValue> {
+        with_player!(self, |p| p.set_frame_rate(fps))
+    }
+
+    /// The rate the animation advances at.
+    #[wasm_bindgen(js_name = frameRate)]
+    pub fn frame_rate(&self) -> Result<i32, JsValue> {
+        with_player!(self, |p| p.frame_rate())
+    }
+
+    /// Restrict playback to `start..=end` of the current animation. Call it
+    /// *after* `setAnimation`, which rebuilds the tree and takes the section
+    /// with it.
+    #[wasm_bindgen(js_name = setAnimationSection)]
+    pub fn set_animation_section(&self, start: i32, end: i32) -> Result<(), JsValue> {
+        with_player!(self, |p| p.set_animation_section(start, end))
+    }
+
+    /// `direction`: 0 forward, 1 backward. `style`: 0 normal, 1 ping-pong.
+    /// Set as a pair — pass the current value for whichever you are not
+    /// changing.
+    #[wasm_bindgen(js_name = setPlaybackDirection)]
+    pub fn set_playback_direction(&self, direction: i32, style: i32) -> Result<(), JsValue> {
+        with_player!(self, |p| p.set_playback_direction(PlaybackDirection::from_wire(direction), PlaybackStyle::from_wire(style)))
+    }
+
+    /// 0 forward, 1 backward.
+    #[wasm_bindgen(js_name = playbackDirection)]
+    pub fn playback_direction(&self) -> Result<i32, JsValue> {
+        with_player!(self, |p| p.playback_direction().as_wire())
+    }
+
+    /// 0 normal, 1 ping-pong.
+    #[wasm_bindgen(js_name = playbackStyle)]
+    pub fn playback_style(&self) -> Result<i32, JsValue> {
+        with_player!(self, |p| p.playback_style().as_wire())
+    }
+
+    /// On (the default) keeps playback on the wall clock by dropping frames;
+    /// off advances exactly one frame per `frame()` call.
+    #[wasm_bindgen(js_name = setSkipFrames)]
+    pub fn set_skip_frames(&self, skip: bool) -> Result<(), JsValue> {
+        with_player!(self, |p| p.set_skip_frames(skip))
+    }
+
+    /// See `setSkipFrames`.
+    #[wasm_bindgen(js_name = skipFrames)]
+    pub fn skip_frames(&self) -> Result<bool, JsValue> {
+        with_player!(self, |p| p.skip_frames())
     }
 
     /// Place this player in the scene, in pixels from the canvas centre.

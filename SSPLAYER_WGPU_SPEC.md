@@ -722,6 +722,18 @@ impl SSPlayer {
     pub fn animation_names(&self) -> Option<Vec<String>>;
     pub fn canvas_size(&self) -> Option<(f32, f32)>;
 
+    // --- トランスポート（★実装済）---
+    pub fn is_paused(&self) -> bool;  pub fn is_finished(&self) -> bool;  pub fn is_looped(&self) -> bool;
+    pub fn seek(&mut self, frame: f32);   // 小数フレーム可
+    pub fn frame_no(&self) -> f32;
+    pub fn start_frame(&self) -> i32;  pub fn end_frame(&self) -> i32;  pub fn total_frames(&self) -> i32;  // 区間を反映・両端含み
+    pub fn set_loop_count(&mut self, count: i32);  pub fn loop_count(&self) -> i32;  pub fn remaining_loops(&self) -> i32;
+    pub fn set_frame_rate(&mut self, fps: i32);  pub fn frame_rate(&self) -> i32;
+    pub fn set_animation_section(&mut self, start: i32, end: i32);  // ★set_animation の後に呼ぶ
+    pub fn set_playback_direction(&mut self, direction: PlaybackDirection, style: PlaybackStyle);
+    pub fn playback_direction(&self) -> PlaybackDirection;  pub fn playback_style(&self) -> PlaybackStyle;
+    pub fn set_skip_frames(&mut self, skip: bool);  pub fn skip_frames(&self) -> bool;
+
     // --- 配置・合成（★P7 新設。複数体を1シーンに置くために必須）---
     pub fn set_transform(&mut self, x: f32, y: f32, scale_x: f32, scale_y: f32, rotation: f32);
     pub fn set_order(&mut self, order: i32);        // シーン内の描画順。小さいほど先
@@ -741,7 +753,11 @@ impl SSPlayer {
 
 **将来 API（webgl 版に追随）**: `box`（追従矩形）/ `clip`（scissor）/ `backdrop`（framebuffer 読み取り系ブレンド用の下地）/ パーツ単位オーバーライド（色・セル・表示）/ イベント（userData・signal・audio・animEnd・animLoop・frame）。§9.5。
 
-> **現状と将来**: エラーは当面 `SSRuntimeError` を流用。将来 `SSPlayerError`（`thiserror`）でラップし FFI 整数コード / JS `JsError` へ変換。ssab の **embedded 自動テクスチャロード**（§8.1）は ✅ 実装済。**seek** は未実装。
+**トランスポートの enum（★確定）**: `PlaybackDirection` / `PlaybackStyle` は **ssruntime の同名 enum を re-export せず、本クレートで定義**して境界で変換する。ssruntime 側は掛け算に使うため `Forward = 1 / Backward = -1` だが、**C-API・wasm・他の全 Player は `0 / 1`**（`ffi/mod.rs` の `ss_runtime_set_playback_direction` が `direction == 0` で判定）。re-export すると `-1` が js / ffi 面に漏れて全兄弟と食い違うので、ワイヤ値は `as_wire` / `from_wire` に固定した。`tests/transport.rs` がこれを固定している。
+
+**`set_animation` は木を作り直す**ので、上記トランスポート設定と `set_speed` はすべてパック既定へ戻る。呼び出し側が毎回設定し直す。Flutter / Unity Player のようにプレイヤー側でキャッシュして再適用する層は**現時点では持たない**（本クレートはホスト駆動の低レベル API という位置づけのため）。特に **`set_animation_section` は `set_animation` の後**に呼ぶこと。
+
+> **現状と将来**: エラーは当面 `SSRuntimeError` を流用。将来 `SSPlayerError`（`thiserror`）でラップし FFI 整数コード / JS `JsError` へ変換。ssab の **embedded 自動テクスチャロード**（§8.1）は ✅ 実装済。**seek** ✅ 実装済。
 
 ### 9.4 各ホストからの駆動（rs / js / ffi 共通の型）
 

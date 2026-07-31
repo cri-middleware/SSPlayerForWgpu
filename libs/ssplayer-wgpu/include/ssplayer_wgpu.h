@@ -500,9 +500,9 @@ void ss_player_stop(ss_player_t *handle);
 /*
  Scale playback speed; 1.0 is the authored speed.
 
- Zero and negative values are **ignored** (the runtime keeps 1.0): direction
- is a separate playback setting the player does not expose yet, so a negative
- speed does not play backwards.
+ Zero and negative values are **ignored** (the runtime keeps 1.0). To play
+ backwards use `ss_player_set_playback_direction`, which is the separate
+ setting that controls direction.
 
  # Safety
  `handle` must be a live handle or null.
@@ -516,6 +516,170 @@ void ss_player_set_speed(ss_player_t *handle, float speed);
  `handle` must be a live handle or null.
  */
 bool ss_player_is_playing(ss_player_t *handle);
+
+/*
+ Whether playback is held in place. `ss_player_is_playing` stays true.
+
+ # Safety
+ `handle` must be a live handle or null.
+ */
+bool ss_player_is_paused(ss_player_t *handle);
+
+/*
+ Whether every configured loop has played. Sticky until the next play or
+ `ss_player_set_animation`, and never true under an infinite loop.
+
+ # Safety
+ `handle` must be a live handle or null.
+ */
+bool ss_player_is_finished(ss_player_t *handle);
+
+/*
+ Whether the last `ss_scene_update` crossed a loop boundary. An edge: true
+ only inside the update that crossed.
+
+ # Safety
+ `handle` must be a live handle or null.
+ */
+bool ss_player_is_looped(ss_player_t *handle);
+
+/*
+ Jump to `frame`. Fractional values are honoured.
+
+ # Safety
+ `handle` must be a live handle or null.
+ */
+void ss_player_seek(ss_player_t *handle, float frame);
+
+/*
+ Current playhead position, fractional. 0 when nothing is loaded.
+
+ # Safety
+ `handle` must be a live handle or null.
+ */
+float ss_player_frame_no(ss_player_t *handle);
+
+/*
+ First frame of the range being played; follows
+ `ss_player_set_animation_section`.
+
+ # Safety
+ `handle` must be a live handle or null.
+ */
+int32_t ss_player_start_frame(ss_player_t *handle);
+
+/*
+ Last frame of that range.
+
+ # Safety
+ `handle` must be a live handle or null.
+ */
+int32_t ss_player_end_frame(ss_player_t *handle);
+
+/*
+ Length of that range, both ends inclusive.
+
+ # Safety
+ `handle` must be a live handle or null.
+ */
+int32_t ss_player_total_frames(ss_player_t *handle);
+
+/*
+ `count` cycles then stop; `-1` (or `0`) loops forever. Under ping-pong one
+ cycle is a full round trip.
+
+ # Safety
+ `handle` must be a live handle or null.
+ */
+void ss_player_set_loop_count(ss_player_t *handle, int32_t count);
+
+/*
+ The configured loop count.
+
+ # Safety
+ `handle` must be a live handle or null.
+ */
+int32_t ss_player_loop_count(ss_player_t *handle);
+
+/*
+ How many cycles are left of it.
+
+ # Safety
+ `handle` must be a live handle or null.
+ */
+int32_t ss_player_remaining_loops(ss_player_t *handle);
+
+/*
+ Override the advance rate in fps. Prefer `ss_player_set_speed`, which scales
+ playback without replacing the authored rate.
+
+ # Safety
+ `handle` must be a live handle or null.
+ */
+void ss_player_set_frame_rate(ss_player_t *handle, int32_t fps);
+
+/*
+ The rate the animation advances at. 0 when nothing is loaded.
+
+ # Safety
+ `handle` must be a live handle or null.
+ */
+int32_t ss_player_frame_rate(ss_player_t *handle);
+
+/*
+ Restrict playback to `start..=end` of the current animation, so looping and
+ ping-pong turn around inside that range.
+
+ Call it **after** `ss_player_set_animation`: frame numbers only mean
+ something inside the animation they were measured in, and setting an
+ animation rebuilds the tree and takes the section with it.
+
+ # Safety
+ `handle` must be a live handle or null.
+ */
+void ss_player_set_animation_section(ss_player_t *handle, int32_t start, int32_t end);
+
+/*
+ `direction`: 0 forward, 1 backward. `style`: 0 normal, 1 ping-pong. Set as a
+ pair — pass the current value for whichever you are not changing.
+
+ # Safety
+ `handle` must be a live handle or null.
+ */
+void ss_player_set_playback_direction(ss_player_t *handle, int32_t direction, int32_t style);
+
+/*
+ 0 forward, 1 backward.
+
+ # Safety
+ `handle` must be a live handle or null.
+ */
+int32_t ss_player_playback_direction(ss_player_t *handle);
+
+/*
+ 0 normal, 1 ping-pong.
+
+ # Safety
+ `handle` must be a live handle or null.
+ */
+int32_t ss_player_playback_style(ss_player_t *handle);
+
+/*
+ True (the default) keeps playback on the wall clock by dropping frames under
+ load; false advances exactly one frame per `ss_scene_update`.
+
+ # Safety
+ `handle` must be a live handle or null.
+ */
+void ss_player_set_skip_frames(ss_player_t *handle, bool skip);
+
+/*
+ See `ss_player_set_skip_frames`.
+
+ # Safety
+ `handle` must be a live handle or null.
+ */
+bool ss_player_skip_frames(ss_player_t *handle);
 
 /*
  How many animations the main pack holds (0 if nothing is loaded).
