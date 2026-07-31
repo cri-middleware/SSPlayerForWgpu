@@ -73,6 +73,51 @@
 #define SS_BACKEND_VULKAN 3
 
 /*
+ What kind of thing an `ss_event_t` is; read it before the payload.
+ */
+#define SS_EVENT_USER_DATA 0
+
+/*
+ See `SS_EVENT_USER_DATA`.
+ */
+#define SS_EVENT_SIGNAL 1
+
+/*
+ See `SS_EVENT_USER_DATA`.
+ */
+#define SS_EVENT_AUDIO 2
+
+/*
+ Which field of an `ss_signal_param_t` carries the value.
+ */
+#define SS_SIGNAL_VALUE_NONE 0
+
+/*
+ See `SS_SIGNAL_VALUE_NONE`.
+ */
+#define SS_SIGNAL_VALUE_BOOL 1
+
+/*
+ A choice from a list, as its index. See `SS_SIGNAL_VALUE_NONE`.
+ */
+#define SS_SIGNAL_VALUE_INDEX 2
+
+/*
+ See `SS_SIGNAL_VALUE_NONE`.
+ */
+#define SS_SIGNAL_VALUE_INTEGER 3
+
+/*
+ See `SS_SIGNAL_VALUE_NONE`.
+ */
+#define SS_SIGNAL_VALUE_FLOATING 4
+
+/*
+ See `SS_SIGNAL_VALUE_NONE`.
+ */
+#define SS_SIGNAL_VALUE_TEXT 5
+
+/*
  An atlas that did not load. The parts using it draw against the white
  fallback, so they appear as silhouettes.
  */
@@ -207,6 +252,98 @@ typedef struct {
      */
     const char *name;
 } SsMissingAsset;
+
+/*
+ One timeline event, flattened for the ABI.
+
+ The three kinds share one struct rather than a real union, because a union
+ across the ABI costs the caller a cast for no gain at this size. `kind` says
+ which fields carry anything; the rest are zeroed.
+
+ `text` is owned by the scene and valid until the next `ss_player_event_at`
+ on it — copy it if you need to keep it. Never null.
+ */
+typedef struct {
+    /*
+     One of the `SS_EVENT_*` constants.
+     */
+    uint32_t kind;
+    /*
+     Which part raised it.
+     */
+    uint32_t part_index;
+    /*
+     UserData: whether the animator filled each optional field in. Unset is
+     not the same as zero, which is what these distinguish.
+     */
+    bool has_integer;
+    bool has_rect;
+    bool has_point;
+    bool has_text;
+    /*
+     UserData, when `has_integer`.
+     */
+    int32_t integer;
+    /*
+     UserData, when `has_rect`: `[x1, y1, x2, y2]` — two corners, not origin+size.
+     */
+    float rect[4];
+    /*
+     UserData, when `has_point`.
+     */
+    float point[2];
+    /*
+     UserData's `str` (when `has_text`), Signal's `command_id`, or Audio's
+     `sound_name`. Empty for the kinds that have none.
+     */
+    const char *text;
+    /*
+     Signal: how many parameters `ss_player_event_signal_param_at` will serve.
+     */
+    uint32_t param_count;
+    /*
+     Audio: addresses the `SoundList` and the `SoundFile` within it.
+     */
+    uint32_t sound_list_name_hash;
+    uint32_t sound_name_hash;
+    /*
+     Audio: how many times to play. A count, never zero — SpriteStudio has no
+     infinite audio loop.
+     */
+    int32_t loop_num;
+} SsEventData;
+
+/*
+ One signal parameter, flattened for the ABI. `value_type` says which field
+ to read; `SS_SIGNAL_VALUE_NONE` means the parameter exists but was left
+ unset.
+
+ `id` and `text` are owned by the scene and valid until the next
+ `ss_player_event_signal_param_at` on it. Never null.
+ */
+typedef struct {
+    const char *id;
+    /*
+     One of the `SS_SIGNAL_VALUE_*` constants.
+     */
+    uint32_t value_type;
+    /*
+     When `value_type` is `BOOL`.
+     */
+    bool bool_value;
+    /*
+     When `value_type` is `INDEX` or `INTEGER`.
+     */
+    int32_t int_value;
+    /*
+     When `value_type` is `FLOATING`.
+     */
+    float float_value;
+    /*
+     When `value_type` is `TEXT`.
+     */
+    const char *text;
+} SsSignalParamData;
 
 /*
  What the last frame cost (SPEC §14.2 item 10), flattened for the ABI.
@@ -788,6 +925,75 @@ void ss_player_clear_all_part_overrides(ss_player_t *handle);
  `handle` must be a live handle or null.
  */
 uint32_t ss_player_part_count(ss_player_t *handle);
+
+/*
+ Whether the last `ss_scene_update` crossed a loop boundary. One report per
+ update however many cycles it crossed.
+
+ # Safety
+ `handle` must be a live handle or null.
+ */
+bool ss_player_looped_last_update(ss_player_t *handle);
+
+/*
+ Whether the last `ss_scene_update` **completed** playback: true for exactly
+ one update, unlike the sticky `ss_player_is_finished`. Never true under an
+ infinite loop, and not raised by `ss_player_stop`.
+
+ # Safety
+ `handle` must be a live handle or null.
+ */
+bool ss_player_finished_last_update(ss_player_t *handle);
+
+/*
+ How many timeline events the last `ss_scene_update` crossed.
+
+ **Frames skipped over are included**: a long tick reports every frame it
+ stepped through, not just the one it landed on.
+
+ # Safety
+ `handle` must be a live handle or null.
+ */
+uint32_t ss_player_event_count(ss_player_t *handle);
+
+/*
+ Fill `out` with the `index`-th event of the last update.
+
+ Read `kind` first: it says which of the payload fields carry anything.
+
+ Returns `SS_OK`, or `SS_ERROR_INVALID_ARGUMENT` when the handle or `out` is
+ null or `index` is out of range, leaving `out` untouched.
+
+ # Safety
+ `handle` must be a live handle or null; `out` must point at a writable
+ `ss_event_t`.
+ */
+int32_t ss_player_event_at(ss_player_t *handle, uint32_t index, SsEventData *out);
+
+/*
+ How many parameters the `index`-th event carries, or 0 when it is not a
+ signal.
+
+ # Safety
+ `handle` must be a live handle or null.
+ */
+uint32_t ss_player_event_signal_param_count(ss_player_t *handle, uint32_t index);
+
+/*
+ Fill `out` with parameter `param` of the `index`-th event, which must be a
+ signal.
+
+ Returns `SS_OK`, or `SS_ERROR_INVALID_ARGUMENT` when either index is out of
+ range or the event is not a signal, leaving `out` untouched.
+
+ # Safety
+ `handle` must be a live handle or null; `out` must point at a writable
+ `ss_signal_param_t`.
+ */
+int32_t ss_player_event_signal_param_at(ss_player_t *handle,
+                                        uint32_t index,
+                                        uint32_t param,
+                                        SsSignalParamData *out);
 
 /*
  Write the part's current-frame transform into `out` as the 2D affine
