@@ -310,6 +310,71 @@ fn an_embedded_pack_hands_out_its_atlases_undecoded() {
     assert!(SSPack::load(&ref_bytes).unwrap().embedded_images().is_empty(), "a reference-mode pack claims to carry its atlases");
 }
 
+/// SPEC §8.1: a `DrawBatch.texture_hash` is a cellmap's `name_hash` for an
+/// ordinary part, but a texture **file name**'s hash for one the author gave a
+/// TextureChange (`TCHG`). Both `cellmaps()` and `external_textures()` have to be
+/// named, or those batches find nothing.
+///
+/// Worth a test of its own because the failure is quiet: a missing hash falls
+/// back to the 1x1 white texture (SPEC §8), so the part still draws — as a white
+/// silhouette — and no count, no error and no panic marks it.
+#[test]
+fn a_pack_names_its_texture_change_targets() {
+    let Ok(bytes) = std::fs::read(format!("{}/TextureChange.ssab", asset_dir())) else {
+        eprintln!("TextureChange fixture missing; run scripts/deploy-examples.sh. skipping.");
+        return;
+    };
+    let pack = SSPack::load(&bytes).unwrap();
+
+    // The fixture is one cellmap plus three external textures, and one of those
+    // three *is* the cellmap's own image — reachable under a second hash, because
+    // an `ExternalTexture` is keyed by its file name rather than by a cellmap
+    // name. A host fetching per entry therefore has to expect a repeated path.
+    let common: Vec<u32> = pack.textures().iter().filter(|t| t.path == "common.png").map(|t| t.hash).collect();
+    assert_eq!(common.len(), 2, "common.png should be named twice — as the cellmap's image and as a TextureChange target — got {:?}", pack.textures());
+    assert_ne!(common[0], common[1], "the two entries for one file carry the same hash; one of the two tables was keyed wrongly");
+    assert!(pack.textures().iter().any(|t| t.path == "box_00_00.png"), "an external texture the cellmaps never mention is missing — external_textures() is not being read");
+
+    // Embedded export carries the external textures too, under those same keys.
+    if let Ok(emb_bytes) = std::fs::read(format!("{}/TextureChange.ssab", embedded_dir())) {
+        let emb = SSPack::load(&emb_bytes).unwrap();
+        let carried: Vec<u32> = emb.embedded_images().iter().map(|i| i.hash).collect();
+        for texture in emb.textures() {
+            assert!(carried.contains(&texture.hash), "embedded pack does not carry {} ({:#010x}) — the TCHG target would render white", texture.path, texture.hash);
+        }
+    }
+
+    // And the parts really do sample them: drop one external atlas and the frame
+    // has to change. If `textures()` ever regresses to cellmaps only, this atlas
+    // is not in either list and the two renders come out identical.
+    let Some((device, queue)) = gpu() else {
+        eprintln!("no GPU adapter available, skipping the render half");
+        return;
+    };
+    let all = atlases(&pack);
+    let box_hash = pack.textures().iter().find(|t| t.path == "box_00_00.png").unwrap().hash;
+    let minus_box: Vec<_> = all.iter().filter(|(hash, ..)| *hash != box_hash).cloned().collect();
+    assert_eq!(minus_box.len() + 1, all.len(), "the atlas to drop was not in the supplied set");
+
+    let mut renderer = SSRenderer::new(&device);
+    let mut scene = scene_for(&device, &queue);
+    let mut player = play(&pack);
+    for (hash, rgba, w, h) in &all {
+        renderer.upload_texture(&device, &queue, *hash, rgba, (*w, *h), Retention::Retain);
+    }
+    let complete = render(&device, &queue, &mut renderer, &mut scene, &mut [&mut player], 12);
+
+    let mut renderer = SSRenderer::new(&device);
+    let mut scene = scene_for(&device, &queue);
+    let mut player = play(&pack);
+    for (hash, rgba, w, h) in &minus_box {
+        renderer.upload_texture(&device, &queue, *hash, rgba, (*w, *h), Retention::Retain);
+    }
+    let missing_one = render(&device, &queue, &mut renderer, &mut scene, &mut [&mut player], 12);
+
+    assert_ne!(complete, missing_one, "dropping a TextureChange target changed nothing — the parts are not sampling it");
+}
+
 /// SPEC §8.2: sharing a pack means sharing its atlas. Two players of one embedded
 /// pack must decode and upload it exactly once between them — the decode is
 /// skipped too, because the filter runs before the PNG is touched.

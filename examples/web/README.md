@@ -60,14 +60,13 @@ three objects, one per resource scope (SPEC §1.2, §10):
 | `SsPlayerWeb` | any number | one playback tree — **no GPU resource at all** |
 
 ```js
-import { sharedContext, supplyTextures } from './ss-context.js';
+import { sharedContext } from './ss-context.js';
 
 const ctx     = await sharedContext();        // once for the page
 const surface = ctx.createSurface(canvas);    // once per canvas
 const player  = surface.createPlayer();       // as many as you like
 
-player.loadSsab('Basic', bytes);
-await supplyTextures(ctx, player, { pack: 'Basic', baseUrl });  // ← atlases (see below)
+await player.loadSsab(bytes, null, ssabUrl);  // pack + its atlases (see below)
 player.setAnimation('idle');                  // selecting allocates …
 player.play();                                // … starting does not (SPEC §9.3)
 player.setTransform(x, y, scaleX, scaleY, rotation);
@@ -77,33 +76,46 @@ surface.frame(dt);                            // one call draws every player
 player.destroy(); surface.destroy();          // explicit — they live in the context
 ```
 
-### Textures — the browser is the decoder
+### Loading — `loadSsab` brings the textures with it
 
-`loadSsab` registers playback data and nothing else. **The wasm carries no image
-decoder**: one is already installed on every page, and bundling a second cost
-~29% of the transferred bytes to do the same job worse (SPEC §8.1). So atlases
-are supplied by the host, and both `.ssab` forms end at the same call:
+`loadSsab(bytes, pack?, baseUrl?)` registers the pack **and loads the atlases it
+needs**, in either export mode. Same shape as `SS6PlayerForGodot`'s
+`setSSABResource`: texture loading belongs to initialisation, so `setAnimation`
+stays a pure, **synchronous** selection — switching motions must not carry a
+promise.
 
-| Form | Where the image is | Ask the player | Then |
-|---|---|---|---|
-| embedded | inside the `.ssab` | `player.embeddedTextures(pack)` → `{ hash, bytes }[]` | `ctx.addTextureFromBytes(hash, bytes)` |
-| reference | sibling files | `player.textureRefs(pack)` → `{ hash, path, embedded }[]` | fetch `new URL(path, ssabUrl)`, then the same call |
+| Form | Where the images are | What `loadSsab` does |
+|---|---|---|
+| embedded | inside the `.ssab` | decodes what the pack carries; fetches nothing |
+| reference | sibling files | fetches each one relative to `baseUrl`, in parallel |
 
-`supplyTextures(ctx, player, { pack, baseUrl })` in `ss-context.js` does both,
-skipping any hash the shared renderer already has (`ctx.hasTexture`) so N players
-of one pack decode its atlas once between them. This is the same division of
-labour as `ssplayer-core`'s `extractEmbeddedTextures` / `extractTexturePaths` +
-`loadTextures`, which is how the WebGL player supports both forms without an
-image decoder either.
+* `pack` — omit it (pass `null`). The pack then keeps the name the exporter
+  wrote, which is the name external instance parts are resolved against
+  (`ref_anime_pack`). A name of your own **silently breaks those references**.
+* `baseUrl` — where the `.ssab` came from; reference paths resolve against it.
+  Defaults to the document URL. Embedded packs ignore it.
 
-`addTextureFromBytes` decodes with `createImageBitmap` — off the main thread,
-premultiplied — and `copyExternalImageToTexture` moves the pixels straight into
-the texture without passing through wasm memory. It also keeps the *encoded*
-bytes, so `ctx.restoreDevice()` rebuilds its textures after a device loss without
-the page re-fetching anything. Two other paths exist:
+It is `async` only because a browser leaves no choice — `fetch` and
+`createImageBitmap` are asynchronous where Godot's `ResourceLoader::load` is not.
+That is the one place the asynchrony appears.
+
+An atlas the shared renderer already has is skipped, so N players of one pack
+load it once between them. One that cannot be fetched or decoded is reported on
+the console and skipped: a missing image costs you that image, not the character.
+
+**The wasm carries no image decoder** — one is already installed on every page,
+and bundling a second cost ~29% of the transferred bytes to do the same job worse
+(SPEC §8.1). Decoding is `createImageBitmap` (off the main thread,
+premultiplied) and `copyExternalImageToTexture` moves the pixels straight into
+the texture without passing through wasm memory. The *encoded* bytes are kept, so
+`ctx.restoreDevice()` rebuilds every texture after a device loss with no re-fetch.
+
+Three context-level paths remain for hosts that supply their own images:
+`ctx.addTextureFromBytes(hash, bytes)` (encoded — same route `loadSsab` takes),
 `ctx.addTextureFromBitmap(hash, bitmap)` for a host with its own asset pipeline
 (device loss is then yours to repair), and `ctx.addTexture(hash, rgba, w, h)` for
-raw straight-alpha RGBA.
+raw straight-alpha RGBA. `player.textureRefs()` / `player.embeddedTextures()`
+answer what a pack needs, if you would rather load it yourself.
 
 **Ask for the context once.** A second `SsContextWeb.create()` builds a second
 `GPUDevice`, and nothing is shared across a device: the same character on two

@@ -1,6 +1,7 @@
 // A `<ss-player-webgpu>` custom element: renders a SpriteStudio `.ssab` to a
-// WebGPU canvas. Attributes: `src` (embedded .ssab URL), `pack` (name, default
-// from the file), `anim` (animation name, default = first), `pause-when-hidden`
+// WebGPU canvas. Attributes: `src` (.ssab URL, embedded or reference), `pack`
+// (name override; default is the name inside the .ssab), `anim` (animation name,
+// default = first), `pause-when-hidden`
 // (default on — opt out with `pause-when-hidden="false"`).
 //
 // This is the **convenience wrapper**: one element = one canvas = one player,
@@ -11,7 +12,7 @@
 // canvas with several characters, drive `SsContextWeb` directly (see index.html).
 //
 // Build the wasm package first with ./build.sh (outputs ./pkg).
-import { sharedContext, restoreSharedDevice, supplyTextures } from './ss-context.js';
+import { sharedContext, restoreSharedDevice } from './ss-context.js';
 
 export class SsPlayerWebGPU extends HTMLElement {
   connectedCallback() {
@@ -160,12 +161,10 @@ export class SsPlayerWebGPU extends HTMLElement {
     if (!this.player) return;
     const url = new URL(src, location.href);
     const bytes = new Uint8Array(await (await fetch(url)).arrayBuffer());
-    const name = pack || src.split('/').pop().replace(/\.ssab$/, '');
-    this.player.loadSsab(name, bytes);
-    // Registering the pack does not supply its atlases (SPEC §8.2). `url` is
-    // what makes a reference-mode pack work here too: its atlas paths are
-    // relative to the `.ssab` itself.
-    await supplyTextures(this.ctx, this.player, { pack: name, baseUrl: url });
+    // `loadSsab` loads the pack's atlases too (SPEC §8.1), which is why it is
+    // awaited: `url` lets a reference-mode pack resolve its images, and the pack
+    // keeps the name the exporter gave it unless `pack` overrides it.
+    await this.player.loadSsab(bytes, pack, url.href);
     const names = this.player.animationNames();
     // Selecting and starting are separate calls (SPEC §9.3): `setAnimation` is
     // the allocating step, `play` is transport. The old single `play(name)` is

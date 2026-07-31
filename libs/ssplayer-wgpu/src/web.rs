@@ -37,6 +37,7 @@
 //! `extractEmbeddedTextures` + `ssplayer-webgl`'s `loadTextureFromBytes`, and the
 //! reason this face is ~30% smaller over the wire than one that bundles `image`.
 
+use crate::pack::{SSPack, TextureRef};
 use crate::player::SSPlayer;
 use crate::renderer::{AlphaMode, Retention, SSRenderer};
 use crate::roster::{Roster, SlotId};
@@ -97,6 +98,102 @@ async fn decode_image(bytes: &[u8]) -> Result<web_sys::ImageBitmap, JsValue> {
     let promise = window.create_image_bitmap_with_blob_and_image_bitmap_options(&blob, &options)?;
 
     wasm_bindgen_futures::JsFuture::from(promise).await?.dyn_into::<web_sys::ImageBitmap>().map_err(|_| JsValue::from_str("createImageBitmap did not return an ImageBitmap"))
+}
+
+/// Report a recoverable problem the way the sibling players do — one missing
+/// atlas or sub-pack should cost you that one thing, not the character
+/// (`SS6PlayerForGodot`'s `ERR_PRINT` + `continue`, `PackResolver`'s
+/// `console.warn` + `continue`).
+fn warn(message: &str) {
+    web_sys::console::warn_1(&JsValue::from_str(message));
+}
+
+/// Fetch every path **once**, in parallel, resolved against `base_url` (or the
+/// document's URL).
+///
+/// One request per file rather than per hash: `external_textures()` can name an
+/// image a cellmap already named, under a different hash (SPEC §8.1), and that
+/// must not become two downloads. `allSettled` rather than `all` so a single 404
+/// costs one atlas instead of every atlas.
+async fn fetch_atlases(paths: &[String], base_url: Option<&str>) -> HashMap<String, Rc<[u8]>> {
+    let mut out = HashMap::new();
+    let Some(window) = web_sys::window() else {
+        warn("[ssplayer-wgpu] no `window`: reference-mode atlases cannot be fetched");
+        return out;
+    };
+    let base = base_url.map(str::to_owned).or_else(|| window.document().and_then(|d| d.url().ok()));
+
+    let requests = js_sys::Array::new();
+    let mut ordered: Vec<&String> = Vec::new();
+    for path in paths {
+        let url = match base.as_deref().and_then(|base| web_sys::Url::new_with_base(path, base).ok()) {
+            Some(url) => url.href(),
+            None => {
+                warn(&format!("[ssplayer-wgpu] atlas {path}: cannot resolve against a base URL; pass `baseUrl` to loadSsab"));
+                continue;
+            }
+        };
+        requests.push(&window.fetch_with_str(&url));
+        ordered.push(path);
+    }
+    if ordered.is_empty() {
+        return out;
+    }
+
+    let settled = match wasm_bindgen_futures::JsFuture::from(js_sys::Promise::all_settled(&requests)).await {
+        Ok(value) => js_sys::Array::from(&value),
+        Err(e) => {
+            warn(&format!("[ssplayer-wgpu] atlas fetch failed: {e:?}"));
+            return out;
+        }
+    };
+
+    // Second round: the bodies. `Response` resolving says nothing about the body
+    // having arrived, and `allSettled` again so one truncated response is one
+    // missing atlas.
+    let bodies = js_sys::Array::new();
+    let mut with_body: Vec<&String> = Vec::new();
+    for (i, path) in ordered.iter().enumerate() {
+        let entry = settled.get(i as u32);
+        let value = js_sys::Reflect::get(&entry, &JsValue::from_str("value")).unwrap_or(JsValue::UNDEFINED);
+        let Ok(response) = value.dyn_into::<web_sys::Response>() else {
+            warn(&format!("[ssplayer-wgpu] atlas {path}: fetch rejected"));
+            continue;
+        };
+        if !response.ok() {
+            warn(&format!("[ssplayer-wgpu] atlas {path}: HTTP {}", response.status()));
+            continue;
+        }
+        match response.array_buffer() {
+            Ok(promise) => {
+                bodies.push(&promise);
+                with_body.push(path);
+            }
+            Err(e) => warn(&format!("[ssplayer-wgpu] atlas {path}: {e:?}")),
+        }
+    }
+    if with_body.is_empty() {
+        return out;
+    }
+
+    let settled = match wasm_bindgen_futures::JsFuture::from(js_sys::Promise::all_settled(&bodies)).await {
+        Ok(value) => js_sys::Array::from(&value),
+        Err(e) => {
+            warn(&format!("[ssplayer-wgpu] atlas body read failed: {e:?}"));
+            return out;
+        }
+    };
+    for (i, path) in with_body.iter().enumerate() {
+        let entry = settled.get(i as u32);
+        let value = js_sys::Reflect::get(&entry, &JsValue::from_str("value")).unwrap_or(JsValue::UNDEFINED);
+        match value.dyn_into::<js_sys::ArrayBuffer>() {
+            Ok(buffer) => {
+                out.insert((*path).clone(), Rc::from(js_sys::Uint8Array::new(&buffer).to_vec()));
+            }
+            Err(_) => warn(&format!("[ssplayer-wgpu] atlas {path}: body could not be read")),
+        }
+    }
+    out
 }
 
 /// Request a device and subscribe to its `GPUDevice.lost` (SPEC §14). The returned
@@ -314,7 +411,7 @@ impl SsContextWeb {
     /// [`SsContextWeb::restore_device`] can rebuild this texture on its own.
     #[wasm_bindgen(js_name = addTextureFromBytes)]
     pub async fn add_texture_from_bytes(&self, hash: u32, bytes: Vec<u8>) -> Result<(), JsValue> {
-        self.upload_encoded(hash, Rc::from(bytes)).await
+        upload_encoded(&self.inner, hash, Rc::from(bytes)).await
     }
 
     /// Supply a texture by hash from an `ImageBitmap` the **page** decoded.
@@ -410,7 +507,7 @@ impl SsContextWeb {
         // supply and an embedded pack ends up where it was before the loss:
         // `addTextureFrom*` overwrites, on this path as on the first one.
         for (hash, bytes) in encoded {
-            self.upload_encoded(hash, bytes).await?;
+            upload_encoded(&self.inner, hash, bytes).await?;
         }
         Ok(())
     }
@@ -422,25 +519,24 @@ impl SsContextWeb {
     }
 }
 
-impl SsContextWeb {
-    /// Decode `bytes` in the browser, upload the result under `hash` and retain
-    /// the bytes for device-loss recovery.
-    ///
-    /// Takes an `Rc` so the restore path can re-run it without copying every
-    /// retained atlas. Nothing is borrowed across the await — a `RefMut` held
-    /// over a yield point would still be held when JS re-enters through a rAF
-    /// callback.
-    async fn upload_encoded(&self, hash: u32, bytes: Rc<[u8]>) -> Result<(), JsValue> {
-        let bitmap = decode_image(&bytes).await?;
-        {
-            let ctx = &mut *self.inner.borrow_mut();
-            ctx.set_texture_from_bitmap(hash, &bitmap);
-            ctx.encoded_textures.insert(hash, bytes);
-        }
-        // Ours to decode, ours to release: the copy captured the pixels already.
-        bitmap.close();
-        Ok(())
+/// Decode `bytes` in the browser, upload the result under `hash` and retain the
+/// bytes for device-loss recovery.
+///
+/// A free function because both faces need it: the context supplies textures the
+/// page hands over, and a player supplies its own pack's (SPEC §8.1). Takes an
+/// `Rc` so the restore path can re-run it without copying every retained atlas.
+/// Nothing is borrowed across the await — a `RefMut` held over a yield point
+/// would still be held when JS re-enters through a rAF callback.
+async fn upload_encoded(ctx: &Rc<RefCell<WebContext>>, hash: u32, bytes: Rc<[u8]>) -> Result<(), JsValue> {
+    let bitmap = decode_image(&bytes).await?;
+    {
+        let ctx = &mut *ctx.borrow_mut();
+        ctx.set_texture_from_bitmap(hash, &bitmap);
+        ctx.encoded_textures.insert(hash, bytes);
     }
+    // Ours to decode, ours to release: the copy captured the pixels already.
+    bitmap.close();
+    Ok(())
 }
 
 /// One canvas and the scene drawn into it (SPEC §9.2). Holds **any number of
@@ -600,28 +696,106 @@ macro_rules! with_player {
     }};
 }
 
-#[wasm_bindgen]
 impl SsPlayerWeb {
-    /// Register + select a `.ssab`. `pack` names the pack for external instance
-    /// references.
+    /// Parse `bytes` and register the pack, selecting it when `select`.
     ///
-    /// **Registering a pack does not supply its atlases**, in either form: this
-    /// face has no decoder and no way to fetch, and until they arrive every part
-    /// draws against the 1x1 white fallback (SPEC §8). Follow with
-    /// [`SsPlayerWeb::embedded_textures`] or [`SsPlayerWeb::texture_refs`] and
-    /// [`SsContextWeb::add_texture_from_bytes`] — `examples/web/ss-context.js`
-    /// wraps both into one `supplyTextures` call, the way `ssplayer-core` wraps
-    /// them into `loadTextures`.
-    #[wasm_bindgen(js_name = loadSsab)]
-    pub fn load_ssab(&self, pack: &str, bytes: &[u8]) -> Result<(), JsValue> {
-        with_player!(self, |p| p.load_ssab(pack, bytes).map_err(js_err)?)
+    /// A pack keeps the name the exporter wrote unless the caller overrides it,
+    /// because that is the name external instance parts are resolved against
+    /// (`ref_anime_pack`, SPEC §7.1) and the exporter writes the same string on
+    /// both sides. An override is a promise that the caller knows better.
+    fn register(&self, bytes: &[u8], pack: Option<String>, select: bool) -> Result<SSPack, JsValue> {
+        let pack = match pack.as_deref() {
+            Some(name) => SSPack::load_named(name, bytes),
+            None => SSPack::load(bytes),
+        }
+        .map_err(js_err)?;
+        // Annotated because the macro's `Ok(out)` leaves the error type to the
+        // caller, and here the value is discarded rather than returned.
+        let registered: Result<(), JsValue> = with_player!(self, |p| if select { p.set_pack(&pack) } else { p.add_pack(&pack) });
+        registered?;
+        Ok(pack)
     }
 
-    /// Register an additional pack (for external instance references) without
-    /// changing what plays.
+    /// Load every atlas `pack` asks for that the renderer does not already have.
+    ///
+    /// The web edition of `SS6PlayerForGodot`'s `_loadTextures`: both `cellmaps()`
+    /// and `external_textures()` (that is [`SSPack::textures`]'s job), embedded
+    /// bytes taken from the pack and reference-mode ones fetched, all landing in
+    /// the device-scoped texture map under the hash a draw batch will ask for.
+    ///
+    /// Asking the renderer what is missing *first* is what keeps N players of one
+    /// pack to one load between them ("registered wins", SPEC §8.2) — the same
+    /// job the native path does with the predicate it runs before decoding.
+    async fn load_textures(&self, pack: &SSPack, base_url: Option<&str>) -> Result<(), JsValue> {
+        let wanted: Vec<TextureRef> = {
+            let ctx = self.ctx.borrow();
+            pack.textures().iter().filter(|t| ctx.renderer.texture_size(t.hash).is_none()).cloned().collect()
+        };
+        if wanted.is_empty() {
+            return Ok(());
+        }
+
+        let carried: HashMap<u32, Rc<[u8]>> = pack.embedded_images().into_iter().filter(|i| wanted.iter().any(|t| t.hash == i.hash)).map(|i| (i.hash, Rc::from(i.bytes))).collect();
+        let mut to_fetch: Vec<String> = wanted.iter().filter(|t| !carried.contains_key(&t.hash)).map(|t| t.path.clone()).collect();
+        to_fetch.sort();
+        to_fetch.dedup();
+        let fetched = if to_fetch.is_empty() { HashMap::new() } else { fetch_atlases(&to_fetch, base_url).await };
+
+        // Decoding stays sequential: the uploads behind it take the context's one
+        // `RefMut` each, so overlapping them would buy nothing but a borrow panic.
+        // The fetches — the part that actually waits — already ran in parallel.
+        for texture in &wanted {
+            let Some(bytes) = carried.get(&texture.hash).or_else(|| fetched.get(&texture.path)) else { continue };
+            if let Err(e) = upload_encoded(&self.ctx, texture.hash, Rc::clone(bytes)).await {
+                warn(&format!("[ssplayer-wgpu] atlas {} could not be decoded: {e:?}", texture.path));
+            }
+        }
+        Ok(())
+    }
+}
+
+#[wasm_bindgen]
+impl SsPlayerWeb {
+    /// Register + select a `.ssab`, **and load the textures it needs** (SPEC §8.1).
+    ///
+    /// The shape of `SS6PlayerForGodot`'s `setSSABResource`, which loads the
+    /// pack's textures before returning and leaves `setAnimation` a pure
+    /// selection. Texture loading belongs to initialisation, not to animation
+    /// selection: the porting guide puts it there
+    /// (`ssruntime/docs/30_core/10_initialization.ja.md` §3), and switching
+    /// motions is a frequent, synchronous operation that must not carry a
+    /// `Promise`. [`SsPlayerWeb::set_animation`] therefore stays synchronous.
+    ///
+    /// This is async because a browser cannot do otherwise — `fetch` and
+    /// `createImageBitmap` are asynchronous where Godot's `ResourceLoader::load`
+    /// is not. **That is the one place the asynchrony appears.**
+    ///
+    /// * `pack` names the pack for external instance references (`ref_anime_pack`,
+    ///   SPEC §7.1). Pass `null`/`undefined` — the usual case — to use the name
+    ///   the exporter wrote into the `.ssab`, which is the name those references
+    ///   are resolved against. A name of your own overrides it, and then any
+    ///   external instance reference to this pack stops resolving.
+    /// * `baseUrl` is where the `.ssab` came from; reference-mode atlas paths are
+    ///   relative to it. Defaults to the document's URL. Embedded packs ignore it.
+    ///
+    /// An atlas the renderer already has is left alone ("registered wins",
+    /// SPEC §8.2), so N players of one pack load it once between them. An atlas
+    /// that cannot be fetched or decoded is reported on the console and skipped,
+    /// as in `_load_external_ssabs`' `ERR_PRINT` and `PackResolver`'s
+    /// `console.warn`: one missing image should not cost you the character.
+    #[wasm_bindgen(js_name = loadSsab)]
+    pub async fn load_ssab(&self, bytes: Vec<u8>, pack: Option<String>, base_url: Option<String>) -> Result<(), JsValue> {
+        let pack = self.register(&bytes, pack, true)?;
+        self.load_textures(&pack, base_url.as_deref()).await
+    }
+
+    /// [`SsPlayerWeb::load_ssab`] without changing what plays: registers an
+    /// additional pack for external instance references, and loads its textures
+    /// too — a sub-animation's cells come out of its own pack's atlases.
     #[wasm_bindgen(js_name = addSsab)]
-    pub fn add_ssab(&self, pack: &str, bytes: &[u8]) -> Result<(), JsValue> {
-        with_player!(self, |p| p.add_ssab(pack, bytes).map_err(js_err)?)
+    pub async fn add_ssab(&self, bytes: Vec<u8>, pack: Option<String>, base_url: Option<String>) -> Result<(), JsValue> {
+        let pack = self.register(&bytes, pack, false)?;
+        self.load_textures(&pack, base_url.as_deref()).await
     }
 
     /// The animation names in the loaded pack.

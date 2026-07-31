@@ -33,4 +33,12 @@ echo "==> staging embedded .ssab demo assets -> examples/web/assets"
 rm -rf "$here/assets"; mkdir -p "$here/assets"
 cp "$repo/assets/overall_emb/"*.ssab "$here/assets/"
 
+# The other export mode, so the page can exercise it: reference-mode packs name
+# sibling PNGs, which `loadSsab` resolves against the `.ssab`'s own URL and
+# fetches (SPEC §8.1). Nothing else on the page covers that branch.
+echo "==> staging reference .ssab + atlases -> examples/web/assets-ref"
+rm -rf "$here/assets-ref"; mkdir -p "$here/assets-ref"
+cp "$repo/assets/overall/"*.ssab "$here/assets-ref/"
+cp "$repo/assets/overall/"*.png "$here/assets-ref/"
+
 echo "==> done. serve this directory over http (e.g. python3 -m http.server) and open index.html"
