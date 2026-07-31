@@ -77,6 +77,33 @@ pub trait AssetLoader {
     fn warn(&self, message: &str);
 }
 
+/// What kind of thing [`SSPlayer::load`] could not get.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum MissingKind {
+    /// An atlas. The parts that use it draw against the 1x1 white fallback, so
+    /// they appear as silhouettes rather than not at all (SPEC §8).
+    Texture,
+    /// An animation pack an instance part plays from. Those parts do not appear.
+    Pack,
+}
+
+/// Something a load needed and did not get (SPEC §8.1).
+///
+/// A missing file is deliberately **not** an error: one unreadable atlas must not
+/// cost you the character, so [`SSPlayer::load`] reports `Err` only when the
+/// `.ssab` itself is unreadable. That leaves the caller unable to tell a complete
+/// load from a partial one, which is what this answers — the human-facing half is
+/// [`AssetLoader::warn`], and this is the half a program can branch on.
+#[derive(Clone, Debug)]
+pub struct MissingAsset {
+    pub kind: MissingKind,
+    /// What was asked for: a path for a texture, a pack name for a pack.
+    pub name: String,
+    /// For a texture, the key a draw batch will ask for. Zero for a pack, whose
+    /// identity is its name (SPEC §7.1).
+    pub hash: u32,
+}
+
 /// Everything in `path` up to the last `/`, with the separator — the directory a
 /// pack's siblings are named relative to (SPEC §8.1).
 ///
@@ -156,6 +183,9 @@ pub struct SSPlayer {
     /// because a 2048² atlas is a few hundred KB here against 16 MB of pixels,
     /// and because it puts both routes on one timeline.
     pending_images: Vec<(u32, Vec<u8>)>,
+    /// What the last load could not get (SPEC §8.1). Reset by each
+    /// [`SSPlayer::load_with`], appended to as the walk gives up on a file.
+    missing: Vec<MissingAsset>,
     /// Where this player sits in the scene — the root transform of its tree
     /// (SPEC §5.4). Composed by [`SSPlayer::set_transform`]; only the matrix is
     /// kept because nothing yet re-composes it. A future `box` (§9.3, the
@@ -183,7 +213,7 @@ impl SSPlayer {
     /// cheap. The device-scoped [`SSRenderer`] and the target-scoped
     /// [`SSScene`] are lent to it per frame by [`SSScene::update`].
     pub fn new() -> Self {
-        Self { packs: HashMap::new(), main_pack: None, root: None, current_animation: None, packs_awaiting_textures: Vec::new(), pending_images: Vec::new(), transform: IDENTITY, order: 0, visible: true, alpha: 1.0 }
+        Self { packs: HashMap::new(), main_pack: None, root: None, current_animation: None, packs_awaiting_textures: Vec::new(), pending_images: Vec::new(), missing: Vec::new(), transform: IDENTITY, order: 0, visible: true, alpha: 1.0 }
     }
 
     /// Re-offer this player's embedded atlases after a device loss (SPEC §14).
@@ -233,6 +263,9 @@ impl SSPlayer {
     ///
     /// [`SSPlayer::load`]: crate::SSPlayer::load
     pub async fn load_with(&mut self, loader: &mut impl AssetLoader, src: &str) -> Result<(), SSRuntimeError> {
+        // This load's tally, not the player's history: a caller checks it against
+        // the call it just made.
+        self.missing.clear();
         let Some(bytes) = loader.read(std::slice::from_ref(&src.to_owned())).await.into_iter().next().flatten() else {
             loader.warn(&format!("could not read {src}"));
             return Err(SSRuntimeError::NotLoaded);
@@ -313,6 +346,7 @@ impl SSPlayer {
             for ((name, path), bytes) in wanted.iter().zip(&paths).zip(fetched) {
                 let Some(bytes) = bytes else {
                     loader.warn(&format!("instance pack \"{name}\" ({path}) did not load; parts that play it will not appear"));
+                    self.missing.push(MissingAsset { kind: MissingKind::Pack, name: name.clone(), hash: 0 });
                     continue;
                 };
                 // Never renamed: `ref_anime_pack` is matched against the name the
@@ -324,7 +358,10 @@ impl SSPlayer {
                         self.load_textures(loader, &sub, base).await;
                         queue.extend(sub.instance_packs());
                     }
-                    Err(e) => loader.warn(&format!("instance pack \"{name}\" ({path}) is not a valid .ssab: {e:?}")),
+                    Err(e) => {
+                        loader.warn(&format!("instance pack \"{name}\" ({path}) is not a valid .ssab: {e:?}"));
+                        self.missing.push(MissingAsset { kind: MissingKind::Pack, name: name.clone(), hash: 0 });
+                    }
                 }
             }
         }
@@ -356,12 +393,37 @@ impl SSPlayer {
                     Some(bytes) => bytes,
                     None => {
                         loader.warn(&format!("atlas {joined} did not load; parts that use it will draw white"));
+                        self.missing.push(MissingAsset { kind: MissingKind::Texture, name: joined, hash: texture.hash });
                         continue;
                     }
                 },
             };
             loader.supply_texture(texture.hash, bytes).await;
         }
+    }
+
+    /// What the last load could not get, in the order it gave up (SPEC §8.1).
+    /// Empty means everything the packs asked for arrived.
+    ///
+    /// A load reports `Err` only when the `.ssab` itself is unreadable, because
+    /// one missing atlas must not cost you the character. This is how a caller
+    /// tells "complete" from "played anyway": check it right after `load`, and
+    /// decide for itself whether a silhouette is worth failing over.
+    ///
+    /// ```no_run
+    /// # use ssplayer_wgpu::SSPlayer;
+    /// # fn go(player: &mut SSPlayer) -> Result<(), Box<dyn std::error::Error>> {
+    /// player.load("assets/overall/Instance.ssab")?;   // the pack was readable …
+    /// for missing in player.missing_assets() {        // … but maybe not all of it
+    ///     eprintln!("{:?} {} is not there", missing.kind, missing.name);
+    /// }
+    /// # Ok(()) }
+    /// ```
+    ///
+    /// Reset by every [`SSPlayer::load_with`], so it always describes the most
+    /// recent call rather than the player's history.
+    pub fn missing_assets(&self) -> &[MissingAsset] {
+        &self.missing
     }
 
     /// Whether a pack is registered under `name` — what an instance part's

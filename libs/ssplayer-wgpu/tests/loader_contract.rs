@@ -23,7 +23,7 @@
 //! walk does real work — the pack parses, its instance references resolve, both
 //! texture tables come out — and every request it made is left behind to assert on.
 
-use ssplayer_wgpu::{AssetLoader, SSPlayer};
+use ssplayer_wgpu::{AssetLoader, MissingKind, SSPlayer};
 
 fn asset_root() -> &'static str {
     concat!(env!("CARGO_MANIFEST_DIR"), "/../../assets")
@@ -217,6 +217,7 @@ fn one_missing_file_does_not_fail_the_load() {
     let Some(mut player) = load(&mut recorder, "overall/Instance.ssab") else { return };
     let anim = player.animation_names().unwrap().first().cloned().unwrap();
     assert!(player.set_animation(&anim).is_ok());
+    assert!(player.missing_assets().is_empty(), "a complete load reported something missing: {:?}", player.missing_assets());
 
     // But a pack that is not there at all is an error — that one the caller has
     // to hear about, and it is the only thing `load` fails on.
@@ -224,4 +225,80 @@ fn one_missing_file_does_not_fail_the_load() {
     let mut orphan = SSPlayer::new();
     assert!(pollster::block_on(orphan.load_with(&mut empty, "overall/Instance.ssab")).is_err(), "a pack that could not be read still reported success");
     assert_eq!(empty.0, ["overall/Instance.ssab"], "the walk kept going after the pack itself failed");
+}
+
+/// A load that succeeds but did not get everything says so — the half of a
+/// partial load a program can branch on, where `warn` is the half a human reads
+/// (SPEC §8.1).
+#[test]
+fn a_partial_load_is_reported_without_failing() {
+    /// Serves the packs and refuses every image.
+    struct NoImages {
+        root: std::path::PathBuf,
+    }
+    impl AssetLoader for NoImages {
+        async fn read(&mut self, paths: &[String]) -> Vec<Option<Vec<u8>>> {
+            paths.iter().map(|path| if path.ends_with(".png") { None } else { std::fs::read(self.root.join(path)).ok() }).collect()
+        }
+        async fn supply_texture(&mut self, _hash: u32, _encoded: &[u8]) {}
+        fn has_texture(&self, _hash: u32) -> bool {
+            false
+        }
+        fn warn(&self, _message: &str) {}
+    }
+
+    let mut loader = NoImages { root: asset_root().into() };
+    let mut player = SSPlayer::new();
+    if pollster::block_on(player.load_with(&mut loader, "overall/Instance.ssab")).is_err() {
+        eprintln!("fixture missing; run scripts/deploy-examples.sh. skipping.");
+        return;
+    }
+
+    // It loaded, and it plays.
+    let anim = player.animation_names().unwrap().first().cloned().unwrap();
+    assert!(player.set_animation(&anim).is_ok());
+
+    // And every image it could not get is named, by the key a draw batch will
+    // ask for — so a caller can decide whether a silhouette is worth failing over.
+    let missing = player.missing_assets();
+    assert!(!missing.is_empty(), "every atlas was refused and nothing was reported missing");
+    assert!(missing.iter().all(|m| m.kind == MissingKind::Texture && m.name.ends_with(".png") && m.hash != 0), "{missing:?}");
+
+    // The tally belongs to the last load, not to the player.
+    let mut recorder = Recorder::new(asset_root());
+    assert!(pollster::block_on(player.load_with(&mut recorder, "overall/Instance.ssab")).is_ok());
+    assert!(player.missing_assets().is_empty(), "the previous load's failures survived a successful one: {:?}", player.missing_assets());
+}
+
+/// A sub-pack that does not arrive is reported too, and as a pack rather than as
+/// the path it was looked for under (SPEC §7.1).
+#[test]
+fn a_missing_sub_pack_is_reported_by_name() {
+    /// Serves the root pack and its images, and no sibling `.ssab`.
+    struct NoSiblings {
+        root: std::path::PathBuf,
+        first: bool,
+    }
+    impl AssetLoader for NoSiblings {
+        async fn read(&mut self, paths: &[String]) -> Vec<Option<Vec<u8>>> {
+            let root_pack = std::mem::take(&mut self.first);
+            paths.iter().map(|path| if path.ends_with(".ssab") && !root_pack { None } else { std::fs::read(self.root.join(path)).ok() }).collect()
+        }
+        async fn supply_texture(&mut self, _hash: u32, _encoded: &[u8]) {}
+        fn has_texture(&self, _hash: u32) -> bool {
+            false
+        }
+        fn warn(&self, _message: &str) {}
+    }
+
+    let mut loader = NoSiblings { root: asset_root().into(), first: true };
+    let mut player = SSPlayer::new();
+    if pollster::block_on(player.load_with(&mut loader, "overall/Instance.ssab")).is_err() {
+        eprintln!("fixture missing; run scripts/deploy-examples.sh. skipping.");
+        return;
+    }
+
+    let packs: Vec<&str> = player.missing_assets().iter().filter(|m| m.kind == MissingKind::Pack).map(|m| m.name.as_str()).collect();
+    assert_eq!(packs, ["Instance_SourceAnime"], "the missing sub-pack was not reported by the name `ref_anime_pack` resolves against: {:?}", player.missing_assets());
+    assert!(!player.has_pack("Instance_SourceAnime"));
 }
