@@ -144,3 +144,29 @@ fn set_animation_clears_all_but_permanent() {
     player.set_part_color_override(part, BlendOp::Mix, 0xFFFFFFFF, OverridePriority::default()).unwrap();
     player.clear_all_part_overrides();
 }
+
+// --- Part read-outs -------------------------------------------------------
+
+#[test]
+fn part_transform_is_bounds_checked_and_frame_shaped() {
+    let player = loaded();
+
+    assert!(player.part_count() > 0, "a loaded animation has parts");
+
+    // The root part exists and reports a finite affine.
+    let m = player.part_transform(0).expect("part 0 should resolve");
+    assert!(m.iter().all(|v| v.is_finite()), "affine should be finite: {m:?}");
+
+    // Out of range is None rather than a read past the runtime's buffer — which
+    // is what would otherwise come back as NaN.
+    assert!(player.part_transform(player.part_count() as u32).is_none());
+    assert!(player.part_transform(u32::MAX).is_none());
+}
+
+#[test]
+fn part_read_outs_are_empty_before_an_animation() {
+    let player = SSPlayer::new();
+
+    assert_eq!(player.part_count(), 0);
+    assert!(player.part_transform(0).is_none());
+}

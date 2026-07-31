@@ -965,6 +965,47 @@ impl SSPlayer {
         }
     }
 
+    // --- Part read-outs (SPEC §9.5) ----------------------------------------
+
+    /// How many parts the root animation has. Zero before one is set up.
+    ///
+    /// Derived from the world-matrix buffer, which carries one 4x4 per part, so
+    /// it is exactly the bound [`SSPlayer::part_transform`] checks against.
+    pub fn part_count(&self) -> usize {
+        let Some(root) = &self.root else { return 0 };
+        root.context.get_world_matrices_len() / 16
+    }
+
+    /// The part's transform on the current frame, as the 2D affine
+    /// `[m00, m01, m10, m11, tx, ty]` — the same six numbers, in the same order,
+    /// that `ssplayer-webgl`'s `getPartTransform` returns. A point maps as
+    /// `x' = m00·x + m01·y + tx`, `y' = m10·x + m11·y + ty`.
+    ///
+    /// The space is **animation-local and Y-down**: this is the part's pose
+    /// inside its own animation, with neither [`SSPlayer::set_transform`] nor
+    /// the scene's projection applied. A host pinning something to a part
+    /// composes those itself, which is also what lets it pin into whatever
+    /// coordinate system it actually uses.
+    ///
+    /// `None` when no animation is set up or `part` is out of range. Copied out,
+    /// so unlike a [`FrameView`] it is safe to keep.
+    ///
+    /// Read it **after** [`SSScene::update`] — it describes the frame the last
+    /// update produced. The matrix is computed for every part whether or not it
+    /// is hidden, so a hidden part still reports where it would have been.
+    ///
+    /// [`SSScene::update`]: crate::SSScene::update
+    pub fn part_transform(&self, part: u32) -> Option<[f32; 6]> {
+        let root = self.root.as_ref()?;
+        let matrices = unsafe { slice_f32(root.context.get_world_matrices_ptr(), root.context.get_world_matrices_len()) };
+        let base = (part as usize).checked_mul(16)?;
+        // Bounds-checked rather than trusted: these read the runtime's buffer
+        // directly, so an out-of-range part would read past it instead of
+        // producing the documented None.
+        let m = matrices.get(base..base + 16)?;
+        Some([m[0], m[4], m[1], m[5], m[12], m[13]])
+    }
+
     /// Place this player: translation, scale, then rotation in radians, composed
     /// into the root transform of its tree.
     ///

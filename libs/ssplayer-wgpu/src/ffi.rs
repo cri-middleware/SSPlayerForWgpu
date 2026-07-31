@@ -1092,6 +1092,44 @@ pub unsafe extern "C" fn ss_player_clear_all_part_overrides(handle: *mut SsPlaye
     }
 }
 
+/// How many parts the root animation has; 0 before one is set up.
+///
+/// # Safety
+/// `handle` must be a live handle or null.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn ss_player_part_count(handle: *mut SsPlayer) -> u32 {
+    unsafe { player(handle) }.map(|p| p.part_count() as u32).unwrap_or(0)
+}
+
+/// Write the part's current-frame transform into `out` as the 2D affine
+/// `[m00, m01, m10, m11, tx, ty]`, in animation-local (Y-down) space with
+/// neither `ss_player_set_transform` nor the scene's projection applied. A point
+/// maps as `x' = m00*x + m01*y + tx`, `y' = m10*x + m11*y + ty`.
+///
+/// Returns `SS_OK`, or `SS_ERROR_INVALID_ARGUMENT` when the handle or `out` is
+/// null, no animation is set up, or `part` is out of range — `out` is untouched
+/// in that case.
+///
+/// Call it after `ss_scene_update`: it describes the frame that produced. The
+/// matrix exists for every part whether or not it is hidden, so a hidden part
+/// still reports where it would have been.
+///
+/// # Safety
+/// `handle` must be a live handle or null; `out` must point at 6 writable
+/// `float`s.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn ss_player_part_transform(handle: *mut SsPlayer, part: u32, out: *mut f32) -> i32 {
+    if out.is_null() {
+        return fail(SS_ERROR_INVALID_ARGUMENT, "out is null");
+    }
+    let Some(player) = (unsafe { player(handle) }) else { return fail(SS_ERROR_INVALID_ARGUMENT, "player handle is null or destroyed") };
+    let Some(m) = player.part_transform(part) else {
+        return fail(SS_ERROR_INVALID_ARGUMENT, format!("part {part} is out of range, or no animation is set up"));
+    };
+    unsafe { std::ptr::copy_nonoverlapping(m.as_ptr(), out, 6) };
+    SS_OK
+}
+
 /// How many animations the main pack holds (0 if nothing is loaded).
 ///
 /// # Safety

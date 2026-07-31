@@ -782,6 +782,34 @@ int32_t ss_player_clear_part_cell_override(ss_player_t *handle, uint32_t part);
 void ss_player_clear_all_part_overrides(ss_player_t *handle);
 
 /*
+ How many parts the root animation has; 0 before one is set up.
+
+ # Safety
+ `handle` must be a live handle or null.
+ */
+uint32_t ss_player_part_count(ss_player_t *handle);
+
+/*
+ Write the part's current-frame transform into `out` as the 2D affine
+ `[m00, m01, m10, m11, tx, ty]`, in animation-local (Y-down) space with
+ neither `ss_player_set_transform` nor the scene's projection applied. A point
+ maps as `x' = m00*x + m01*y + tx`, `y' = m10*x + m11*y + ty`.
+
+ Returns `SS_OK`, or `SS_ERROR_INVALID_ARGUMENT` when the handle or `out` is
+ null, no animation is set up, or `part` is out of range — `out` is untouched
+ in that case.
+
+ Call it after `ss_scene_update`: it describes the frame that produced. The
+ matrix exists for every part whether or not it is hidden, so a hidden part
+ still reports where it would have been.
+
+ # Safety
+ `handle` must be a live handle or null; `out` must point at 6 writable
+ `float`s.
+ */
+int32_t ss_player_part_transform(ss_player_t *handle, uint32_t part, float *out);
+
+/*
  How many animations the main pack holds (0 if nothing is loaded).
 
  # Safety
