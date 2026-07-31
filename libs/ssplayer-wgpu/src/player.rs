@@ -216,6 +216,79 @@ impl From<ssruntime::core::playback_controller::PlaybackStyle> for PlaybackStyle
     }
 }
 
+/// How an override's colour combines with what is underneath — the same four
+/// operations the authored PartColor offers.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum BlendOp {
+    #[default]
+    Mix,
+    Mul,
+    Add,
+    Sub,
+}
+
+impl BlendOp {
+    /// The value crossing the `js` / `ffi` faces, and what the runtime takes.
+    pub fn as_wire(self) -> u8 {
+        match self {
+            Self::Mix => 0,
+            Self::Mul => 1,
+            Self::Add => 2,
+            Self::Sub => 3,
+        }
+    }
+
+    /// `None` for anything outside `0..=3`, so a bad value from a C or JS caller
+    /// becomes a rejected call rather than a silently different blend.
+    pub fn from_wire(value: u8) -> Option<Self> {
+        match value {
+            0 => Some(Self::Mix),
+            1 => Some(Self::Mul),
+            2 => Some(Self::Add),
+            3 => Some(Self::Sub),
+            _ => None,
+        }
+    }
+}
+
+/// How long an override outlives the keyframes it beats.
+///
+/// Visibility has no priority: a force-hide always wins, and is always cleared
+/// when a new animation is set up.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum OverridePriority {
+    /// Holds until the animation next drives that attribute, so it shows only
+    /// on frames the animation leaves alone.
+    OverwriteOnNextKeyframe,
+    /// Holds for the current animation, and is cleared when another is set up.
+    #[default]
+    HoldUntilNextAnimation,
+    /// Holds for as long as the same pack is playing, surviving animation
+    /// changes.
+    Permanent,
+}
+
+impl OverridePriority {
+    /// See [`BlendOp::as_wire`].
+    pub fn as_wire(self) -> u8 {
+        match self {
+            Self::OverwriteOnNextKeyframe => 0,
+            Self::HoldUntilNextAnimation => 1,
+            Self::Permanent => 2,
+        }
+    }
+
+    /// See [`BlendOp::from_wire`].
+    pub fn from_wire(value: u8) -> Option<Self> {
+        match value {
+            0 => Some(Self::OverwriteOnNextKeyframe),
+            1 => Some(Self::HoldUntilNextAnimation),
+            2 => Some(Self::Permanent),
+            _ => None,
+        }
+    }
+}
+
 /// Everything in `path` up to the last `/`, with the separator — the directory a
 /// pack's siblings are named relative to (SPEC §8.1).
 ///
@@ -785,6 +858,111 @@ impl SSPlayer {
     /// See [`SSPlayer::set_skip_frames`].
     pub fn skip_frames(&self) -> bool {
         self.root.as_ref().map(|r| r.context.get_skip_frames()).unwrap_or(true)
+    }
+
+    // --- Per-part overrides (SPEC §9.5) -------------------------------------
+    //
+    // Say "make this part this colour / this cell / hidden **now**", beating the
+    // keyframes underneath. The runtime owns the override table and its whole
+    // lifecycle, so these are one-shot calls: never drive them from a per-frame
+    // loop, and expect nothing to be re-applied for you.
+    //
+    // Two things to know before reaching for them:
+    //
+    // * Part indices address the ROOT animation, and are stable within one pack.
+    //   Resolve a name once with [`SSPlayer::find_part_index`] and keep the
+    //   index if you override often.
+    // * **Overrides do not reach inside an instance part.** Its child animation
+    //   runs as its own context (SPEC §7.1), so an override on the part that
+    //   *hosts* an instance does not touch what the instance draws.
+    //
+    // Every call needs an animation: the runtime sizes its override table in
+    // `set_animation`, which is also what clears everything but
+    // [`OverridePriority::Permanent`]. Overriding before selecting an animation
+    // is therefore both rejected and pointless — override after, never before.
+
+    /// Resolve a part name to its index in the current animation, or `None` when
+    /// the name is unknown or no animation is set up.
+    pub fn find_part_index(&self, name: &str) -> Option<u32> {
+        let root = self.root.as_ref()?;
+        match root.context.find_part_index(name) {
+            index if index >= 0 => Some(index as u32),
+            _ => None,
+        }
+    }
+
+    /// Force-hide a part, or revert it to the animation.
+    ///
+    /// `cascade` propagates a force-hide to the part's descendants. A keyframe
+    /// `hide` never cascades, so this is the only way to hide a whole sub-tree.
+    /// Visibility has no priority mode: it always beats the keyframe, and is
+    /// always cleared when a new animation is set up.
+    pub fn set_part_visibility_override(&mut self, part: u32, hide: bool, cascade: bool) -> Result<(), SSRuntimeError> {
+        let root = self.root.as_mut().ok_or(SSRuntimeError::NotLoaded)?;
+        root.context.set_part_visibility_override(part, u8::from(hide), cascade)
+    }
+
+    /// Revert a part to the animation's own visibility.
+    pub fn clear_part_visibility_override(&mut self, part: u32) -> Result<(), SSRuntimeError> {
+        let root = self.root.as_mut().ok_or(SSRuntimeError::NotLoaded)?;
+        root.context.clear_part_visibility_override(part)
+    }
+
+    /// Override a part's colour with one value across all four corners.
+    ///
+    /// `rgba` is packed `0xRRGGBBAA` in the same 8-bit sRGB space as the
+    /// authored PartColor: the runtime multiplies its alpha with the part's
+    /// composed alpha itself, so do not pre-multiply or gamma-convert it here.
+    ///
+    /// Normal parts only. Others ignore it silently — `Ok` means the override
+    /// was recorded, not that anything looks different.
+    pub fn set_part_color_override(&mut self, part: u32, blend_op: BlendOp, rgba: u32, priority: OverridePriority) -> Result<(), SSRuntimeError> {
+        let root = self.root.as_mut().ok_or(SSRuntimeError::NotLoaded)?;
+        root.context.set_part_color_override(part, blend_op.as_wire(), rgba, priority.as_wire())
+    }
+
+    /// Override a part's colour with four distinct corners, for a gradient.
+    ///
+    /// Same contract as [`SSPlayer::set_part_color_override`]. `corners` is in
+    /// the runtime's order — **left-top, right-top, left-bottom, right-bottom**,
+    /// each `[r, g, b, a]` — and getting that order wrong flips the gradient
+    /// silently rather than failing.
+    pub fn set_part_color_override_corners(&mut self, part: u32, blend_op: BlendOp, corners: [[u8; 4]; 4], priority: OverridePriority) -> Result<(), SSRuntimeError> {
+        let root = self.root.as_mut().ok_or(SSRuntimeError::NotLoaded)?;
+        root.context.set_part_color_override_corners(part, blend_op.as_wire(), corners, priority.as_wire())
+    }
+
+    /// Revert a part to the animation's own colour. Clears either kind of colour
+    /// override — they share one slot per part.
+    pub fn clear_part_color_override(&mut self, part: u32) -> Result<(), SSRuntimeError> {
+        let root = self.root.as_mut().ok_or(SSRuntimeError::NotLoaded)?;
+        root.context.clear_part_color_override(part)
+    }
+
+    /// Make a part draw a different cell.
+    ///
+    /// `cellmap_name` is written without the `.ssce` extension. Both names are
+    /// hashed here, so pass them exactly as they appear in the pack. Normal and
+    /// Mask parts only; errors when the cell cannot be resolved against the
+    /// bound `.ssab`.
+    pub fn set_part_cell_override(&mut self, part: u32, cellmap_name: &str, cell_name: &str, priority: OverridePriority) -> Result<(), SSRuntimeError> {
+        let root = self.root.as_mut().ok_or(SSRuntimeError::NotLoaded)?;
+        let cellmap_hash = ssruntime::fnv1a_hash_str(cellmap_name);
+        let cell_hash = ssruntime::fnv1a_hash_str(cell_name);
+        root.context.set_part_cell_override(part, cellmap_hash, cell_hash, priority.as_wire())
+    }
+
+    /// Revert a part to the animation's own cell.
+    pub fn clear_part_cell_override(&mut self, part: u32) -> Result<(), SSRuntimeError> {
+        let root = self.root.as_mut().ok_or(SSRuntimeError::NotLoaded)?;
+        root.context.clear_part_cell_override(part)
+    }
+
+    /// Drop every override on the root animation at once.
+    pub fn clear_all_part_overrides(&mut self) {
+        if let Some(root) = &mut self.root {
+            root.context.clear_all_part_overrides();
+        }
     }
 
     /// Place this player: translation, scale, then rotation in radians, composed

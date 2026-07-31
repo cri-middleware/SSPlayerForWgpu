@@ -38,7 +38,7 @@
 //! reason this face is ~30% smaller over the wire than one that bundles `image`.
 
 use crate::pack::SSPack;
-use crate::player::{AssetLoader, MissingKind, PlaybackDirection, PlaybackStyle, SSPlayer};
+use crate::player::{AssetLoader, BlendOp, MissingKind, OverridePriority, PlaybackDirection, PlaybackStyle, SSPlayer};
 use crate::renderer::{AlphaMode, Retention, SSRenderer};
 use crate::roster::{Roster, SlotId};
 use crate::scene::{SSScene, SceneConfig};
@@ -1137,6 +1137,90 @@ impl SsPlayerWeb {
     #[wasm_bindgen(js_name = skipFrames)]
     pub fn skip_frames(&self) -> Result<bool, JsValue> {
         with_player!(self, |p| p.skip_frames())
+    }
+
+    // --- Per-part overrides (SPEC §9.5) ---
+    //
+    // Indices address the root animation and are stable within one pack, so
+    // resolve a name once with `findPartIndex` and keep the index. Overrides do
+    // not reach inside an instance part — its child runs as its own context.
+    // Call them only after `setAnimation`, which is what sizes the runtime's
+    // override table and clears everything but a permanent override.
+
+    /// Resolve a part name to its index in the current animation, or `-1` when
+    /// the name is unknown or no animation is set up.
+    #[wasm_bindgen(js_name = findPartIndex)]
+    pub fn find_part_index(&self, name: &str) -> Result<i32, JsValue> {
+        with_player!(self, |p| p.find_part_index(name).map(|i| i as i32).unwrap_or(-1))
+    }
+
+    /// Force-hide a part (`hide` = true) or revert it to the animation.
+    /// `cascade` propagates a force-hide to the part's descendants — a keyframe
+    /// hide never cascades, so this is the only way to hide a sub-tree.
+    #[wasm_bindgen(js_name = setPartVisibilityOverride)]
+    pub fn set_part_visibility_override(&self, part: u32, hide: bool, cascade: bool) -> Result<(), JsValue> {
+        with_player!(self, |p| p.set_part_visibility_override(part, hide, cascade).map_err(js_err)?)
+    }
+
+    /// Revert a part to the animation's own visibility.
+    #[wasm_bindgen(js_name = clearPartVisibilityOverride)]
+    pub fn clear_part_visibility_override(&self, part: u32) -> Result<(), JsValue> {
+        with_player!(self, |p| p.clear_part_visibility_override(part).map_err(js_err)?)
+    }
+
+    /// Override a part's colour. `blendOp`: 0 mix, 1 mul, 2 add, 3 sub.
+    /// `rgba` is packed `0xRRGGBBAA` in the authored 8-bit sRGB space — do not
+    /// pre-multiply it. `priority`: 0 until the next keyframe, 1 until the next
+    /// animation, 2 permanent. Normal parts only.
+    #[wasm_bindgen(js_name = setPartColorOverride)]
+    pub fn set_part_color_override(&self, part: u32, blend_op: u8, rgba: u32, priority: u8) -> Result<(), JsValue> {
+        let blend_op = BlendOp::from_wire(blend_op).ok_or_else(|| JsValue::from_str("blendOp must be 0..=3"))?;
+        let priority = OverridePriority::from_wire(priority).ok_or_else(|| JsValue::from_str("priority must be 0..=2"))?;
+        with_player!(self, |p| p.set_part_color_override(part, blend_op, rgba, priority).map_err(js_err)?)
+    }
+
+    /// Four-corner colour override, for a gradient. `corners` is 16 bytes in the
+    /// runtime's order — left-top, right-top, left-bottom, right-bottom, each
+    /// `[r, g, b, a]`. Otherwise as `setPartColorOverride`.
+    #[wasm_bindgen(js_name = setPartColorOverrideCorners)]
+    pub fn set_part_color_override_corners(&self, part: u32, blend_op: u8, corners: &[u8], priority: u8) -> Result<(), JsValue> {
+        let blend_op = BlendOp::from_wire(blend_op).ok_or_else(|| JsValue::from_str("blendOp must be 0..=3"))?;
+        let priority = OverridePriority::from_wire(priority).ok_or_else(|| JsValue::from_str("priority must be 0..=2"))?;
+        if corners.len() != 16 {
+            return Err(JsValue::from_str("corners must be 16 bytes (4 corners x RGBA)"));
+        }
+        let mut rgba = [[0u8; 4]; 4];
+        for (corner, chunk) in rgba.iter_mut().zip(corners.chunks_exact(4)) {
+            corner.copy_from_slice(chunk);
+        }
+        with_player!(self, |p| p.set_part_color_override_corners(part, blend_op, rgba, priority).map_err(js_err)?)
+    }
+
+    /// Revert a part to the animation's own colour.
+    #[wasm_bindgen(js_name = clearPartColorOverride)]
+    pub fn clear_part_color_override(&self, part: u32) -> Result<(), JsValue> {
+        with_player!(self, |p| p.clear_part_color_override(part).map_err(js_err)?)
+    }
+
+    /// Make a part draw a different cell. `cellmapName` is written without the
+    /// `.ssce` extension. Normal and Mask parts only; throws when the cell
+    /// cannot be resolved against the loaded pack.
+    #[wasm_bindgen(js_name = setPartCellOverride)]
+    pub fn set_part_cell_override(&self, part: u32, cellmap_name: &str, cell_name: &str, priority: u8) -> Result<(), JsValue> {
+        let priority = OverridePriority::from_wire(priority).ok_or_else(|| JsValue::from_str("priority must be 0..=2"))?;
+        with_player!(self, |p| p.set_part_cell_override(part, cellmap_name, cell_name, priority).map_err(js_err)?)
+    }
+
+    /// Revert a part to the animation's own cell.
+    #[wasm_bindgen(js_name = clearPartCellOverride)]
+    pub fn clear_part_cell_override(&self, part: u32) -> Result<(), JsValue> {
+        with_player!(self, |p| p.clear_part_cell_override(part).map_err(js_err)?)
+    }
+
+    /// Drop every override on the root animation at once.
+    #[wasm_bindgen(js_name = clearAllPartOverrides)]
+    pub fn clear_all_part_overrides(&self) -> Result<(), JsValue> {
+        with_player!(self, |p| p.clear_all_part_overrides())
     }
 
     /// Place this player in the scene, in pixels from the canvas centre.

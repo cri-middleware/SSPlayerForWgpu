@@ -682,6 +682,106 @@ void ss_player_set_skip_frames(ss_player_t *handle, bool skip);
 bool ss_player_skip_frames(ss_player_t *handle);
 
 /*
+ Resolve a part name to its index in the current animation, or -1 when the
+ name is unknown, `name` is not valid UTF-8, or no animation is set up.
+
+ Unlike the calls below this returns an index rather than a status, so it does
+ not touch `ss_last_error`.
+
+ # Safety
+ `handle` must be a live handle or null; `name` must be a valid
+ null-terminated C string.
+ */
+int32_t ss_player_find_part_index(ss_player_t *handle, const char *name);
+
+/*
+ Force-hide a part (`hide` true) or revert it to the animation. `cascade`
+ propagates a force-hide to the part's descendants — a keyframe hide never
+ cascades, so this is the only way to hide a sub-tree.
+
+ # Safety
+ `handle` must be a live handle or null.
+ */
+int32_t ss_player_set_part_visibility_override(ss_player_t *handle, uint32_t part, bool hide, bool cascade);
+
+/*
+ Revert a part to the animation's own visibility.
+
+ # Safety
+ `handle` must be a live handle or null.
+ */
+int32_t ss_player_clear_part_visibility_override(ss_player_t *handle, uint32_t part);
+
+/*
+ Override a part's colour. `blend_op`: 0 mix, 1 mul, 2 add, 3 sub. `rgba` is
+ packed `0xRRGGBBAA` in the authored 8-bit sRGB space — do not pre-multiply
+ it. `priority`: 0 until the next keyframe, 1 until the next animation, 2
+ permanent. Normal parts only; other kinds ignore it and still return `SS_OK`.
+
+ # Safety
+ `handle` must be a live handle or null.
+ */
+int32_t ss_player_set_part_color_override(ss_player_t *handle,
+                                          uint32_t part,
+                                          uint8_t blend_op,
+                                          uint32_t rgba,
+                                          uint8_t priority);
+
+/*
+ Four-corner colour override, for a gradient. `corners` points at 16 bytes in
+ the runtime's order — left-top, right-top, left-bottom, right-bottom, each
+ `[r, g, b, a]`. Otherwise as `ss_player_set_part_color_override`.
+
+ # Safety
+ `handle` must be a live handle or null; `corners` must point at 16 readable
+ bytes.
+ */
+int32_t ss_player_set_part_color_override_corners(ss_player_t *handle,
+                                                  uint32_t part,
+                                                  uint8_t blend_op,
+                                                  const uint8_t *corners,
+                                                  uint8_t priority);
+
+/*
+ Revert a part to the animation's own colour.
+
+ # Safety
+ `handle` must be a live handle or null.
+ */
+int32_t ss_player_clear_part_color_override(ss_player_t *handle, uint32_t part);
+
+/*
+ Make a part draw a different cell. `cellmap_name` is written without the
+ `.ssce` extension. Normal and Mask parts only; fails when the cell cannot be
+ resolved against the loaded pack.
+
+ # Safety
+ `handle` must be a live handle or null; both names must be valid
+ null-terminated C strings.
+ */
+int32_t ss_player_set_part_cell_override(ss_player_t *handle,
+                                         uint32_t part,
+                                         const char *cellmap_name,
+                                         const char *cell_name,
+                                         uint8_t priority);
+
+/*
+ Revert a part to the animation's own cell.
+
+ # Safety
+ `handle` must be a live handle or null.
+ */
+int32_t ss_player_clear_part_cell_override(ss_player_t *handle, uint32_t part);
+
+/*
+ Drop every override on the root animation at once.
+
+ # Safety
+ `handle` must be a live handle or null.
+ */
+void ss_player_clear_all_part_overrides(ss_player_t *handle);
+
+/*
  How many animations the main pack holds (0 if nothing is loaded).
 
  # Safety

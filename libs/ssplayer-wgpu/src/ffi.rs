@@ -26,7 +26,7 @@
 //!   alive until [`ss_scene_destroy`].
 
 use crate::host::{NativeHost, NativeHostConfig, PlayerId};
-use crate::player::{MissingKind, PlaybackDirection, PlaybackStyle, SSPlayer};
+use crate::player::{BlendOp, MissingKind, OverridePriority, PlaybackDirection, PlaybackStyle, SSPlayer};
 use std::cell::RefCell;
 use std::ffi::{CStr, CString, c_char, c_void};
 use std::num::NonZeroIsize;
@@ -938,6 +938,158 @@ pub unsafe extern "C" fn ss_player_set_skip_frames(handle: *mut SsPlayer, skip: 
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn ss_player_skip_frames(handle: *mut SsPlayer) -> bool {
     unsafe { player(handle) }.map(|p| p.skip_frames()).unwrap_or(true)
+}
+
+// --- Per-part overrides (SPEC §9.5) ---
+//
+// Indices address the root animation and are stable within one pack, so resolve
+// a name once with `ss_player_find_part_index` and keep the index. Overrides do
+// not reach inside an instance part — its child runs as its own context. Call
+// them only after `ss_player_set_animation`, which sizes the runtime's override
+// table and clears everything but a permanent override.
+
+/// Resolve a part name to its index in the current animation, or -1 when the
+/// name is unknown, `name` is not valid UTF-8, or no animation is set up.
+///
+/// Unlike the calls below this returns an index rather than a status, so it does
+/// not touch `ss_last_error`.
+///
+/// # Safety
+/// `handle` must be a live handle or null; `name` must be a valid
+/// null-terminated C string.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn ss_player_find_part_index(handle: *mut SsPlayer, name: *const c_char) -> i32 {
+    let Some(player) = (unsafe { player(handle) }) else { return -1 };
+    let Some(name) = (unsafe { c_str(name) }) else { return -1 };
+    player.find_part_index(name).map(|i| i as i32).unwrap_or(-1)
+}
+
+/// Force-hide a part (`hide` true) or revert it to the animation. `cascade`
+/// propagates a force-hide to the part's descendants — a keyframe hide never
+/// cascades, so this is the only way to hide a sub-tree.
+///
+/// # Safety
+/// `handle` must be a live handle or null.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn ss_player_set_part_visibility_override(handle: *mut SsPlayer, part: u32, hide: bool, cascade: bool) -> i32 {
+    let Some(player) = (unsafe { player(handle) }) else { return fail(SS_ERROR_INVALID_ARGUMENT, "player handle is null or destroyed") };
+    match player.set_part_visibility_override(part, hide, cascade) {
+        Ok(()) => SS_OK,
+        Err(e) => fail(e.as_code(), format!("part {part}: {e}")),
+    }
+}
+
+/// Revert a part to the animation's own visibility.
+///
+/// # Safety
+/// `handle` must be a live handle or null.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn ss_player_clear_part_visibility_override(handle: *mut SsPlayer, part: u32) -> i32 {
+    let Some(player) = (unsafe { player(handle) }) else { return fail(SS_ERROR_INVALID_ARGUMENT, "player handle is null or destroyed") };
+    match player.clear_part_visibility_override(part) {
+        Ok(()) => SS_OK,
+        Err(e) => fail(e.as_code(), format!("part {part}: {e}")),
+    }
+}
+
+/// Override a part's colour. `blend_op`: 0 mix, 1 mul, 2 add, 3 sub. `rgba` is
+/// packed `0xRRGGBBAA` in the authored 8-bit sRGB space — do not pre-multiply
+/// it. `priority`: 0 until the next keyframe, 1 until the next animation, 2
+/// permanent. Normal parts only; other kinds ignore it and still return `SS_OK`.
+///
+/// # Safety
+/// `handle` must be a live handle or null.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn ss_player_set_part_color_override(handle: *mut SsPlayer, part: u32, blend_op: u8, rgba: u32, priority: u8) -> i32 {
+    let Some(blend_op) = BlendOp::from_wire(blend_op) else { return fail(SS_ERROR_INVALID_ARGUMENT, "blend_op must be 0..=3") };
+    let Some(priority) = OverridePriority::from_wire(priority) else { return fail(SS_ERROR_INVALID_ARGUMENT, "priority must be 0..=2") };
+    let Some(player) = (unsafe { player(handle) }) else { return fail(SS_ERROR_INVALID_ARGUMENT, "player handle is null or destroyed") };
+    match player.set_part_color_override(part, blend_op, rgba, priority) {
+        Ok(()) => SS_OK,
+        Err(e) => fail(e.as_code(), format!("part {part}: {e}")),
+    }
+}
+
+/// Four-corner colour override, for a gradient. `corners` points at 16 bytes in
+/// the runtime's order — left-top, right-top, left-bottom, right-bottom, each
+/// `[r, g, b, a]`. Otherwise as `ss_player_set_part_color_override`.
+///
+/// # Safety
+/// `handle` must be a live handle or null; `corners` must point at 16 readable
+/// bytes.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn ss_player_set_part_color_override_corners(handle: *mut SsPlayer, part: u32, blend_op: u8, corners: *const u8, priority: u8) -> i32 {
+    let Some(blend_op) = BlendOp::from_wire(blend_op) else { return fail(SS_ERROR_INVALID_ARGUMENT, "blend_op must be 0..=3") };
+    let Some(priority) = OverridePriority::from_wire(priority) else { return fail(SS_ERROR_INVALID_ARGUMENT, "priority must be 0..=2") };
+    if corners.is_null() {
+        return fail(SS_ERROR_INVALID_ARGUMENT, "corners is null");
+    }
+    let mut rgba = [[0u8; 4]; 4];
+    let bytes = unsafe { std::slice::from_raw_parts(corners, 16) };
+    for (corner, chunk) in rgba.iter_mut().zip(bytes.chunks_exact(4)) {
+        corner.copy_from_slice(chunk);
+    }
+    let Some(player) = (unsafe { player(handle) }) else { return fail(SS_ERROR_INVALID_ARGUMENT, "player handle is null or destroyed") };
+    match player.set_part_color_override_corners(part, blend_op, rgba, priority) {
+        Ok(()) => SS_OK,
+        Err(e) => fail(e.as_code(), format!("part {part}: {e}")),
+    }
+}
+
+/// Revert a part to the animation's own colour.
+///
+/// # Safety
+/// `handle` must be a live handle or null.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn ss_player_clear_part_color_override(handle: *mut SsPlayer, part: u32) -> i32 {
+    let Some(player) = (unsafe { player(handle) }) else { return fail(SS_ERROR_INVALID_ARGUMENT, "player handle is null or destroyed") };
+    match player.clear_part_color_override(part) {
+        Ok(()) => SS_OK,
+        Err(e) => fail(e.as_code(), format!("part {part}: {e}")),
+    }
+}
+
+/// Make a part draw a different cell. `cellmap_name` is written without the
+/// `.ssce` extension. Normal and Mask parts only; fails when the cell cannot be
+/// resolved against the loaded pack.
+///
+/// # Safety
+/// `handle` must be a live handle or null; both names must be valid
+/// null-terminated C strings.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn ss_player_set_part_cell_override(handle: *mut SsPlayer, part: u32, cellmap_name: *const c_char, cell_name: *const c_char, priority: u8) -> i32 {
+    let Some(priority) = OverridePriority::from_wire(priority) else { return fail(SS_ERROR_INVALID_ARGUMENT, "priority must be 0..=2") };
+    let Some(cellmap_name) = (unsafe { c_str(cellmap_name) }) else { return fail(SS_ERROR_INVALID_ARGUMENT, "cellmap_name is null or not UTF-8") };
+    let Some(cell_name) = (unsafe { c_str(cell_name) }) else { return fail(SS_ERROR_INVALID_ARGUMENT, "cell_name is null or not UTF-8") };
+    let Some(player) = (unsafe { player(handle) }) else { return fail(SS_ERROR_INVALID_ARGUMENT, "player handle is null or destroyed") };
+    match player.set_part_cell_override(part, cellmap_name, cell_name, priority) {
+        Ok(()) => SS_OK,
+        Err(e) => fail(e.as_code(), format!("part {part} -> {cellmap_name}/{cell_name}: {e}")),
+    }
+}
+
+/// Revert a part to the animation's own cell.
+///
+/// # Safety
+/// `handle` must be a live handle or null.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn ss_player_clear_part_cell_override(handle: *mut SsPlayer, part: u32) -> i32 {
+    let Some(player) = (unsafe { player(handle) }) else { return fail(SS_ERROR_INVALID_ARGUMENT, "player handle is null or destroyed") };
+    match player.clear_part_cell_override(part) {
+        Ok(()) => SS_OK,
+        Err(e) => fail(e.as_code(), format!("part {part}: {e}")),
+    }
+}
+
+/// Drop every override on the root animation at once.
+///
+/// # Safety
+/// `handle` must be a live handle or null.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn ss_player_clear_all_part_overrides(handle: *mut SsPlayer) {
+    if let Some(player) = unsafe { player(handle) } {
+        player.clear_all_part_overrides();
+    }
 }
 
 /// How many animations the main pack holds (0 if nothing is loaded).

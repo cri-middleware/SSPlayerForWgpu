@@ -751,7 +751,26 @@ impl SSPlayer {
 
 **★P7 で移った API**: `upload_texture` は `SSRenderer`（§9.1）、`set_viewport` は `SSScene`（§9.2）、`restore_device` は `SSRenderer`/`SSScene` へ。いずれも「Player が GPU リソースを持たない」の帰結。
 
-**将来 API（webgl 版に追随）**: `box`（追従矩形）/ `clip`（scissor）/ `backdrop`（framebuffer 読み取り系ブレンド用の下地）/ パーツ単位オーバーライド（色・セル・表示）/ イベント（userData・signal・audio・animEnd・animLoop・frame）。§9.5。
+**パーツ単位オーバーライド（★実装済・§9.5）**:
+
+```rust
+pub fn find_part_index(&self, name: &str) -> Option<u32>;   // 名前→index。index はパック内で安定
+pub fn set_part_visibility_override(&mut self, part: u32, hide: bool, cascade: bool) -> Result<(), SSRuntimeError>;
+pub fn clear_part_visibility_override(&mut self, part: u32) -> Result<(), SSRuntimeError>;
+pub fn set_part_color_override(&mut self, part: u32, blend_op: BlendOp, rgba: u32, priority: OverridePriority) -> Result<(), SSRuntimeError>;
+pub fn set_part_color_override_corners(&mut self, part: u32, blend_op: BlendOp, corners: [[u8;4];4], priority: OverridePriority) -> Result<(), SSRuntimeError>;  // lt, rt, lb, rb
+pub fn clear_part_color_override(&mut self, part: u32) -> Result<(), SSRuntimeError>;
+pub fn set_part_cell_override(&mut self, part: u32, cellmap_name: &str, cell_name: &str, priority: OverridePriority) -> Result<(), SSRuntimeError>;  // 名前は内部で FNV-1a
+pub fn clear_part_cell_override(&mut self, part: u32) -> Result<(), SSRuntimeError>;
+pub fn clear_all_part_overrides(&mut self);
+```
+
+- **index はルートアニメを指す**。`BlendOp`（0=Mix 1=Mul 2=Add 3=Sub）/ `OverridePriority`（0=次キーフレームまで 1=次アニメまで 2=永続）も `PlaybackDirection` と同じ理由で本クレート定義＋`as_wire`/`from_wire`。範囲外は `None` → js/ffi ではエラーにする（黙って別のブレンドにしない）。
+- **インスタンスパーツの中には届かない**。子は独自 Context（§7.1）なので、インスタンスを載せているパーツへのオーバーライドは子の描画を変えない。
+- **オーバーライドは `set_animation` の後**。ランタイムがオーバーライド表を確保するのが `set_animation` で、そこが `Permanent` 以外を消す場所でもある。前に呼ぶと（黙って失われるのではなく）エラーになる。
+- 表の寿命はランタイム所有。Player 側でキャッシュも毎フレーム再適用もしない。
+
+**残りの将来 API（webgl 版に追随）**: `box`（追従矩形）/ `clip`（scissor）/ `backdrop`（framebuffer 読み取り系ブレンド用の下地）/ `getPartTransform` / イベント（userData・signal・audio・animEnd・animLoop・frame）。§9.5。
 
 **トランスポートの enum（★確定）**: `PlaybackDirection` / `PlaybackStyle` は **ssruntime の同名 enum を re-export せず、本クレートで定義**して境界で変換する。ssruntime 側は掛け算に使うため `Forward = 1 / Backward = -1` だが、**C-API・wasm・他の全 Player は `0 / 1`**（`ffi/mod.rs` の `ss_runtime_set_playback_direction` が `direction == 0` で判定）。re-export すると `-1` が js / ffi 面に漏れて全兄弟と食い違うので、ワイヤ値は `as_wire` / `from_wire` に固定した。`tests/transport.rs` がこれを固定している。
 
@@ -771,6 +790,8 @@ impl SSPlayer {
 ### 9.5 将来 API（REDESIGN_ASSESSMENT §7）
 
 パーツ単位オーバーライド（色/セル/表示）、ミキシング、ステートマシン。いずれも ssruntime 側の合成で完結し FrameData/DrawBatch 契約を壊さないため、`SSPlayer` に制御メソッドを足すだけで層2 の改修は不要。ssplayer-webgl は既に実装済（`setPartColorOverride` / `setPartCellOverride` / `setPartVisibilityOverride` / `getPartTransform`）なので、移植先の形はそちらに合わせる。
+
+**進捗**: **パーツ単位オーバーライド ✅ 実装済**（rs / js / ffi の三面。API と決定事項は §9.3）。上の見立てどおり層2 の改修は不要だった。残りは `getPartTransform`（ワールド行列の読み出し。SoA は既にあるので露出の設計だけ）、イベント（ホストへの通知経路の設計が要る）、ミキシング / ステートマシン（前者は SDK に primitives が揃っており、後者は SDK 側 Phase 3 待ち）。
 
 ---
 
