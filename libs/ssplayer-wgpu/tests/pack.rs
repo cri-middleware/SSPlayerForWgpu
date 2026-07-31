@@ -62,18 +62,18 @@ fn alpha_ramp(width: u32, height: u32) -> Vec<u8> {
     out
 }
 
-/// Every atlas in the asset dir, keyed the way the viewer keys them.
-fn atlases() -> Vec<(u32, Vec<u8>, u32, u32)> {
+/// The atlases `pack` asks for, loaded the way a host is meant to load them
+/// (SPEC §8.1): the `.ssab` names each image and where it sits relative to
+/// itself, and the hash comes with it rather than being derived from a filename.
+fn atlases(pack: &SSPack) -> Vec<(u32, Vec<u8>, u32, u32)> {
     let mut out = Vec::new();
-    for entry in std::fs::read_dir(asset_dir()).unwrap().flatten() {
-        let path = entry.path();
-        if path.extension().and_then(|s| s.to_str()) != Some("png") {
+    for texture in pack.textures() {
+        if texture.embedded {
             continue;
         }
-        let stem = path.file_stem().and_then(|s| s.to_str()).unwrap_or_default();
-        let img = image::open(&path).unwrap().to_rgba8();
+        let img = image::open(std::path::Path::new(asset_dir()).join(&texture.path)).unwrap().to_rgba8();
         let (w, h) = img.dimensions();
-        out.push((ssruntime::fnv1a_hash_str(stem), img.into_raw(), w, h));
+        out.push((texture.hash, img.into_raw(), w, h));
     }
     out
 }
@@ -212,6 +212,59 @@ fn a_pack_carries_its_own_name() {
     assert_eq!(SSPack::load_named("Renamed", &bytes).unwrap().name(), "Renamed");
 }
 
+/// SPEC §8.1 / §8.2: a pack names the atlases it needs **and where they are**, so
+/// a host can load a reference-mode `.ssab` without knowing anything about the
+/// directory it came from.
+///
+/// This is the same contract the sibling players expose (`ssplayer-core`'s
+/// `extractTexturePaths`), and it is what makes a `.ssab` dropped onto a viewer
+/// from an arbitrary folder playable: before it, hosts globbed for `*.png` and
+/// derived the hash from the file stem, which only worked because the converter
+/// happens to name its output after the cellmap.
+///
+/// The pair of exports also pins `embedded`, the flag that tells a host to load
+/// nothing at all: the same animation, converted both ways, must agree on the
+/// texture keys and disagree only on where the bytes live.
+#[test]
+fn a_pack_names_the_atlases_it_needs() {
+    let Ok(bytes) = std::fs::read(format!("{}/Basic.ssab", asset_dir())) else {
+        eprintln!("reference fixture missing; run scripts/deploy-examples.sh. skipping.");
+        return;
+    };
+    let reference = SSPack::load(&bytes).unwrap();
+    assert!(!reference.has_embedded_textures(), "the fixture is not a reference-mode pack — this test would prove nothing");
+    assert!(!reference.textures().is_empty(), "the pack asks for no textures — nothing to name");
+
+    for texture in reference.textures() {
+        assert!(!texture.embedded, "a reference-mode pack claims its atlas rides inside the .ssab");
+        // Resolved against the file's own directory, exactly as a host would.
+        let path = std::path::Path::new(asset_dir()).join(&texture.path);
+        assert!(path.is_file(), "{path:?} does not exist — the path is not relative to the .ssab");
+        let (width, height) = image::open(&path).unwrap().to_rgba8().dimensions();
+        assert!(width > 0 && height > 0);
+    }
+
+    // The same list through a player, which is the route the C and js faces take
+    // (`ss_player_texture_at` / `textureRefs`): a host that only holds a player
+    // must be able to ask what the pack it just registered needs.
+    let mut player = SSPlayer::new();
+    player.load_ssab("Basic", &bytes).unwrap();
+    let by_player: Vec<u32> = player.textures(None).unwrap().iter().map(|t| t.hash).collect();
+    assert_eq!(by_player, reference.textures().iter().map(|t| t.hash).collect::<Vec<_>>(), "the main pack's textures did not come back through the player");
+    assert_eq!(player.textures(Some("Basic")).unwrap().len(), by_player.len(), "naming the pack explicitly found a different list");
+    assert!(player.textures(Some("nope")).is_none(), "an unregistered pack name reported textures");
+
+    let Ok(emb_bytes) = std::fs::read(format!("{}/Basic.ssab", embedded_dir())) else {
+        eprintln!("embedded fixture missing; run scripts/deploy-examples.sh. skipping the export-mode comparison.");
+        return;
+    };
+    let embedded = SSPack::load(&emb_bytes).unwrap();
+    let keys: Vec<u32> = reference.textures().iter().map(|t| t.hash).collect();
+    let emb_keys: Vec<u32> = embedded.textures().iter().map(|t| t.hash).collect();
+    assert_eq!(keys, emb_keys, "the two export modes disagree about the texture keys a draw batch will ask for");
+    assert!(embedded.textures().iter().all(|t| t.embedded), "an embedded pack reported an atlas the host would have to load");
+}
+
 /// SPEC §8.2: sharing a pack means sharing its atlas. Two players of one embedded
 /// pack must decode and upload it exactly once between them — the decode is
 /// skipped too, because the filter runs before the PNG is touched.
@@ -229,7 +282,7 @@ fn a_shared_pack_uploads_its_atlas_once() {
 
     let pack = SSPack::load(&bytes).unwrap();
     assert!(pack.has_embedded_textures(), "the fixture is not an embedded pack — this test would prove nothing");
-    let atlas_count = pack.required_textures().len();
+    let atlas_count = pack.textures().len();
     assert!(atlas_count > 0, "the pack asks for no textures — nothing to share");
 
     let mut renderer = SSRenderer::new(&device);
@@ -274,7 +327,7 @@ fn scenes_share_one_renderer() {
 
     const SECOND_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Bgra8Unorm;
     let pack = SSPack::load(&bytes).unwrap();
-    let atlas_count = pack.required_textures().len();
+    let atlas_count = pack.textures().len();
     assert!(atlas_count > 0, "the pack asks for no textures — nothing to share");
 
     // One renderer for the whole "page".
@@ -318,7 +371,7 @@ fn a_borrowed_texture_renders_like_an_owned_one() {
     };
     let bytes = std::fs::read(format!("{}/Basic.ssab", asset_dir())).unwrap();
     let pack = SSPack::load(&bytes).unwrap();
-    let atlases = atlases();
+    let atlases = atlases(&pack);
 
     // Owned: the renderer creates the texture and premultiplies on the way in.
     let owned = {
@@ -381,7 +434,7 @@ fn alpha_mode_decides_how_the_texel_is_read() {
     let pack = SSPack::load(&bytes).unwrap();
     // Same hashes and sizes as the real atlases, so the animation samples them,
     // but with alpha that actually varies.
-    let atlases: Vec<(u32, Vec<u8>, u32, u32)> = atlases().into_iter().map(|(hash, _, w, h)| (hash, alpha_ramp(w, h), w, h)).collect();
+    let atlases: Vec<(u32, Vec<u8>, u32, u32)> = atlases(&pack).into_iter().map(|(hash, _, w, h)| (hash, alpha_ramp(w, h), w, h)).collect();
 
     // Reference: the pixels premultiplied on the way in, as our own path does.
     let reference = {
@@ -450,7 +503,7 @@ fn embedded_pixels_can_be_routed_through_the_borrowed_channel() {
 
     // The engine route: take the pixels, own them elsewhere, lend the view back.
     let decoded = pack.decode_embedded();
-    assert_eq!(decoded.len(), pack.required_textures().len(), "decode_embedded did not produce one image per cellmap");
+    assert_eq!(decoded.len(), pack.textures().len(), "decode_embedded did not produce one image per cellmap");
 
     let mut renderer = SSRenderer::new(&device);
     let _views: Vec<wgpu::TextureView> = decoded

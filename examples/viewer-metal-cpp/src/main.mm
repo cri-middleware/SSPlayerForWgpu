@@ -6,8 +6,17 @@
 // (host.rs) builds the wgpu stack behind the ABI, with backend=Metal forced so
 // this really exercises Metal rather than whatever wgpu would pick.
 //
-// It plays the embedded-mode packs from assets/overall_emb, so the atlases ride
-// inside the .ssab and no texture supply is needed (SPEC §8.1).
+// It starts on the embedded-mode packs from assets/overall_emb, so the atlases
+// ride inside the .ssab and no texture supply is needed (SPEC §8.1).
+//
+// **Drop a .ssab (or a folder of them) on the window to play it**, whichever way
+// it was exported. Reference-mode packs keep their atlases as sibling files, and
+// where those sit is the .ssab's own business: `ss_player_texture_at` reports the
+// path the exporter wrote, relative to the file, and this viewer joins it with
+// the directory the drop came from and hands the bytes to
+// `ss_scene_add_texture_png`. That is the same division of labour the sibling
+// players use — the pack says what it needs and from where, the host reads it
+// (SPEC §8.2).
 //
 // **It shows two characters at once by default** (SPEC §11, phase P7-7). That
 // used to be impossible through this API: the handle fused the window and the
@@ -21,6 +30,7 @@
 //   Space       pause / resume        Left/Right  previous / next .ssab
 //   R           restart animation     Up/Down     previous / next animation
 //   +/-         add / remove player   Escape      quit
+//   drop        play a .ssab / add every .ssab in a folder
 //
 // The other C++ viewers (DX12/Win32, Vulkan/Linux) deliberately duplicate this
 // loop instead of sharing it: the point of the sample is that one directory is
@@ -37,9 +47,45 @@
 #define SS_DEFAULT_ASSET_DIR "assets/overall_emb"
 #endif
 
+/// Collect the `.ssab` files behind a drop: the files themselves, plus the ones
+/// directly inside any dropped folder. Sorted, so a folder plays in the order
+/// the Left/Right keys will walk it.
+static NSArray<NSString *> *SSCollectSsabPaths(NSArray<NSURL *> *urls) {
+    NSFileManager *fm = NSFileManager.defaultManager;
+    NSMutableArray<NSString *> *paths = [NSMutableArray array];
+    for (NSURL *url in urls) {
+        NSString *path = url.path;
+        BOOL isDir = NO;
+        if (![fm fileExistsAtPath:path isDirectory:&isDir]) {
+            continue;
+        }
+        if (!isDir) {
+            if ([path.pathExtension caseInsensitiveCompare:@"ssab"] == NSOrderedSame) {
+                [paths addObject:path];
+            }
+            continue;
+        }
+        for (NSString *entry in [[fm contentsOfDirectoryAtPath:path error:nil] sortedArrayUsingSelector:@selector(compare:)]) {
+            if ([entry.pathExtension caseInsensitiveCompare:@"ssab"] == NSOrderedSame) {
+                [paths addObject:[path stringByAppendingPathComponent:entry]];
+            }
+        }
+    }
+    return paths;
+}
+
+/// What the view hands a drop to.
+@protocol SSFileDropTarget <NSObject>
+- (BOOL)playDroppedPaths:(NSArray<NSString *> *)paths;
+@end
+
 // A layer-backed view whose backing layer is the CAMetalLayer we hand to the
 // player. AppKit calls makeBackingLayer once `wantsLayer` is set.
+//
+// It is also the window's drop target: dragging a .ssab onto the animation is
+// the shortest path from "the converter just wrote this" to seeing it move.
 @interface SSMetalView : NSView
+@property(weak) id<SSFileDropTarget> dropTarget;
 @end
 
 @implementation SSMetalView
@@ -49,9 +95,26 @@
 - (BOOL)wantsUpdateLayer {
     return YES;
 }
+
+- (NSArray<NSString *> *)ssabPathsIn:(id<NSDraggingInfo>)drag {
+    NSArray<NSURL *> *urls = [drag.draggingPasteboard readObjectsForClasses:@[ NSURL.class ] options:@{NSPasteboardURLReadingFileURLsOnlyKey : @YES}];
+    return SSCollectSsabPaths(urls ?: @[]);
+}
+
+- (NSDragOperation)draggingEntered:(id<NSDraggingInfo>)drag {
+    return [self ssabPathsIn:drag].count > 0 ? NSDragOperationCopy : NSDragOperationNone;
+}
+
+- (BOOL)prepareForDragOperation:(id<NSDraggingInfo>)drag {
+    return [self ssabPathsIn:drag].count > 0;
+}
+
+- (BOOL)performDragOperation:(id<NSDraggingInfo>)drag {
+    return [self.dropTarget playDroppedPaths:[self ssabPathsIn:drag]];
+}
 @end
 
-@interface SSViewerApp : NSObject <NSApplicationDelegate, NSWindowDelegate>
+@interface SSViewerApp : NSObject <NSApplicationDelegate, NSWindowDelegate, SSFileDropTarget>
 @end
 
 /// How many characters to show at startup. Two is the point of the exercise.
@@ -69,7 +132,10 @@ static const NSUInteger kMaxPlayers = 6;
     NSString *_assetDir;
     NSString *_initialPack; // pack to show first, or nil for Basic
 
-    NSArray<NSString *> *_packs; // .ssab paths, sorted
+    NSMutableArray<NSString *> *_packs; // .ssab paths: the asset dir, then whatever was dropped
+    /// Cellmap hashes already handed to the scene, so a second pack sharing an
+    /// atlas (most of the demo set shares `common.png`) does not re-read it.
+    NSMutableSet<NSNumber *> *_suppliedTextures;
     NSUInteger _packIndex;
     NSArray<NSString *> *_anims; // animation names of the current pack
     NSUInteger _animIndex;
@@ -99,6 +165,8 @@ static const NSUInteger kMaxPlayers = 6;
 
     _view = [[SSMetalView alloc] initWithFrame:frame];
     _view.wantsLayer = YES;
+    _view.dropTarget = self;
+    [_view registerForDraggedTypes:@[ NSPasteboardTypeFileURL ]];
     _window.contentView = _view;
     [_window center];
     [_window makeKeyAndOrderFront:nil];
@@ -130,6 +198,8 @@ static const NSUInteger kMaxPlayers = 6;
         return;
     }
 
+    _packs = [NSMutableArray array];
+    _suppliedTextures = [NSMutableSet set];
     _players = [NSMutableArray array];
     for (NSUInteger i = 0; i < kInitialPlayers; i++) {
         [self addPlayer];
@@ -176,6 +246,11 @@ static const NSUInteger kMaxPlayers = 6;
         return;
     }
     [_players addObject:[NSValue valueWithPointer:player]];
+    // Registration is per player (SPEC §7.1), so a character added later — or
+    // after a drop — still resolves every instance reference the others can.
+    for (NSString *path in _packs) {
+        [self registerPackAtPath:path onPlayer:player];
+    }
     [self layOutPlayers];
 }
 
@@ -203,9 +278,81 @@ static const NSUInteger kMaxPlayers = 6;
 
 // --- assets --------------------------------------------------------------
 
-/// Gather every .ssab in the asset directory. All of them are registered with
-/// the player up front so external instance parts, which resolve by pack name,
-/// can find their source animation (SPEC §7.1).
+/// Register one .ssab with one player, without changing what plays. Every player
+/// needs every pack: instance parts resolve their sub-animation by pack name,
+/// per player (SPEC §7.1).
+- (BOOL)registerPackAtPath:(NSString *)path onPlayer:(ss_player_t *)player {
+    NSData *data = [NSData dataWithContentsOfFile:path];
+    if (data == nil) {
+        fprintf(stderr, "cannot read %s\n", path.UTF8String);
+        return NO;
+    }
+    NSString *pack = path.lastPathComponent.stringByDeletingPathExtension;
+    if (ss_player_add_ssab(player, pack.UTF8String, (const uint8_t *)data.bytes, data.length) != SS_OK) {
+        fprintf(stderr, "add_ssab %s: %s\n", pack.UTF8String, ss_last_error());
+        return NO;
+    }
+    return YES;
+}
+
+/// Supply the atlases a registered pack needs but does not carry — the host half
+/// of reference-mode texture supply (SPEC §8.1).
+///
+/// **Where the images are is the pack's own answer**, not a guess about the
+/// directory: `ss_player_texture_at` reports the path the exporter wrote,
+/// relative to the .ssab, so joining it with the file's directory locates the
+/// atlas wherever the pack was dropped from. Embedded entries are skipped —
+/// their bytes ride inside the file and reach the GPU on the next update.
+///
+/// Registered on the **scene**, because the texture map is device-scoped: one
+/// upload serves every player, and the shared-hash guard means a set of packs
+/// over one atlas reads it once.
+- (void)supplyTexturesForPackAtPath:(NSString *)path {
+    if (_players.count == 0) {
+        return;
+    }
+    ss_player_t *player = [self playerAt:0];
+    NSString *pack = path.lastPathComponent.stringByDeletingPathExtension;
+    NSString *dir = path.stringByDeletingLastPathComponent;
+
+    uint32_t count = ss_player_texture_count(player, pack.UTF8String);
+    for (uint32_t i = 0; i < count; i++) {
+        ss_texture_ref_t texture;
+        if (ss_player_texture_at(player, pack.UTF8String, i, &texture) != SS_OK) {
+            fprintf(stderr, "texture %u of %s: %s\n", i, pack.UTF8String, ss_last_error());
+            continue;
+        }
+        if (texture.embedded || [_suppliedTextures containsObject:@(texture.hash)]) {
+            continue;
+        }
+        NSString *image = [dir stringByAppendingPathComponent:@(texture.path)];
+        NSData *png = [NSData dataWithContentsOfFile:image];
+        if (png == nil) {
+            fprintf(stderr, "%s needs %s, which could not be read\n", pack.UTF8String, image.UTF8String);
+            continue;
+        }
+        if (ss_scene_add_texture_png(_scene, texture.hash, (const uint8_t *)png.bytes, png.length) != SS_OK) {
+            fprintf(stderr, "add_texture_png %s: %s\n", image.UTF8String, ss_last_error());
+            continue;
+        }
+        [_suppliedTextures addObject:@(texture.hash)];
+    }
+}
+
+/// Register a .ssab with every player and make sure its atlases are on the GPU.
+- (BOOL)adoptPackAtPath:(NSString *)path {
+    BOOL ok = YES;
+    for (NSValue *entry in _players) {
+        ok &= [self registerPackAtPath:path onPlayer:(ss_player_t *)entry.pointerValue];
+    }
+    if (!ok) {
+        return NO; // unreadable or not a .ssab: leave it out of the list entirely
+    }
+    [self supplyTexturesForPackAtPath:path];
+    return YES;
+}
+
+/// Gather every .ssab in the asset directory and register all of them up front.
 - (BOOL)collectPacks {
     NSFileManager *fm = NSFileManager.defaultManager;
     NSArray<NSString *> *entries = [fm contentsOfDirectoryAtPath:_assetDir error:nil];
@@ -214,31 +361,18 @@ static const NSUInteger kMaxPlayers = 6;
         return NO;
     }
 
-    NSMutableArray<NSString *> *packs = [NSMutableArray array];
     for (NSString *entry in [entries sortedArrayUsingSelector:@selector(compare:)]) {
         if ([entry.pathExtension isEqualToString:@"ssab"]) {
-            [packs addObject:[_assetDir stringByAppendingPathComponent:entry]];
+            [_packs addObject:[_assetDir stringByAppendingPathComponent:entry]];
         }
     }
-    if (packs.count == 0) {
+    if (_packs.count == 0) {
         fprintf(stderr, "no .ssab files in %s\n", _assetDir.UTF8String);
         return NO;
     }
-    _packs = packs;
 
     for (NSString *path in _packs) {
-        NSData *data = [NSData dataWithContentsOfFile:path];
-        if (data == nil) {
-            continue;
-        }
-        NSString *pack = path.lastPathComponent.stringByDeletingPathExtension;
-        // Every player needs every pack registered: instance parts resolve their
-        // sub-animation by pack name, per player (SPEC §7.1).
-        for (NSValue *entry in _players) {
-            if (ss_player_add_ssab((ss_player_t *)entry.pointerValue, pack.UTF8String, (const uint8_t *)data.bytes, data.length) != SS_OK) {
-                fprintf(stderr, "add_ssab %s: %s\n", pack.UTF8String, ss_last_error());
-            }
-        }
+        [self adoptPackAtPath:path];
     }
 
     // Show the pack named on the command line, else Basic.ssab like the Rust viewer.
@@ -250,6 +384,34 @@ static const NSUInteger kMaxPlayers = 6;
             break;
         }
     }
+    return YES;
+}
+
+/// Play what was dropped on the window (`SSFileDropTarget`).
+///
+/// Dropped packs join the list the Left/Right keys walk rather than replacing
+/// it, so a character dropped in can still be compared against the demo set —
+/// and a folder dropped in brings its instance-referenced packs along, which is
+/// what a pack with external references needs to resolve (SPEC §7.1).
+- (BOOL)playDroppedPaths:(NSArray<NSString *> *)paths {
+    NSUInteger first = NSNotFound;
+    for (NSString *path in paths) {
+        if (![self adoptPackAtPath:path]) {
+            continue;
+        }
+        NSUInteger existing = [_packs indexOfObject:path];
+        if (existing == NSNotFound) {
+            existing = _packs.count;
+            [_packs addObject:path];
+        }
+        if (first == NSNotFound) {
+            first = existing;
+        }
+    }
+    if (first == NSNotFound) {
+        return NO;
+    }
+    [self loadPackAtIndex:first];
     return YES;
 }
 
@@ -422,6 +584,7 @@ static const NSUInteger kMaxPlayers = 6;
     printf("----------------------------------------------------\n");
     printf("  Space  pause    Left/Right  .ssab    Up/Down  anim\n");
     printf("  R      restart  +/-  players  Escape   quit\n");
+    printf("  Drop a .ssab or a folder on the window to play it\n");
     printf("====================================================\n");
     fflush(stdout);
 }

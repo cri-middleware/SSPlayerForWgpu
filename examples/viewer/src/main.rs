@@ -18,6 +18,7 @@
 //   R           restart animation         [ / ]   alpha down / up
 //   L           layout: Row / Stack       O       reverse draw order
 //   F           toggle Y-axis flip        Escape  quit
+//   drop        play a dropped .ssab, or every .ssab in a dropped folder
 //
 // The pack, animation, visibility and alpha keys act on the **focused** member;
 // focus starts at "all", so they drive the whole cast until you press Tab.
@@ -266,6 +267,78 @@ impl AppState {
         self.layout_cast();
     }
 
+    /// Play a `.ssab` dropped on the window, or every `.ssab` directly inside a
+    /// dropped folder.
+    ///
+    /// **Atlases resolve against the directory the drop came from**, not against
+    /// the viewer's asset directory: each pack names its images relative to
+    /// itself (SPEC §8.2), so a pack from anywhere on disk brings its textures
+    /// with it, embedded or not. Drop the folder rather than the file when the
+    /// pack has external instance references — those resolve by pack name, so
+    /// every referenced pack has to be registered too (SPEC §7.1).
+    ///
+    /// Dropped packs join the list Right/Left walks; a pack dropped twice
+    /// replaces its own entry rather than growing the list, which is what makes
+    /// "convert, drop, look, convert again" work.
+    fn adopt_dropped(&mut self, path: &Path) {
+        let is_ssab = |p: &Path| p.extension().and_then(|s| s.to_str()) == Some("ssab");
+        let mut paths = Vec::new();
+        if path.is_dir() {
+            if let Ok(entries) = std::fs::read_dir(path) {
+                paths.extend(entries.flatten().map(|e| e.path()).filter(|p| p.is_file() && is_ssab(p)));
+            }
+            paths.sort();
+        } else if is_ssab(path) {
+            paths.push(path.to_path_buf());
+        }
+
+        let mut first = None;
+        for path in &paths {
+            // Pack name = file stem, as `load_packs` does: external instance refs
+            // are resolved by pack name.
+            let Some(name) = path.file_stem().and_then(|s| s.to_str()) else { continue };
+            let bytes = match std::fs::read(path) {
+                Ok(bytes) => bytes,
+                Err(e) => {
+                    eprintln!("Failed to read {:?}: {:?}", path, e);
+                    continue;
+                }
+            };
+            let pack = match SSPack::load_named(name, &bytes) {
+                Ok(pack) => pack,
+                Err(e) => {
+                    eprintln!("Failed to parse {:?}: {:?}", path, e);
+                    continue;
+                }
+            };
+            println!("Dropped SSAB: {:?}", path);
+
+            let idx = self.packs.iter().position(|p| p.name() == pack.name()).unwrap_or(self.packs.len());
+            if idx == self.packs.len() {
+                self.packs.push(pack.clone());
+                self.pack_anims.push(pack.animation_names());
+            } else {
+                self.packs[idx] = pack.clone();
+                self.pack_anims[idx] = pack.animation_names();
+            }
+
+            // Registration is per player (SPEC §7.1), and an `Arc` bump each.
+            for member in &mut self.cast {
+                member.player.add_pack(&pack);
+            }
+            let dir = path.parent().unwrap_or(Path::new("."));
+            load_textures(&mut self.renderer, &self.device, &self.queue, dir, std::slice::from_ref(&pack));
+            first.get_or_insert(idx);
+        }
+
+        // Show the first of them, on whoever the pack keys drive.
+        let Some(idx) = first else { return };
+        for member_idx in self.targets() {
+            self.apply_pack(member_idx, idx);
+        }
+        self.refresh_status();
+    }
+
     /// The members the pack / animation / appearance keys act on.
     fn targets(&self) -> Vec<usize> {
         match self.focus {
@@ -403,6 +476,7 @@ impl AppState {
         println!("    R           - Restart animation     [ / ] - Alpha down / up");
         println!("    L           - Row / Stack layout    O     - Reverse draw order");
         println!("    F           - Toggle Y-Axis Flip    Esc   - Exit");
+        println!("    Drop a .ssab or a folder on the window to play it");
         println!("====================================================");
     }
 }
@@ -465,12 +539,13 @@ impl ApplicationHandler for App {
         let mut renderer = SSRenderer::new(&device);
         let scene = SSScene::new(&device, &SceneConfig { color_format: format, stencil_format: Some(STENCIL_FORMAT) });
 
-        // Host responsibility (reference-mode ssab): decode atlas PNGs and hand
-        // the RGBA to the renderer keyed by fnv1a hash of the file stem. Device
-        // scope, so this happens once no matter how big the cast gets.
-        load_textures(&mut renderer, &device, &queue, &self.asset_dir);
-
         let (packs, pack_anims) = load_packs(&self.asset_dir);
+
+        // Host responsibility (reference-mode ssab): load the atlases the packs
+        // name and hand the RGBA to the renderer, keyed by cellmap hash. Device
+        // scope, so this happens once no matter how big the cast gets.
+        load_textures(&mut renderer, &device, &queue, &self.asset_dir, &packs);
+
         // Prefer "Basic" as the initial pack, otherwise the first one.
         let initial_pack = packs.iter().position(|p| p.name() == "Basic").unwrap_or(0);
 
@@ -521,6 +596,9 @@ impl ApplicationHandler for App {
             }
             WindowEvent::Resized(physical_size) => {
                 state.resize(physical_size);
+            }
+            WindowEvent::DroppedFile(path) => {
+                state.adopt_dropped(&path);
             }
             WindowEvent::RedrawRequested => {
                 state.update();
@@ -698,23 +776,42 @@ fn load_packs(dir: &Path) -> (Vec<SSPack>, Vec<Vec<String>>) {
     (packs, pack_anims)
 }
 
-/// Decode every PNG in `dir` and upload it to the renderer, keyed by the fnv1a
-/// hash of the file stem (matching the runtime's cellmap texture hashes).
-fn load_textures(renderer: &mut SSRenderer, device: &Device, queue: &Queue, dir: &Path) {
-    let entries = std::fs::read_dir(dir).expect("Failed to read assets directory");
-    for entry in entries {
-        let entry = entry.expect("Failed to read entry");
-        let path = entry.path();
-        if path.is_file() && path.extension().and_then(|s| s.to_str()) == Some("png") {
-            let file_stem = path.file_stem().and_then(|s| s.to_str()).unwrap_or_default();
-            let hash = ssruntime::fnv1a_hash_str(file_stem);
-
-            println!("Loading texture: {:?} (stem: {}, hash: {})", path, file_stem, hash);
-
-            let img = image::open(&path).expect("Failed to open texture image");
+/// Load the atlases `packs` ask for and register them with the renderer — the
+/// host's half of reference-mode texture supply (SPEC §8.1 / §8.2).
+///
+/// **Where each image lives is the `.ssab`'s own business.** `SSPack::textures()`
+/// reports the path the exporter wrote, relative to the file it came from, so
+/// nothing here guesses from directory contents; before that this globbed every
+/// PNG next to the packs and derived the hash from the file stem, which only
+/// worked because the converter happens to name its output after the cellmap.
+fn load_textures(renderer: &mut SSRenderer, device: &Device, queue: &Queue, dir: &Path, packs: &[SSPack]) {
+    // Hashes already registered. Packs share atlases (`common.png` backs most of
+    // the demo set), and the renderer is device-scoped, so one load covers every
+    // pack and every member of the cast.
+    for pack in packs {
+        for texture in pack.textures() {
+            // Embedded packs carry their atlases; the player hands those over on
+            // the next update (SPEC §8.1). A hash the renderer already holds is
+            // done too — packs share atlases (`common.png` backs most of the demo
+            // set) and the renderer is device-scoped, so one load covers every
+            // pack, the whole cast, and anything dropped in later.
+            if texture.embedded || renderer.texture_size(texture.hash).is_some() {
+                continue;
+            }
+            // The path comes out of the `.ssab` itself, relative to where the file
+            // was read from — the same resolution rule the sibling players use.
+            let path = dir.join(&texture.path);
+            let img = match image::open(&path) {
+                Ok(img) => img,
+                Err(e) => {
+                    eprintln!("Pack {} needs {:?}, which did not load: {e}", pack.name(), path);
+                    continue;
+                }
+            };
+            println!("Loading texture: {:?} (hash: {})", path, texture.hash);
             let rgba = img.to_rgba8();
             let (width, height) = rgba.dimensions();
-            renderer.upload_texture(device, queue, hash, &rgba, (width, height), Retention::Retain);
+            renderer.upload_texture(device, queue, texture.hash, &rgba, (width, height), Retention::Retain);
         }
     }
 }

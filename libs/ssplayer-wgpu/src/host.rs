@@ -170,6 +170,21 @@ impl NativeHost {
         self.renderer.upload_texture(&self.device, &self.queue, hash, rgba, (width, height), Retention::Retain);
     }
 
+    /// Register a texture from **encoded** image bytes (PNG), for hosts that have
+    /// no image decoder of their own — the C face's reference-mode path.
+    ///
+    /// The library already carries a PNG decoder for embedded packs (SPEC §8.1),
+    /// so lending it out costs nothing and saves every C viewer from bringing
+    /// ImageIO / WIC / libpng along just to show a reference-mode `.ssab`. The
+    /// host still does the reading: nothing here opens a file (SPEC §8.2).
+    pub fn upload_texture_encoded(&mut self, hash: u32, encoded: &[u8]) -> Result<(), String> {
+        let image = image::load_from_memory(encoded).map_err(|e| format!("decode image: {e}"))?;
+        let rgba = image.to_rgba8();
+        let (width, height) = rgba.dimensions();
+        self.renderer.upload_texture(&self.device, &self.queue, hash, &rgba, (width, height), Retention::Retain);
+        Ok(())
+    }
+
     /// Advance every player and build this frame's GPU buffers. Players are drawn
     /// in ascending `order` (SPEC §9.2), whatever order the slots happen to be in.
     pub fn update(&mut self, delta_secs: f32) {

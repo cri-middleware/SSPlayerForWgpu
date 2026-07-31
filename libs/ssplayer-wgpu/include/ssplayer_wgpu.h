@@ -151,6 +151,31 @@ typedef struct {
 } ss_scene_desc_t;
 
 /*
+ One atlas a pack asks for (SPEC §8.1), flattened for the ABI. What
+ `ss_player_texture_at` fills in.
+ */
+typedef struct {
+    /*
+     The key `ss_scene_add_texture` / `ss_scene_add_texture_png` expects for
+     this image — the cellmap's fnv1a hash, as `DrawBatch.texture_hash` reports it.
+     */
+    uint32_t hash;
+    /*
+     `true` when the image rides inside the `.ssab` (embedded mode): the pack
+     supplies it on the next `ss_scene_update` and the host loads nothing.
+     */
+    bool embedded;
+    /*
+     The image path the exporter wrote, **relative to the `.ssab`'s own
+     directory** — join it with the directory the file was read from.
+
+     Owned by the scene and valid until the next `ss_player_texture_at` on it;
+     copy it if you need to keep it. Never null.
+     */
+    const char *path;
+} ss_texture_ref_t;
+
+/*
  What the last frame cost (SPEC §14.2 item 10), flattened for the ABI.
 
  `gpu_pass_time_ns` is 0 when the adapter has no timestamp query, or before
@@ -297,6 +322,51 @@ int32_t ss_scene_add_texture(ss_scene_t *scene,
                              const uint8_t *rgba,
                              uint32_t width,
                              uint32_t height);
+
+/*
+ `ss_scene_add_texture` from **encoded** image bytes (PNG) instead of raw RGBA:
+ the library decodes, premultiplies and uploads.
+
+ It carries a PNG decoder for embedded packs anyway (SPEC §8.1), so a C host
+ showing a reference-mode `.ssab` does not have to bring ImageIO / WIC /
+ libpng along just to hand the pixels over. Reading the file is still the
+ host's job — nothing here opens one (SPEC §8.2).
+
+ # Safety
+ `data` must point at `len` readable bytes. It is not retained.
+ */
+int32_t ss_scene_add_texture_png(ss_scene_t *scene, uint32_t hash, const uint8_t *data, size_t len);
+
+/*
+ How many atlases a registered pack asks for (SPEC §8.1). `pack_name` null
+ selects the main pack; 0 means nothing is registered under that name.
+
+ # Safety
+ `pack_name` must be null or a NUL-terminated UTF-8 string.
+ */
+uint32_t ss_player_texture_count(ss_player_t *handle, const char *pack_name);
+
+/*
+ Describe the `index`-th atlas of a registered pack, so a reference-mode host
+ knows *what* to load and *where the exporter put it* (SPEC §8.1).
+
+ This is the half of texture supply only the `.ssab` can answer, and it is the
+ same shape the sibling players expose: register the pack, walk this list, and
+ for every entry whose `embedded` is false read
+ `<directory the .ssab came from>/<path>` and hand it to
+ `ss_scene_add_texture_png`. Embedded entries need no call at all.
+
+ `pack_name` null selects the main pack. Writes `out` and returns `SS_OK`, or
+ leaves it untouched and reports the reason.
+
+ # Safety
+ `pack_name` must be null or a NUL-terminated UTF-8 string, and `out` must
+ point at a writable `ss_texture_ref_t`.
+ */
+int32_t ss_player_texture_at(ss_player_t *handle,
+                             const char *pack_name,
+                             uint32_t index,
+                             ss_texture_ref_t *out);
 
 /*
  Select the animation to play, rebuilding the instance tree. It is left at its
