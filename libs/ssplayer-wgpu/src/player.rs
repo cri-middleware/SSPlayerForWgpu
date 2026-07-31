@@ -57,6 +57,28 @@ pub trait AssetLoader {
     /// base directory or URL is the implementation's business.
     async fn read(&mut self, paths: &[String]) -> Vec<Option<Vec<u8>>>;
 
+    /// Bytes for an instance-referenced pack, **by the name it is referenced
+    /// under** rather than by a path (SPEC §7.1).
+    ///
+    /// Tried before `<the .ssab's directory>/<name>.ssab`, and returning `None`
+    /// — the default — falls back to exactly that. Implement it where a pack is
+    /// addressable by name but not by path: an archive keyed by pack name, an
+    /// engine's asset server, bytes a drop handler is already holding.
+    /// `ssplayer-core` has the same hook for the same reason
+    /// (`InstancePackProvider`, tried before its fetch).
+    ///
+    /// The alternative is to register the pack with [`SSPlayer::add_ssab`] before
+    /// loading — the walk skips a pack it already has — but that means knowing
+    /// which packs a `.ssab` references before reading it. This is for letting
+    /// the walk ask instead.
+    ///
+    /// Called once per name, not batched: a provider is normally a lookup in
+    /// something already in memory, and the batching exists for the reads that
+    /// actually wait.
+    async fn read_pack(&mut self, _name: &str) -> Option<Vec<u8>> {
+        None
+    }
+
     /// Decode `encoded` (a PNG, as the exporter wrote it) and register it under
     /// `hash` — the key a draw batch will ask for (SPEC §8.1).
     async fn supply_texture(&mut self, hash: u32, encoded: &[u8]);
@@ -341,8 +363,17 @@ impl SSPlayer {
                 break;
             }
 
+            // The provider first, for packs that have a name but no path
+            // (`read_pack`); whatever it declines is looked for as a sibling file.
+            let mut provided: Vec<Option<Vec<u8>>> = Vec::with_capacity(wanted.len());
+            for name in &wanted {
+                provided.push(loader.read_pack(name).await);
+            }
             let paths: Vec<String> = wanted.iter().map(|name| format!("{base}{name}.ssab")).collect();
-            let fetched = loader.read(&paths).await;
+            let unprovided: Vec<String> = paths.iter().zip(&provided).filter(|(_, bytes)| bytes.is_none()).map(|(path, _)| path.clone()).collect();
+            let mut fetched = loader.read(&unprovided).await.into_iter();
+            let fetched: Vec<Option<Vec<u8>>> = provided.into_iter().map(|bytes| if bytes.is_some() { bytes } else { fetched.next().flatten() }).collect();
+
             for ((name, path), bytes) in wanted.iter().zip(&paths).zip(fetched) {
                 let Some(bytes) = bytes else {
                     loader.warn(&format!("instance pack \"{name}\" ({path}) did not load; parts that play it will not appear"));

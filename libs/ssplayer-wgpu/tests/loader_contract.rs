@@ -302,3 +302,76 @@ fn a_missing_sub_pack_is_reported_by_name() {
     assert_eq!(packs, ["Instance_SourceAnime"], "the missing sub-pack was not reported by the name `ref_anime_pack` resolves against: {:?}", player.missing_assets());
     assert!(!player.has_pack("Instance_SourceAnime"));
 }
+
+/// A pack that has a name but no path is resolvable through `read_pack`, and the
+/// walk never goes looking for it as a file (SPEC §7.1).
+#[test]
+fn a_provider_answers_for_packs_with_no_path() {
+    /// Serves the root pack and its images by path, and every sibling `.ssab` by
+    /// name only — an archive keyed by pack name, in miniature.
+    struct ByName {
+        root: std::path::PathBuf,
+        asked_for: Vec<String>,
+        provided: Vec<String>,
+    }
+    impl AssetLoader for ByName {
+        async fn read(&mut self, paths: &[String]) -> Vec<Option<Vec<u8>>> {
+            self.asked_for.extend(paths.iter().cloned());
+            paths.iter().map(|path| std::fs::read(self.root.join(path)).ok()).collect()
+        }
+        async fn read_pack(&mut self, name: &str) -> Option<Vec<u8>> {
+            self.provided.push(name.to_string());
+            std::fs::read(self.root.join(format!("overall/{name}.ssab"))).ok()
+        }
+        async fn supply_texture(&mut self, _hash: u32, _encoded: &[u8]) {}
+        fn has_texture(&self, _hash: u32) -> bool {
+            false
+        }
+        fn warn(&self, _message: &str) {}
+    }
+
+    let mut loader = ByName { root: asset_root().into(), asked_for: Vec::new(), provided: Vec::new() };
+    let mut player = SSPlayer::new();
+    if pollster::block_on(player.load_with(&mut loader, "overall/Instance.ssab")).is_err() {
+        eprintln!("fixture missing; run scripts/deploy-examples.sh. skipping.");
+        return;
+    }
+
+    assert!(player.has_pack("Instance_SourceAnime"), "the provider's pack was not registered");
+    assert_eq!(loader.provided, ["Instance_SourceAnime"], "the provider was asked for the wrong thing: {:?}", loader.provided);
+    assert!(player.missing_assets().is_empty(), "{:?}", player.missing_assets());
+
+    // And the file was never looked for: what the provider answers costs no read.
+    let looked_for: Vec<&String> = loader.asked_for.iter().filter(|p| p.ends_with("Instance_SourceAnime.ssab")).collect();
+    assert!(looked_for.is_empty(), "the provider answered and the walk still went to the filesystem: {looked_for:?}");
+}
+
+/// Declining is the default and falls back to the path, so a loader that does not
+/// implement `read_pack` behaves exactly as before.
+#[test]
+fn declining_the_provider_falls_back_to_the_path() {
+    let mut recorder = Recorder::new(asset_root());
+    let Some(player) = load(&mut recorder, "overall/Instance.ssab") else { return };
+
+    assert!(player.has_pack("Instance_SourceAnime"));
+    assert!(recorder.requested().contains(&"overall/Instance_SourceAnime.ssab"), "the sibling was not read by path: {:?}", recorder.requested());
+}
+
+/// The other way to get a pack the walk cannot reach: register it first. The walk
+/// skips what the player already has, so it never looks for it at all.
+#[test]
+fn a_pre_registered_pack_is_not_looked_for() {
+    let Ok(bytes) = std::fs::read(format!("{}/overall/Instance_SourceAnime.ssab", asset_root())) else {
+        eprintln!("fixture missing; run scripts/deploy-examples.sh. skipping.");
+        return;
+    };
+    let mut player = SSPlayer::new();
+    player.add_ssab("Instance_SourceAnime", &bytes).unwrap();
+
+    let mut recorder = Recorder::new(asset_root());
+    assert!(pollster::block_on(player.load_with(&mut recorder, "overall/Instance.ssab")).is_ok());
+
+    let looked_for: Vec<&str> = recorder.requested().into_iter().filter(|p| p.ends_with("Instance_SourceAnime.ssab")).collect();
+    assert!(looked_for.is_empty(), "a pack the player already had was fetched again: {looked_for:?}");
+    assert!(player.has_pack("Instance_SourceAnime"), "loading the main pack dropped a pack registered before it");
+}
