@@ -460,13 +460,15 @@ Godot / Unity のネイティブプレイヤー実績と C-API 契約から、�
 - `PlaybackNode { context, instances, effects }` の木を SSPlayer が所有。GPU リソースは現行 `SSInternalPlayer` 1個を共有（P7 で `SSRenderer` / `SSScene` へ移り、共有範囲が**シーン内の全 Player**へ広がる）。
 - **外部参照は pack 名の文字列**（`PartTypeInstance::ref_anime_pack()`/`ref_anime_name()`）で解決＝ハッシュアルゴリズム不整合を回避。ホストは全 pack を `add_ssab(pack_name, data)` で事前登録し、`load_ssab(pack_name, data)` で主 pack 指定。ssab 型は `ssab::ssab::ss::format::{PartType, root_as_ss_anime_binary_unchecked}`。
 - **transition スナップはホスト責務**: `InstanceSlot::step` は transition 時にセクション/ループ/方向を設定するのみで開始フレームへのスナップはしない。**`result.transitioned` 時に子 `context.play()` を呼ぶ**（呼ばないと独立モードが再生状態にならず進まない）。
-- **`parent_looped` はランタイム非通知**: root は前フレームからのフレーム後退で検出（前向き再生のループ edge）、子は `result.child_looped` を伝播。
-- 検証: `libs/ssplayer-wgpu/tests/instance.rs`（ヘッドレス probe。同期/独立/pingpong の frame 推移を確認）。
+- **スロットの step は「パーツ一覧」から回す。`draw_order` から回してはいけない（★実装済・回帰テストあり）**: ランタイムは `Hide` のパーツを `draw_order` / `draw_batches` から丸ごと落とす（`framedata.rs` の `drawn_as_self`）。描画走査のついでに step すると**非表示になった瞬間そのスロットが止まり**、独立再生の子／エフェクトは止まっていた時間だけ遅れて再開する（`10_instance.md` §Supporting Independent Playback、`20_effect.md`）。そこで `step_slots`（全スロットを再帰的に進める）と `render_node`（`draw_batches` を描く）を**別の走査**に分ける。可視性は「描くか」の判断にだけ使う。兄弟実装も同型（Web の `stepEffectSlots`/`stepInstanceSlots`、Godot の `_update_instance_children`）。
+- **`parent_looped` は `Context::is_looped()`**: コントローラが `update` 中に立てるパルスで、次の `update` 開始時にクリアされるため**その `update` の直後に読む**。「フレームが後退したら」で代用しない——逆再生・ピンポンでは毎フレーム後退するため。子へは `result.child_looped` を伝播（独立再生の子は親ではなく自分のループが基準）。
+- **子のサブツリーへ渡す delta は `delta * |ev.speed|`**: 独立再生の子は自分の時計をキーの speed で進めるので、その孫（子の中のエフェクト／インスタンス）も同じスケールで進めないと速度がずれる。
+- 検証: `libs/ssplayer-wgpu/tests/slots.rs::a_hidden_independent_child_keeps_its_clock`（`Instance.ssab` の `INDEP_MID_INFINITE_HIDE`——独立・無限ループ・途中で Hide——の子フレームが Hide 中も進み続けることを固定する。draw_order 駆動に戻すと 23 tick 止まって落ちる）。ほか `libs/ssplayer-wgpu/tests/instance.rs`（ヘッドレス probe。同期/独立/pingpong の frame 推移を確認）。
 
 ### 7.2 エフェクト（別 Context を持たない）✅ 実装済
 
 - エフェクトは**別 Context 不要**（親 Context の frame_no/delta で駆動するシミュレータのため上書き問題が無い）。`EffectSlot<'static>` を再生ノードが part_index で保持。`EffectSlot::new(resource, PartTypeEffect::ref_effect_name_hash(), seed=part_index)`。
-- `slot.step(ev, frame_no, delta_secs, fps, parent_looped, y_flip=false, vert_stride=2)` → `ss_effect_step_result{ visible, draw_plan_buf: *const u8, draw_plan_len }`。`draw_plan_buf` はスロット所有・次 step まで有効なので**即コピー消費**。`ev = ctx.get_active_effect_event(part_index)`、`fps = ctx.get_fps()`。
+- `slot.step(ev, frame_no, delta_secs, fps, parent_looped, y_flip=false, vert_stride=2)` → `ss_effect_step_result{ visible, draw_plan_buf: *const u8, draw_plan_len }`。`draw_plan_buf` はスロット所有・**そのスロットが次に step するまで**有効。step を描画走査から切り離した（§7.1）ため、プランは step 時に `EffectPart.plan`（再利用する `Vec<u8>`）へコピーし、描画走査はそれを読む。生ポインタで持ち回ると `SSPlayer: Send` が失われ、並列プレイヤー走査（§14.2 項目6）が壊れる。`ev = ctx.get_active_effect_event(part_index)`、`fps = ctx.get_fps()`。
 - `EffectDrawPlan`（`root_as_effect_draw_plan_unchecked`）: `commands`（`cellmap_hash`/`quad_count`/`particle_offset`/`blend` 0=Mix 1=Add）、`vert_stride`、`verts`/`uvs`/`colors`/`indices`。スライス式（`po=particle_offset`）: verts `[po*4*stride..(po+qc)*4*stride]` / uvs `[po*4*2..]` / colors `[po*4*4..]` / indices `[po*6..]`（**quad-local 0基点、rebase 不要**）。
 - **★エフェクト UV は正規化済み(0..1)**: スプライト/メッシュの pixel UV と違い、**tex_size で割ってはいけない**（probe で確認・当初バグを修正）。colors も正規化。
 - verts は **slot-relative** → エフェクトパーツの world 行列を transform 合成（`mat4_mul(transform, effectPartWorld)`）。

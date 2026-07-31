@@ -35,15 +35,35 @@ struct PlaybackNode {
     instances: HashMap<usize, InstanceChild>,
     /// Effect slots keyed by part index. Effects reuse this node's context
     /// (no separate context, unlike instances).
-    effects: HashMap<usize, EffectSlot<'static>>,
+    effects: HashMap<usize, EffectPart>,
     /// Static per-part mask flags, indexed by part index. Read once from ssab
     /// `PartData` at build time (SPEC §6). Empty when the pack has no ssab data.
     mask_flags: Vec<PartMaskFlags>,
 }
 
+/// One instance part: its slot, the sub-animation it drives, and what the last
+/// [`step_slots`] left behind for the draw walk to use.
 struct InstanceChild {
     slot: InstanceSlot,
     node: Box<PlaybackNode>,
+    /// Frame the slot last left the child on. Read raw — rounding it and writing
+    /// it back would truncate sub-frame progress every tick (instance doc).
+    frame_no: f32,
+    /// Whether the slot says the child is showing this frame.
+    visible: bool,
+}
+
+/// One effect part: its slot, and the draw plan the last [`step_slots`] produced.
+struct EffectPart {
+    slot: EffectSlot<'static>,
+    /// This frame's plan, empty when the effect produced nothing.
+    ///
+    /// Copied rather than borrowed: the buffer behind `step`'s result belongs to
+    /// the slot, and the draw walk that consumes it runs after every slot has
+    /// stepped. Keeping the raw pointer instead would cost `SSPlayer: Send`,
+    /// which the parallel player walk needs (`SSScene::update`). The allocation
+    /// is reused frame to frame, so the price is one memcpy per effect.
+    plan: Vec<u8>,
 }
 
 /// The SpriteStudio player. One instance owns one animation-instance tree.
@@ -55,9 +75,6 @@ pub struct SSPlayer {
     main_pack: Option<String>,
     root: Option<PlaybackNode>,
     current_animation: Option<String>,
-    /// Root frame_no from the previous `update`, used to detect the loop edge
-    /// that instance slots need (`parent_looped`).
-    last_root_frame: f32,
     /// Names of packs whose embedded atlases (SPEC §8.1) have not been offered to
     /// a renderer yet. The offer happens on the next `update`, which is the
     /// earliest point the borrow model lends a `Device`/`Queue`; the decode itself
@@ -91,7 +108,7 @@ impl SSPlayer {
     /// cheap. The device-scoped [`SSRenderer`] and the target-scoped
     /// [`SSScene`] are lent to it per frame by [`SSScene::update`].
     pub fn new() -> Self {
-        Self { packs: HashMap::new(), main_pack: None, root: None, current_animation: None, last_root_frame: 0.0, packs_awaiting_textures: Vec::new(), transform: IDENTITY, order: 0, visible: true, alpha: 1.0 }
+        Self { packs: HashMap::new(), main_pack: None, root: None, current_animation: None, packs_awaiting_textures: Vec::new(), transform: IDENTITY, order: 0, visible: true, alpha: 1.0 }
     }
 
     /// Re-offer this player's embedded atlases after a device loss (SPEC §14).
@@ -157,7 +174,6 @@ impl SSPlayer {
     pub fn set_animation(&mut self, anim_name: &str) -> Result<(), SSRuntimeError> {
         let main_pack = self.main_pack.clone().ok_or(SSRuntimeError::NotLoaded)?;
         let root = build_node(&self.packs, &main_pack, anim_name, 0).ok_or(SSRuntimeError::NotLoaded)?;
-        self.last_root_frame = root.context.get_frame_no();
         self.root = Some(root);
         self.current_animation = Some(anim_name.to_string());
         Ok(())
@@ -316,14 +332,33 @@ impl SSPlayer {
         // The runtime works in milliseconds for the primary context.
         root.context.update(delta_secs * 1000.0);
         let frame_no = root.context.get_frame_no();
-        // Detect the loop edge (forward playback wrapping past the end) so
-        // instance slots can persist/re-arm their children correctly.
-        let looped = frame_no + 0.5 < self.last_root_frame;
-        self.last_root_frame = frame_no;
+        // The loop edge instance/effect slots re-arm their playback keys on. It
+        // is a pulse the controller clears on entry to every `update`, so it has
+        // to be read here, right after the one that raised it. Deriving it from
+        // "the frame went backwards" instead is wrong under reverse and
+        // ping-pong playback, where the frame goes backwards every tick.
+        let looped = root.context.is_looped();
+
+        // Advance every slot first, then draw. The two are separate walks for a
+        // reason — see `step_slots`.
+        step_slots(root, frame_no, delta_secs, looped);
 
         let draw = NodeDraw { transform: &self.transform, alpha: self.alpha };
         let mut build = FrameBuild { scene, renderer };
-        render_node(root, &mut build, draw, frame_no, delta_secs, looped, StencilTest::None);
+        render_node(root, &mut build, draw, frame_no, StencilTest::None);
+    }
+
+    /// What frame each instance child of the root is on, keyed by part index.
+    ///
+    /// A diagnostic, like [`SSPlayer::instance_node_count`] — and the only way to
+    /// see that a child's clock is running while its part is hidden, since a
+    /// hidden child draws nothing to look at (instance doc §Supporting
+    /// Independent Playback).
+    pub fn instance_child_frames(&self) -> Vec<(usize, f32)> {
+        let Some(root) = &self.root else { return Vec::new() };
+        let mut out: Vec<(usize, f32)> = root.instances.iter().map(|(&part_idx, child)| (part_idx, child.frame_no)).collect();
+        out.sort_by_key(|&(part_idx, _)| part_idx);
+        out
     }
 
     /// Total number of instance child nodes in the current tree. A non-zero
@@ -381,14 +416,15 @@ fn build_node(packs: &HashMap<String, SSPack>, pack: &str, anime: &str, depth: u
                     if let Some(inst) = part.part_type_as_part_type_instance()
                         && let Some(child) = build_node(packs, inst.ref_anime_pack(), inst.ref_anime_name(), depth + 1)
                     {
-                        instances.insert(i, InstanceChild { slot: InstanceSlot::new(), node: Box::new(child) });
+                        let frame_no = child.context.get_frame_no();
+                        instances.insert(i, InstanceChild { slot: InstanceSlot::new(), node: Box::new(child), frame_no, visible: false });
                     }
                 }
                 PartType::PartTypeEffect => {
                     if let Some(eff) = part.part_type_as_part_type_effect()
                         && let Ok(slot) = EffectSlot::new(static_res, eff.ref_effect_name_hash(), i as u32)
                     {
-                        effects.insert(i, slot);
+                        effects.insert(i, EffectPart { slot, plan: Vec::new() });
                     }
                 }
                 _ => {}
@@ -397,6 +433,63 @@ fn build_node(packs: &HashMap<String, SSPack>, pack: &str, anime: &str, depth: u
     }
 
     Some(PlaybackNode { context, instances, effects, mask_flags })
+}
+
+/// Advance every instance and effect slot this node owns, and recurse through
+/// the instance children — **over the parts, not over what is drawn**.
+///
+/// This is deliberately a separate walk from [`render_node`], because the two
+/// answer different questions: *whose clock moves* is every slot in the pack,
+/// while *what is drawn and in what order* is `draw_order`. The runtime drops
+/// `Hide`-ed parts from `draw_order` / `draw_batches` entirely (`framedata.rs`,
+/// `drawn_as_self`), so stepping from the draw walk stops a slot the moment its
+/// part is hidden. For an independently-played effect or instance — one running
+/// on its own elapsed time rather than the parent's frame — that freezes the
+/// clock and makes it resume late by exactly the time it spent hidden, which is
+/// not what SS7 means by independent playback (instance doc §Supporting
+/// Independent Playback, effect doc). The slots are built from the pack's part
+/// list in [`build_node`], so they are all here to walk.
+///
+/// What the draw walk needs afterwards is left on each slot: the child's frame
+/// and visibility, and the effect's draw plan.
+fn step_slots(node: &mut PlaybackNode, frame_no: f32, delta_secs: f32, node_looped: bool) {
+    let fps = node.context.get_fps() as f32;
+    for (&part_idx, effect) in node.effects.iter_mut() {
+        let ev = node.context.get_active_effect_event(part_idx as u32);
+        // vert_stride=2 (packed XY), y_flip=false (Y handled by the world matrix).
+        let r = effect.slot.step(ev, frame_no, delta_secs, fps, node_looped, false, 2);
+        effect.plan.clear();
+        if r.visible && !r.draw_plan_buf.is_null() && r.draw_plan_len > 0 {
+            // SAFETY: the slot just built this buffer and owns it until its next
+            // step; nothing steps it between here and the copy.
+            effect.plan.extend_from_slice(unsafe { std::slice::from_raw_parts(r.draw_plan_buf, r.draw_plan_len) });
+        }
+    }
+
+    for (&part_idx, child) in node.instances.iter_mut() {
+        let ev = node.context.get_active_event_instance(part_idx as u32);
+        // An independent child runs its own clock at the key's speed, so its own
+        // sub-tree has to be stepped with the same scaling — the parent's raw
+        // delta would run the grandchildren at the wrong rate.
+        let child_delta = delta_secs * ev.speed.abs();
+        let r = child.slot.step(ev, &mut child.node.context, frame_no, delta_secs, node_looped);
+
+        // On a transition edge the slot configures the child's section but leaves
+        // the frame snap to the host: play() moves the child to its start frame
+        // so independent playback actually advances.
+        if r.transitioned {
+            child.node.context.play();
+        }
+        // Raw, never rounded: rounding here would truncate sub-frame progress on
+        // every tick and freeze the child when a tick is worth less than a frame.
+        child.frame_no = child.node.context.get_frame_no();
+        child.visible = r.visible;
+
+        // Recurse regardless of visibility, and re-arm the grandchildren on the
+        // *child's* loop rather than the parent animation's: an independent child
+        // runs on its own clock, so that is the edge they must re-fire on.
+        step_slots(&mut child.node, child.frame_no, child_delta, r.child_looped);
+    }
 }
 
 /// `DrawBatch.flags` bit set when a content batch is a masked target
@@ -447,9 +540,12 @@ struct NodeDraw<'a> {
     alpha: f32,
 }
 
-/// Recursively append a node's geometry to the renderer, driving instance slots
-/// and composing transforms. The node's context must already be advanced to
-/// `frame_no` (root by `update`, children by the parent's `InstanceSlot::step`).
+/// Recursively append a node's geometry to the renderer, composing transforms.
+///
+/// Draw only: every slot was advanced by [`step_slots`] before this walk began,
+/// so this reads what the step left behind rather than driving it. The node's
+/// context is already at `frame_no` (root by `update`, children by their
+/// parent's `InstanceSlot::step`).
 ///
 /// Masking (SPEC §6): when the renderer has a stencil buffer and this is the
 /// root scope (`inherited_stencil == None`), pure masks are pre-written and the
@@ -462,7 +558,7 @@ struct NodeDraw<'a> {
 /// `draw` carries the owning player's placement and fade down the tree; whatever
 /// coverage this scope writes, it takes back before returning (see
 /// [`unwind_masks`]).
-fn render_node(node: &mut PlaybackNode, build: &mut FrameBuild<'_>, draw: NodeDraw, frame_no: f32, delta_secs: f32, node_looped: bool, inherited_stencil: StencilTest) {
+fn render_node(node: &mut PlaybackNode, build: &mut FrameBuild<'_>, draw: NodeDraw, frame_no: f32, inherited_stencil: StencilTest) {
     let NodeDraw { transform, alpha } = draw;
     let frame_data = match node.context.get_frame_data(frame_no) {
         Ok(bytes) => unsafe { std::slice::from_raw_parts(bytes.as_ptr(), bytes.len()) },
@@ -553,25 +649,15 @@ fn render_node(node: &mut PlaybackNode, build: &mut FrameBuild<'_>, draw: NodeDr
                     };
 
                     let Some(child) = node.instances.get_mut(&part_idx) else { continue };
-
-                    let ev = node.context.get_active_event_instance(part_idx as u32);
-                    let result = child.slot.step(ev, &mut child.node.context, frame_no, delta_secs, node_looped);
-
-                    // On a transition edge the slot configures the child's section
-                    // but leaves the frame snap to the host: play() moves the child
-                    // to its start frame so independent playback actually advances.
-                    if result.transitioned {
-                        child.node.context.play();
+                    if !child.visible {
+                        continue;
                     }
-                    let child_frame_no = child.node.context.get_frame_no();
-
-                    if result.visible {
-                        // Compose the instance part's world matrix onto the parent transform.
-                        let m: [f32; 16] = frame.world_matrices[part_idx * 16..part_idx * 16 + 16].try_into().unwrap();
-                        let child_transform = mat4_mul(transform, &m);
-                        let child_draw = NodeDraw { transform: &child_transform, alpha };
-                        render_node(&mut child.node, build, child_draw, child_frame_no, delta_secs, result.child_looped, child_inherited);
-                    }
+                    // Compose the instance part's world matrix onto the parent transform.
+                    let child_frame_no = child.frame_no;
+                    let m: [f32; 16] = frame.world_matrices[part_idx * 16..part_idx * 16 + 16].try_into().unwrap();
+                    let child_transform = mat4_mul(transform, &m);
+                    let child_draw = NodeDraw { transform: &child_transform, alpha };
+                    render_node(&mut child.node, build, child_draw, child_frame_no, child_inherited);
                 }
             }
             DrawBatchKind::Effect => {
@@ -586,24 +672,15 @@ fn render_node(node: &mut PlaybackNode, build: &mut FrameBuild<'_>, draw: NodeDr
                 };
                 for rank in start_rank..start_rank + count {
                     let part_idx = draw_order.get(rank) as usize;
-                    let Some(slot) = node.effects.get_mut(&part_idx) else { continue };
-
-                    let ev = node.context.get_active_effect_event(part_idx as u32);
-                    let fps = node.context.get_fps() as f32;
-                    // vert_stride=2 (packed XY), y_flip=false (Y handled by the world matrix).
-                    let r = slot.step(ev, frame_no, delta_secs, fps, node_looped, false, 2);
-
-                    if r.visible && !r.draw_plan_buf.is_null() && r.draw_plan_len > 0 {
-                        // The plan buffer is owned by the slot and valid until its
-                        // next step; append_effect copies it immediately.
-                        let plan = unsafe { std::slice::from_raw_parts(r.draw_plan_buf, r.draw_plan_len) };
-                        let m: [f32; 16] = frame.world_matrices[part_idx * 16..part_idx * 16 + 16].try_into().unwrap();
-                        let eff_transform = mat4_mul(transform, &m);
-                        // The effect draws from its own plan, so it needs its own
-                        // arena slot rather than this node's.
-                        let eff_slot = build.scene.push_transform(&eff_transform);
-                        build.scene.append_effect(plan, &eff_slot, eff_stencil, alpha);
-                    }
+                    // Whatever `step_slots` produced for this part earlier in the
+                    // frame; empty when the effect had nothing to draw.
+                    let Some(plan) = node.effects.get(&part_idx).map(|e| e.plan.as_slice()).filter(|p| !p.is_empty()) else { continue };
+                    let m: [f32; 16] = frame.world_matrices[part_idx * 16..part_idx * 16 + 16].try_into().unwrap();
+                    let eff_transform = mat4_mul(transform, &m);
+                    // The effect draws from its own plan, so it needs its own
+                    // arena slot rather than this node's.
+                    let eff_slot = build.scene.push_transform(&eff_transform);
+                    build.scene.append_effect(plan, &eff_slot, eff_stencil, alpha);
                 }
             }
             // Mask batches emit no colour (coverage is handled by the writer

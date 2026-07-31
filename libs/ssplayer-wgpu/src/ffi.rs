@@ -491,7 +491,11 @@ pub unsafe extern "C" fn ss_player_stop(handle: *mut SsPlayer) {
     }
 }
 
-/// Scale playback speed (1.0 = authored speed, negative plays backwards).
+/// Scale playback speed; 1.0 is the authored speed.
+///
+/// Zero and negative values are **ignored** (the runtime keeps 1.0): direction
+/// is a separate playback setting the player does not expose yet, so a negative
+/// speed does not play backwards.
 ///
 /// # Safety
 /// `handle` must be a live handle or null.
