@@ -808,7 +808,7 @@ player.destroy(); surface.destroy();            // ★明示。実体は ctx に
 - **`ctx.addTexture(hash, rgba, w, h)`**（生 RGBA）は残置。CPU premul と `Retention::Retain` を通るので、エンコード済み画像を持っているなら `addTextureFromBytes` のほうが速く小さい。
 - **`surface.stats()`** がフレームカウンタを JS オブジェクトで返す（players / prims / drawCalls / mergeableDraws / redundantTextureBinds / uploadedBytes ＋ `timestamp-query` があれば `gpuPassTimeNs`）。**§14.2 は native でしか測っていない**——ブラウザで同じ数字を取る手段がこれ。`examples/web/index.html` の②が毎フレーム表示する。
 - `<ss-player-webgpu>` カスタム要素は「1要素 = 1 canvas = 1 player」の**便利ラッパ**として残す（広告のような単体用途はこれが最短）。ただし内部では上記の共有 context から surface を1枚取るだけなので、要素を何個置いても device は1つ。
-- ssab は embedded / reference 両対応（§8.1）。**embedded のデコードは `createImageBitmap` ＋ `copy_external_image_to_texture` に寄せ、`image` crate を wasm から外した** ✅（`web` feature は `embedded` を引かない。brotli −26.9%、§8.1 に計測値）。**残課題**: web 面はテストが1つも無いので、パース側だけ native で固定してある（`tests/pack.rs::an_embedded_pack_hands_out_its_atlases_undecoded`）——`createImageBitmap` 経路そのものはブラウザ実機の目視が唯一の検証。
+- ssab は embedded / reference 両対応（§8.1）。**embedded のデコードは `createImageBitmap` ＋ `copy_external_image_to_texture` に寄せ、`image` crate を wasm から外した** ✅（`web` feature は `embedded` を引かない。brotli −26.9%、§8.1 に計測値）。**残課題**: web 面はテストが1つも無い。**ローダに何が渡されるか**は native で固定してある（`tests/loader_contract.rs`。`src` は verbatim、以降は `<src のディレクトリ>` 前置、という契約）が、**渡されたものをどう扱うか**——`fetch` / `createImageBitmap` / `copy_external_image_to_texture`——はブラウザ実機の目視が唯一の検証。`wasm-bindgen-test` ＋ CI のヘッドレスブラウザで埋める案は、WebGPU にフラグが要り CI が重くなるため**見送り**（2026-07-31）。
 - ビルド/パッケージは `scripts/release-web.sh` 相当を追加し `pkg/ssplayer-wgpu-web/` を吐く。◻ 未着手。
 - 注意: WebGPU 未対応ブラウザへのフォールバック方針（WebGL 版へ退避 or エラー表示）を Web Component 層で定義（§14）。現状は `sharedContext()` が非対応を検知して reject し、要素がエラー表示へ落ちるところまで。
 
@@ -960,6 +960,10 @@ const char*  ss_last_error(void);                             // スレッドロ
 - **WebGPU 非対応環境のフォールバック**方針（WebGL 退避か）未定 → §14.1。
 - **raw-window-handle の FFI 越え** ✅ 実装済: Rust トレイトは C に渡せないため、平坦な `ss_window_handle_t{ kind, screen, window, display }` を C-API に定義し、`ffi.rs` が `raw-window-handle` 型へ組み立てる（§11）。CAMetalLayer だけは rwh に表現が無いので wgpu の `SurfaceTargetUnsafe::CoreAnimationLayer` を使う（Apple ターゲットのみ）。**Win32/Xlib/Wayland の経路は実機未検証**——DX12/Vulkan viewer で確認する。
 - **テクスチャ供給** ✅: embedded（`SSPack::decode_embedded`）/ reference（ホスト供給）/ 借用（`set_texture`）の3経路が `SSRenderer` の1つの hash マップに集約される（§8.1 / §8.2）。
+- **★ロードの診断はホストに届かない（未対応・記録）**: `AssetLoader::warn` の出力先が実装ごとに固定されている——`FsLoader` は `eprintln!`、web 面は `console.warn`。読めなかったアトラスや兄弟パックは**そこにしか出ない**ので、GUI アプリやログ基盤に乗せられず、**プログラムから取りこぼしを判定する手段が無い**。`load` が `Err` を返すのは「`.ssab` 自身が読めない／壊れている」場合だけで、アトラスが1枚も届かなくても `SS_OK` / `Ok(())` になる（1枚欠けてもキャラごと落とさない、という §8.1 の設計の裏返し）。
+  - 案: (a) `ss_player_missing_count()` 相当——全パックの `textures()` を舐めて「登録済みでも保留中でもない」数を返す。`load` 直後にそのまま呼べて「取りこぼしの有無」を、1フレーム後に呼べば「GPU に載ったか」を答える。(b) `warn` の行き先をホストに渡すフック。**現時点では (a)(b) とも入れない判断**（stderr で足りる、2026-07-31）。必要になったらこの項を起点に。
+- **★URL/パスで辿れないサブパックは自動解決できない（未対応・記録）**: `load` / `load_with` の外部インスタンス解決は `<.ssab のディレクトリ>/<pack 名>.ssab` を読む規則に固定されている（§7.1）。アーカイブの中・バンドラ・D&D で渡されたバイト列など、その規則で辿れないパックは**ホストが `add_ssab` を手で呼ぶ**必要がある。`ssplayer-core` は `InstancePackProvider`（`resolveInstancePacks` の `provider` フック）でここを埋めていて、こちらの等価物は無い。
+  - 案: `AssetLoader` に「名前で引く」フックを足す（`read` はパスで引くので別口が要る）か、`load_with` に provider を渡せるようにする。**現時点では入れない判断**（`add_ssab` で回避可能、2026-07-31）。
 - **データ所有契約（§1.1）**: ssab は Player 所有→ssruntime へ borrow、FrameData/SoA は ssruntime 所有→Player が borrow。ssab を Context より先に破棄しない／FrameData 借用をフレーム跨ぎで保持しない。
 - **エフェクト blend はコマンド毎**（batch.blend_type ではない）点を実装で取り違えない。
 - **ss_shader 統合シェーダ13種** ✅ 実装済（`renderer.rs` `SS_SHADER_WGSL`、WebGL `SSShaderLib.ts` を WGSL 移植）。残課題: map0/map1 セカンダリテクスチャ・shader×マスク結合・GLSL 版との厳密ピクセル一致検証。
