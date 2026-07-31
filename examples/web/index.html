@@ -31,7 +31,12 @@
   <p>
     <label for="pick">アニメーション:</label>
     <select id="pick"></select>
-    <span class="hint">— 横スクロール無しの単体パックのみ</span>
+    <label for="mode">形態:</label>
+    <select id="mode">
+      <option value="assets">embedded（アトラス埋め込み）</option>
+      <option value="assets-ref">reference（外部 PNG）</option>
+    </select>
+    <span class="hint">— どちらも <code>loadSsab</code> の1コールで揃います</span>
   </p>
 
   <!-- The custom element creates its own <canvas> and drives requestAnimationFrame. -->
@@ -57,18 +62,26 @@
 
   <script type="module">
     import './ss-player-webgpu.js';
-    import { sharedContext, supplyTextures } from './ss-context.js';
+    import { sharedContext } from './ss-context.js';
 
     // Standalone single-pack animations from tests/overall (no external instance refs).
-    const PACKS = ['Basic', 'PartsColor', 'BlendMode', 'Mask', 'Shape', 'Mesh', 'Effect', 'Shader'];
+    // TextureChange is here on purpose: its parts bind by texture *file name*
+    // hash (`external_textures()`, SPEC §8.1), so it is the one that turns into
+    // white silhouettes if only the cellmaps get loaded.
+    const PACKS = ['Basic', 'PartsColor', 'BlendMode', 'Mask', 'Shape', 'Mesh', 'Effect', 'Shader', 'TextureChange'];
     const pick = document.getElementById('pick');
+    const mode = document.getElementById('mode');
     const player = document.getElementById('player');
     for (const p of PACKS) {
       const o = document.createElement('option');
       o.value = p; o.textContent = p;
       pick.appendChild(o);
     }
-    pick.addEventListener('change', () => player.loadSrc(`assets/${pick.value}.ssab`));
+    // The same call for both export modes: an embedded pack decodes what it
+    // carries, a reference pack fetches its sibling PNGs relative to the .ssab.
+    const reload = () => player.loadSrc(`${mode.value}/${pick.value}.ssab`);
+    pick.addEventListener('change', reload);
+    mode.addEventListener('change', reload);
 
     // --- ② one canvas, many players -------------------------------------
     // Fetched once and reused: the same bytes make every player, and the atlas
@@ -102,12 +115,12 @@
       async function addPlayer() {
         const name = CAST[players.length % CAST.length];
         const p = surface.createPlayer();
-        p.loadSsab(name, await bytesFor(name));
-        // The atlas is decoded by the browser and registered on the shared
-        // renderer, so the second player of a pack finds it already there
-        // (SPEC §8.2 — "registered wins").
-        await supplyTextures(ctx, p, { pack: name, baseUrl: new URL(`assets/${name}.ssab`, location.href) });
-        // Select, then start — two calls (SPEC §9.3).
+        // Loading a pack loads its atlases (SPEC §8.1). They are decoded by the
+        // browser into the shared, device-scoped renderer, so the second player
+        // of a pack finds them already there and loads nothing (SPEC §8.2 —
+        // "registered wins").
+        await p.loadSsab(await bytesFor(name), null, new URL(`assets/${name}.ssab`, location.href).href);
+        // Select, then start — two calls (SPEC §9.3), both synchronous.
         p.setAnimation(p.animationNames()[0]);
         p.play();
         players.push(p);

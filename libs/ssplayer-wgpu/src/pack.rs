@@ -71,8 +71,9 @@ pub struct EmbeddedImage<'a> {
 /// pack.
 #[derive(Clone, Debug)]
 pub struct TextureRef {
-    /// The cellmap's `name_hash` — what `DrawBatch.texture_hash` carries, and the
-    /// key [`crate::SSRenderer`] looks textures up by.
+    /// What `DrawBatch.texture_hash` carries, and the key [`crate::SSRenderer`]
+    /// looks textures up by: a cellmap's `name_hash`, or a texture file name's
+    /// hash for a TextureChange target (see [`SSPack::textures`]).
     pub hash: u32,
     /// The image path the exporter wrote, relative to the `.ssab`'s own location.
     pub path: String,
@@ -132,14 +133,36 @@ impl SSPack {
         // The two hashes are different things and must not be swapped (SPEC §8.1):
         // `name_hash` is what a draw batch asks for, `image_path_hash` is the key
         // of the embedded byte blob.
+        let embedded: Vec<u32> = ab.embedded_assets().map(|assets| assets.iter().map(|a| a.name_hash()).collect()).unwrap_or_default();
         let mut textures = Vec::new();
         let mut has_embedded = false;
         if let Some(cellmaps) = ab.cellmaps() {
-            let embedded: Vec<u32> = ab.embedded_assets().map(|assets| assets.iter().map(|a| a.name_hash()).collect()).unwrap_or_default();
             for cm in cellmaps {
                 let is_embedded = embedded.contains(&cm.image_path_hash());
                 has_embedded |= is_embedded;
                 textures.push(TextureRef { hash: cm.name_hash(), path: cm.image_path().to_string(), embedded: is_embedded });
+            }
+        }
+        // The second table, and not optional: a `DrawBatch.texture_hash` is a
+        // cellmap's `name_hash` *or* a texture file name's hash, the latter for a
+        // part the author gave a TextureChange (`TCHG`). Miss these and those
+        // batches resolve to nothing — here that means the 1x1 white fallback,
+        // so the part turns into a white silhouette rather than disappearing.
+        // Both tables go into one list under the key a draw batch will ask for,
+        // exactly as the porting guide requires (`30_core/10_initialization.ja.md`
+        // §3, and `SS6PlayerForGodot`'s `_loadTextures`).
+        //
+        // An `ExternalTexture`'s `name_hash` is the hash of its file name, so it
+        // is also the key of its embedded blob — no join needed, unlike a
+        // cellmap. The same file can therefore appear twice in this list under
+        // two different hashes (once as a cellmap's image, once by name); a host
+        // that fetches per entry should dedupe by [`TextureRef::path`].
+        if let Some(externals) = ab.external_textures() {
+            for et in externals {
+                let Some(name) = et.name() else { continue };
+                let is_embedded = embedded.contains(&et.name_hash());
+                has_embedded |= is_embedded;
+                textures.push(TextureRef { hash: et.name_hash(), path: name.to_string(), embedded: is_embedded });
             }
         }
 
@@ -151,12 +174,21 @@ impl SSPack {
         &self.name
     }
 
-    /// The atlases this pack's draw batches will ask for, in pack order.
+    /// The atlases this pack's draw batches will ask for: every cellmap's image,
+    /// then every `external_textures()` entry.
     ///
     /// A reference-mode host walks this to know what to load, and from where,
     /// before playing (see [`TextureRef`]); combined with
     /// [`crate::SSRenderer::texture_size`] it also answers "is this pack ready to
     /// draw".
+    ///
+    /// **Both tables, always.** `DrawBatch.texture_hash` is a cellmap's
+    /// `name_hash` for an ordinary part but a texture *file name*'s hash for one
+    /// the author gave a TextureChange (`TCHG`), and the two tables are the only
+    /// places those keys come from. `assets/overall/TextureChange.ssab` is the
+    /// fixture: one cellmap and three external textures, one of which is the
+    /// cellmap's own image under a second hash. Loading only the cellmaps leaves
+    /// the changed parts on the white fallback.
     pub fn textures(&self) -> &[TextureRef] {
         &self.textures
     }
@@ -204,6 +236,17 @@ impl SSPack {
         for cm in cellmaps {
             if let Some(&bytes) = bytes_by_hash.get(&cm.image_path_hash()) {
                 out.push(EmbeddedImage { hash: cm.name_hash(), bytes });
+            }
+        }
+        // TextureChange targets, keyed by file name — which for an
+        // `ExternalTexture` is its `name_hash`, the blob key as well. One blob can
+        // come back twice under two hashes (as a cellmap's image and by name);
+        // that is what the draw batches ask for, so both entries are wanted.
+        if let Some(externals) = ab.external_textures() {
+            for et in externals {
+                if let Some(&bytes) = bytes_by_hash.get(&et.name_hash()) {
+                    out.push(EmbeddedImage { hash: et.name_hash(), bytes });
+                }
             }
         }
         out

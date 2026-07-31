@@ -67,7 +67,7 @@ wasm-bindgen-futures = { workspace = true, optional = true }
 js-sys = { workspace = true, optional = true }
 # `Blob` / `ImageBitmap*` / `PremultiplyAlpha` are the browser-side texture
 # decoder this face uses in place of a bundled one (SPEC §8.1).
-web-sys = { workspace = true, optional = true, features = ["HtmlCanvasElement", "Window", "Document", "Blob", "ImageBitmap", "ImageBitmapOptions", "PremultiplyAlpha"] }
+web-sys = { workspace = true, optional = true, features = ["HtmlCanvasElement", "Window", "Document", "Blob", "ImageBitmap", "ImageBitmapOptions", "PremultiplyAlpha", "Response", "Url", "console"] }
 console_error_panic_hook = { workspace = true, optional = true }
 # The C face blocks on wgpu's async adapter/device requests: a C caller has no
 # executor to hand us.

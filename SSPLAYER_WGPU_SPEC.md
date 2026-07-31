@@ -495,7 +495,8 @@ ssconverter は `.ssab` を2形態で出力しうるので、SSPlayer はどち�
 | **embedded** ✅ | テクスチャ（atlas PNG）を `.ssab` に埋め込み | **パース**（`embedded_images()` = エンコード済みバイト列を渡すだけ）と**デコード**（`decode_embedded()` = `image`、feature `embedded`）が分かれている。ネイティブは後者を使い `add_ssab` → 次の `update` で **premul → upload_texture** まで自動。**web は前者だけを使い、デコードはブラウザ**（自己完結・単一ファイル配布に最適・広告向け、はどちらでも変わらない） |
 | **reference** ✅ | テクスチャは外部ファイルを名前/hash で参照 | Player は hash とパスだけ把握。**実バイトはホストが供給**（`upload_texture(hash, rgba, w, h)`）。ロード経路（ファイル/URL/バンドル）はホストの責務 |
 
-- **ハッシュ対応（重要）**: `DrawBatch.texture_hash = CellMap.name_hash`（`framedata.rs:104`）。埋め込みバイト列は `embedded_assets`（key = `CellMap.image_path_hash`）にある。→ embedded ロードは **cellmap 毎に `embedded_assets[image_path_hash]` を取り出し、`name_hash` で upload** する（2つのハッシュを取り違えない）。この join は `embedded_images()` にあり、`decode_embedded_where` はその上に乗っている（1箇所だけ）。
+- **ロード対象は `cellmaps()` と `external_textures()` の2つ（★必須）** ✅: `DrawBatch.texture_hash` は通常 `CellMap.name_hash` だが、作画で**テクスチャ変更（`TCHG`）**が指定されたパーツでは**テクスチャファイル名のハッシュ**になる。両方を同じマップへ入れること——移植ガイド `30_core/10_initialization.ja.md` §3 の `[!IMPORTANT]` そのもので、`SS6PlayerForGodot` の `_loadTextures` も両テーブルを走査している。**落とすと静かに壊れる**: 見つからない hash は 1x1 白フォールバック（§8）に落ちるので、そのパーツは消えるのではなく**白いシルエットで描かれ**、カウンタもエラーも動かない。`SSPack::textures()` / `embedded_images()` が両方を返す。フィクスチャは `assets/overall/TextureChange.ssab`（cellmap 1 ＋ external 3、うち1つは cellmap 自身の画像を別 hash で指す）。検証は `tests/pack.rs::a_pack_names_its_texture_change_targets`。
+- **ハッシュ対応（重要）**: 埋め込みバイト列は `embedded_assets`（key = **ファイル名**のハッシュ）にある。cellmap は `image_path_hash` で引いて `name_hash` で返す**join が要る**が、`ExternalTexture` は `name_hash` がファイル名のハッシュなので**そのまま両用**（引く鍵と返す鍵が同じ）。この join は `embedded_images()` にあり、`decode_embedded_where` はその上に乗っている（1箇所だけ）。同じ画像が2つの hash で2回出てくることがあり、それが正しい——ホストが取得するときは**パス単位で重複排除**すること。
 - **統一供給 API**: 最終的にはどちらも「hash で1枚登録する」に集約される。embedded は Player 内部（`upload_texture`）またはホスト（`addTextureFromBytes`）、reference はホスト。ブラウザの `TexImageSource` 供給・ネイティブの RGBA 供給と対称。
 - **借用モデルとの整合**: `add_ssab`/`load_ssab` は device/queue を借りないので、デコードは load 時（CPU）、GPU upload は次の `update`（queue 貸与時）に `pending_textures` を flush。
 - **★デコーダはどの層に置くか（兄弟プレイヤーとの整合）**: **可搬コアには置かない**が3実装で一致している。SS6PlayerForCPP は `Common/` がピクセルを知らず、`Platform/OpenGL/ss6player_texture.cpp` の `Texture::CacheStore` が stb_image でデコードする（アプリ側で持つ経路も `_COMPILEOPTION_TEXTURE_EXTERNALENTITY_` で選べる）。ssplayer-core は `extractEmbeddedTextures` が**バイト列を返すだけ**で、`ssplayer-webgl` の `loadTextureFromBytes` が `createImageBitmap` に渡す——だから WebGL 版は**デコーダを同梱せずに両形態に対応できている**。本実装の `embedded_images()` / `decode_embedded()` の分割はこれに合わせたもの。
@@ -513,7 +514,7 @@ pub struct TextureRef { hash: u32, path: String, embedded: bool }  // ★何が�
 SSPack::load(bytes) -> Result<SSPack, SSRuntimeError>       // ★device も queue も要らない（CPU のみ）
 SSPack::load_named(name, bytes) -> Result<SSPack, _>        // ホストが名前を決める場合
 pack.name() -> &str;                                        // ★既定は .ssab 自身の name
-pack.textures() -> &[TextureRef];                           // このパックが要求するアトラス（cellmap 順）
+pack.textures() -> &[TextureRef];                           // ★cellmaps() ＋ external_textures()（TCHG 先。§8.1）
 pack.has_embedded_textures() -> bool;
 pack.animation_names() -> Vec<String>;
 pack.embedded_images() -> Vec<EmbeddedImage<'_>>;           // ★エンコード済みバイト列を**借りるだけ**（デコーダ不要・feature 不問）
@@ -738,7 +739,7 @@ const ctx     = await sharedContext();          // ページで1回（内部で 
 const surface = ctx.createSurface(canvas);      // canvas ごと
 const player  = surface.createPlayer();         // 1 canvas に何体でも
 
-player.loadSsab('Basic', bytes);                // ★bytes を受ける（fetch はホストの責務）
+await player.loadSsab(bytes, null, ssabUrl);    // ★bytes を受け、**アトラスまで揃える**（§8.1）
 player.setAnimation('idle');                    // 選択＝確保はここだけ
 player.play();                                  // 開始 / pause からの再開（§9.3）
 player.setTransform(x, y, scaleX, scaleY, rotation);
@@ -754,8 +755,13 @@ player.destroy(); surface.destroy();            // ★明示。実体は ctx に
 - **★テクスチャ供給は `ctx.addTextureFromBytes(hash, bytes)` が主経路**（✅ 実装済）。**device スコープなので1回で全 canvas・全 player に効く**（だから surface でも player でもなく context にある）。エンコード済みバイト列を `createImageBitmap(blob, {premultiplyAlpha:'premultiply'})` に通し、`copy_external_image_to_texture` で直接テクスチャへ入れて `set_texture` で登録する（CPU premul も 16 MB の一時コピーも通らない）。**両形態がここに集まる**:
   - embedded → **`player.embeddedTextures(pack?)`** = `{ hash, bytes }[]`（ssplayer-core の `extractEmbeddedTextures` と同型）。fetch は不要。
   - reference → **`player.textureRefs(pack?)`** = `{ hash, path, embedded }[]`（同 `extractTexturePaths`）。`embedded` が false のエントリを `new URL(path, ssabUrl)` で fetch して渡す。
-  - `examples/web/ss-context.js` の **`supplyTextures(ctx, player, {pack, baseUrl})`** が両方を1コールに畳む（＝ssplayer-core の `loadTextures`）。**`loadSsab` はアトラスを供給しない**——供給されるまで白フォールバックで描かれる（§8）。
-- **`ctx.hasTexture(hash)`** が「登録済みが勝つ」を JS 側から効かせるためのもの。デコードが JS に出た以上、N 体で1回に保つ判定もページ側に要る（Player 内部の flush は `decode_embedded_where` の述語で同じことを自前でやる）。`supplyTextures` はこれ＋in-flight マップで、同一 tick に2体追加しても1回しかデコードしない。
+- **★`player.loadSsab(bytes, pack?, baseUrl?)` がテクスチャまでロードする（✅ 実装済）**——`SS6PlayerForGodot` の `setSSABResource` と同じ形。**テクスチャロードは初期化に属し、アニメーション選択には属さない**（移植ガイド `30_core/10_initialization.ja.md` §3）。`setAnimation` は**同期のまま**で、モーション切り替えのたびに `Promise` を挟まない——これが置き場所を決める理由。
+  - `async` なのはブラウザ側の事情だけ（Godot の `ResourceLoader::load` は同期、`fetch` / `createImageBitmap` は非同期）。**非同期はこの1箇所に閉じ込める。**
+  - `pack` を省略すると `.ssab` 自身の名前を使う。**これが既定であるべき**——`ref_anime_pack`（§7.1）はエクスポータが書いた文字列で引くので、ホストが別名を付けると外部インスタンス参照が黙って解決されなくなる。
+  - `baseUrl` は `.ssab` の取得元。reference 形態のアトラスパスはこれを基準に解決する（既定は document の URL）。移植ガイド `20_design/10_preparation.ja.md`「ベースディレクトリの保持」。
+  - fetch は **`Promise.allSettled` で並列・ファイル単位**（hash 単位だと同一画像を2回落とす。上の §8.1 参照）。失敗は console 警告のうえ**続行**——`_load_external_ssabs` の `ERR_PRINT`＋`continue`、`PackResolver` の `console.warn`＋`continue` と同じ割り切り。
+  - `addSsab` も同形（サブアニメのセルはそのパック自身のアトラスを引くので、テクスチャも要る）。
+- **`ctx.hasTexture(hash)`** が「登録済みが勝つ」をホスト側から効かせるためのもの。`loadSsab` は自分でこれを見てから落としに行くので、**N 体で1回**は保たれる（Player 内部の flush が `decode_embedded_where` の述語で同じことをするのと同じ判定）。
 - **`ctx.addTextureFromBitmap(hash, bitmap)`** は自前のアセットパイプラインを持つホスト向け（`set_texture` / WebGL 版 `bindTextureSource` に相当）。**device 喪失復帰は供給側の責務**。対して `addTextureFromBytes` は**エンコード済みバイト列を保持**するので `restoreDevice` が自分で復元する（ピクセルではなくエンコード済みなので 2048² で 16 MB ではなく数百 KB。WebGL 版が `{kind:'bytes'}` を retain するのと同じ判断）。
 - **`ctx.addTexture(hash, rgba, w, h)`**（生 RGBA）は残置。CPU premul と `Retention::Retain` を通るので、エンコード済み画像を持っているなら `addTextureFromBytes` のほうが速く小さい。
 - **`surface.stats()`** がフレームカウンタを JS オブジェクトで返す（players / prims / drawCalls / mergeableDraws / redundantTextureBinds / uploadedBytes ＋ `timestamp-query` があれば `gpuPassTimeNs`）。**§14.2 は native でしか測っていない**——ブラウザで同じ数字を取る手段がこれ。`examples/web/index.html` の②が毎フレーム表示する。
