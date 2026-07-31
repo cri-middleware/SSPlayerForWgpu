@@ -26,7 +26,7 @@
 //!   alive until [`ss_scene_destroy`].
 
 use crate::host::{NativeHost, NativeHostConfig, PlayerId};
-use crate::player::{MissingKind, SSPlayer};
+use crate::player::{MissingKind, PlaybackDirection, PlaybackStyle, SSPlayer};
 use std::cell::RefCell;
 use std::ffi::{CStr, CString, c_char, c_void};
 use std::num::NonZeroIsize;
@@ -723,9 +723,9 @@ pub unsafe extern "C" fn ss_player_stop(handle: *mut SsPlayer) {
 
 /// Scale playback speed; 1.0 is the authored speed.
 ///
-/// Zero and negative values are **ignored** (the runtime keeps 1.0): direction
-/// is a separate playback setting the player does not expose yet, so a negative
-/// speed does not play backwards.
+/// Zero and negative values are **ignored** (the runtime keeps 1.0). To play
+/// backwards use `ss_player_set_playback_direction`, which is the separate
+/// setting that controls direction.
 ///
 /// # Safety
 /// `handle` must be a live handle or null.
@@ -743,6 +743,201 @@ pub unsafe extern "C" fn ss_player_set_speed(handle: *mut SsPlayer, speed: f32) 
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn ss_player_is_playing(handle: *mut SsPlayer) -> bool {
     unsafe { player(handle) }.map(|p| p.is_playing()).unwrap_or(false)
+}
+
+/// Whether playback is held in place. `ss_player_is_playing` stays true.
+///
+/// # Safety
+/// `handle` must be a live handle or null.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn ss_player_is_paused(handle: *mut SsPlayer) -> bool {
+    unsafe { player(handle) }.map(|p| p.is_paused()).unwrap_or(false)
+}
+
+/// Whether every configured loop has played. Sticky until the next play or
+/// `ss_player_set_animation`, and never true under an infinite loop.
+///
+/// # Safety
+/// `handle` must be a live handle or null.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn ss_player_is_finished(handle: *mut SsPlayer) -> bool {
+    unsafe { player(handle) }.map(|p| p.is_finished()).unwrap_or(false)
+}
+
+/// Whether the last `ss_scene_update` crossed a loop boundary. An edge: true
+/// only inside the update that crossed.
+///
+/// # Safety
+/// `handle` must be a live handle or null.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn ss_player_is_looped(handle: *mut SsPlayer) -> bool {
+    unsafe { player(handle) }.map(|p| p.is_looped()).unwrap_or(false)
+}
+
+/// Jump to `frame`. Fractional values are honoured.
+///
+/// # Safety
+/// `handle` must be a live handle or null.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn ss_player_seek(handle: *mut SsPlayer, frame: f32) {
+    if let Some(player) = unsafe { player(handle) } {
+        player.seek(frame);
+    }
+}
+
+/// Current playhead position, fractional. 0 when nothing is loaded.
+///
+/// # Safety
+/// `handle` must be a live handle or null.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn ss_player_frame_no(handle: *mut SsPlayer) -> f32 {
+    unsafe { player(handle) }.map(|p| p.frame_no()).unwrap_or(0.0)
+}
+
+/// First frame of the range being played; follows
+/// `ss_player_set_animation_section`.
+///
+/// # Safety
+/// `handle` must be a live handle or null.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn ss_player_start_frame(handle: *mut SsPlayer) -> i32 {
+    unsafe { player(handle) }.map(|p| p.start_frame()).unwrap_or(0)
+}
+
+/// Last frame of that range.
+///
+/// # Safety
+/// `handle` must be a live handle or null.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn ss_player_end_frame(handle: *mut SsPlayer) -> i32 {
+    unsafe { player(handle) }.map(|p| p.end_frame()).unwrap_or(0)
+}
+
+/// Length of that range, both ends inclusive.
+///
+/// # Safety
+/// `handle` must be a live handle or null.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn ss_player_total_frames(handle: *mut SsPlayer) -> i32 {
+    unsafe { player(handle) }.map(|p| p.total_frames()).unwrap_or(0)
+}
+
+/// `count` cycles then stop; `-1` (or `0`) loops forever. Under ping-pong one
+/// cycle is a full round trip.
+///
+/// # Safety
+/// `handle` must be a live handle or null.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn ss_player_set_loop_count(handle: *mut SsPlayer, count: i32) {
+    if let Some(player) = unsafe { player(handle) } {
+        player.set_loop_count(count);
+    }
+}
+
+/// The configured loop count.
+///
+/// # Safety
+/// `handle` must be a live handle or null.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn ss_player_loop_count(handle: *mut SsPlayer) -> i32 {
+    unsafe { player(handle) }.map(|p| p.loop_count()).unwrap_or(0)
+}
+
+/// How many cycles are left of it.
+///
+/// # Safety
+/// `handle` must be a live handle or null.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn ss_player_remaining_loops(handle: *mut SsPlayer) -> i32 {
+    unsafe { player(handle) }.map(|p| p.remaining_loops()).unwrap_or(0)
+}
+
+/// Override the advance rate in fps. Prefer `ss_player_set_speed`, which scales
+/// playback without replacing the authored rate.
+///
+/// # Safety
+/// `handle` must be a live handle or null.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn ss_player_set_frame_rate(handle: *mut SsPlayer, fps: i32) {
+    if let Some(player) = unsafe { player(handle) } {
+        player.set_frame_rate(fps);
+    }
+}
+
+/// The rate the animation advances at. 0 when nothing is loaded.
+///
+/// # Safety
+/// `handle` must be a live handle or null.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn ss_player_frame_rate(handle: *mut SsPlayer) -> i32 {
+    unsafe { player(handle) }.map(|p| p.frame_rate()).unwrap_or(0)
+}
+
+/// Restrict playback to `start..=end` of the current animation, so looping and
+/// ping-pong turn around inside that range.
+///
+/// Call it **after** `ss_player_set_animation`: frame numbers only mean
+/// something inside the animation they were measured in, and setting an
+/// animation rebuilds the tree and takes the section with it.
+///
+/// # Safety
+/// `handle` must be a live handle or null.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn ss_player_set_animation_section(handle: *mut SsPlayer, start: i32, end: i32) {
+    if let Some(player) = unsafe { player(handle) } {
+        player.set_animation_section(start, end);
+    }
+}
+
+/// `direction`: 0 forward, 1 backward. `style`: 0 normal, 1 ping-pong. Set as a
+/// pair — pass the current value for whichever you are not changing.
+///
+/// # Safety
+/// `handle` must be a live handle or null.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn ss_player_set_playback_direction(handle: *mut SsPlayer, direction: i32, style: i32) {
+    if let Some(player) = unsafe { player(handle) } {
+        player.set_playback_direction(PlaybackDirection::from_wire(direction), PlaybackStyle::from_wire(style));
+    }
+}
+
+/// 0 forward, 1 backward.
+///
+/// # Safety
+/// `handle` must be a live handle or null.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn ss_player_playback_direction(handle: *mut SsPlayer) -> i32 {
+    unsafe { player(handle) }.map(|p| p.playback_direction().as_wire()).unwrap_or(0)
+}
+
+/// 0 normal, 1 ping-pong.
+///
+/// # Safety
+/// `handle` must be a live handle or null.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn ss_player_playback_style(handle: *mut SsPlayer) -> i32 {
+    unsafe { player(handle) }.map(|p| p.playback_style().as_wire()).unwrap_or(0)
+}
+
+/// True (the default) keeps playback on the wall clock by dropping frames under
+/// load; false advances exactly one frame per `ss_scene_update`.
+///
+/// # Safety
+/// `handle` must be a live handle or null.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn ss_player_set_skip_frames(handle: *mut SsPlayer, skip: bool) {
+    if let Some(player) = unsafe { player(handle) } {
+        player.set_skip_frames(skip);
+    }
+}
+
+/// See `ss_player_set_skip_frames`.
+///
+/// # Safety
+/// `handle` must be a live handle or null.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn ss_player_skip_frames(handle: *mut SsPlayer) -> bool {
+    unsafe { player(handle) }.map(|p| p.skip_frames()).unwrap_or(true)
 }
 
 /// How many animations the main pack holds (0 if nothing is loaded).
