@@ -17,7 +17,6 @@
 use ssab::ssab::ss::format::root_as_ss_anime_binary_unchecked;
 use ssruntime::error::SSRuntimeError;
 use ssruntime::{SsabData, SsabResource};
-#[cfg(feature = "embedded")]
 use std::collections::HashMap;
 use std::sync::Arc;
 
@@ -36,6 +35,27 @@ pub struct EmbeddedTexture {
     pub rgba: Vec<u8>,
     pub width: u32,
     pub height: u32,
+}
+
+/// One atlas an embedded `.ssab` carries, still in the form the exporter wrote
+/// it: **encoded image bytes (PNG), not pixels** (SPEC §8.1).
+///
+/// This is the *parsing* half of embedded support, and it deliberately has no
+/// decoder behind it — which is why it is available without the `embedded`
+/// feature. The sibling players split the same way: `ssplayer-core`'s
+/// `extractEmbeddedTextures` hands out bytes and `ssplayer-webgl` decodes them
+/// with `createImageBitmap`, which is how the WebGL player supports embedded
+/// packs while shipping no image decoder of its own. A host with a decoder
+/// already — a browser, or an engine's asset pipeline — wants this;
+/// [`SSPack::decode_embedded`] is for hosts that would rather the player do it.
+///
+/// The bytes borrow the pack's `.ssab`, so nothing is copied to produce them.
+pub struct EmbeddedImage<'a> {
+    /// The cellmap's `name_hash` — what `DrawBatch.texture_hash` carries, and the
+    /// key [`crate::SSRenderer`] looks textures up by.
+    pub hash: u32,
+    /// The encoded image exactly as the exporter embedded it.
+    pub bytes: &'a [u8],
 }
 
 /// One atlas a pack asks for, described the way the `.ssab` itself describes it
@@ -152,23 +172,19 @@ impl SSPack {
         self.resource.resource().map(|r| r.get_animation_names()).unwrap_or_default()
     }
 
-    /// Decode the atlases this pack carries (SPEC §8.1). Empty for a
-    /// reference-mode pack, and empty without the `embedded` feature.
+    /// The encoded atlases this pack carries, in cellmap order (SPEC §8.1).
+    /// Empty for a reference-mode pack.
     ///
-    /// Decoding is not cached: the pixels are handed over so the caller can put
-    /// them wherever GPU memory is owned (`upload_texture`, or an engine's asset
-    /// system, §8.2). Call it once per pack, not once per player.
-    pub fn decode_embedded(&self) -> Vec<EmbeddedTexture> {
-        self.decode_embedded_where(|_| true)
-    }
-
-    /// [`SSPack::decode_embedded`], restricted to the hashes `wanted` accepts.
+    /// Parsing only — no image decoder is involved, so this works in every build
+    /// and is the route a host with its own decoder takes (see [`EmbeddedImage`]).
+    /// On the web that host is the browser: `createImageBitmap` on these bytes
+    /// decodes off the main thread and premultiplies for free, which
+    /// [`SSPack::decode_embedded`] cannot do and pays for in wasm size.
     ///
-    /// The filter runs *before* the PNG decode, which is the whole point: a player
-    /// joining a scene where its atlas is already registered skips the decode
-    /// entirely, so N players of one pack cost one decode and one upload.
-    #[cfg(feature = "embedded")]
-    pub fn decode_embedded_where(&self, wanted: impl Fn(u32) -> bool) -> Vec<EmbeddedTexture> {
+    /// The two hashes are different things and must not be swapped (SPEC §8.1):
+    /// the blob is keyed by `image_path_hash`, and what comes back is keyed by
+    /// `name_hash` — the one a draw batch asks for.
+    pub fn embedded_images(&self) -> Vec<EmbeddedImage<'_>> {
         if !self.has_embedded {
             return Vec::new();
         }
@@ -186,21 +202,46 @@ impl SSPack {
 
         let mut out = Vec::new();
         for cm in cellmaps {
-            let hash = cm.name_hash();
-            if !wanted(hash) {
+            if let Some(&bytes) = bytes_by_hash.get(&cm.image_path_hash()) {
+                out.push(EmbeddedImage { hash: cm.name_hash(), bytes });
+            }
+        }
+        out
+    }
+
+    /// Decode the atlases this pack carries (SPEC §8.1). Empty for a
+    /// reference-mode pack, and empty without the `embedded` feature.
+    ///
+    /// Decoding is not cached: the pixels are handed over so the caller can put
+    /// them wherever GPU memory is owned (`upload_texture`, or an engine's asset
+    /// system, §8.2). Call it once per pack, not once per player.
+    pub fn decode_embedded(&self) -> Vec<EmbeddedTexture> {
+        self.decode_embedded_where(|_| true)
+    }
+
+    /// [`SSPack::decode_embedded`], restricted to the hashes `wanted` accepts.
+    ///
+    /// The filter runs *before* the PNG decode, which is the whole point: a player
+    /// joining a scene where its atlas is already registered skips the decode
+    /// entirely, so N players of one pack cost one decode and one upload.
+    #[cfg(feature = "embedded")]
+    pub fn decode_embedded_where(&self, wanted: impl Fn(u32) -> bool) -> Vec<EmbeddedTexture> {
+        let mut out = Vec::new();
+        for embedded in self.embedded_images() {
+            if !wanted(embedded.hash) {
                 continue;
             }
-            let Some(png) = bytes_by_hash.get(&cm.image_path_hash()) else { continue };
-            let Ok(img) = image::load_from_memory(png) else { continue };
+            let Ok(img) = image::load_from_memory(embedded.bytes) else { continue };
             let rgba = img.to_rgba8();
             let (width, height) = rgba.dimensions();
-            out.push(EmbeddedTexture { hash, rgba: rgba.into_raw(), width, height });
+            out.push(EmbeddedTexture { hash: embedded.hash, rgba: rgba.into_raw(), width, height });
         }
         out
     }
 
     /// Without the `embedded` feature the player carries no image decoder, so the
-    /// host decodes instead — in the browser that is `createImageBitmap` (SPEC §10).
+    /// host decodes instead — in the browser that is `createImageBitmap` over
+    /// [`SSPack::embedded_images`] (SPEC §10), which still needs no sibling files.
     #[cfg(not(feature = "embedded"))]
     pub fn decode_embedded_where(&self, _wanted: impl Fn(u32) -> bool) -> Vec<EmbeddedTexture> {
         Vec::new()

@@ -26,6 +26,70 @@ export function sharedContext() {
   return contextPromise;
 }
 
+/**
+ * Give a freshly loaded pack its atlas textures (SPEC §8.1, §8.2).
+ *
+ * `loadSsab` registers playback data and nothing else — the player carries no
+ * image decoder and cannot fetch, so until this resolves every part draws
+ * against the 1x1 white fallback. Both `.ssab` forms end at the same call:
+ *
+ *   embedded  — the images ride inside the `.ssab`. `embeddedTextures()` hands
+ *               out the encoded bytes; nothing is fetched.
+ *   reference — only the `.ssab` knows where the exporter put each atlas, and
+ *               only the page can read it. `textureRefs()` answers "what, and
+ *               from where", relative to the `.ssab`'s own URL.
+ *
+ * `addTextureFromBytes` then decodes with `createImageBitmap` — off the main
+ * thread, premultiplied, and using the decoder the browser already ships. That
+ * is why the wasm carries none: bundling one cost ~29% of the transferred bytes
+ * to do the same job worse. Same division of labour as `ssplayer-core`'s
+ * `extractEmbeddedTextures` / `extractTexturePaths` + `loadTextures`.
+ *
+ * @param baseUrl the URL the `.ssab` itself was fetched from; reference-mode
+ *                paths resolve against it. Omit for a pack known to be embedded.
+ */
+export async function supplyTextures(ctx, player, { pack, baseUrl } = {}) {
+  const jobs = player.embeddedTextures(pack).map(({ hash, bytes }) => once(ctx, hash, () => ctx.addTextureFromBytes(hash, bytes)));
+
+  if (baseUrl) {
+    for (const ref of player.textureRefs(pack)) {
+      if (ref.embedded) continue;
+      jobs.push(once(ctx, ref.hash, async () => {
+        const res = await fetch(new URL(ref.path, baseUrl));
+        if (!res.ok) throw new Error(`atlas ${ref.path}: ${res.status} ${res.statusText}`);
+        await ctx.addTextureFromBytes(ref.hash, new Uint8Array(await res.arrayBuffer()));
+      }));
+    }
+  }
+
+  await Promise.all(jobs);
+}
+
+/**
+ * One decode per atlas per page, however many players ask for it.
+ *
+ * The renderer's texture map is device-scoped (SPEC §1.2), so `hasTexture`
+ * settles anything a previous player already registered — this is the "registered
+ * wins" rule the player-side flush applies for itself, applied from JS now that
+ * the decoding is out here. The pending map covers the window the flag cannot:
+ * two players added in the same tick would both see "not yet" and decode the
+ * same atlas twice. `SSWebGLTextureCache` exists in the WebGL player for exactly
+ * this, one layer down.
+ */
+const inFlight = new WeakMap();
+
+function once(ctx, hash, supply) {
+  if (ctx.hasTexture(hash)) return Promise.resolve();
+  let pending = inFlight.get(ctx);
+  if (!pending) inFlight.set(ctx, (pending = new Map()));
+  let job = pending.get(hash);
+  if (!job) {
+    job = supply().finally(() => pending.delete(hash));
+    pending.set(hash, job);
+  }
+  return job;
+}
+
 let restorePromise = null;
 
 /**
