@@ -37,6 +37,7 @@
 //! `extractEmbeddedTextures` + `ssplayer-webgl`'s `loadTextureFromBytes`, and the
 //! reason this face is ~30% smaller over the wire than one that bundles `image`.
 
+use crate::events::{SignalValue, SsEvent};
 use crate::pack::SSPack;
 use crate::player::{AssetLoader, BlendOp, MissingKind, OverridePriority, PlaybackDirection, PlaybackStyle, SSPlayer};
 use crate::renderer::{AlphaMode, Retention, SSRenderer};
@@ -1229,6 +1230,48 @@ impl SsPlayerWeb {
         with_player!(self, |p| p.part_count())
     }
 
+    // --- Events (SPEC §9.5) ---
+    //
+    // Polled after `frame()`, which is what advanced the clock. All three
+    // describe that tick and are replaced by the next one.
+
+    /// Whether the last `frame()` crossed a loop boundary. One report per call
+    /// however many cycles it crossed.
+    #[wasm_bindgen(js_name = loopedLastUpdate)]
+    pub fn looped_last_update(&self) -> Result<bool, JsValue> {
+        with_player!(self, |p| p.looped_last_update())
+    }
+
+    /// Whether the last `frame()` **completed** playback — true for exactly one
+    /// call, unlike the sticky `isFinished`. Never true under an infinite loop,
+    /// and not raised by `stop()`.
+    #[wasm_bindgen(js_name = finishedLastUpdate)]
+    pub fn finished_last_update(&self) -> Result<bool, JsValue> {
+        with_player!(self, |p| p.finished_last_update())
+    }
+
+    /// Timeline events the last `frame()` crossed, as an array of plain objects
+    /// tagged by `kind`:
+    ///
+    /// ```js
+    /// { kind: 'userData', partIndex, integer?, rect?, point?, text? }
+    /// { kind: 'signal',   partIndex, commandId, params: [{ id, value }] }
+    /// { kind: 'audio',    partIndex, soundName, soundListNameHash, soundNameHash, loopNum }
+    /// ```
+    ///
+    /// **Frames skipped over are still represented**: a long tick reports every
+    /// frame it stepped through, not just the one it landed on. Empty on a tick
+    /// that crossed nothing, and on a hidden player, which does not advance.
+    pub fn events(&self) -> Result<js_sys::Array, JsValue> {
+        with_player!(self, |p| {
+            let out = js_sys::Array::new();
+            for event in p.events() {
+                out.push(&event_to_js(event));
+            }
+            out
+        })
+    }
+
     /// The part's transform on the current frame as the 2D affine
     /// `[m00, m01, m10, m11, tx, ty]` — the same six numbers `ssplayer-webgl`'s
     /// `getPartTransform` returns, in animation-local (Y-down) space, with
@@ -1290,4 +1333,64 @@ impl SsPlayerWeb {
             entry.players.remove(self.id);
         }
     }
+}
+
+/// One event as a plain JS object, tagged by `kind`.
+///
+/// Hand-built rather than serde-derived: the `web` feature carries no
+/// serialisation crate, and one small object per event is not worth adding one
+/// for. Optional UserData fields are simply absent when unset, which is what
+/// distinguishes "the animator left it blank" from "it is zero".
+fn event_to_js(event: &SsEvent) -> JsValue {
+    let out = js_sys::Object::new();
+    let set = |key: &str, value: JsValue| {
+        let _ = js_sys::Reflect::set(&out, &JsValue::from_str(key), &value);
+    };
+    match event {
+        SsEvent::UserData(u) => {
+            set("kind", JsValue::from_str("userData"));
+            set("partIndex", u.part_index.into());
+            if let Some(v) = u.integer {
+                set("integer", v.into());
+            }
+            if let Some(r) = u.rect {
+                set("rect", js_sys::Float32Array::from(&r[..]).into());
+            }
+            if let Some(p) = u.point {
+                set("point", js_sys::Float32Array::from(&p[..]).into());
+            }
+            if let Some(t) = &u.text {
+                set("text", JsValue::from_str(t));
+            }
+        }
+        SsEvent::Signal(s) => {
+            set("kind", JsValue::from_str("signal"));
+            set("partIndex", s.part_index.into());
+            set("commandId", JsValue::from_str(&s.command_id));
+            let params = js_sys::Array::new();
+            for param in &s.params {
+                let entry = js_sys::Object::new();
+                let _ = js_sys::Reflect::set(&entry, &JsValue::from_str("id"), &JsValue::from_str(&param.id));
+                let value = match &param.value {
+                    SignalValue::Bool(b) => JsValue::from_bool(*b),
+                    SignalValue::Index(i) | SignalValue::Integer(i) => (*i).into(),
+                    SignalValue::Floating(f) => (*f).into(),
+                    SignalValue::Text(t) => JsValue::from_str(t),
+                    SignalValue::None => JsValue::NULL,
+                };
+                let _ = js_sys::Reflect::set(&entry, &JsValue::from_str("value"), &value);
+                params.push(&entry);
+            }
+            set("params", params.into());
+        }
+        SsEvent::Audio(a) => {
+            set("kind", JsValue::from_str("audio"));
+            set("partIndex", a.part_index.into());
+            set("soundName", JsValue::from_str(&a.sound_name));
+            set("soundListNameHash", a.sound_list_name_hash.into());
+            set("soundNameHash", a.sound_name_hash.into());
+            set("loopNum", a.loop_num.into());
+        }
+    }
+    out.into()
 }

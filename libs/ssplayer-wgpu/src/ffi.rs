@@ -25,6 +25,7 @@
 //! * Nothing here retains the window; the caller must keep it (and its layer)
 //!   alive until [`ss_scene_destroy`].
 
+use crate::events::{SignalValue, SsEvent};
 use crate::host::{NativeHost, NativeHostConfig, PlayerId};
 use crate::player::{BlendOp, MissingKind, OverridePriority, PlaybackDirection, PlaybackStyle, SSPlayer};
 use std::cell::RefCell;
@@ -166,6 +167,92 @@ pub struct SsMissingAsset {
     pub name: *const c_char,
 }
 
+/// What kind of thing an `ss_event_t` is; read it before the payload.
+pub const SS_EVENT_USER_DATA: u32 = 0;
+/// See `SS_EVENT_USER_DATA`.
+pub const SS_EVENT_SIGNAL: u32 = 1;
+/// See `SS_EVENT_USER_DATA`.
+pub const SS_EVENT_AUDIO: u32 = 2;
+
+/// One timeline event, flattened for the ABI.
+///
+/// The three kinds share one struct rather than a real union, because a union
+/// across the ABI costs the caller a cast for no gain at this size. `kind` says
+/// which fields carry anything; the rest are zeroed.
+///
+/// `text` is owned by the scene and valid until the next `ss_player_event_at`
+/// on it — copy it if you need to keep it. Never null.
+#[repr(C)]
+#[derive(Clone, Copy)]
+pub struct SsEventData {
+    /// One of the `SS_EVENT_*` constants.
+    pub kind: u32,
+    /// Which part raised it.
+    pub part_index: u32,
+
+    /// UserData: whether the animator filled each optional field in. Unset is
+    /// not the same as zero, which is what these distinguish.
+    pub has_integer: bool,
+    pub has_rect: bool,
+    pub has_point: bool,
+    pub has_text: bool,
+    /// UserData, when `has_integer`.
+    pub integer: i32,
+    /// UserData, when `has_rect`: `[x1, y1, x2, y2]` — two corners, not origin+size.
+    pub rect: [f32; 4],
+    /// UserData, when `has_point`.
+    pub point: [f32; 2],
+
+    /// UserData's `str` (when `has_text`), Signal's `command_id`, or Audio's
+    /// `sound_name`. Empty for the kinds that have none.
+    pub text: *const c_char,
+
+    /// Signal: how many parameters `ss_player_event_signal_param_at` will serve.
+    pub param_count: u32,
+
+    /// Audio: addresses the `SoundList` and the `SoundFile` within it.
+    pub sound_list_name_hash: u32,
+    pub sound_name_hash: u32,
+    /// Audio: how many times to play. A count, never zero — SpriteStudio has no
+    /// infinite audio loop.
+    pub loop_num: i32,
+}
+
+/// Which field of an `ss_signal_param_t` carries the value.
+pub const SS_SIGNAL_VALUE_NONE: u32 = 0;
+/// See `SS_SIGNAL_VALUE_NONE`.
+pub const SS_SIGNAL_VALUE_BOOL: u32 = 1;
+/// A choice from a list, as its index. See `SS_SIGNAL_VALUE_NONE`.
+pub const SS_SIGNAL_VALUE_INDEX: u32 = 2;
+/// See `SS_SIGNAL_VALUE_NONE`.
+pub const SS_SIGNAL_VALUE_INTEGER: u32 = 3;
+/// See `SS_SIGNAL_VALUE_NONE`.
+pub const SS_SIGNAL_VALUE_FLOATING: u32 = 4;
+/// See `SS_SIGNAL_VALUE_NONE`.
+pub const SS_SIGNAL_VALUE_TEXT: u32 = 5;
+
+/// One signal parameter, flattened for the ABI. `value_type` says which field
+/// to read; `SS_SIGNAL_VALUE_NONE` means the parameter exists but was left
+/// unset.
+///
+/// `id` and `text` are owned by the scene and valid until the next
+/// `ss_player_event_signal_param_at` on it. Never null.
+#[repr(C)]
+#[derive(Clone, Copy)]
+pub struct SsSignalParamData {
+    pub id: *const c_char,
+    /// One of the `SS_SIGNAL_VALUE_*` constants.
+    pub value_type: u32,
+    /// When `value_type` is `BOOL`.
+    pub bool_value: bool,
+    /// When `value_type` is `INDEX` or `INTEGER`.
+    pub int_value: i32,
+    /// When `value_type` is `FLOATING`.
+    pub float_value: f32,
+    /// When `value_type` is `TEXT`.
+    pub text: *const c_char,
+}
+
 /// An atlas that did not load. The parts using it draw against the white
 /// fallback, so they appear as silhouettes.
 pub const SS_MISSING_TEXTURE: u32 = 0;
@@ -192,6 +279,13 @@ pub struct SsScene {
     /// is separate: a caller walking the missing list while reading texture paths
     /// must not have one invalidate the other.
     missing_scratch: CString,
+    /// Backs `ss_player_event_at`'s `text`, and the two below back
+    /// `ss_player_event_signal_param_at`. Three separate slots for the same
+    /// reason the ones above are separate: reading an event's payload must not
+    /// invalidate the parameter a caller is part-way through walking.
+    event_text_scratch: CString,
+    param_id_scratch: CString,
+    param_text_scratch: CString,
 }
 
 /// Opaque player handle: which scene, and which player within it.
@@ -359,7 +453,16 @@ pub unsafe extern "C" fn ss_scene_create(desc: *const SsSceneDesc) -> *mut SsSce
     // SAFETY: forwarded from this function's contract — the caller keeps the
     // window alive until `ss_scene_destroy`.
     match unsafe { NativeHost::new(target, &config) } {
-        Ok(host) => Box::into_raw(Box::new(SsScene { host, handles: Vec::new(), name_scratch: CString::default(), path_scratch: CString::default(), missing_scratch: CString::default() })),
+        Ok(host) => Box::into_raw(Box::new(SsScene {
+            host,
+            handles: Vec::new(),
+            name_scratch: CString::default(),
+            path_scratch: CString::default(),
+            missing_scratch: CString::default(),
+            event_text_scratch: CString::default(),
+            param_id_scratch: CString::default(),
+            param_text_scratch: CString::default(),
+        })),
         Err(msg) => {
             set_last_error(msg);
             std::ptr::null_mut()
@@ -1099,6 +1202,189 @@ pub unsafe extern "C" fn ss_player_clear_all_part_overrides(handle: *mut SsPlaye
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn ss_player_part_count(handle: *mut SsPlayer) -> u32 {
     unsafe { player(handle) }.map(|p| p.part_count() as u32).unwrap_or(0)
+}
+
+// --- Events (SPEC §9.5) ---
+//
+// Polled after `ss_scene_update`, which is what advanced the clock. Everything
+// below describes that tick and is replaced by the next one, so a host that
+// wants to keep a payload copies it before updating again.
+//
+// The strings are borrowed from the player and stay valid until the next
+// `ss_scene_update` on it — the same rule `ss_player_texture_at` follows.
+
+/// Whether the last `ss_scene_update` crossed a loop boundary. One report per
+/// update however many cycles it crossed.
+///
+/// # Safety
+/// `handle` must be a live handle or null.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn ss_player_looped_last_update(handle: *mut SsPlayer) -> bool {
+    unsafe { player(handle) }.map(|p| p.looped_last_update()).unwrap_or(false)
+}
+
+/// Whether the last `ss_scene_update` **completed** playback: true for exactly
+/// one update, unlike the sticky `ss_player_is_finished`. Never true under an
+/// infinite loop, and not raised by `ss_player_stop`.
+///
+/// # Safety
+/// `handle` must be a live handle or null.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn ss_player_finished_last_update(handle: *mut SsPlayer) -> bool {
+    unsafe { player(handle) }.map(|p| p.finished_last_update()).unwrap_or(false)
+}
+
+/// How many timeline events the last `ss_scene_update` crossed.
+///
+/// **Frames skipped over are included**: a long tick reports every frame it
+/// stepped through, not just the one it landed on.
+///
+/// # Safety
+/// `handle` must be a live handle or null.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn ss_player_event_count(handle: *mut SsPlayer) -> u32 {
+    unsafe { player(handle) }.map(|p| p.events().len() as u32).unwrap_or(0)
+}
+
+/// Fill `out` with the `index`-th event of the last update.
+///
+/// Read `kind` first: it says which of the payload fields carry anything.
+///
+/// Returns `SS_OK`, or `SS_ERROR_INVALID_ARGUMENT` when the handle or `out` is
+/// null or `index` is out of range, leaving `out` untouched.
+///
+/// # Safety
+/// `handle` must be a live handle or null; `out` must point at a writable
+/// `ss_event_t`.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn ss_player_event_at(handle: *mut SsPlayer, index: u32, out: *mut SsEventData) -> i32 {
+    if out.is_null() {
+        return fail(SS_ERROR_INVALID_ARGUMENT, "out is null");
+    }
+    let Some((scene, id)) = (unsafe { scene_of(handle) }) else { return fail(SS_ERROR_INVALID_ARGUMENT, "player handle is null or destroyed") };
+    // Cloned before the scratch is touched: the borrow of the player has to end
+    // before `scene` can be used mutably to own the string handed back.
+    let Some(event) = scene.host.player_mut(id).and_then(|p| p.events().get(index as usize)).cloned() else {
+        return fail(SS_ERROR_INVALID_ARGUMENT, format!("event {index} is out of range"));
+    };
+
+    let mut data = SsEventData {
+        kind: 0,
+        part_index: event.part_index(),
+        has_integer: false,
+        has_rect: false,
+        has_point: false,
+        has_text: false,
+        integer: 0,
+        rect: [0.0; 4],
+        point: [0.0; 2],
+        text: std::ptr::null(),
+        param_count: 0,
+        sound_list_name_hash: 0,
+        sound_name_hash: 0,
+        loop_num: 0,
+    };
+    let text = match &event {
+        SsEvent::UserData(u) => {
+            data.kind = SS_EVENT_USER_DATA;
+            data.has_integer = u.integer.is_some();
+            data.has_rect = u.rect.is_some();
+            data.has_point = u.point.is_some();
+            data.has_text = u.text.is_some();
+            data.integer = u.integer.unwrap_or(0);
+            data.rect = u.rect.unwrap_or([0.0; 4]);
+            data.point = u.point.unwrap_or([0.0; 2]);
+            u.text.clone().unwrap_or_default()
+        }
+        SsEvent::Signal(sig) => {
+            data.kind = SS_EVENT_SIGNAL;
+            data.param_count = sig.params.len() as u32;
+            sig.command_id.clone()
+        }
+        SsEvent::Audio(a) => {
+            data.kind = SS_EVENT_AUDIO;
+            data.sound_list_name_hash = a.sound_list_name_hash;
+            data.sound_name_hash = a.sound_name_hash;
+            data.loop_num = a.loop_num;
+            a.sound_name.clone()
+        }
+    };
+
+    scene.event_text_scratch = CString::new(text).unwrap_or_default();
+    data.text = scene.event_text_scratch.as_ptr();
+    unsafe { out.write(data) };
+    SS_OK
+}
+
+/// How many parameters the `index`-th event carries, or 0 when it is not a
+/// signal.
+///
+/// # Safety
+/// `handle` must be a live handle or null.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn ss_player_event_signal_param_count(handle: *mut SsPlayer, index: u32) -> u32 {
+    let Some(player) = (unsafe { player(handle) }) else { return 0 };
+    match player.events().get(index as usize) {
+        Some(SsEvent::Signal(s)) => s.params.len() as u32,
+        _ => 0,
+    }
+}
+
+/// Fill `out` with parameter `param` of the `index`-th event, which must be a
+/// signal.
+///
+/// Returns `SS_OK`, or `SS_ERROR_INVALID_ARGUMENT` when either index is out of
+/// range or the event is not a signal, leaving `out` untouched.
+///
+/// # Safety
+/// `handle` must be a live handle or null; `out` must point at a writable
+/// `ss_signal_param_t`.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn ss_player_event_signal_param_at(handle: *mut SsPlayer, index: u32, param: u32, out: *mut SsSignalParamData) -> i32 {
+    if out.is_null() {
+        return fail(SS_ERROR_INVALID_ARGUMENT, "out is null");
+    }
+    let Some((scene, id)) = (unsafe { scene_of(handle) }) else { return fail(SS_ERROR_INVALID_ARGUMENT, "player handle is null or destroyed") };
+    let found = scene.host.player_mut(id).and_then(|p| match p.events().get(index as usize) {
+        Some(SsEvent::Signal(s)) => s.params.get(param as usize).cloned(),
+        _ => None,
+    });
+    let Some(p) = found else {
+        return fail(SS_ERROR_INVALID_ARGUMENT, format!("event {index} parameter {param} is out of range, or the event is not a signal"));
+    };
+
+    let mut data = SsSignalParamData { id: std::ptr::null(), value_type: SS_SIGNAL_VALUE_NONE, bool_value: false, int_value: 0, float_value: 0.0, text: std::ptr::null() };
+    let mut text = String::new();
+    match &p.value {
+        SignalValue::Bool(b) => {
+            data.value_type = SS_SIGNAL_VALUE_BOOL;
+            data.bool_value = *b;
+        }
+        SignalValue::Index(i) => {
+            data.value_type = SS_SIGNAL_VALUE_INDEX;
+            data.int_value = *i;
+        }
+        SignalValue::Integer(i) => {
+            data.value_type = SS_SIGNAL_VALUE_INTEGER;
+            data.int_value = *i;
+        }
+        SignalValue::Floating(f) => {
+            data.value_type = SS_SIGNAL_VALUE_FLOATING;
+            data.float_value = *f;
+        }
+        SignalValue::Text(t) => {
+            data.value_type = SS_SIGNAL_VALUE_TEXT;
+            text = t.clone();
+        }
+        SignalValue::None => {}
+    }
+
+    scene.param_id_scratch = CString::new(p.id).unwrap_or_default();
+    scene.param_text_scratch = CString::new(text).unwrap_or_default();
+    data.id = scene.param_id_scratch.as_ptr();
+    data.text = scene.param_text_scratch.as_ptr();
+    unsafe { out.write(data) };
+    SS_OK
 }
 
 /// Write the part's current-frame transform into `out` as the 2D affine
