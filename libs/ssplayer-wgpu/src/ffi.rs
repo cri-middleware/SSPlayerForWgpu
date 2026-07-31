@@ -26,7 +26,7 @@
 //!   alive until [`ss_scene_destroy`].
 
 use crate::host::{NativeHost, NativeHostConfig, PlayerId};
-use crate::player::SSPlayer;
+use crate::player::{MissingKind, SSPlayer};
 use std::cell::RefCell;
 use std::ffi::{CStr, CString, c_char, c_void};
 use std::num::NonZeroIsize;
@@ -150,6 +150,28 @@ pub struct SsTextureRef {
     pub path: *const c_char,
 }
 
+/// Something a load needed and did not get (SPEC §8.1), flattened for the ABI.
+/// What `ss_player_missing_at` fills in.
+#[repr(C)]
+#[derive(Clone, Copy)]
+pub struct SsMissingAsset {
+    /// `SS_MISSING_TEXTURE` or `SS_MISSING_PACK`.
+    pub kind: u32,
+    /// For a texture, the key a draw batch will ask for. Zero for a pack.
+    pub hash: u32,
+    /// The path asked for, or the pack's name.
+    ///
+    /// Owned by the scene and valid until the next `ss_player_missing_at` on it;
+    /// copy it if you need to keep it. Never null.
+    pub name: *const c_char,
+}
+
+/// An atlas that did not load. The parts using it draw against the white
+/// fallback, so they appear as silhouettes.
+pub const SS_MISSING_TEXTURE: u32 = 0;
+/// An animation pack that did not load. The instance parts playing it do not appear.
+pub const SS_MISSING_PACK: u32 = 1;
+
 /// Opaque scene handle: one window's [`NativeHost`], the player handles it has
 /// issued, and the buffer backing the string `ss_player_animation_name` hands
 /// back to C.
@@ -166,6 +188,10 @@ pub struct SsScene {
     /// two "valid until the next call" contracts do not invalidate each other:
     /// walking a pack's textures and its animation names interleaved is normal.
     path_scratch: CString,
+    /// Backs `ss_player_missing_at`'s `name`, for the same reason `path_scratch`
+    /// is separate: a caller walking the missing list while reading texture paths
+    /// must not have one invalidate the other.
+    missing_scratch: CString,
 }
 
 /// Opaque player handle: which scene, and which player within it.
@@ -333,7 +359,7 @@ pub unsafe extern "C" fn ss_scene_create(desc: *const SsSceneDesc) -> *mut SsSce
     // SAFETY: forwarded from this function's contract — the caller keeps the
     // window alive until `ss_scene_destroy`.
     match unsafe { NativeHost::new(target, &config) } {
-        Ok(host) => Box::into_raw(Box::new(SsScene { host, handles: Vec::new(), name_scratch: CString::default(), path_scratch: CString::default() })),
+        Ok(host) => Box::into_raw(Box::new(SsScene { host, handles: Vec::new(), name_scratch: CString::default(), path_scratch: CString::default(), missing_scratch: CString::default() })),
         Err(msg) => {
             set_last_error(msg);
             std::ptr::null_mut()
@@ -586,6 +612,58 @@ pub unsafe extern "C" fn ss_player_texture_at(handle: *mut SsPlayer, pack_name: 
     };
     scene.path_scratch = path;
     unsafe { out.write(SsTextureRef { hash: texture.hash, embedded: texture.embedded, path: scene.path_scratch.as_ptr() }) };
+    SS_OK
+}
+
+/// How many things the player's last load could not get (SPEC §8.1).
+///
+/// `ss_player_load` reports an error only when the `.ssab` itself is unreadable —
+/// one missing atlas must not cost you the character — so this is how a caller
+/// tells a complete load from one that played anyway:
+///
+/// ```c
+/// if (ss_player_load(player, path) != SS_OK) {
+///     /* the .ssab itself */
+/// } else if (ss_player_missing_count(player) > 0) {
+///     /* it plays, but something is a silhouette or absent */
+/// }
+/// ```
+///
+/// Describes the most recent load, not the player's history. Zero for a null or
+/// destroyed handle, which is indistinguishable from success — check the load's
+/// own return value for that.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn ss_player_missing_count(handle: *mut SsPlayer) -> u32 {
+    unsafe { player(handle) }.map(|p| p.missing_assets().len() as u32).unwrap_or(0)
+}
+
+/// Detail of one entry in the list `ss_player_missing_count` sizes.
+///
+/// Writes `out` and returns `SS_OK`, or leaves it untouched and reports why.
+///
+/// # Safety
+/// `out` must point at a writable `ss_missing_asset_t`.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn ss_player_missing_at(handle: *mut SsPlayer, index: u32, out: *mut SsMissingAsset) -> i32 {
+    if out.is_null() {
+        return fail(SS_ERROR_INVALID_ARGUMENT, "out is null");
+    }
+    let Some((scene, id)) = (unsafe { scene_of(handle) }) else { return fail(SS_ERROR_INVALID_ARGUMENT, "player handle is null or destroyed") };
+
+    // Copied out before the scratch is touched: the borrow of the player ends
+    // here, and `scene` is needed mutably to own the string handed back.
+    let Some(missing) = scene.host.player_mut(id).and_then(|p| p.missing_assets().get(index as usize)).cloned() else {
+        return fail(SS_ERROR_INVALID_ARGUMENT, format!("nothing missing at index {index}"));
+    };
+    let kind = match missing.kind {
+        MissingKind::Texture => SS_MISSING_TEXTURE,
+        MissingKind::Pack => SS_MISSING_PACK,
+    };
+    let Ok(name) = CString::new(missing.name) else {
+        return fail(SS_ERROR_INVALID_ARGUMENT, "name contains an interior NUL");
+    };
+    scene.missing_scratch = name;
+    unsafe { out.write(SsMissingAsset { kind, hash: missing.hash, name: scene.missing_scratch.as_ptr() }) };
     SS_OK
 }
 

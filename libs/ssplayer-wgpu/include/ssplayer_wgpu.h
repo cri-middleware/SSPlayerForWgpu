@@ -73,6 +73,17 @@
 #define SS_BACKEND_VULKAN 3
 
 /*
+ An atlas that did not load. The parts using it draw against the white
+ fallback, so they appear as silhouettes.
+ */
+#define SS_MISSING_TEXTURE 0
+
+/*
+ An animation pack that did not load. The instance parts playing it do not appear.
+ */
+#define SS_MISSING_PACK 1
+
+/*
  Opaque player handle: which scene, and which player within it.
 
  Not a pointer into the scene's player list. That list moves as it grows, and
@@ -174,6 +185,28 @@ typedef struct {
      */
     const char *path;
 } ss_texture_ref_t;
+
+/*
+ Something a load needed and did not get (SPEC §8.1), flattened for the ABI.
+ What `ss_player_missing_at` fills in.
+ */
+typedef struct {
+    /*
+     `SS_MISSING_TEXTURE` or `SS_MISSING_PACK`.
+     */
+    uint32_t kind;
+    /*
+     For a texture, the key a draw batch will ask for. Zero for a pack.
+     */
+    uint32_t hash;
+    /*
+     The path asked for, or the pack's name.
+
+     Owned by the scene and valid until the next `ss_player_missing_at` on it;
+     copy it if you need to keep it. Never null.
+     */
+    const char *name;
+} SsMissingAsset;
 
 /*
  What the last frame cost (SPEC §14.2 item 10), flattened for the ABI.
@@ -395,6 +428,37 @@ int32_t ss_player_texture_at(ss_player_t *handle,
                              const char *pack_name,
                              uint32_t index,
                              ss_texture_ref_t *out);
+
+/*
+ How many things the player's last load could not get (SPEC §8.1).
+
+ `ss_player_load` reports an error only when the `.ssab` itself is unreadable —
+ one missing atlas must not cost you the character — so this is how a caller
+ tells a complete load from one that played anyway:
+
+ ```c
+ if (ss_player_load(player, path) != SS_OK) {
+     /* the .ssab itself */
+ } else if (ss_player_missing_count(player) > 0) {
+     /* it plays, but something is a silhouette or absent */
+ }
+ ```
+
+ Describes the most recent load, not the player's history. Zero for a null or
+ destroyed handle, which is indistinguishable from success — check the load's
+ own return value for that.
+ */
+uint32_t ss_player_missing_count(ss_player_t *handle);
+
+/*
+ Detail of one entry in the list `ss_player_missing_count` sizes.
+
+ Writes `out` and returns `SS_OK`, or leaves it untouched and reports why.
+
+ # Safety
+ `out` must point at a writable `ss_missing_asset_t`.
+ */
+int32_t ss_player_missing_at(ss_player_t *handle, uint32_t index, SsMissingAsset *out);
 
 /*
  Select the animation to play, rebuilding the instance tree. It is left at its

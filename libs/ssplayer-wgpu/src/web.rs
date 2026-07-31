@@ -38,7 +38,7 @@
 //! reason this face is ~30% smaller over the wire than one that bundles `image`.
 
 use crate::pack::SSPack;
-use crate::player::{AssetLoader, SSPlayer};
+use crate::player::{AssetLoader, MissingKind, SSPlayer};
 use crate::renderer::{AlphaMode, Retention, SSRenderer};
 use crate::roster::{Roster, SlotId};
 use crate::scene::{SSScene, SceneConfig};
@@ -944,6 +944,37 @@ impl SsPlayerWeb {
                 };
                 set("hash", image.hash.into());
                 set("bytes", js_sys::Uint8Array::from(image.bytes).into());
+                out.push(&entry);
+            }
+            out
+        })
+    }
+
+    /// What the last load could not get, as `{ kind, name, hash }[]` (SPEC §8.1).
+    /// Empty means everything the packs asked for arrived.
+    ///
+    /// `load` rejects only when the `.ssab` itself is unreadable — one missing
+    /// atlas must not cost you the character — so this is how a page tells a
+    /// complete load from one that played anyway. `kind` is `"texture"` (its
+    /// parts draw as white silhouettes) or `"pack"` (its parts do not appear).
+    #[wasm_bindgen(js_name = missingAssets)]
+    pub fn missing_assets(&self) -> Result<js_sys::Array, JsValue> {
+        with_player!(self, |p| {
+            let out = js_sys::Array::new();
+            for missing in p.missing_assets() {
+                let entry = js_sys::Object::new();
+                let set = |key: &str, value: JsValue| {
+                    let _ = js_sys::Reflect::set(&entry, &JsValue::from_str(key), &value);
+                };
+                set(
+                    "kind",
+                    JsValue::from_str(match missing.kind {
+                        MissingKind::Texture => "texture",
+                        MissingKind::Pack => "pack",
+                    }),
+                );
+                set("name", missing.name.as_str().into());
+                set("hash", missing.hash.into());
                 out.push(&entry);
             }
             out

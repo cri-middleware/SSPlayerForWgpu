@@ -42,7 +42,7 @@ pub use frame::FrameView;
 pub use mask::{GeomKind, MaskOp, MaskWriter, PartMaskFlags, StencilTest, plan_writers};
 pub use metrics::SceneStats;
 pub use pack::{EmbeddedImage, EmbeddedTexture, SSPack, TextureRef};
-pub use player::{AssetLoader, SSPlayer};
+pub use player::{AssetLoader, MissingAsset, MissingKind, SSPlayer};
 pub use renderer::{AlphaMode, Retention, SSRenderer};
 pub use scene::{BatchInfo, FrameChunk, IDENTITY_TRANSFORM, NodeSlot, SSScene, SceneConfig};
 #[cfg(feature = "web")]
