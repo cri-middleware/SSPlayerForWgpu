@@ -21,11 +21,12 @@ python3 -m http.server   # serve THIS directory
 
 `build.sh` does two things:
 1. `wasm-pack build` of `libs/ssplayer-wgpu` with `--features web` → `./pkg` (wasm + JS bindings).
-2. Generates embedded-mode `.ssab` demo assets → `./assets`
-   (`ssconverter-cli --embedded`). Embedded ssab bakes the atlas PNG in, so the
-   page fetches a single self-contained file and no sibling image files.
+2. Generates the demo assets in **both export modes**: embedded-mode `.ssab`
+   (`ssconverter-cli --embedded`, atlas PNG baked in) → `./assets`, and
+   reference-mode `.ssab` plus its sibling PNGs → `./assets-ref`. The page has a
+   selector for the two, so the fetch path is exercised as well as the embedded one.
 
-Both `pkg/` and `assets/` are generated (git-ignored).
+`pkg/`, `assets/` and `assets-ref/` are all generated (git-ignored).
 
 ## Usage
 
@@ -43,8 +44,8 @@ they still share **one `GPUDevice`** — see below.
 
 | Attribute | Default | Meaning |
 |---|---|---|
-| `src` | — | Embedded `.ssab` URL |
-| `pack` | file stem | Pack name (for external instance references) |
+| `src` | — | `.ssab` URL, either export mode; its atlases and instance packs come with it |
+| `pack` | from the `.ssab` | Pack name override. Leave it alone — external instance references are resolved by the exporter's name |
 | `anim` | first | Animation to play |
 | `pause-when-hidden` | on | Stop the rAF loop while the element is scrolled off-screen or the tab is backgrounded. Opt out with `pause-when-hidden="false"` |
 
@@ -66,7 +67,7 @@ const ctx     = await sharedContext();        // once for the page
 const surface = ctx.createSurface(canvas);    // once per canvas
 const player  = surface.createPlayer();       // as many as you like
 
-await player.loadSsab(bytes, null, ssabUrl);  // pack + its atlases (see below)
+await player.load('assets/Basic.ssab');       // pack + assets (see below)
 player.setAnimation('idle');                  // selecting allocates …
 player.play();                                // … starting does not (SPEC §9.3)
 player.setTransform(x, y, scaleX, scaleY, rotation);
@@ -76,32 +77,39 @@ surface.frame(dt);                            // one call draws every player
 player.destroy(); surface.destroy();          // explicit — they live in the context
 ```
 
-### Loading — `loadSsab` brings the textures with it
+### Loading — one call brings everything the pack needs
 
-`loadSsab(bytes, pack?, baseUrl?)` registers the pack **and loads the atlases it
-needs**, in either export mode. Same shape as `SS6PlayerForGodot`'s
-`setSSABResource`: texture loading belongs to initialisation, so `setAnimation`
-stays a pure, **synchronous** selection — switching motions must not carry a
-promise.
+`load(src)` fetches a `.ssab` **and everything it depends on**: its atlases in
+either export mode, and any sibling `.ssab` its instance parts play from,
+transitively. `src` is a URL or a path, absolute or relative to the document.
 
-| Form | Where the images are | What `loadSsab` does |
+Same shape as `SS6PlayerForGodot`'s `setSSABResource` (`_loadTextures` +
+`_load_external_ssabs`) and `ssplayer-core`'s `load(ssabUrl)`. Assets belong to
+initialisation, so `setAnimation` stays a pure, **synchronous** selection —
+switching motions must not carry a promise.
+
+| What | Where it is | What `load` does |
 |---|---|---|
-| embedded | inside the `.ssab` | decodes what the pack carries; fetches nothing |
-| reference | sibling files | fetches each one relative to `baseUrl`, in parallel |
+| atlas, embedded | inside the `.ssab` | decodes what the pack carries; fetches nothing |
+| atlas, reference | sibling files | fetches each one relative to the `.ssab` |
+| instance pack | `<dir>/<packName>.ssab` | fetches it by the name the exporter wrote, then its atlases, then whatever *it* references |
 
-* `pack` — omit it (pass `null`). The pack then keeps the name the exporter
-  wrote, which is the name external instance parts are resolved against
-  (`ref_anime_pack`). A name of your own **silently breaks those references**.
-* `baseUrl` — where the `.ssab` came from; reference paths resolve against it.
-  Defaults to the document URL. Embedded packs ignore it.
+A URL is what makes this one call: it answers both "what are the bytes" and
+"what do the siblings resolve against". `loadSsab(bytes, pack?, baseUrl?)` is the
+same thing for bytes that are not URL-addressable — a drop, a bundler, an archive
+— where `baseUrl` supplies the second answer and `pack` can override the pack's
+name. Omit `pack`: the name the exporter wrote is the one external instance parts
+are resolved against (`ref_anime_pack`), and a name of your own **silently breaks
+those references**.
 
-It is `async` only because a browser leaves no choice — `fetch` and
+These are `async` only because a browser leaves no choice — `fetch` and
 `createImageBitmap` are asynchronous where Godot's `ResourceLoader::load` is not.
 That is the one place the asynchrony appears.
 
-An atlas the shared renderer already has is skipped, so N players of one pack
-load it once between them. One that cannot be fetched or decoded is reported on
-the console and skipped: a missing image costs you that image, not the character.
+Anything the shared renderer or the player already holds is skipped, so N players
+of one pack load its atlas once between them, and a cycle of packs referencing
+each other terminates. Anything that cannot be fetched or decoded is reported on
+the console and skipped: a missing file costs you that file, not the character.
 
 **The wasm carries no image decoder** — one is already installed on every page,
 and bundling a second cost ~29% of the transferred bytes to do the same job worse

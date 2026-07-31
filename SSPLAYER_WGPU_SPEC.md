@@ -458,7 +458,9 @@ Godot / Unity のネイティブプレイヤー実績と C-API 契約から、�
 **実装メモ（✅ 実装済・`libs/ssplayer-wgpu/src/player.rs`）**
 
 - `PlaybackNode { context, instances, effects }` の木を SSPlayer が所有。GPU リソースは現行 `SSInternalPlayer` 1個を共有（P7 で `SSRenderer` / `SSScene` へ移り、共有範囲が**シーン内の全 Player**へ広がる）。
-- **外部参照は pack 名の文字列**（`PartTypeInstance::ref_anime_pack()`/`ref_anime_name()`）で解決＝ハッシュアルゴリズム不整合を回避。ホストは全 pack を `add_ssab(pack_name, data)` で事前登録し、`load_ssab(pack_name, data)` で主 pack 指定。ssab 型は `ssab::ssab::ss::format::{PartType, root_as_ss_anime_binary_unchecked}`。
+- **外部参照は pack 名の文字列**（`PartTypeInstance::ref_anime_pack()`/`ref_anime_name()`）で解決＝ハッシュアルゴリズム不整合を回避。ホストは全 pack を `add_pack` / `add_ssab` で事前登録し、`set_pack` / `load_ssab` で主 pack を指定。ssab 型は `ssab::ssab::ss::format::{PartType, root_as_ss_anime_binary_unchecked}`。
+- **どのパックが要るかは `.ssab` が知っている** ✅: `SSPack::instance_packs()` が `external_instances()` から**参照先パック名**を返す（自己参照と重複は除く）。テクスチャの `textures()` と同じ分担で、**パックが「何が要るか」を答え、ホストが取ってくる**。エクスポータは参照先パック自身の名前を書くので、その文字列が**ファイル名の stem** でもあり `ref_anime_pack` の照合キーでもある——だから `<.ssab のディレクトリ>/<name>.ssab` で必ず見つかる。`SS6PlayerForGodot` の `_load_external_ssabs`（`parent_dir.path_join(pack + ".ssab")`）と `ssplayer-core` の `resolveInstancePacks`（`<base>/<name>.ssab`）が同じ規則。
+- **js 面は自動で解決する** ✅（§10）: `load` / `loadSsab` が上記を辿って `add_pack` ＋そのパックのテクスチャロードまで済ませる。**Godot は子プレイヤーごとに `setSSABResource` を呼んで深い階層へ到達する**が、この Player は 1 プレイヤーがパック表をフラットに1枚持つ設計（`packs: HashMap<String, SSPack>`）なので、代わりに**推移的に辿る**。1階層＝1往復、その階層は並列取得。登録済み（`SSPlayer::has_pack`）は取りに行かないので、相互参照でも止まる。
 - **transition スナップはホスト責務**: `InstanceSlot::step` は transition 時にセクション/ループ/方向を設定するのみで開始フレームへのスナップはしない。**`result.transitioned` 時に子 `context.play()` を呼ぶ**（呼ばないと独立モードが再生状態にならず進まない）。
 - **スロットの step は「パーツ一覧」から回す。`draw_order` から回してはいけない（★実装済・回帰テストあり）**: ランタイムは `Hide` のパーツを `draw_order` / `draw_batches` から丸ごと落とす（`framedata.rs` の `drawn_as_self`）。描画走査のついでに step すると**非表示になった瞬間そのスロットが止まり**、独立再生の子／エフェクトは止まっていた時間だけ遅れて再開する（`10_instance.md` §Supporting Independent Playback、`20_effect.md`）。そこで `step_slots`（全スロットを再帰的に進める）と `render_node`（`draw_batches` を描く）を**別の走査**に分ける。可視性は「描くか」の判断にだけ使う。兄弟実装も同型（Web の `stepEffectSlots`/`stepInstanceSlots`、Godot の `_update_instance_children`）。
 - **`parent_looped` は `Context::is_looped()`**: コントローラが `update` 中に立てるパルスで、次の `update` 開始時にクリアされるため**その `update` の直後に読む**。「フレームが後退したら」で代用しない——逆再生・ピンポンでは毎フレーム後退するため。子へは `result.child_looped` を伝播（独立再生の子は親ではなく自分のループが基準）。
@@ -516,6 +518,7 @@ SSPack::load_named(name, bytes) -> Result<SSPack, _>        // ホストが名�
 pack.name() -> &str;                                        // ★既定は .ssab 自身の name
 pack.textures() -> &[TextureRef];                           // ★cellmaps() ＋ external_textures()（TCHG 先。§8.1）
 pack.has_embedded_textures() -> bool;
+pack.instance_packs() -> Vec<String>;                       // ★インスタンスパーツの参照先パック名（§7.1）
 pack.animation_names() -> Vec<String>;
 pack.embedded_images() -> Vec<EmbeddedImage<'_>>;           // ★エンコード済みバイト列を**借りるだけ**（デコーダ不要・feature 不問）
 pack.decode_embedded() -> Vec<EmbeddedTexture>;             // embedded の場合のみ。ピクセルを**渡すだけ**（feature `embedded`）
@@ -674,6 +677,7 @@ impl SSPlayer {
 
     // --- pack 登録 / 再生制御（★P7-5 実装済）---
     pub fn add_pack(&mut self, pack: &SSPack);      // 外部参照解決用に全 pack 登録（§8.2）
+    pub fn has_pack(&self, name: &str) -> bool;    // 自前で解決するホスト向け（§7.1）
     pub fn set_pack(&mut self, pack: &SSPack);      // 主 pack 指定
     pub fn add_ssab(&mut self, pack_name: &str, data: &[u8]) -> Result<(), SSRuntimeError>;   // = load_named + add_pack
     pub fn load_ssab(&mut self, pack_name: &str, data: &[u8]) -> Result<(), SSRuntimeError>;  // = load_named + set_pack
@@ -739,7 +743,8 @@ const ctx     = await sharedContext();          // ページで1回（内部で 
 const surface = ctx.createSurface(canvas);      // canvas ごと
 const player  = surface.createPlayer();         // 1 canvas に何体でも
 
-await player.loadSsab(bytes, null, ssabUrl);    // ★bytes を受け、**アトラスまで揃える**（§8.1）
+await player.load('assets/Basic.ssab');         // ★最短形: パック＋アトラス＋兄弟 ssab（§8.1/§7.1）
+await player.loadSsab(bytes, null, ssabUrl);    // bytes から入る場合（D&D・バンドル）
 player.setAnimation('idle');                    // 選択＝確保はここだけ
 player.play();                                  // 開始 / pause からの再開（§9.3）
 player.setTransform(x, y, scaleX, scaleY, rotation);
@@ -755,12 +760,13 @@ player.destroy(); surface.destroy();            // ★明示。実体は ctx に
 - **★テクスチャ供給は `ctx.addTextureFromBytes(hash, bytes)` が主経路**（✅ 実装済）。**device スコープなので1回で全 canvas・全 player に効く**（だから surface でも player でもなく context にある）。エンコード済みバイト列を `createImageBitmap(blob, {premultiplyAlpha:'premultiply'})` に通し、`copy_external_image_to_texture` で直接テクスチャへ入れて `set_texture` で登録する（CPU premul も 16 MB の一時コピーも通らない）。**両形態がここに集まる**:
   - embedded → **`player.embeddedTextures(pack?)`** = `{ hash, bytes }[]`（ssplayer-core の `extractEmbeddedTextures` と同型）。fetch は不要。
   - reference → **`player.textureRefs(pack?)`** = `{ hash, path, embedded }[]`（同 `extractTexturePaths`）。`embedded` が false のエントリを `new URL(path, ssabUrl)` で fetch して渡す。
+- **★`player.load(src)` が最短形（✅ 実装済）**——`ssplayer-core` の `load(ssabUrl)` に相当。**URL 1つで2つの問いが同時に決まる**（バイト列は何か／兄弟は何を基準に解決するか）ので、これが既定の入口。相対パスは document 基準で解決し、兄弟は **`.ssab` 自身**を基準に解決する（`src` が相対のとき両者は違う）。パック名の上書きが要る場合だけ `loadSsab` を使う。
 - **★`player.loadSsab(bytes, pack?, baseUrl?)` がテクスチャまでロードする（✅ 実装済）**——`SS6PlayerForGodot` の `setSSABResource` と同じ形。**テクスチャロードは初期化に属し、アニメーション選択には属さない**（移植ガイド `30_core/10_initialization.ja.md` §3）。`setAnimation` は**同期のまま**で、モーション切り替えのたびに `Promise` を挟まない——これが置き場所を決める理由。
   - `async` なのはブラウザ側の事情だけ（Godot の `ResourceLoader::load` は同期、`fetch` / `createImageBitmap` は非同期）。**非同期はこの1箇所に閉じ込める。**
   - `pack` を省略すると `.ssab` 自身の名前を使う。**これが既定であるべき**——`ref_anime_pack`（§7.1）はエクスポータが書いた文字列で引くので、ホストが別名を付けると外部インスタンス参照が黙って解決されなくなる。
   - `baseUrl` は `.ssab` の取得元。reference 形態のアトラスパスはこれを基準に解決する（既定は document の URL）。移植ガイド `20_design/10_preparation.ja.md`「ベースディレクトリの保持」。
   - fetch は **`Promise.allSettled` で並列・ファイル単位**（hash 単位だと同一画像を2回落とす。上の §8.1 参照）。失敗は console 警告のうえ**続行**——`_load_external_ssabs` の `ERR_PRINT`＋`continue`、`PackResolver` の `console.warn`＋`continue` と同じ割り切り。
-  - `addSsab` も同形（サブアニメのセルはそのパック自身のアトラスを引くので、テクスチャも要る）。
+  - **外部インスタンス参照も同じ1コールで解決する**（§7.1）。`addSsab` は同形のまま残すが、位置づけは **URL で辿れないパック**用（ドロップ・バンドル・アーカイブ）——`ssplayer-core` が `InstancePackProvider` フックでカバーしている領域。
 - **`ctx.hasTexture(hash)`** が「登録済みが勝つ」をホスト側から効かせるためのもの。`loadSsab` は自分でこれを見てから落としに行くので、**N 体で1回**は保たれる（Player 内部の flush が `decode_embedded_where` の述語で同じことをするのと同じ判定）。
 - **`ctx.addTextureFromBitmap(hash, bitmap)`** は自前のアセットパイプラインを持つホスト向け（`set_texture` / WebGL 版 `bindTextureSource` に相当）。**device 喪失復帰は供給側の責務**。対して `addTextureFromBytes` は**エンコード済みバイト列を保持**するので `restoreDevice` が自分で復元する（ピクセルではなくエンコード済みなので 2048² で 16 MB ではなく数百 KB。WebGL 版が `{kind:'bytes'}` を retain するのと同じ判断）。
 - **`ctx.addTexture(hash, rgba, w, h)`**（生 RGBA）は残置。CPU premul と `Retention::Retain` を通るので、エンコード済み画像を持っているなら `addTextureFromBytes` のほうが速く小さい。

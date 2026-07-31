@@ -125,6 +125,16 @@ impl SSPlayer {
         self.flush_textures(renderer, device, queue);
     }
 
+    /// Whether a pack is registered under `name` — what an instance part's
+    /// `ref_anime_pack` will be looked up by (SPEC §7.1).
+    ///
+    /// For a host resolving those references itself: it answers "have I already
+    /// fetched this one", which is what keeps a cycle of packs referencing each
+    /// other from being walked forever.
+    pub fn has_pack(&self, name: &str) -> bool {
+        self.packs.contains_key(name)
+    }
+
     /// Register a pack for external instance references (SPEC §7.1) without
     /// changing what is playing. Registration is by [`SSPack::name`].
     ///

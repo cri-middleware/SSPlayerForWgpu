@@ -159,12 +159,18 @@ export class SsPlayerWebGPU extends HTMLElement {
   /** Fetch + play a `.ssab`, embedded or reference. Can be called to switch packs. */
   async loadSrc(src, pack, anim) {
     if (!this.player) return;
-    const url = new URL(src, location.href);
-    const bytes = new Uint8Array(await (await fetch(url)).arrayBuffer());
-    // `loadSsab` loads the pack's atlases too (SPEC §8.1), which is why it is
-    // awaited: `url` lets a reference-mode pack resolve its images, and the pack
-    // keeps the name the exporter gave it unless `pack` overrides it.
-    await this.player.loadSsab(bytes, pack, url.href);
+    // One call fetches the pack, its atlases and any sibling `.ssab` its instance
+    // parts play from (SPEC §8.1, §7.1) — a URL answers both "what bytes" and
+    // "what do its siblings resolve against". `pack` is a name override, which
+    // `load` deliberately does not take; the rare host that needs one goes
+    // through `loadSsab` with its own bytes.
+    if (pack) {
+      const url = new URL(src, location.href);
+      const bytes = new Uint8Array(await (await fetch(url)).arrayBuffer());
+      await this.player.loadSsab(bytes, pack, url.href);
+    } else {
+      await this.player.load(src);
+    }
     const names = this.player.animationNames();
     // Selecting and starting are separate calls (SPEC §9.3): `setAnimation` is
     // the allocating step, `play` is transport. The old single `play(name)` is

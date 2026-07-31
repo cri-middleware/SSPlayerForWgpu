@@ -199,6 +199,37 @@ impl SSPack {
         self.has_embedded
     }
 
+    /// The names of the packs this one's instance parts play from (SPEC §7.1),
+    /// deduplicated, in `external_instances()` order.
+    ///
+    /// The counterpart of [`SSPack::textures`] for playback data rather than
+    /// images: a pack answers what else it needs, and the host — the only side
+    /// with a filesystem or a network — fetches it and hands it to
+    /// [`SSPlayer::add_pack`]. The exporter writes the referenced pack's own name
+    /// here, which is both the file's stem and the key `ref_anime_pack` resolves
+    /// against, so `<the .ssab's directory>/<name>.ssab` finds it — the rule
+    /// `SS6PlayerForGodot`'s `_load_external_ssabs` and `ssplayer-core`'s
+    /// `resolveInstancePacks` both follow.
+    ///
+    /// Only genuinely external references appear: `external_instances()` is the
+    /// exporter's own list, so a pack whose instance parts play its own
+    /// animations reports nothing.
+    ///
+    /// [`SSPlayer::add_pack`]: crate::SSPlayer::add_pack
+    pub fn instance_packs(&self) -> Vec<String> {
+        // SAFETY: as in `build` — the resource owns the buffer being read.
+        let ab = unsafe { root_as_ss_anime_binary_unchecked(self.resource.data().as_slice()) };
+        let Some(externals) = ab.external_instances() else { return Vec::new() };
+        let mut out: Vec<String> = Vec::new();
+        for entry in externals {
+            let Some(name) = entry.anime_pack_name() else { continue };
+            if name != &*self.name && !out.iter().any(|seen| seen == name) {
+                out.push(name.to_string());
+            }
+        }
+        out
+    }
+
     /// Names of every animation in the pack.
     pub fn animation_names(&self) -> Vec<String> {
         self.resource.resource().map(|r| r.get_animation_names()).unwrap_or_default()
