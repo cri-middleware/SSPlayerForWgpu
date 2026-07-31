@@ -7,10 +7,9 @@
 //! `Handle<Image>` / `RenderAssets<GpuImage>` already own upload, hot reload and
 //! unload; a pack that also owned them would upload every atlas twice, free at the
 //! wrong moment, and take the format / mip / sampler decisions away from the
-//! engine. So a pack *describes* the textures it needs
-//! ([`SSPack::required_textures`]) and can *hand over pixels*
-//! ([`SSPack::decode_embedded`]), and whoever owns GPU memory registers them with
-//! [`crate::SSRenderer`].
+//! engine. So a pack *describes* the textures it needs ([`SSPack::textures`])
+//! and can *hand over pixels* ([`SSPack::decode_embedded`]), and whoever owns GPU
+//! memory registers them with [`crate::SSRenderer`].
 //!
 //! Cloning a pack is cheap — an `Arc` bump and two small shared slices — so "the
 //! same character twenty times" costs one parse and one atlas.
@@ -39,6 +38,30 @@ pub struct EmbeddedTexture {
     pub height: u32,
 }
 
+/// One atlas a pack asks for, described the way the `.ssab` itself describes it
+/// (SPEC §8.1).
+///
+/// This is what makes reference mode loadable without the host guessing: the
+/// pack answers *what* it needs and *where the exporter put it*, and the host —
+/// the only side that has a filesystem or a network — does the reading. The
+/// sibling players work exactly this way (`ssplayer-core`'s
+/// `extractTexturePaths` + `loadTextures`), and a host here should too: resolve
+/// [`TextureRef::path`] against the directory the `.ssab` came from, skipping
+/// the entries that are [`TextureRef::embedded`] because those arrive with the
+/// pack.
+#[derive(Clone, Debug)]
+pub struct TextureRef {
+    /// The cellmap's `name_hash` — what `DrawBatch.texture_hash` carries, and the
+    /// key [`crate::SSRenderer`] looks textures up by.
+    pub hash: u32,
+    /// The image path the exporter wrote, relative to the `.ssab`'s own location.
+    pub path: String,
+    /// Whether this image rides inside the `.ssab` (embedded mode, SPEC §8.1).
+    /// `true` means the host has nothing to load: [`SSPack::decode_embedded`]
+    /// already produces it, and a player registers it on the next update.
+    pub embedded: bool,
+}
+
 /// A loaded `.ssab`, shareable between players (SPEC §8.2).
 ///
 /// Loading costs a parse; sharing costs an `Arc` clone. [`SSPlayer::set_pack`]
@@ -51,8 +74,8 @@ pub struct EmbeddedTexture {
 pub struct SSPack {
     name: Arc<str>,
     resource: Arc<SsabResource>,
-    /// Every cellmap's `name_hash`, in pack order.
-    required_textures: Arc<[u32]>,
+    /// Every cellmap's atlas, in pack order.
+    textures: Arc<[TextureRef]>,
     /// Whether any cellmap's image is carried inside the `.ssab` (SPEC §8.1).
     has_embedded: bool,
 }
@@ -89,17 +112,18 @@ impl SSPack {
         // The two hashes are different things and must not be swapped (SPEC §8.1):
         // `name_hash` is what a draw batch asks for, `image_path_hash` is the key
         // of the embedded byte blob.
-        let mut required_textures = Vec::new();
+        let mut textures = Vec::new();
         let mut has_embedded = false;
         if let Some(cellmaps) = ab.cellmaps() {
             let embedded: Vec<u32> = ab.embedded_assets().map(|assets| assets.iter().map(|a| a.name_hash()).collect()).unwrap_or_default();
             for cm in cellmaps {
-                required_textures.push(cm.name_hash());
-                has_embedded |= embedded.contains(&cm.image_path_hash());
+                let is_embedded = embedded.contains(&cm.image_path_hash());
+                has_embedded |= is_embedded;
+                textures.push(TextureRef { hash: cm.name_hash(), path: cm.image_path().to_string(), embedded: is_embedded });
             }
         }
 
-        Ok(Self { name, resource, required_textures: required_textures.into(), has_embedded })
+        Ok(Self { name, resource, textures: textures.into(), has_embedded })
     }
 
     /// The name instance references resolve against.
@@ -107,13 +131,14 @@ impl SSPack {
         &self.name
     }
 
-    /// The texture hashes this pack's draw batches will ask for.
+    /// The atlases this pack's draw batches will ask for, in pack order.
     ///
-    /// A reference-mode host uses this to know what to load before playing;
-    /// combined with [`crate::SSRenderer::texture_size`] it also answers "is this
-    /// pack ready to draw".
-    pub fn required_textures(&self) -> &[u32] {
-        &self.required_textures
+    /// A reference-mode host walks this to know what to load, and from where,
+    /// before playing (see [`TextureRef`]); combined with
+    /// [`crate::SSRenderer::texture_size`] it also answers "is this pack ready to
+    /// draw".
+    pub fn textures(&self) -> &[TextureRef] {
+        &self.textures
     }
 
     /// Whether the atlases ride inside the `.ssab` (embedded mode, SPEC §8.1).

@@ -12,7 +12,7 @@
 
 use crate::frame::FrameView;
 use crate::mask::{GeomKind, MaskOp, MaskWriter, PartMaskFlags, StencilTest, plan_writers};
-use crate::pack::SSPack;
+use crate::pack::{SSPack, TextureRef};
 use crate::renderer::{Retention, SSRenderer};
 use crate::scene::{BatchInfo, FrameChunk, NodeSlot};
 use ssab::ssab::ss::format::{PartType, root_as_ss_anime_binary_unchecked};
@@ -259,6 +259,22 @@ impl SSPlayer {
     pub fn animation_names(&self) -> Option<Vec<String>> {
         let anim_resource = self.packs.get(self.main_pack.as_ref()?)?.resource().resource()?;
         Some(anim_resource.get_animation_names())
+    }
+
+    /// The atlases a registered pack asks for (SPEC §8.1), or `None` if
+    /// `pack_name` names no pack this player holds. `None` selects the main pack.
+    ///
+    /// This is the reference-mode half of texture supply, and it exists because
+    /// only the `.ssab` knows where its atlases were exported to: a host calls it
+    /// straight after [`SSPlayer::add_ssab`] / [`SSPlayer::load_ssab`], loads
+    /// every entry that is not [`TextureRef::embedded`] by resolving
+    /// [`TextureRef::path`] against the directory the `.ssab` came from, and hands
+    /// the pixels to [`SSRenderer::upload_texture`]. The player never opens a
+    /// file itself — it has no filesystem on the web face, and on any face the
+    /// host's asset system is the one that should own the bytes (SPEC §8.2).
+    pub fn textures(&self, pack_name: Option<&str>) -> Option<&[TextureRef]> {
+        let name = pack_name.or(self.main_pack.as_deref())?;
+        Some(self.packs.get(name)?.textures())
     }
 
     /// Canvas size of the currently playing animation.

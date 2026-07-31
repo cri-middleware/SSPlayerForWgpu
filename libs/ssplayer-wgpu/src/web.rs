@@ -451,6 +451,33 @@ impl SsPlayerWeb {
         with_player!(self, |p| p.animation_names().unwrap_or_default())
     }
 
+    /// The atlases a registered pack asks for, as `{ hash, path, embedded }[]`
+    /// in pack order (SPEC §8.1). `pack` undefined selects the main pack.
+    ///
+    /// The counterpart of [`SsContextWeb::add_texture`], and the same shape the
+    /// reference implementation exposes (`ssplayer-core`'s `extractTexturePaths`):
+    /// only the `.ssab` knows where its atlases were exported to, so a page
+    /// showing a reference-mode pack fetches `new URL(path, ssabUrl)` for every
+    /// entry whose `embedded` is false and registers the pixels by `hash`.
+    /// Embedded entries need no fetch — they arrive with the pack.
+    #[wasm_bindgen(js_name = textureRefs)]
+    pub fn texture_refs(&self, pack: Option<String>) -> Result<js_sys::Array, JsValue> {
+        with_player!(self, |p| {
+            let out = js_sys::Array::new();
+            for texture in p.textures(pack.as_deref()).unwrap_or_default() {
+                let entry = js_sys::Object::new();
+                let set = |key: &str, value: JsValue| {
+                    let _ = js_sys::Reflect::set(&entry, &JsValue::from_str(key), &value);
+                };
+                set("hash", texture.hash.into());
+                set("path", texture.path.as_str().into());
+                set("embedded", texture.embedded.into());
+                out.push(&entry);
+            }
+            out
+        })
+    }
+
     /// Select an animation: builds the instance tree, and the only call here that
     /// allocates. Separate from [`SsPlayerWeb::play`] on purpose (SPEC §9.3) —
     /// the reference implementation split the same way, so the old single

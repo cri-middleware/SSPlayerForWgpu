@@ -131,6 +131,25 @@ pub struct SsSceneStats {
     pub gpu_pass_time_ns: u64,
 }
 
+/// One atlas a pack asks for (SPEC §8.1), flattened for the ABI. What
+/// `ss_player_texture_at` fills in.
+#[repr(C)]
+#[derive(Clone, Copy)]
+pub struct SsTextureRef {
+    /// The key `ss_scene_add_texture` / `ss_scene_add_texture_png` expects for
+    /// this image — the cellmap's fnv1a hash, as `DrawBatch.texture_hash` reports it.
+    pub hash: u32,
+    /// `true` when the image rides inside the `.ssab` (embedded mode): the pack
+    /// supplies it on the next `ss_scene_update` and the host loads nothing.
+    pub embedded: bool,
+    /// The image path the exporter wrote, **relative to the `.ssab`'s own
+    /// directory** — join it with the directory the file was read from.
+    ///
+    /// Owned by the scene and valid until the next `ss_player_texture_at` on it;
+    /// copy it if you need to keep it. Never null.
+    pub path: *const c_char,
+}
+
 /// Opaque scene handle: one window's [`NativeHost`], the player handles it has
 /// issued, and the buffer backing the string `ss_player_animation_name` hands
 /// back to C.
@@ -143,6 +162,10 @@ pub struct SsScene {
     /// freed memory, so a double destroy — the easy mistake — is a safe no-op.
     handles: Vec<*mut SsPlayer>,
     name_scratch: CString,
+    /// Backs `ss_player_texture_at`'s `path`. Separate from `name_scratch` so the
+    /// two "valid until the next call" contracts do not invalidate each other:
+    /// walking a pack's textures and its animation names interleaved is normal.
+    path_scratch: CString,
 }
 
 /// Opaque player handle: which scene, and which player within it.
@@ -215,6 +238,19 @@ unsafe fn c_str<'a>(s: *const c_char) -> Option<&'a str> {
         return None;
     }
     unsafe { CStr::from_ptr(s) }.to_str().ok()
+}
+
+/// Borrow an *optional* string argument, where null means "the default" rather
+/// than a mistake — so a bad encoding is still reported instead of silently
+/// becoming the default.
+///
+/// # Safety
+/// As [`c_str`].
+unsafe fn optional_c_str<'a>(s: *const c_char) -> Result<Option<&'a str>, &'static str> {
+    if s.is_null() {
+        return Ok(None);
+    }
+    unsafe { c_str(s) }.map(Some).ok_or("string is not UTF-8")
 }
 
 fn backend_bits(backend: u32) -> wgpu::Backends {
@@ -297,7 +333,7 @@ pub unsafe extern "C" fn ss_scene_create(desc: *const SsSceneDesc) -> *mut SsSce
     // SAFETY: forwarded from this function's contract — the caller keeps the
     // window alive until `ss_scene_destroy`.
     match unsafe { NativeHost::new(target, &config) } {
-        Ok(host) => Box::into_raw(Box::new(SsScene { host, handles: Vec::new(), name_scratch: CString::default() })),
+        Ok(host) => Box::into_raw(Box::new(SsScene { host, handles: Vec::new(), name_scratch: CString::default(), path_scratch: CString::default() })),
         Err(msg) => {
             set_last_error(msg);
             std::ptr::null_mut()
@@ -434,6 +470,88 @@ pub unsafe extern "C" fn ss_scene_add_texture(scene: *mut SsScene, hash: u32, rg
         return fail(SS_ERROR_INVALID_ARGUMENT, "texture is empty");
     }
     scene.host.upload_texture(hash, unsafe { std::slice::from_raw_parts(rgba, len) }, width, height);
+    SS_OK
+}
+
+/// `ss_scene_add_texture` from **encoded** image bytes (PNG) instead of raw RGBA:
+/// the library decodes, premultiplies and uploads.
+///
+/// It carries a PNG decoder for embedded packs anyway (SPEC §8.1), so a C host
+/// showing a reference-mode `.ssab` does not have to bring ImageIO / WIC /
+/// libpng along just to hand the pixels over. Reading the file is still the
+/// host's job — nothing here opens one (SPEC §8.2).
+///
+/// # Safety
+/// `data` must point at `len` readable bytes. It is not retained.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn ss_scene_add_texture_png(scene: *mut SsScene, hash: u32, data: *const u8, len: usize) -> i32 {
+    let Some(scene) = (unsafe { scene.as_mut() }) else { return fail(SS_ERROR_INVALID_ARGUMENT, "scene is null") };
+    if data.is_null() || len == 0 {
+        return fail(SS_ERROR_INVALID_ARGUMENT, "image is empty");
+    }
+    match scene.host.upload_texture_encoded(hash, unsafe { std::slice::from_raw_parts(data, len) }) {
+        Ok(()) => SS_OK,
+        Err(msg) => fail(SS_ERROR_INVALID_ARGUMENT, msg),
+    }
+}
+
+/// How many atlases a registered pack asks for (SPEC §8.1). `pack_name` null
+/// selects the main pack; 0 means nothing is registered under that name.
+///
+/// # Safety
+/// `pack_name` must be null or a NUL-terminated UTF-8 string.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn ss_player_texture_count(handle: *mut SsPlayer, pack_name: *const c_char) -> u32 {
+    let Some(player) = (unsafe { player(handle) }) else {
+        set_last_error("player handle is null or destroyed");
+        return 0;
+    };
+    let pack = match unsafe { optional_c_str(pack_name) } {
+        Ok(pack) => pack,
+        Err(msg) => {
+            set_last_error(msg);
+            return 0;
+        }
+    };
+    player.textures(pack).map(|textures| textures.len() as u32).unwrap_or(0)
+}
+
+/// Describe the `index`-th atlas of a registered pack, so a reference-mode host
+/// knows *what* to load and *where the exporter put it* (SPEC §8.1).
+///
+/// This is the half of texture supply only the `.ssab` can answer, and it is the
+/// same shape the sibling players expose: register the pack, walk this list, and
+/// for every entry whose `embedded` is false read
+/// `<directory the .ssab came from>/<path>` and hand it to
+/// `ss_scene_add_texture_png`. Embedded entries need no call at all.
+///
+/// `pack_name` null selects the main pack. Writes `out` and returns `SS_OK`, or
+/// leaves it untouched and reports the reason.
+///
+/// # Safety
+/// `pack_name` must be null or a NUL-terminated UTF-8 string, and `out` must
+/// point at a writable `ss_texture_ref_t`.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn ss_player_texture_at(handle: *mut SsPlayer, pack_name: *const c_char, index: u32, out: *mut SsTextureRef) -> i32 {
+    if out.is_null() {
+        return fail(SS_ERROR_INVALID_ARGUMENT, "out is null");
+    }
+    let Some((scene, id)) = (unsafe { scene_of(handle) }) else { return fail(SS_ERROR_INVALID_ARGUMENT, "player handle is null or destroyed") };
+    let pack = match unsafe { optional_c_str(pack_name) } {
+        Ok(pack) => pack,
+        Err(msg) => return fail(SS_ERROR_INVALID_ARGUMENT, msg),
+    };
+
+    // Copied out before the scratch is touched: the borrow of the player ends
+    // here, and `scene` is needed mutably to own the string handed back.
+    let Some(texture) = scene.host.player_mut(id).and_then(|p| p.textures(pack)).and_then(|textures| textures.get(index as usize)).cloned() else {
+        return fail(SS_ERROR_INVALID_ARGUMENT, format!("no texture at index {index}"));
+    };
+    let Ok(path) = CString::new(texture.path) else {
+        return fail(SS_ERROR_INVALID_ARGUMENT, "image path contains an interior NUL");
+    };
+    scene.path_scratch = path;
+    unsafe { out.write(SsTextureRef { hash: texture.hash, embedded: texture.embedded, path: scene.path_scratch.as_ptr() }) };
     SS_OK
 }
 

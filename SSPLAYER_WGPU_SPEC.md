@@ -202,7 +202,7 @@ ssplayer-wgpu/
     ├── viewer-dx12-cpp/           ◻ C++ DX12 確認 viewer（Win32 HWND → C-API → backend=DX12）
     ├── viewer-metal-cpp/          ✅ C++ Metal 確認 viewer（Cocoa CAMetalLayer → C-API → Metal）
     │   ├── CMakeLists.txt         cargo build --features ffi を叩き、cdylib＋生成ヘッダを消費
-    │   └── src/main.mm            Objective-C++。NSWindow/CAMetalLayer を所有し C-API を駆動
+    │   └── src/main.mm            Objective-C++。NSWindow/CAMetalLayer を所有し C-API を駆動。.ssab の D&D 対応
     ├── viewer-vulkan-cpp/         ◻ C++ Vulkan 確認 viewer（Linux Xlib/Wayland → C-API → Vulkan）
     └── bevy/                      ◻【将来】Bevy アダプタのデモアプリ
 ```
@@ -504,12 +504,13 @@ ssconverter は `.ssab` を2形態で出力しうるので、SSPlayer はどち�
 「同じキャラを何体も出す」が普通になるので `.ssab` の共有単位を作る。ただし **`SSPack` は CPU データだけを持ち、GPU テクスチャは所有しない。**
 
 ```rust
-pub struct SSPack { /* Arc<str> 名前, Arc<SsabResource>, Arc<[u32]> 必要 hash, embedded 有無 */ }
+pub struct SSPack { /* Arc<str> 名前, Arc<SsabResource>, Arc<[TextureRef]> 必要アトラス, embedded 有無 */ }
+pub struct TextureRef { hash: u32, path: String, embedded: bool }  // ★何が要るか＋どこにあるか
 
 SSPack::load(bytes) -> Result<SSPack, SSRuntimeError>       // ★device も queue も要らない（CPU のみ）
 SSPack::load_named(name, bytes) -> Result<SSPack, _>        // ホストが名前を決める場合
 pack.name() -> &str;                                        // ★既定は .ssab 自身の name
-pack.required_textures() -> &[u32];                         // このパックが要求する hash
+pack.textures() -> &[TextureRef];                           // このパックが要求するアトラス（cellmap 順）
 pack.has_embedded_textures() -> bool;
 pack.animation_names() -> Vec<String>;
 pack.decode_embedded() -> Vec<EmbeddedTexture>;             // embedded の場合のみ。ピクセルを**渡すだけ**
@@ -517,8 +518,10 @@ pack.decode_embedded_where(|hash| ...) -> Vec<EmbeddedTexture>; // ★デコー�
 
 player.set_pack(&pack);   // Arc をクローンして参照するだけ（主パック指定）
 player.add_pack(&pack);   // 外部インスタンス参照解決用
+player.textures(None) -> Option<&[TextureRef]>;             // 主パック（Some(name) で登録済みパック指定）
 ```
 
+- **reference 形態のアトラスの在り処は `.ssab` が知っている（★兄弟プレイヤーと同型）** ✅: `TextureRef.path` は exporter が書いた画像パスで、**`.ssab` 自身の位置からの相対**。ホストはこれを読み込み元ディレクトリと結合するだけでアトラスに辿り着けるので、「ディレクトリ内の `*.png` を総当たりで舐めてファイル名 stem から hash を作る」という推測（旧 viewer / 旧テストのやり方。converter がたまたま cellmap 名で出力するから動いていただけ）が要らない。ssplayer-core の `extractTexturePaths` + `loadTextures` と同じ分担で、**パックが「何をどこから」を答え、ホストが読む**。`embedded` が true のエントリはホストの仕事が無い（次の `update` でパックが渡す）。**任意の場所からドロップされた `.ssab` が再生できる**のはこの性質のおかげ（`viewer-metal-cpp` の D&D、§13）。
 - **パック名は `.ssab` が持っている**（`SsAnimeBinary.name`）。インスタンス参照は `ref_anime_pack` 文字列で解決する（§7.1）ので、ホストがファイル名から名前を復元する必要はない——`SSPack::load` の既定名がそのまま噛み合う。`load_named` はファイル名で管理したいホスト向け（`add_ssab` / `load_ssab` はこちらの薄いラッパ）。
 - **デコードは「渡すだけ」でキャッシュしない**。代わりに `decode_embedded_where` の述語が **PNG デコードの前**に走るので、既に登録済みのアトラスは**デコードごとスキップ**される。`SSPlayer` はこれを使って `update` 時に「まだ無いものだけ」を上げる。
 
@@ -744,7 +747,7 @@ player.destroy(); surface.destroy();            // ★明示。実体は ctx に
 - **`destroy()` が要る**のは所有が context 側にあるから。JS ラッパを捨てても swapchain は消えないので、要素の `disconnectedCallback` は player → surface の順に明示破棄する。
 - **device 喪失復帰はページで1回**（`ctx.restoreDevice()`）。喪失は device のものなので全 canvas が同時に気づく——`ss-context.js` が同時呼び出しを1本の promise に畳む（畳まないと N 個の置換 device を要求して最後の1つしか残らない）。旧実装はこの復帰を**アトラスの PNG 再デコードごと canvas 数だけ**繰り返していた。
 - **JS 露出は再設計後の ssplayer-webgl（`SSSurface` ＋ N 体の `SSPlayer`）と同型**（§0.2）。旧 `<ss-player>` の 1 canvas = 1 player・`play(name)` 1コールには揃えない——参照実装から既に消えているため。**選択と開始は別コール**（`setAnimation` + `play`）。
-- **`ctx.addTexture(hash, rgba, w, h)`** が reference 形態のテクスチャ供給。**device スコープなので1回で全 canvas・全 player に効く**（だから surface でも player でもなく context にある）。
+- **`ctx.addTexture(hash, rgba, w, h)`** が reference 形態のテクスチャ供給。**device スコープなので1回で全 canvas・全 player に効く**（だから surface でも player でもなく context にある）。その相方が **`player.textureRefs(pack?)`** = `{ hash, path, embedded }[]`（§8.2）——ssplayer-core の `extractTexturePaths` と同型で、`embedded` が false のエントリを `new URL(path, ssabUrl)` で fetch して `addTexture` に渡す、というのが reference 形態のページの形。
 - **`surface.stats()`** がフレームカウンタを JS オブジェクトで返す（players / prims / drawCalls / mergeableDraws / redundantTextureBinds / uploadedBytes ＋ `timestamp-query` があれば `gpuPassTimeNs`）。**§14.2 は native でしか測っていない**——ブラウザで同じ数字を取る手段がこれ。`examples/web/index.html` の②が毎フレーム表示する。
 - `<ss-player-webgpu>` カスタム要素は「1要素 = 1 canvas = 1 player」の**便利ラッパ**として残す（広告のような単体用途はこれが最短）。ただし内部では上記の共有 context から surface を1枚取るだけなので、要素を何個置いても device は1つ。
 - ssab は embedded / reference 両対応（§8.1）。**embedded のデコードは `createImageBitmap` ＋ `copy_external_image_to_texture` に寄せ、`image` crate を wasm から外す**余地が残っている（§8——狙いは premultiply の GPU 化とオフスレッドデコード。§14.2 項目 9）。
@@ -770,6 +773,7 @@ void         ss_scene_update(ss_scene_t*, float delta_seconds);
 int32_t      ss_scene_render(ss_scene_t*);                    // swapchain 取得 → 全 player を1 pass → present
 void         ss_scene_resize(ss_scene_t*, uint32_t w, uint32_t h);  // ★ピクセル単位
 int32_t      ss_scene_add_texture(ss_scene_t*, uint32_t hash, const uint8_t* rgba, uint32_t w, uint32_t h);  // reference 用（renderer 共有）
+int32_t      ss_scene_add_texture_png(ss_scene_t*, uint32_t hash, const uint8_t* data, size_t len);  // ★同上・PNG のまま渡す
 uint32_t     ss_scene_player_count(ss_scene_t*);              // 診断
 
 ss_player_t* ss_scene_create_player(ss_scene_t*);             // ★1シーンに何体でも
@@ -786,9 +790,13 @@ void         ss_player_set_visible(ss_player_t*, bool visible);
 void         ss_player_set_alpha(ss_player_t*, float alpha);
 uint32_t     ss_player_animation_count(ss_player_t*);
 const char*  ss_player_animation_name(ss_player_t*, uint32_t index);  // 次の呼び出しまで有効
+uint32_t     ss_player_texture_count(ss_player_t*, const char* pack); // ★pack=NULL で主パック
+int32_t      ss_player_texture_at(ss_player_t*, const char* pack, uint32_t index, ss_texture_ref_t* out);  // ★hash / path / embedded
 int32_t      ss_player_canvas_size(ss_player_t*, float* w, float* h);
 const char*  ss_last_error(void);                             // スレッドローカル。次の失敗まで有効
 ```
+
+- **reference 形態の供給は「パックに聞いてホストが読む」** ✅: `ss_player_texture_at` が `{ hash, path, embedded }` を返し（`path` は `.ssab` 自身からの相対、§8.2）、ホストは `<.ssab を読んだディレクトリ>/<path>` を読んで `ss_scene_add_texture_png` に渡す。`embedded` が true のエントリは何もしない。**デコードをライブラリ側に用意した**のは、embedded 用に `image`（PNG）を既にリンクしているから——C ホストが ImageIO / WIC / libpng を各自抱える必要をなくす。ファイルを開くのは飽くまでホスト（ライブラリは wasm 面と共通で fs を持たない）。生 RGBA を持っているホストは従来どおり `ss_scene_add_texture`。
 
 - **ハンドルの寿命（★実装済の形）**: `ss_player_t*` は「どの scene の、どの slot か」を持つ小さな box。**scene の Vec への生ポインタではない**——Vec は伸びると移動し、slot は再利用されるため。
   - `ss_player_destroy` は **box を解放しない**（scene が破棄されるまで生かす）。おかげで**二重 destroy も、破棄後の呼び出しも安全な no-op** になる。よくある C の間違いを未定義動作にしない。
@@ -861,14 +869,14 @@ const char*  ss_last_error(void);                             // スレッドロ
 
 | 対象 | 手段 |
 |---|---|
-| Rust 描画（開発） | `examples/viewer/`（winit+wgpu、`assets/overall/` 再生。横=ssab切替/縦=アニメ切替） |
+| Rust 描画（開発） | `examples/viewer/`（winit+wgpu、`assets/overall/` 再生。横=ssab切替/縦=アニメ切替）。**`.ssab`／フォルダの D&D で任意のパックを再生**——アトラスは落とし元ディレクトリを基準に `SSPack::textures()` のパスで解決する（§8.2） |
 | インスタンス/エフェクト（ヘッドレス） | `libs/ssplayer-wgpu/tests/instance.rs`（probe。frame 推移・quad 生成を GUI 抜きで確認） |
 | マスク/Shape（ヘッドレス） | `libs/ssplayer-wgpu/tests/mask.rs`（planner probe：writer 分類・Shape-mask）＋ `libs/ssplayer-wgpu/tests/render.rs`（GPU offscreen readback：masking on/off 差分・Shape content 描画量。adapter 無ければ skip。PNG 保存で目視も可） |
 | 統合シェーダ（ヘッドレス） | `libs/ssplayer-wgpu/tests/render.rs::render_integration_shaders`（Shader.ssab を描画し、SS WGSL コンパイル＋per-part ディスパッチ＋params で描画量が出ることを確認。adapter 無ければ skip） |
 | WebGPU（主） | `examples/web/`（ブラウザで①`<ss-player-webgpu>`＋②1 canvas に N 体）。**②が要点**——device がページで1つであること・体を増やしてもアップロードが増えないこと・`stats()` の数字を、ブラウザでしか確認できない。初回起動計測（取得→wasm初期化→初フレーム ms） |
 | C-API（③ ffi） | `cargo build -p ssplayer-wgpu --features ffi`（cbindgen がヘッダを再生成。**ネイティブの他コマンドではこの面はコンパイルされない**——web feature と同じ死角）＋ **`cargo test -p ssplayer-wgpu --features ffi --lib`**（`roster.rs` 単体テスト：破棄した id が後継を指さないこと、二重 destroy が no-op であること。ハンドル寿命は C / JS 双方の未定義動作・取り違えに直結するので、ここだけは死角に置かない。`--features web` でも同じテストが走る） |
 | DX12（副） | `examples/viewer-dx12-cpp/`（Windows 実機、backend=DX12 強制） |
-| Metal（副） | `examples/viewer-metal-cpp/`（macOS 実機、backend=Metal 強制）。`cmake -B build && cmake --build build && ./build/ssviewer-metal [asset-dir] [pack]` |
+| Metal（副） | `examples/viewer-metal-cpp/`（macOS 実機、backend=Metal 強制）。`cmake -B build && cmake --build build && ./build/ssviewer-metal [asset-dir] [pack]`。**`.ssab`／フォルダの D&D で任意のパックを再生**——embedded / reference 両対応で、reference のアトラスは `ss_player_texture_at` が返すパスを落とし元ディレクトリと結合して `ss_scene_add_texture_png` に渡す（§8.2）。ドロップ経路は C 面の reference 供給を実機で通す唯一の検証でもある |
 | Vulkan（将来） | `examples/viewer-vulkan-cpp/`（Linux 実機、backend=Vulkan 強制） |
 | **複数プレイヤー（ヘッドレス）** ✅ P7-1/7-2/7-3 | `libs/ssplayer-wgpu/tests/scene.rs`。**レンダラ共有**は `players_share_one_renderer`（同一 pack の2体目でパイプライン本数が増えないこと）と `pipelines_are_built_on_demand`（構築直後は0本、Basic.ssab で1本、同一フレーム再構築で増えない＝キーが安定）で見る。**ステンシル残留の回帰**は「1 pass に N 体」と「1 体 1 pass（stencil を毎回クリア）」の**ピクセル完全一致**で検出する——後者は構造的に漏れようがないので基準になる。マスク持ち同士（`Mask.ssab` ×2）と混在（`Mask` × `Basic`、順序両方向）。`set_transform` は**同一フレームで**（`update(0.0)` で再構築）整数ピクセル平行移動し、元画像を N px ずらしたものと完全一致することを要求。`set_visible(false)` は描画ゼロ、`set_alpha(0.0)` も描画ゼロ、0.5 はその中間。`order` の並べ替えは `order_decides_who_draws_on_top`（前後入替で composite が変わる ＋ スライス順を逆にしても値順に描く） |
 | **1 レンダラに N ターゲット（ヘッドレス）** ✅ P7-9 | `tests/pack.rs::scenes_share_one_renderer`。web 面が乗っている土台——「レンダラは device スコープでフォーマット非依存」——を native で押さえる。**2枚目の scene はわざと別のカラーフォーマット**（canvas はブラウザの好むフォーマットを取るため）にして、フォーマットが scene のパイプラインキー側にあり renderer 側に無いことを固定する。判定は `texture_upload_count()` が増えないこと ＋ `pipeline_count()` は**増える**こと（増えなければ2枚目が正しく描けているはずがない）＋ 2枚目の後も1枚目が描けること |
