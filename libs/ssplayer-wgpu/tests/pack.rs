@@ -265,6 +265,51 @@ fn a_pack_names_the_atlases_it_needs() {
     assert!(embedded.textures().iter().all(|t| t.embedded), "an embedded pack reported an atlas the host would have to load");
 }
 
+/// SPEC §8.1: an embedded pack can hand out its atlases **without decoding them**,
+/// which is what lets a host with its own decoder — the browser, via
+/// `createImageBitmap` — support embedded packs while the player carries no
+/// decoder at all (the `web` feature builds without `embedded` for exactly this).
+///
+/// Pinned natively because the face that relies on it has no test of its own:
+/// nothing in `web.rs` is covered, so the invariant is nailed down on the side
+/// that can be (the same reason `scenes_share_one_renderer` exists).
+#[test]
+fn an_embedded_pack_hands_out_its_atlases_undecoded() {
+    let Ok(bytes) = std::fs::read(format!("{}/Basic.ssab", embedded_dir())) else {
+        eprintln!("embedded fixture missing; run scripts/deploy-examples.sh. skipping.");
+        return;
+    };
+    let pack = SSPack::load(&bytes).unwrap();
+    let images = pack.embedded_images();
+    assert!(!images.is_empty(), "an embedded pack carried no images — this test would prove nothing");
+
+    // The keys must be the ones a draw batch asks for (`name_hash`), not the ones
+    // the blobs are stored under (`image_path_hash`) — swapping the two is the
+    // classic way to break embedded loading (SPEC §8.1).
+    let undecoded: Vec<u32> = images.iter().map(|i| i.hash).collect();
+    let decoded: Vec<u32> = pack.decode_embedded().iter().map(|t| t.hash).collect();
+    assert_eq!(undecoded, decoded, "the encoded and decoded routes disagree about which atlas is which");
+
+    for image in &images {
+        // Encoded, not pixels: whoever takes these still has to decode them.
+        assert_eq!(&image.bytes[..8], b"\x89PNG\r\n\x1a\n", "an embedded image is not the encoded file the exporter wrote");
+        let decoded = image::load_from_memory(image.bytes).expect("the bytes handed out are not a decodable image");
+        assert!(decoded.width() > 0 && decoded.height() > 0);
+        assert!(image.bytes.len() < (decoded.width() * decoded.height() * 4) as usize, "the encoded image is no smaller than its pixels — retaining it for device loss would be pointless");
+    }
+
+    // Through a player, which is the route the js face takes (`embeddedTextures`).
+    let mut player = SSPlayer::new();
+    player.load_ssab("Basic", &bytes).unwrap();
+    assert_eq!(player.embedded_images(None).unwrap().iter().map(|i| i.hash).collect::<Vec<_>>(), undecoded, "the main pack's embedded images did not come back through the player");
+    assert!(player.embedded_images(Some("nope")).is_none(), "an unregistered pack name reported embedded images");
+
+    // A reference-mode pack carries none: there is nothing to hand out, and the
+    // host is told where to fetch instead (`textures()`).
+    let Ok(ref_bytes) = std::fs::read(format!("{}/Basic.ssab", asset_dir())) else { return };
+    assert!(SSPack::load(&ref_bytes).unwrap().embedded_images().is_empty(), "a reference-mode pack claims to carry its atlases");
+}
+
 /// SPEC §8.2: sharing a pack means sharing its atlas. Two players of one embedded
 /// pack must decode and upload it exactly once between them — the decode is
 /// skipped too, because the filter runs before the PNG is touched.

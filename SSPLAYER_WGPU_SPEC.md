@@ -492,13 +492,14 @@ ssconverter は `.ssab` を2形態で出力しうるので、SSPlayer はどち�
 
 | 形態 | 内容 | Player の扱い |
 |---|---|---|
-| **embedded** ✅ | テクスチャ（atlas PNG）を `.ssab` に埋め込み | `add_ssab` 時に **Player が cellmap を列挙 → 埋め込みバイト列をデコード**（CPU、`image`）、次の `update` で **premul → upload_texture** まで自動（自己完結、単一ファイル配布に最適・広告向け） |
-| **reference** ✅ | テクスチャは外部ファイルを名前/hash で参照 | Player は hash だけ把握。**実バイトはホストが供給**（`upload_texture(hash, rgba, w, h)`）。ロード経路（ファイル/URL/バンドル）はホストの責務 |
+| **embedded** ✅ | テクスチャ（atlas PNG）を `.ssab` に埋め込み | **パース**（`embedded_images()` = エンコード済みバイト列を渡すだけ）と**デコード**（`decode_embedded()` = `image`、feature `embedded`）が分かれている。ネイティブは後者を使い `add_ssab` → 次の `update` で **premul → upload_texture** まで自動。**web は前者だけを使い、デコードはブラウザ**（自己完結・単一ファイル配布に最適・広告向け、はどちらでも変わらない） |
+| **reference** ✅ | テクスチャは外部ファイルを名前/hash で参照 | Player は hash とパスだけ把握。**実バイトはホストが供給**（`upload_texture(hash, rgba, w, h)`）。ロード経路（ファイル/URL/バンドル）はホストの責務 |
 
-- **ハッシュ対応（重要）**: `DrawBatch.texture_hash = CellMap.name_hash`（`framedata.rs:104`）。埋め込みバイト列は `embedded_assets`（key = `CellMap.image_path_hash`）にある。→ embedded ロードは **cellmap 毎に `embedded_assets[image_path_hash]` をデコードし、`name_hash` で upload** する（2つのハッシュを取り違えない）。
-- **統一供給 API**: 最終的にはどちらも `upload_texture(hash, premul済みRGBA, w, h)` に集約される。embedded は Player 内部でこの呼び出しを行い、reference はホストが行う。ブラウザの `TexImageSource` 供給・ネイティブの RGBA 供給と対称。
+- **ハッシュ対応（重要）**: `DrawBatch.texture_hash = CellMap.name_hash`（`framedata.rs:104`）。埋め込みバイト列は `embedded_assets`（key = `CellMap.image_path_hash`）にある。→ embedded ロードは **cellmap 毎に `embedded_assets[image_path_hash]` を取り出し、`name_hash` で upload** する（2つのハッシュを取り違えない）。この join は `embedded_images()` にあり、`decode_embedded_where` はその上に乗っている（1箇所だけ）。
+- **統一供給 API**: 最終的にはどちらも「hash で1枚登録する」に集約される。embedded は Player 内部（`upload_texture`）またはホスト（`addTextureFromBytes`）、reference はホスト。ブラウザの `TexImageSource` 供給・ネイティブの RGBA 供給と対称。
 - **借用モデルとの整合**: `add_ssab`/`load_ssab` は device/queue を借りないので、デコードは load 時（CPU）、GPU upload は次の `update`（queue 貸与時）に `pending_textures` を flush。
-- **feature `embedded`（default on）**: Player 内蔵 `image`（PNG のみ）でデコード。WASM サイズを抑える場合は `--no-default-features` で切り、デコードをブラウザ（`createImageBitmap`）に委ねてホスト供給に一本化。
+- **★デコーダはどの層に置くか（兄弟プレイヤーとの整合）**: **可搬コアには置かない**が3実装で一致している。SS6PlayerForCPP は `Common/` がピクセルを知らず、`Platform/OpenGL/ss6player_texture.cpp` の `Texture::CacheStore` が stb_image でデコードする（アプリ側で持つ経路も `_COMPILEOPTION_TEXTURE_EXTERNALENTITY_` で選べる）。ssplayer-core は `extractEmbeddedTextures` が**バイト列を返すだけ**で、`ssplayer-webgl` の `loadTextureFromBytes` が `createImageBitmap` に渡す——だから WebGL 版は**デコーダを同梱せずに両形態に対応できている**。本実装の `embedded_images()` / `decode_embedded()` の分割はこれに合わせたもの。
+- **feature `embedded`（default on。ただし `web` は引かない）**: Player 内蔵 `image`（PNG のみ）でデコード。**`web` feature はこれを引かない**——ブラウザには既にデコーダがあり、`image` を積むのは二重持ちだから。**計測: brotli 201,386 B → 142,418 B（−29.3%）、gzip 249,331 → 178,011（−28.6%）**（wasm-pack release + `wasm-opt -Oz`）。ブラウザ経路の実装ぶんを戻した最終形は **brotli 147,161 B（対現行 −26.9%）**。自分でグルーコードを書きたくないページは `web` に `embedded` を足せば従来どおり動く。
 - **検証**: `render.rs::render_embedded_ssab`（埋め込み `Basic.ssab` をテクスチャ無供給でロード → reference レンダーとピクセル完全一致 14378/14378）。埋め込みフィクスチャは `assets/overall_emb/`（`ssconverter-cli --embedded` 生成）。
 
 ### 8.2 SSPack とテクスチャ供給（★P7-5）— **GPU テクスチャは所有しない** ✅ 実装済（`libs/ssplayer-wgpu/src/pack.rs`）
@@ -515,7 +516,8 @@ pack.name() -> &str;                                        // ★既定は .ssa
 pack.textures() -> &[TextureRef];                           // このパックが要求するアトラス（cellmap 順）
 pack.has_embedded_textures() -> bool;
 pack.animation_names() -> Vec<String>;
-pack.decode_embedded() -> Vec<EmbeddedTexture>;             // embedded の場合のみ。ピクセルを**渡すだけ**
+pack.embedded_images() -> Vec<EmbeddedImage<'_>>;           // ★エンコード済みバイト列を**借りるだけ**（デコーダ不要・feature 不問）
+pack.decode_embedded() -> Vec<EmbeddedTexture>;             // embedded の場合のみ。ピクセルを**渡すだけ**（feature `embedded`）
 pack.decode_embedded_where(|hash| ...) -> Vec<EmbeddedTexture>; // ★デコード前に絞る
 
 player.set_pack(&pack);   // Arc をクローンして参照するだけ（主パック指定）
@@ -749,10 +751,16 @@ player.destroy(); surface.destroy();            // ★明示。実体は ctx に
 - **`destroy()` が要る**のは所有が context 側にあるから。JS ラッパを捨てても swapchain は消えないので、要素の `disconnectedCallback` は player → surface の順に明示破棄する。
 - **device 喪失復帰はページで1回**（`ctx.restoreDevice()`）。喪失は device のものなので全 canvas が同時に気づく——`ss-context.js` が同時呼び出しを1本の promise に畳む（畳まないと N 個の置換 device を要求して最後の1つしか残らない）。旧実装はこの復帰を**アトラスの PNG 再デコードごと canvas 数だけ**繰り返していた。
 - **JS 露出は再設計後の ssplayer-webgl（`SSSurface` ＋ N 体の `SSPlayer`）と同型**（§0.2）。旧 `<ss-player>` の 1 canvas = 1 player・`play(name)` 1コールには揃えない——参照実装から既に消えているため。**選択と開始は別コール**（`setAnimation` + `play`）。
-- **`ctx.addTexture(hash, rgba, w, h)`** が reference 形態のテクスチャ供給。**device スコープなので1回で全 canvas・全 player に効く**（だから surface でも player でもなく context にある）。その相方が **`player.textureRefs(pack?)`** = `{ hash, path, embedded }[]`（§8.2）——ssplayer-core の `extractTexturePaths` と同型で、`embedded` が false のエントリを `new URL(path, ssabUrl)` で fetch して `addTexture` に渡す、というのが reference 形態のページの形。
+- **★テクスチャ供給は `ctx.addTextureFromBytes(hash, bytes)` が主経路**（✅ 実装済）。**device スコープなので1回で全 canvas・全 player に効く**（だから surface でも player でもなく context にある）。エンコード済みバイト列を `createImageBitmap(blob, {premultiplyAlpha:'premultiply'})` に通し、`copy_external_image_to_texture` で直接テクスチャへ入れて `set_texture` で登録する（CPU premul も 16 MB の一時コピーも通らない）。**両形態がここに集まる**:
+  - embedded → **`player.embeddedTextures(pack?)`** = `{ hash, bytes }[]`（ssplayer-core の `extractEmbeddedTextures` と同型）。fetch は不要。
+  - reference → **`player.textureRefs(pack?)`** = `{ hash, path, embedded }[]`（同 `extractTexturePaths`）。`embedded` が false のエントリを `new URL(path, ssabUrl)` で fetch して渡す。
+  - `examples/web/ss-context.js` の **`supplyTextures(ctx, player, {pack, baseUrl})`** が両方を1コールに畳む（＝ssplayer-core の `loadTextures`）。**`loadSsab` はアトラスを供給しない**——供給されるまで白フォールバックで描かれる（§8）。
+- **`ctx.hasTexture(hash)`** が「登録済みが勝つ」を JS 側から効かせるためのもの。デコードが JS に出た以上、N 体で1回に保つ判定もページ側に要る（Player 内部の flush は `decode_embedded_where` の述語で同じことを自前でやる）。`supplyTextures` はこれ＋in-flight マップで、同一 tick に2体追加しても1回しかデコードしない。
+- **`ctx.addTextureFromBitmap(hash, bitmap)`** は自前のアセットパイプラインを持つホスト向け（`set_texture` / WebGL 版 `bindTextureSource` に相当）。**device 喪失復帰は供給側の責務**。対して `addTextureFromBytes` は**エンコード済みバイト列を保持**するので `restoreDevice` が自分で復元する（ピクセルではなくエンコード済みなので 2048² で 16 MB ではなく数百 KB。WebGL 版が `{kind:'bytes'}` を retain するのと同じ判断）。
+- **`ctx.addTexture(hash, rgba, w, h)`**（生 RGBA）は残置。CPU premul と `Retention::Retain` を通るので、エンコード済み画像を持っているなら `addTextureFromBytes` のほうが速く小さい。
 - **`surface.stats()`** がフレームカウンタを JS オブジェクトで返す（players / prims / drawCalls / mergeableDraws / redundantTextureBinds / uploadedBytes ＋ `timestamp-query` があれば `gpuPassTimeNs`）。**§14.2 は native でしか測っていない**——ブラウザで同じ数字を取る手段がこれ。`examples/web/index.html` の②が毎フレーム表示する。
 - `<ss-player-webgpu>` カスタム要素は「1要素 = 1 canvas = 1 player」の**便利ラッパ**として残す（広告のような単体用途はこれが最短）。ただし内部では上記の共有 context から surface を1枚取るだけなので、要素を何個置いても device は1つ。
-- ssab は embedded / reference 両対応（§8.1）。**embedded のデコードは `createImageBitmap` ＋ `copy_external_image_to_texture` に寄せ、`image` crate を wasm から外す**余地が残っている（§8——狙いは premultiply の GPU 化とオフスレッドデコード。§14.2 項目 9）。
+- ssab は embedded / reference 両対応（§8.1）。**embedded のデコードは `createImageBitmap` ＋ `copy_external_image_to_texture` に寄せ、`image` crate を wasm から外した** ✅（`web` feature は `embedded` を引かない。brotli −26.9%、§8.1 に計測値）。**残課題**: web 面はテストが1つも無いので、パース側だけ native で固定してある（`tests/pack.rs::an_embedded_pack_hands_out_its_atlases_undecoded`）——`createImageBitmap` 経路そのものはブラウザ実機の目視が唯一の検証。
 - ビルド/パッケージは `scripts/release-web.sh` 相当を追加し `pkg/ssplayer-wgpu-web/` を吐く。◻ 未着手。
 - 注意: WebGPU 未対応ブラウザへのフォールバック方針（WebGL 版へ退避 or エラー表示）を Web Component 層で定義（§14）。現状は `sharedContext()` が非対応を検知して reject し、要素がエラー表示へ落ちるところまで。
 
@@ -897,7 +905,7 @@ const char*  ss_last_error(void);                             // スレッドロ
 ## §14 既知の制約・要調査
 
 - **premul の一貫性**が最重要。アップロード・シェーダ・ブレンド係数のどこか1つでも崩すと合成破綻。
-- **premul と WebGPU の非対称（★要注意）**: WebGL は `UNPACK_PREMULTIPLY_ALPHA_WEBGL` でドライバが無料で premultiply するが、**WebGPU の `writeTexture` に等価は無い**。現行は CPU で premul しており、2048² で 16 MB の一時コピーが出る。web は `copy_external_image_to_texture` ＋ `createImageBitmap` へ寄せる（§8）。engine から借りるテクスチャは premul されていないのが普通なので `AlphaMode` フラグで受ける ✅ P7-5（§8.2）。なお `upload_texture` は **`AlphaMode::Straight` で上げれば CPU premul を省ける**が、そうしない——線形補間はアルファ境界で premultiplied のほうが正しく、フチが出るのを避けるため。省くのは供給側が既にその判断をしている `set_texture` 経路だけ。
+- **premul と WebGPU の非対称（★解消済）**: WebGL は `UNPACK_PREMULTIPLY_ALPHA_WEBGL` でドライバが無料で premultiply するが、**WebGPU の `writeTexture` に等価は無い**——`upload_texture` は CPU で premul しており、2048² で 16 MB の一時コピーが出る。**web 面はこの経路を通らなくなった** ✅: `createImageBitmap(…, {premultiplyAlpha:'premultiply'})` ＋ `copy_external_image_to_texture`（dest `premultiplied_alpha: true`）で、デコードも premultiply もブラウザ側で済み、ピクセルは wasm メモリを一度も通らない（§8.1 / §10）。ネイティブの `upload_texture` は従来どおり。engine から借りるテクスチャは premul されていないのが普通なので `AlphaMode` フラグで受ける ✅ P7-5（§8.2）。なお `upload_texture` は **`AlphaMode::Straight` で上げれば CPU premul を省ける**が、そうしない——線形補間はアルファ境界で premultiplied のほうが正しく、フチが出るのを避けるため。省くのは供給側が既にその判断をしている `set_texture` 経路だけ。
 - **stencil ターゲット** ✅ 実装済: `SSPlayerConfig.stencil_format`（P7 以降は `SceneConfig`）で opt-in し、ホストが毎 pass に attach（§6）。
 - **INCR/INVERT 混在マスク**は単一ステンシルで近似（厳密解は coverage-bitmap、要検討）。
 - **ステンシル残留** ✅ P7-1 で解消: `render_node` がフレーム末尾で未消化 writer を全て巻き戻す（`unwind_masks`）。これが無いと**1 pass に複数 Player を積んだとき A のマスクが B をクリップ**した。回帰は `tests/scene.rs::stencil_unwind_isolates_players`（§6 / §13）。

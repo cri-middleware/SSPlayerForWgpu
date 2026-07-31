@@ -12,7 +12,7 @@
 
 use crate::frame::FrameView;
 use crate::mask::{GeomKind, MaskOp, MaskWriter, PartMaskFlags, StencilTest, plan_writers};
-use crate::pack::{SSPack, TextureRef};
+use crate::pack::{EmbeddedImage, SSPack, TextureRef};
 use crate::renderer::{Retention, SSRenderer};
 use crate::scene::{BatchInfo, FrameChunk, NodeSlot};
 use ssab::ssab::ss::format::{PartType, root_as_ss_anime_binary_unchecked};
@@ -291,6 +291,19 @@ impl SSPlayer {
     pub fn textures(&self, pack_name: Option<&str>) -> Option<&[TextureRef]> {
         let name = pack_name.or(self.main_pack.as_deref())?;
         Some(self.packs.get(name)?.textures())
+    }
+
+    /// The encoded atlases a registered pack carries (SPEC §8.1), or `None` if
+    /// `pack_name` names no pack this player holds. `None` selects the main pack.
+    ///
+    /// The embedded-mode counterpart of [`SSPlayer::textures`]: there is nothing
+    /// for the host to fetch, but there is something for it to decode. A host
+    /// with its own decoder walks this and registers the results, rather than
+    /// leaving it to [`SSPlayer::flush_textures`] — which needs the `embedded`
+    /// feature and only knows how to decode PNG (SPEC §8.2).
+    pub fn embedded_images(&self, pack_name: Option<&str>) -> Option<Vec<EmbeddedImage<'_>>> {
+        let name = pack_name.or(self.main_pack.as_deref())?;
+        Some(self.packs.get(name)?.embedded_images())
     }
 
     /// Canvas size of the currently playing animation.

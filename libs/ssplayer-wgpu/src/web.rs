@@ -28,13 +28,21 @@
 //! cell rather than one per object means no borrow can be held across another.
 //!
 //! Embedded ssab (SPEC §8.1) is the natural web form: the atlas PNGs ride inside
-//! the `.ssab`, so a single fetched file renders with no host texture supply.
+//! the `.ssab`, so a single fetched file needs no sibling image files. **The
+//! decoding of those PNGs is the browser's job here, not the player's** — the
+//! `web` feature carries no image decoder, because one is already installed on
+//! every page. [`SsPlayerWeb::embedded_textures`] hands out the encoded bytes and
+//! [`SsContextWeb::add_texture_from_bytes`] runs them through `createImageBitmap`,
+//! which is the same division of labour as `ssplayer-core`'s
+//! `extractEmbeddedTextures` + `ssplayer-webgl`'s `loadTextureFromBytes`, and the
+//! reason this face is ~30% smaller over the wire than one that bundles `image`.
 
 use crate::player::SSPlayer;
-use crate::renderer::{Retention, SSRenderer};
+use crate::renderer::{AlphaMode, Retention, SSRenderer};
 use crate::roster::{Roster, SlotId};
 use crate::scene::{SSScene, SceneConfig};
 use std::cell::RefCell;
+use std::collections::HashMap;
 use std::rc::Rc;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -68,6 +76,27 @@ fn create_stencil_view(device: &wgpu::Device, width: u32, height: u32) -> wgpu::
         view_formats: &[],
     });
     texture.create_view(&wgpu::TextureViewDescriptor::default())
+}
+
+/// Decode encoded image bytes (PNG) with **the browser's** decoder.
+///
+/// `createImageBitmap` decodes off the main thread and premultiplies on the way,
+/// which is why the web face ships no decoder of its own: `image` would cost wasm
+/// size to do the same job worse, on the main thread. The premultiply matters as
+/// much as the decode — the whole pipeline composites premultiplied (SPEC §5.2),
+/// and this is the WebGPU equivalent of the WebGL player's
+/// `UNPACK_PREMULTIPLY_ALPHA_WEBGL` (`SSWebGLResourceManager.createTextureFromSource`).
+async fn decode_image(bytes: &[u8]) -> Result<web_sys::ImageBitmap, JsValue> {
+    let window = web_sys::window().ok_or_else(|| JsValue::from_str("no `window` (this face needs a document)"))?;
+    let parts = js_sys::Array::new();
+    parts.push(&js_sys::Uint8Array::from(bytes));
+    let blob = web_sys::Blob::new_with_u8_array_sequence(parts.as_ref())?;
+
+    let options = web_sys::ImageBitmapOptions::new();
+    options.set_premultiply_alpha(web_sys::PremultiplyAlpha::Premultiply);
+    let promise = window.create_image_bitmap_with_blob_and_image_bitmap_options(&blob, &options)?;
+
+    wasm_bindgen_futures::JsFuture::from(promise).await?.dyn_into::<web_sys::ImageBitmap>().map_err(|_| JsValue::from_str("createImageBitmap did not return an ImageBitmap"))
 }
 
 /// Request a device and subscribe to its `GPUDevice.lost` (SPEC §14). The returned
@@ -125,6 +154,15 @@ struct WebContext {
     /// Set from `GPUDevice.lost`. While it is set every `frame` is a no-op —
     /// each GPU object on the page is dead until `restoreDevice`.
     device_lost: Arc<AtomicBool>,
+    /// The **encoded** bytes behind every texture supplied through
+    /// [`SsContextWeb::add_texture_from_bytes`], kept so a device loss can be
+    /// repaired without the page re-fetching or re-reading anything (SPEC §14).
+    ///
+    /// Affordable precisely because they are encoded: a 2048² atlas is a few
+    /// hundred KB here against the 16 MB its pixels would take under
+    /// [`Retention::Retain`]. The same trade the WebGL player makes by retaining
+    /// its `{ kind: 'bytes' }` source rather than the decoded image.
+    encoded_textures: HashMap<u32, Rc<[u8]>>,
     /// Kept last: the instance must outlive the surfaces it created.
     instance: wgpu::Instance,
 }
@@ -150,6 +188,50 @@ impl WebContext {
         let stencil_view = create_stencil_view(&self.device, width, height);
 
         Ok(self.surfaces.insert(SurfaceEntry { surface, config, stencil_view, scene, players: Roster::default() }))
+    }
+
+    /// Upload a decoded `bitmap` and register it under `hash`.
+    ///
+    /// Goes through [`SSRenderer::set_texture`] rather than `upload_texture`
+    /// because the pixels never pass through Rust: `copyExternalImageToTexture`
+    /// moves them from the browser's decoded image straight into the texture,
+    /// with none of the CPU premultiply pass (and none of its 16 MB temporary,
+    /// SPEC §14) that `upload_texture` needs. The renderer only borrows the view
+    /// — and since wgpu handles are refcounted, dropping our `Texture` here is
+    /// fine: the view it hands over keeps it alive.
+    fn set_texture_from_bitmap(&mut self, hash: u32, bitmap: &web_sys::ImageBitmap) {
+        let (width, height) = (bitmap.width(), bitmap.height());
+        let size = wgpu::Extent3d { width, height, depth_or_array_layers: 1 };
+        let texture = self.device.create_texture(&wgpu::TextureDescriptor {
+            label: Some("SpriteStudio Atlas (ImageBitmap)"),
+            size,
+            mip_level_count: 1,
+            sample_count: 1,
+            dimension: wgpu::TextureDimension::D2,
+            format: wgpu::TextureFormat::Rgba8Unorm,
+            // RENDER_ATTACHMENT is not a use of ours: WebGPU requires it of any
+            // `copyExternalImageToTexture` destination.
+            usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST | wgpu::TextureUsages::RENDER_ATTACHMENT,
+            view_formats: &[],
+        });
+
+        self.queue.copy_external_image_to_texture(
+            &wgpu::CopyExternalImageSourceInfo { source: wgpu::ExternalImageSource::ImageBitmap(bitmap.clone()), origin: wgpu::Origin2d::ZERO, flip_y: false },
+            wgpu::CopyExternalImageDestInfo {
+                texture: &texture,
+                mip_level: 0,
+                origin: wgpu::Origin3d::ZERO,
+                aspect: wgpu::TextureAspect::All,
+                color_space: wgpu::PredefinedColorSpace::Srgb,
+                // The bitmap was asked for premultiplied and the destination is
+                // declared premultiplied, so the copy converts nothing.
+                premultiplied_alpha: true,
+            },
+            size,
+        );
+
+        let view = texture.create_view(&wgpu::TextureViewDescriptor::default());
+        self.renderer.set_texture(&self.device, hash, &view, (width, height), AlphaMode::Premultiplied);
     }
 }
 
@@ -187,7 +269,7 @@ impl SsContextWeb {
         let (device, queue, device_lost) = request_device(&adapter).await?;
         let renderer = SSRenderer::new(&device);
 
-        Ok(SsContextWeb { inner: Rc::new(RefCell::new(WebContext { renderer, device, queue, surfaces: Roster::default(), adapter, device_lost, instance })) })
+        Ok(SsContextWeb { inner: Rc::new(RefCell::new(WebContext { renderer, device, queue, surfaces: Roster::default(), adapter, device_lost, encoded_textures: HashMap::new(), instance })) })
     }
 
     /// Attach a canvas and get the scene that draws into it. Any number of
@@ -198,16 +280,72 @@ impl SsContextWeb {
         Ok(SsSurfaceWeb { ctx: Rc::clone(&self.inner), id })
     }
 
-    /// Supply a texture for a reference-mode pack by hash (SPEC §8.1).
+    /// Supply a texture by hash from **raw straight-alpha RGBA** (SPEC §8.1).
     ///
     /// Device-scoped, so it covers every canvas and every player at once — which
-    /// is exactly why it is here and not on a surface or a player. Embedded packs
-    /// need none of this: the player decodes and uploads its own atlases.
+    /// is exactly why it is here and not on a surface or a player.
+    ///
+    /// Prefer [`SsContextWeb::add_texture_from_bytes`] when what you have is an
+    /// encoded image: this path premultiplies on the CPU and keeps the pixels for
+    /// device-loss recovery, so a 2048² atlas costs two 16 MB passes through wasm
+    /// memory that `createImageBitmap` does not.
     #[wasm_bindgen(js_name = addTexture)]
     pub fn add_texture(&self, hash: u32, rgba: &[u8], width: u32, height: u32) {
         let ctx = &mut *self.inner.borrow_mut();
-        let WebContext { renderer, device, queue, .. } = ctx;
+        let WebContext { renderer, device, queue, encoded_textures, .. } = ctx;
+        // One hash, one supplier: whichever path registered it last owns the
+        // recovery too, so the other's retained source must go.
+        encoded_textures.remove(&hash);
         renderer.upload_texture(device, queue, hash, rgba, (width, height), Retention::Retain);
+    }
+
+    /// Supply a texture by hash from **encoded image bytes** (PNG) — the main
+    /// texture path of this face (SPEC §8.1, §8.2).
+    ///
+    /// Both `.ssab` forms end here. An embedded pack's atlases come from
+    /// [`SsPlayerWeb::embedded_textures`] and need no fetch; a reference pack's
+    /// come from fetching each [`SsPlayerWeb::texture_refs`] entry whose
+    /// `embedded` is false, resolved against the `.ssab`'s own URL. That is the
+    /// same shape as `ssplayer-core`'s `extractEmbeddedTextures` /
+    /// `extractTexturePaths` pair, and the reason this face supports both forms
+    /// without carrying a decoder.
+    ///
+    /// The bytes are kept (they are the encoded image, not the pixels) so
+    /// [`SsContextWeb::restore_device`] can rebuild this texture on its own.
+    #[wasm_bindgen(js_name = addTextureFromBytes)]
+    pub async fn add_texture_from_bytes(&self, hash: u32, bytes: Vec<u8>) -> Result<(), JsValue> {
+        self.upload_encoded(hash, Rc::from(bytes)).await
+    }
+
+    /// Supply a texture by hash from an `ImageBitmap` the **page** decoded.
+    ///
+    /// For a host with its own asset pipeline — the analogue of
+    /// [`crate::SSRenderer::set_texture`] and of the WebGL player's
+    /// `bindTextureSource`. The bitmap must be premultiplied
+    /// (`createImageBitmap(blob, { premultiplyAlpha: 'premultiply' })`), which is
+    /// what the whole pipeline composites in (SPEC §5.2).
+    ///
+    /// Device loss is the supplier's to repair on this path, exactly as on the
+    /// Rust one: nothing is retained here, so the page registers it again after
+    /// [`SsContextWeb::restore_device`]. Use
+    /// [`SsContextWeb::add_texture_from_bytes`] to be spared that.
+    #[wasm_bindgen(js_name = addTextureFromBitmap)]
+    pub fn add_texture_from_bitmap(&self, hash: u32, bitmap: &web_sys::ImageBitmap) {
+        let ctx = &mut *self.inner.borrow_mut();
+        ctx.encoded_textures.remove(&hash);
+        ctx.set_texture_from_bitmap(hash, bitmap);
+    }
+
+    /// Whether an atlas is already registered for `hash`.
+    ///
+    /// The texture map is device-scoped (SPEC §1.2), so this answers for the
+    /// whole page: it is how a caller keeps "N players of one pack decode its
+    /// atlas once between them" true now that the decode happens in JS. The
+    /// player-side flush gets that for free (it filters before the decode,
+    /// SPEC §8.2); a page supplying textures itself has to ask.
+    #[wasm_bindgen(js_name = hasTexture)]
+    pub fn has_texture(&self, hash: u32) -> bool {
+        self.inner.borrow().renderer.texture_size(hash).is_some()
     }
 
     /// Whether the browser has taken the WebGPU device away (SPEC §14). While
@@ -221,7 +359,7 @@ impl SsContextWeb {
     /// Rebuild the page's WebGPU stack after a device loss and restore every
     /// surface and player on it (pipelines, buffers, atlases, projections) —
     /// playback continues from the frame it was interrupted on, with no re-fetch
-    /// of any `.ssab`.
+    /// of any `.ssab` and no re-fetch of any atlas.
     ///
     /// **One call for the page**, where the predecessor ran the whole recovery —
     /// including re-decoding the same atlas PNGs — once per canvas.
@@ -236,31 +374,44 @@ impl SsContextWeb {
         let adapter = request_adapter(&instance).await?;
         let (device, queue, device_lost) = request_device(&adapter).await?;
 
-        let ctx = &mut *self.inner.borrow_mut();
-        // Device-scoped first, then each target, then each player's atlases (§14).
-        ctx.renderer.restore_device(&device, &queue);
-        for surface in ctx.surfaces.iter_mut() {
-            let caps = surface.surface.get_capabilities(&adapter);
-            if !caps.formats.contains(&surface.config.format) {
-                return Err(JsValue::from_str("the restored adapter cannot present a canvas's original surface format; rebuild the context"));
+        let encoded: Vec<(u32, Rc<[u8]>)> = {
+            let ctx = &mut *self.inner.borrow_mut();
+            // Device-scoped first, then each target, then each player's atlases (§14).
+            ctx.renderer.restore_device(&device, &queue);
+            for surface in ctx.surfaces.iter_mut() {
+                let caps = surface.surface.get_capabilities(&adapter);
+                if !caps.formats.contains(&surface.config.format) {
+                    return Err(JsValue::from_str("the restored adapter cannot present a canvas's original surface format; rebuild the context"));
+                }
+                surface.config.alpha_mode = caps.alpha_modes[0];
+                surface.surface.configure(&device, &surface.config);
+                surface.stencil_view = create_stencil_view(&device, surface.config.width, surface.config.height);
+                surface.scene.restore_device(&device, &queue);
+                for player in surface.players.iter_mut() {
+                    player.restore_textures(&mut ctx.renderer, &device, &queue);
+                }
+                // `restore_device` re-applies the viewport the scene last saw, which is
+                // stale if the canvas was resized while the device was gone (`resize`
+                // only records the size then). `config` is authoritative — re-apply from it.
+                surface.scene.set_viewport(&queue, surface.config.width as f32, surface.config.height as f32, false);
             }
-            surface.config.alpha_mode = caps.alpha_modes[0];
-            surface.surface.configure(&device, &surface.config);
-            surface.stencil_view = create_stencil_view(&device, surface.config.width, surface.config.height);
-            surface.scene.restore_device(&device, &queue);
-            for player in surface.players.iter_mut() {
-                player.restore_textures(&mut ctx.renderer, &device, &queue);
-            }
-            // `restore_device` re-applies the viewport the scene last saw, which is
-            // stale if the canvas was resized while the device was gone (`resize`
-            // only records the size then). `config` is authoritative — re-apply from it.
-            surface.scene.set_viewport(&queue, surface.config.width as f32, surface.config.height as f32, false);
-        }
 
-        ctx.adapter = adapter;
-        ctx.device = device;
-        ctx.queue = queue;
-        ctx.device_lost = device_lost;
+            ctx.adapter = adapter;
+            ctx.device = device;
+            ctx.queue = queue;
+            ctx.device_lost = device_lost;
+            ctx.encoded_textures.iter().map(|(&hash, bytes)| (hash, Rc::clone(bytes))).collect()
+        };
+
+        // The atlases this context decoded itself went with the old device:
+        // `set_texture` is the supplier's to repair (SPEC §8.2), and here the
+        // supplier is us. Re-decoding is why the encoded bytes were kept — the
+        // page fetches nothing. Last, so that a hash claimed by both an explicit
+        // supply and an embedded pack ends up where it was before the loss:
+        // `addTextureFrom*` overwrites, on this path as on the first one.
+        for (hash, bytes) in encoded {
+            self.upload_encoded(hash, bytes).await?;
+        }
         Ok(())
     }
 
@@ -268,6 +419,27 @@ impl SsContextWeb {
     #[wasm_bindgen(js_name = surfaceCount)]
     pub fn surface_count(&self) -> usize {
         self.inner.borrow().surfaces.len()
+    }
+}
+
+impl SsContextWeb {
+    /// Decode `bytes` in the browser, upload the result under `hash` and retain
+    /// the bytes for device-loss recovery.
+    ///
+    /// Takes an `Rc` so the restore path can re-run it without copying every
+    /// retained atlas. Nothing is borrowed across the await — a `RefMut` held
+    /// over a yield point would still be held when JS re-enters through a rAF
+    /// callback.
+    async fn upload_encoded(&self, hash: u32, bytes: Rc<[u8]>) -> Result<(), JsValue> {
+        let bitmap = decode_image(&bytes).await?;
+        {
+            let ctx = &mut *self.inner.borrow_mut();
+            ctx.set_texture_from_bitmap(hash, &bitmap);
+            ctx.encoded_textures.insert(hash, bytes);
+        }
+        // Ours to decode, ours to release: the copy captured the pixels already.
+        bitmap.close();
+        Ok(())
     }
 }
 
@@ -430,9 +602,16 @@ macro_rules! with_player {
 
 #[wasm_bindgen]
 impl SsPlayerWeb {
-    /// Register + select an embedded `.ssab` (its atlas textures are decoded and
-    /// uploaded automatically on the next frame). `pack` names the pack for
-    /// external instance references.
+    /// Register + select a `.ssab`. `pack` names the pack for external instance
+    /// references.
+    ///
+    /// **Registering a pack does not supply its atlases**, in either form: this
+    /// face has no decoder and no way to fetch, and until they arrive every part
+    /// draws against the 1x1 white fallback (SPEC §8). Follow with
+    /// [`SsPlayerWeb::embedded_textures`] or [`SsPlayerWeb::texture_refs`] and
+    /// [`SsContextWeb::add_texture_from_bytes`] — `examples/web/ss-context.js`
+    /// wraps both into one `supplyTextures` call, the way `ssplayer-core` wraps
+    /// them into `loadTextures`.
     #[wasm_bindgen(js_name = loadSsab)]
     pub fn load_ssab(&self, pack: &str, bytes: &[u8]) -> Result<(), JsValue> {
         with_player!(self, |p| p.load_ssab(pack, bytes).map_err(js_err)?)
@@ -472,6 +651,35 @@ impl SsPlayerWeb {
                 set("hash", texture.hash.into());
                 set("path", texture.path.as_str().into());
                 set("embedded", texture.embedded.into());
+                out.push(&entry);
+            }
+            out
+        })
+    }
+
+    /// The atlases a registered pack **carries**, as `{ hash, bytes }[]` — the
+    /// encoded images, not pixels (SPEC §8.1). Empty for a reference-mode pack.
+    /// `pack` undefined selects the main pack.
+    ///
+    /// The embedded half of texture supply, and the counterpart of
+    /// [`SsPlayerWeb::texture_refs`]: there is nothing to fetch, but there is
+    /// still something to decode, and on this face the decoder is the browser.
+    /// Hand each entry to [`SsContextWeb::add_texture_from_bytes`].
+    ///
+    /// Same shape as `ssplayer-core`'s `extractEmbeddedTextures`, and same
+    /// reason: it is what lets a player support embedded packs without carrying
+    /// an image decoder into the bundle.
+    #[wasm_bindgen(js_name = embeddedTextures)]
+    pub fn embedded_textures(&self, pack: Option<String>) -> Result<js_sys::Array, JsValue> {
+        with_player!(self, |p| {
+            let out = js_sys::Array::new();
+            for image in p.embedded_images(pack.as_deref()).unwrap_or_default() {
+                let entry = js_sys::Object::new();
+                let set = |key: &str, value: JsValue| {
+                    let _ = js_sys::Reflect::set(&entry, &JsValue::from_str(key), &value);
+                };
+                set("hash", image.hash.into());
+                set("bytes", js_sys::Uint8Array::from(image.bytes).into());
                 out.push(&entry);
             }
             out

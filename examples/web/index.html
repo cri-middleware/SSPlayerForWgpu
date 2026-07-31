@@ -57,7 +57,7 @@
 
   <script type="module">
     import './ss-player-webgpu.js';
-    import { sharedContext } from './ss-context.js';
+    import { sharedContext, supplyTextures } from './ss-context.js';
 
     // Standalone single-pack animations from tests/overall (no external instance refs).
     const PACKS = ['Basic', 'PartsColor', 'BlendMode', 'Mask', 'Shape', 'Mesh', 'Effect', 'Shader'];
@@ -103,6 +103,10 @@
         const name = CAST[players.length % CAST.length];
         const p = surface.createPlayer();
         p.loadSsab(name, await bytesFor(name));
+        // The atlas is decoded by the browser and registered on the shared
+        // renderer, so the second player of a pack finds it already there
+        // (SPEC §8.2 — "registered wins").
+        await supplyTextures(ctx, p, { pack: name, baseUrl: new URL(`assets/${name}.ssab`, location.href) });
         // Select, then start — two calls (SPEC §9.3).
         p.setAnimation(p.animationNames()[0]);
         p.play();
