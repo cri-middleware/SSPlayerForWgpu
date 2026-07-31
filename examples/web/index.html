@@ -22,8 +22,10 @@
 </head>
 <body>
   <h1>ssplayer-wgpu — WebGPU demo</h1>
-  <p>SpriteStudio 7 の <code>.ssab</code>（テクスチャ埋め込み）を <strong>WebGPU</strong> で再生します。
-     ホストからのテクスチャ供給は不要（埋め込みをプレイヤーがデコード）。</p>
+  <p>SpriteStudio 7 の <code>.ssab</code> を <strong>WebGPU</strong> で再生します。
+     reference（外部 PNG）／ embedded（埋め込み）どちらも <code>load()</code> 1コールで、
+     アトラスも参照先パックも揃います。デコードはブラウザ（<code>createImageBitmap</code>）が行うので、
+     wasm に画像デコーダは入っていません。</p>
 
   <h2>① <code>&lt;ss-player-webgpu&gt;</code>（1要素 = 1 canvas = 1 体）</h2>
   <p class="hint">単体用途向けの便利ラッパ。下の②と <strong>device・パイプライン・アトラスを共有</strong>します。</p>
@@ -33,14 +35,14 @@
     <select id="pick"></select>
     <label for="mode">形態:</label>
     <select id="mode">
-      <option value="assets">embedded（アトラス埋め込み）</option>
       <option value="assets-ref">reference（外部 PNG）</option>
+      <option value="assets">embedded（アトラス埋め込み）</option>
     </select>
     <span class="hint">— <code>load()</code> 1コールでアトラスも兄弟 ssab（<code>Instance</code>）も揃います</span>
   </p>
 
   <!-- The custom element creates its own <canvas> and drives requestAnimationFrame. -->
-  <ss-player-webgpu id="player" class="stage" src="assets/Basic.ssab"></ss-player-webgpu>
+  <ss-player-webgpu id="player" class="stage" src="assets-ref/Basic.ssab"></ss-player-webgpu>
 
   <h2>② 1 canvas に N 体（<code>SsContextWeb</code> を直接駆動）</h2>
   <p class="hint">1枚の canvas ＝ 1 <code>SSScene</code> に何体でも載る形（SPEC §10）。
@@ -87,11 +89,11 @@
 
     // --- ② one canvas, many players -------------------------------------
     // Fetched once and reused: the same bytes make every player, and the atlas
-    // inside them is uploaded once by the shared renderer however many players
-    // load it (SPEC §8.2 — "registered wins", so the second one skips the decode).
+    // they name is uploaded once by the shared renderer however many players load
+    // it (SPEC §8.2 — "registered wins", so the second one skips the decode).
     const packBytes = new Map();
     async function bytesFor(name) {
-      if (!packBytes.has(name)) packBytes.set(name, new Uint8Array(await (await fetch(`assets/${name}.ssab`)).arrayBuffer()));
+      if (!packBytes.has(name)) packBytes.set(name, new Uint8Array(await (await fetch(`assets-ref/${name}.ssab`)).arrayBuffer()));
       return packBytes.get(name);
     }
 
@@ -121,7 +123,7 @@
         // browser into the shared, device-scoped renderer, so the second player
         // of a pack finds them already there and loads nothing (SPEC §8.2 —
         // "registered wins").
-        await p.loadSsab(await bytesFor(name), null, new URL(`assets/${name}.ssab`, location.href).href);
+        await p.loadSsab(await bytesFor(name), null, new URL(`assets-ref/${name}.ssab`, location.href).href);
         // Select, then start — two calls (SPEC §9.3), both synchronous.
         p.setAnimation(p.animationNames()[0]);
         p.play();

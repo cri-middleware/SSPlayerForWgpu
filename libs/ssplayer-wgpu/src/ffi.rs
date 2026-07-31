@@ -408,6 +408,40 @@ pub unsafe extern "C" fn ss_scene_player_count(scene: *mut SsScene) -> u32 {
 
 // --- resources ------------------------------------------------------------
 
+/// Load a `.ssab` from `path` **and everything it depends on**, then select it
+/// (SPEC §8.1, §7.1).
+///
+/// The whole of loading in one call: the pack, both of its texture tables in
+/// either export mode, and the sibling packs its instance parts play from,
+/// transitively. Nothing is left for the caller to discover — no
+/// `ss_player_texture_at` loop, no `ss_scene_add_texture_png` per atlas.
+///
+/// ```c
+/// ss_player_load(player, "assets/Instance.ssab");
+/// ss_player_set_animation(player, "anime_1");
+/// ss_player_play(player);
+/// ```
+///
+/// Everything the pack names is resolved against **the `.ssab`'s own directory**,
+/// which is what the exporter wrote those paths relative to. Atlases reach the
+/// GPU on the next `ss_scene_update`, the same moment an embedded pack's do.
+///
+/// A host whose assets are not files — a pack file, an archive, a platform asset
+/// manager — keeps using `ss_player_load_ssab` plus `ss_scene_add_texture_png`,
+/// which is why those remain.
+///
+/// # Safety
+/// `path` must be a NUL-terminated UTF-8 string. It is not retained beyond the call.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn ss_player_load(handle: *mut SsPlayer, path: *const c_char) -> i32 {
+    let Some(player) = (unsafe { player(handle) }) else { return fail(SS_ERROR_INVALID_ARGUMENT, "player handle is null or destroyed") };
+    let Some(path) = (unsafe { c_str(path) }) else { return fail(SS_ERROR_INVALID_ARGUMENT, "path is null or not UTF-8") };
+    match player.load(path) {
+        Ok(()) => SS_OK,
+        Err(e) => fail(e.as_code(), format!("{path}: {e}")),
+    }
+}
+
 /// Register an `.ssab` pack under `pack_name` without changing what plays.
 ///
 /// Every pack an animation can reference must be registered before

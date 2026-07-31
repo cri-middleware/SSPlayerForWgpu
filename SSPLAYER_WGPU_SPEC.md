@@ -460,7 +460,7 @@ Godot / Unity のネイティブプレイヤー実績と C-API 契約から、�
 - `PlaybackNode { context, instances, effects }` の木を SSPlayer が所有。GPU リソースは現行 `SSInternalPlayer` 1個を共有（P7 で `SSRenderer` / `SSScene` へ移り、共有範囲が**シーン内の全 Player**へ広がる）。
 - **外部参照は pack 名の文字列**（`PartTypeInstance::ref_anime_pack()`/`ref_anime_name()`）で解決＝ハッシュアルゴリズム不整合を回避。ホストは全 pack を `add_pack` / `add_ssab` で事前登録し、`set_pack` / `load_ssab` で主 pack を指定。ssab 型は `ssab::ssab::ss::format::{PartType, root_as_ss_anime_binary_unchecked}`。
 - **どのパックが要るかは `.ssab` が知っている** ✅: `SSPack::instance_packs()` が `external_instances()` から**参照先パック名**を返す（自己参照と重複は除く）。テクスチャの `textures()` と同じ分担で、**パックが「何が要るか」を答え、ホストが取ってくる**。エクスポータは参照先パック自身の名前を書くので、その文字列が**ファイル名の stem** でもあり `ref_anime_pack` の照合キーでもある——だから `<.ssab のディレクトリ>/<name>.ssab` で必ず見つかる。`SS6PlayerForGodot` の `_load_external_ssabs`（`parent_dir.path_join(pack + ".ssab")`）と `ssplayer-core` の `resolveInstancePacks`（`<base>/<name>.ssab`）が同じ規則。
-- **js 面は自動で解決する** ✅（§10）: `load` / `loadSsab` が上記を辿って `add_pack` ＋そのパックのテクスチャロードまで済ませる。**Godot は子プレイヤーごとに `setSSABResource` を呼んで深い階層へ到達する**が、この Player は 1 プレイヤーがパック表をフラットに1枚持つ設計（`packs: HashMap<String, SSPack>`）なので、代わりに**推移的に辿る**。1階層＝1往復、その階層は並列取得。登録済み（`SSPlayer::has_pack`）は取りに行かないので、相互参照でも止まる。
+- **3面とも自動で解決する** ✅（§8.1）: `SSPlayer::load` / `load_with`（js の `load`、C の `ss_player_load`）が上記を辿って `add_pack` ＋そのパックのテクスチャロードまで済ませる。**Godot は子プレイヤーごとに `setSSABResource` を呼んで深い階層へ到達する**が、この Player は 1 プレイヤーがパック表をフラットに1枚持つ設計（`packs: HashMap<String, SSPack>`）なので、代わりに**推移的に辿る**。1階層＝1往復、その階層は並列取得。登録済み（`SSPlayer::has_pack`）は取りに行かないので、相互参照でも止まる。
 - **transition スナップはホスト責務**: `InstanceSlot::step` は transition 時にセクション/ループ/方向を設定するのみで開始フレームへのスナップはしない。**`result.transitioned` 時に子 `context.play()` を呼ぶ**（呼ばないと独立モードが再生状態にならず進まない）。
 - **スロットの step は「パーツ一覧」から回す。`draw_order` から回してはいけない（★実装済・回帰テストあり）**: ランタイムは `Hide` のパーツを `draw_order` / `draw_batches` から丸ごと落とす（`framedata.rs` の `drawn_as_self`）。描画走査のついでに step すると**非表示になった瞬間そのスロットが止まり**、独立再生の子／エフェクトは止まっていた時間だけ遅れて再開する（`10_instance.md` §Supporting Independent Playback、`20_effect.md`）。そこで `step_slots`（全スロットを再帰的に進める）と `render_node`（`draw_batches` を描く）を**別の走査**に分ける。可視性は「描くか」の判断にだけ使う。兄弟実装も同型（Web の `stepEffectSlots`/`stepInstanceSlots`、Godot の `_update_instance_children`）。
 - **`parent_looped` は `Context::is_looped()`**: コントローラが `update` 中に立てるパルスで、次の `update` 開始時にクリアされるため**その `update` の直後に読む**。「フレームが後退したら」で代用しない——逆再生・ピンポンでは毎フレーム後退するため。子へは `result.child_looped` を伝播（独立再生の子は親ではなく自分のループが基準）。
@@ -499,6 +499,20 @@ ssconverter は `.ssab` を2形態で出力しうるので、SSPlayer はどち�
 
 - **ロード対象は `cellmaps()` と `external_textures()` の2つ（★必須）** ✅: `DrawBatch.texture_hash` は通常 `CellMap.name_hash` だが、作画で**テクスチャ変更（`TCHG`）**が指定されたパーツでは**テクスチャファイル名のハッシュ**になる。両方を同じマップへ入れること——移植ガイド `30_core/10_initialization.ja.md` §3 の `[!IMPORTANT]` そのもので、`SS6PlayerForGodot` の `_loadTextures` も両テーブルを走査している。**落とすと静かに壊れる**: 見つからない hash は 1x1 白フォールバック（§8）に落ちるので、そのパーツは消えるのではなく**白いシルエットで描かれ**、カウンタもエラーも動かない。`SSPack::textures()` / `embedded_images()` が両方を返す。フィクスチャは `assets/overall/TextureChange.ssab`（cellmap 1 ＋ external 3、うち1つは cellmap 自身の画像を別 hash で指す）。検証は `tests/pack.rs::a_pack_names_its_texture_change_targets`。
 - **ハッシュ対応（重要）**: 埋め込みバイト列は `embedded_assets`（key = **ファイル名**のハッシュ）にある。cellmap は `image_path_hash` で引いて `name_hash` で返す**join が要る**が、`ExternalTexture` は `name_hash` がファイル名のハッシュなので**そのまま両用**（引く鍵と返す鍵が同じ）。この join は `embedded_images()` にあり、`decode_embedded_where` はその上に乗っている（1箇所だけ）。同じ画像が2つの hash で2回出てくることがあり、それが正しい——ホストが取得するときは**パス単位で重複排除**すること。
+- **★ロードは1コール、3面とも同じ形（✅ 実装済）**。手でテクスチャを集めさせる API は採用しない——**利用者が使いたがらない**し、`external_textures()` のような取りこぼしが必ず起きる（静かに白シルエットになる）。
+
+  ```rust
+  player.load("assets/overall/Instance.ssab")?;   // Rust: 同期・GPU 引数ゼロ
+  ```
+  ```js
+  await player.load('assets-ref/Instance.ssab');  // js: 非同期はここ1箇所だけ
+  ```
+  ```c
+  ss_player_load(player, "assets/Instance.ssab"); /* C */
+  ```
+
+  これで **パック ＋ 両テクスチャテーブル ＋ 参照先パック（推移的）** が揃う。置き場所が初期化であってアニメーション選択でないことは移植ガイド `30_core/10_initialization.ja.md` §3 が決めていて、`setAnimation` は同期のまま（切り替えのたびに `Promise` を挟まない）。
+- **★`load` は device も queue も借りない**。読んだアトラスは**エンコード済みのまま** `pending_images` に積まれ、最初の `update` が `flush_textures` でデコード＋アップロードする——embedded がずっとそうしてきた経路に合流させただけ。借用モデル（device/queue が貸されるのは `update` から）を壊さずに1コールを実現する唯一の形で、デコード済み RGBA で持つと 2048² あたり 16 MB を初回フレームまで抱えることになる。**`load` 直後は `texture_size(hash)` がまだ `None`** なのはこのため。
 - **統一供給 API**: 最終的にはどちらも「hash で1枚登録する」に集約される。embedded は Player 内部（`upload_texture`）またはホスト（`addTextureFromBytes`）、reference はホスト。ブラウザの `TexImageSource` 供給・ネイティブの RGBA 供給と対称。
 - **借用モデルとの整合**: `add_ssab`/`load_ssab` は device/queue を借りないので、デコードは load 時（CPU）、GPU upload は次の `update`（queue 貸与時）に `pending_textures` を flush。
 - **★デコーダはどの層に置くか（兄弟プレイヤーとの整合）**: **可搬コアには置かない**が3実装で一致している。SS6PlayerForCPP は `Common/` がピクセルを知らず、`Platform/OpenGL/ss6player_texture.cpp` の `Texture::CacheStore` が stb_image でデコードする（アプリ側で持つ経路も `_COMPILEOPTION_TEXTURE_EXTERNALENTITY_` で選べる）。ssplayer-core は `extractEmbeddedTextures` が**バイト列を返すだけ**で、`ssplayer-webgl` の `loadTextureFromBytes` が `createImageBitmap` に渡す——だから WebGL 版は**デコーダを同梱せずに両形態に対応できている**。本実装の `embedded_images()` / `decode_embedded()` の分割はこれに合わせたもの。
@@ -534,6 +548,21 @@ player.textures(None) -> Option<&[TextureRef]>;             // 主パック（So
 - **デコードは「渡すだけ」でキャッシュしない**。代わりに `decode_embedded_where` の述語が **PNG デコードの前**に走るので、既に登録済みのアトラスは**デコードごとスキップ**される。`SSPlayer` はこれを使って `update` 時に「まだ無いものだけ」を上げる。
 
 **なぜ GPU テクスチャを持たせないか（★設計判断）**: 持たせると `SSPack` の refcount が **engine のアセット管理と二重の所有系**になる。Bevy なら `Assets<Image>` / `Handle<Image>` / `RenderAssets<GpuImage>` が既にライフサイクル・ホットリロード・アンロードを握っており、そこへ第二の所有者を持ち込むと (1) 同じアトラスが Bevy 側と我々側で**二重アップロード**、(2) 解放タイミングが engine の意図とずれる、(3) フォーマット・mip・サンプラの方針を engine から奪う、という3点で必ず衝突する。
+
+**★`AssetLoader` — 面ごとに差し替わるのはこの1枚だけ（✅ 実装済、`player.rs`）**:
+
+```rust
+pub trait AssetLoader {
+    async fn read(&mut self, paths: &[String]) -> Vec<Option<Vec<u8>>>;  // ★まとめて渡す（並列化の余地は実装側）
+    async fn supply_texture(&mut self, hash: u32, encoded: &[u8]);
+    fn has_texture(&self, hash: u32) -> bool;   // 取りに行かなくて済むかのヒント
+    fn warn(&self, message: &str);              // 1枚欠けても続行（ERR_PRINT / console.warn 相当）
+}
+```
+
+出荷実装は2つ——`SSPlayer::load` の裏の fs（`assets.rs`）と web 面の `fetch` ＋ `createImageBitmap`（後者はピクセルが wasm メモリを一度も通らない、§10）。**走査（両テクスチャテーブル／パス単位の重複排除／参照パックの推移的解決）は `player.rs` に1本だけ**あり、面が半分だけ実装することが構造的にできない。SS6PlayerForCPP の `Common/` と `Platform/`、`ssplayer-core` の `IResourceManager` と同じ線。
+
+**なぜ fs 直叩きにしないか（★設計判断）**: 「`std` に依存しているのだから Player が fs を読めばいい」は**ネイティブ単体でしか成り立たない**。`std::fs` は wasm32 でコンパイルは通り実行時に必ず失敗する。さらに engine 統合先の過半でファイルは fs に無い——**Godot はエクスポートすると `.pck` の中**（だから `SSPlayerForGodot` は `ResourceLoader::load`）、**Unity の Android は APK の中**、Unreal は `.pak` ＋ `IFileManager`、Bevy は `AssetSource`（バイナリ埋め込み・加工済みアセット・wasm ビルド）。読み口を1つ差し替えられれば全部通る。
 
 **テクスチャは所有ではなく借用チャネルにする**（Device/Queue と同じ扱い＝借用モデルの一貫適用）:
 
@@ -675,6 +704,11 @@ pub struct SSPlayer { /* packs: Vec<SSPack>, root: PlaybackNode 木, transform, 
 impl SSPlayer {
     pub fn new() -> Self;                  // ★device も renderer も取らない。GPU リソースが無いので失敗しない
 
+    // --- ロード（★1コールで全部揃う。§8.1）---
+    pub fn load(&mut self, path: impl AsRef<Path>) -> Result<(), SSRuntimeError>;  // ★既定。fs。GPU 引数なし
+    pub async fn load_with(&mut self, loader: &mut impl AssetLoader, src: &str) -> Result<(), SSRuntimeError>;  // 差し替え版
+    pub async fn load_assets(&mut self, loader: &mut impl AssetLoader, pack_name: &str, base: &str);  // 登録済みパックの資産だけ
+
     // --- pack 登録 / 再生制御（★P7-5 実装済）---
     pub fn add_pack(&mut self, pack: &SSPack);      // 外部参照解決用に全 pack 登録（§8.2）
     pub fn has_pack(&self, name: &str) -> bool;    // 自前で解決するホスト向け（§7.1）
@@ -760,7 +794,9 @@ player.destroy(); surface.destroy();            // ★明示。実体は ctx に
 - **★テクスチャ供給は `ctx.addTextureFromBytes(hash, bytes)` が主経路**（✅ 実装済）。**device スコープなので1回で全 canvas・全 player に効く**（だから surface でも player でもなく context にある）。エンコード済みバイト列を `createImageBitmap(blob, {premultiplyAlpha:'premultiply'})` に通し、`copy_external_image_to_texture` で直接テクスチャへ入れて `set_texture` で登録する（CPU premul も 16 MB の一時コピーも通らない）。**両形態がここに集まる**:
   - embedded → **`player.embeddedTextures(pack?)`** = `{ hash, bytes }[]`（ssplayer-core の `extractEmbeddedTextures` と同型）。fetch は不要。
   - reference → **`player.textureRefs(pack?)`** = `{ hash, path, embedded }[]`（同 `extractTexturePaths`）。`embedded` が false のエントリを `new URL(path, ssabUrl)` で fetch して渡す。
-- **★`player.load(src)` が最短形（✅ 実装済）**——`ssplayer-core` の `load(ssabUrl)` に相当。**URL 1つで2つの問いが同時に決まる**（バイト列は何か／兄弟は何を基準に解決するか）ので、これが既定の入口。相対パスは document 基準で解決し、兄弟は **`.ssab` 自身**を基準に解決する（`src` が相対のとき両者は違う）。パック名の上書きが要る場合だけ `loadSsab` を使う。
+- **★`player.load(src)` が最短形（✅ 実装済）**——`ssplayer-core` の `load(ssabUrl)` に相当。**URL 1つで2つの問いが同時に決まる**（バイト列は何か／兄弟は何を基準に解決するか）ので、これが既定の入口。パック名の上書きが要る場合だけ `loadSsab` を使う。
+  - **中身は Rust の `SSPlayer::load_with` そのもの**（§9）。この面が足すのは `AssetLoader` の実装1つだけで、走査は3面で共有している。
+  - **★base の落とし穴**: ローダの base は **`src` 自身が解決される場所**（既定は document）であって、`.ssab` の URL ではない。兄弟パスは走査側が `parent_of(src)` を前置してから `read` に渡すので、ここで `.ssab` の URL を base にすると `src` が自分自身に対して解決されて `assets/assets/Basic.ssab` を取りに行く。ネイティブ側が `FsLoader::new("")` にフルパスを渡すのと同じ構造にすること。**一度これで壊した**（js 面にテストが無く、ネイティブのテストでは base が `""` なので再現しない）。
 - **★`player.loadSsab(bytes, pack?, baseUrl?)` がテクスチャまでロードする（✅ 実装済）**——`SS6PlayerForGodot` の `setSSABResource` と同じ形。**テクスチャロードは初期化に属し、アニメーション選択には属さない**（移植ガイド `30_core/10_initialization.ja.md` §3）。`setAnimation` は**同期のまま**で、モーション切り替えのたびに `Promise` を挟まない——これが置き場所を決める理由。
   - `async` なのはブラウザ側の事情だけ（Godot の `ResourceLoader::load` は同期、`fetch` / `createImageBitmap` は非同期）。**非同期はこの1箇所に閉じ込める。**
   - `pack` を省略すると `.ssab` 自身の名前を使う。**これが既定であるべき**——`ref_anime_pack`（§7.1）はエクスポータが書いた文字列で引くので、ホストが別名を付けると外部インスタンス参照が黙って解決されなくなる。

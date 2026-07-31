@@ -51,7 +51,7 @@ add_dependencies(ssviewer-metal ssplayer_wgpu_ffi)
 target_compile_options(ssviewer-metal PRIVATE -fobjc-arc -Wall -Wextra)
 target_include_directories(ssviewer-metal PRIVATE "${SS_INCLUDE_DIR}")
 # Lets the viewer run from any working directory; argv[1] still wins.
-target_compile_definitions(ssviewer-metal PRIVATE SS_DEFAULT_ASSET_DIR="${REPO_ROOT}/assets/overall_emb")
+target_compile_definitions(ssviewer-metal PRIVATE SS_DEFAULT_ASSET_DIR="${REPO_ROOT}/assets/overall")
 target_link_libraries(ssviewer-metal PRIVATE "${SS_LIB}" "-framework Cocoa" "-framework QuartzCore")
 # The cdylib's install name is @rpath-relative, so point at where cargo put it.
 set_target_properties(ssviewer-metal PROPERTIES BUILD_RPATH "${SS_LIB_DIR}")
