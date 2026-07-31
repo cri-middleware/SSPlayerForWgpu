@@ -784,7 +784,27 @@ pub fn part_transform(&self, part: u32) -> Option<[f32; 6]>; // [m00, m01, m10, 
 
 **`is_part_hidden` は未実装**: hide フラグは FrameData 側にあり、`Context::get_frame_data` が `&mut self` なので、クエリが `&mut` になるか、Godot のように描画ウォークで hide 表をキャッシュするかの選択になる。前者は API として不自然、後者は毎フレームのコストなので、必要が出た時点で決める。
 
-**残りの将来 API（webgl 版に追随）**: `box`（追従矩形）/ `clip`（scissor）/ `backdrop`（framebuffer 読み取り系ブレンド用の下地）/ イベント（userData・signal・audio・animEnd・animLoop・frame）。§9.5。
+**イベント（★実装済・§9.5）**:
+
+```rust
+pub fn looped_last_update(&self) -> bool;    // ループ境界を跨いだ（update 1回につき1報）
+pub fn finished_last_update(&self) -> bool;  // 再生完了。★立ち上がりエッジ（1 update だけ true）
+pub fn events(&self) -> &[SsEvent];          // UserData / Signal / Audio（所有型にデコード済み）
+```
+
+**通知はコールバックではなくポーリング**。`SSScene::update` の中で Player に溜め、ホストが直後に読む。借用モデルはホストがクロックを回す形なので元々これに合っており、かつコールバックだと js（関数オブジェクト）と ffi（関数ポインタ + user_data）で API の形が割れる。三面とも同じ形にできるのがポーリングだけ。
+
+以下は SDK の Player 移植ガイド（`docs/30_core/20_playback_control.md`）が定める全 Player 共通の契約。**「複数の Player で実際に起きた欠陥」として列挙されている**ので、逸脱しないこと。
+
+- **フレームスキップで飛ばしたフレームのイベントも発火する。** ランタイムは通過フレームを全部記録する（`passed_frames`。SDK 自身のテストが長い tick で `[4,5,6,7,8]`、ループ跨ぎで `[3,4,5,0,1]` を固定）。update 直後に `get_passed_event_indices()` を読むだけでよく、**自前でフレームを走査してはいけない**（着地フレームだけ見るのも同じく取りこぼす）。
+- **`is_looped` はパルス**（update 先頭でクリア）。update 直後にそのまま読む。1 update で複数周した場合も 1 報にまとまる。
+- **`is_finished` は状態**（次の `play`/`setup_animation` までスティッキー）。**必ず立ち上がりエッジで通知**し、`play()` でラッチ（`prev_finished`）を戻す。生で通知すると完了後は毎フレーム発火し、ラッチを戻し忘れると**次の**完了を取りこぼす。無限ループでは発火せず、`stop()` でも発火しない。`!is_playing` や「最終フレーム到達」で代用しないこと（`end_frame_reached` は誤用が続いたため C-API から削除済み）。
+- **イベント収集は描画をスキップし得る処理より前に置く。** Godot は「整数フレームが変わったか」で門を作り、`play()` 直後のフレーム 0 のイベントを落とした。本実装は `context.update()` の直後、`step_slots`/`render_node` の前で集める。
+- **イベント index はアニメの `events()` サイズで範囲チェックする。** -1 や別アニメ由来の index が FlatBuffer 外を読む。
+
+イベントは**所有型にデコードして返す**（`FrameView` と違い保持してよい）。ホストの反応（音を鳴らす、当たり判定を出す、スクリプトを進める）は raise した tick より長生きするのが普通なため。生 index を返すだけの形（Flutter の `onEvents` 相当）は採らない。
+
+**残りの将来 API（webgl 版に追随）**: `box`（追従矩形）/ `clip`（scissor）/ `backdrop`（framebuffer 読み取り系ブレンド用の下地）。§9.5。
 
 **トランスポートの enum（★確定）**: `PlaybackDirection` / `PlaybackStyle` は **ssruntime の同名 enum を re-export せず、本クレートで定義**して境界で変換する。ssruntime 側は掛け算に使うため `Forward = 1 / Backward = -1` だが、**C-API・wasm・他の全 Player は `0 / 1`**（`ffi/mod.rs` の `ss_runtime_set_playback_direction` が `direction == 0` で判定）。re-export すると `-1` が js / ffi 面に漏れて全兄弟と食い違うので、ワイヤ値は `as_wire` / `from_wire` に固定した。`tests/transport.rs` がこれを固定している。
 
@@ -805,7 +825,7 @@ pub fn part_transform(&self, part: u32) -> Option<[f32; 6]>; // [m00, m01, m10, 
 
 パーツ単位オーバーライド（色/セル/表示）、ミキシング、ステートマシン。いずれも ssruntime 側の合成で完結し FrameData/DrawBatch 契約を壊さないため、`SSPlayer` に制御メソッドを足すだけで層2 の改修は不要。ssplayer-webgl は既に実装済（`setPartColorOverride` / `setPartCellOverride` / `setPartVisibilityOverride` / `getPartTransform`）なので、移植先の形はそちらに合わせる。
 
-**進捗**: **パーツ単位オーバーライド ✅ / `getPartTransform`（= `part_transform`）✅ 実装済**（いずれも rs / js / ffi の三面。API と決定事項は §9.3）。上の見立てどおり層2 の改修は不要だった。残りは **イベント**（ホストへの通知経路の設計が要る。フレームスキップで飛ばしたフレーム上のイベントを取りこぼさないこと、再生終了時の扱いが全 Player で統一されていることに注意）、`is_part_hidden`（§9.3 の注記）、ミキシング / ステートマシン（前者は SDK に primitives が揃っており、後者は SDK 側 Phase 3 待ち）。
+**進捗**: **パーツ単位オーバーライド ✅ / `getPartTransform`（= `part_transform`）✅ 実装済**（いずれも rs / js / ffi の三面。API と決定事項は §9.3）。上の見立てどおり層2 の改修は不要だった。**イベント ✅ 実装済**（ポーリング方式。契約は §9.3）。残りは `box` / `clip` / `backdrop`（描画側）、`is_part_hidden`（§9.3 の注記）、ミキシング / ステートマシン（前者は SDK に primitives が揃っており、後者は SDK 側 Phase 3 待ち）。
 
 ---
 
