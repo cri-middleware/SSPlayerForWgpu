@@ -770,7 +770,21 @@ pub fn clear_all_part_overrides(&mut self);
 - **オーバーライドは `set_animation` の後**。ランタイムがオーバーライド表を確保するのが `set_animation` で、そこが `Permanent` 以外を消す場所でもある。前に呼ぶと（黙って失われるのではなく）エラーになる。
 - 表の寿命はランタイム所有。Player 側でキャッシュも毎フレーム再適用もしない。
 
-**残りの将来 API（webgl 版に追随）**: `box`（追従矩形）/ `clip`（scissor）/ `backdrop`（framebuffer 読み取り系ブレンド用の下地）/ `getPartTransform` / イベント（userData・signal・audio・animEnd・animLoop・frame）。§9.5。
+**パーツ読み出し（★実装済）**:
+
+```rust
+pub fn part_count(&self) -> usize;                          // ルートアニメのパーツ数
+pub fn part_transform(&self, part: u32) -> Option<[f32; 6]>; // [m00, m01, m10, m11, tx, ty]
+```
+
+- 並びと順序は ssplayer-webgl の `getPartTransform` と同一（`x' = m00·x + m01·y + tx`）。**アニメローカル・Y-down** で、`set_transform` もシーンの投影も掛かっていない。ホストが自分の座標系へ合成する。
+- `SSScene::update` の**後**に読む（直近の update が作ったフレームを表す）。**hide のパーツも位置を返す**（描かれないだけで行列は計算されている）。
+- index は範囲チェック済み。オーバーライド系はランタイムが弾くので不要だが、こちらはランタイムのバッファを直読みするため、範囲外は NaN ではなく `None` にする必要がある。
+- コピーを返すので `FrameView` と違って保持してよい。
+
+**`is_part_hidden` は未実装**: hide フラグは FrameData 側にあり、`Context::get_frame_data` が `&mut self` なので、クエリが `&mut` になるか、Godot のように描画ウォークで hide 表をキャッシュするかの選択になる。前者は API として不自然、後者は毎フレームのコストなので、必要が出た時点で決める。
+
+**残りの将来 API（webgl 版に追随）**: `box`（追従矩形）/ `clip`（scissor）/ `backdrop`（framebuffer 読み取り系ブレンド用の下地）/ イベント（userData・signal・audio・animEnd・animLoop・frame）。§9.5。
 
 **トランスポートの enum（★確定）**: `PlaybackDirection` / `PlaybackStyle` は **ssruntime の同名 enum を re-export せず、本クレートで定義**して境界で変換する。ssruntime 側は掛け算に使うため `Forward = 1 / Backward = -1` だが、**C-API・wasm・他の全 Player は `0 / 1`**（`ffi/mod.rs` の `ss_runtime_set_playback_direction` が `direction == 0` で判定）。re-export すると `-1` が js / ffi 面に漏れて全兄弟と食い違うので、ワイヤ値は `as_wire` / `from_wire` に固定した。`tests/transport.rs` がこれを固定している。
 
@@ -791,7 +805,7 @@ pub fn clear_all_part_overrides(&mut self);
 
 パーツ単位オーバーライド（色/セル/表示）、ミキシング、ステートマシン。いずれも ssruntime 側の合成で完結し FrameData/DrawBatch 契約を壊さないため、`SSPlayer` に制御メソッドを足すだけで層2 の改修は不要。ssplayer-webgl は既に実装済（`setPartColorOverride` / `setPartCellOverride` / `setPartVisibilityOverride` / `getPartTransform`）なので、移植先の形はそちらに合わせる。
 
-**進捗**: **パーツ単位オーバーライド ✅ 実装済**（rs / js / ffi の三面。API と決定事項は §9.3）。上の見立てどおり層2 の改修は不要だった。残りは `getPartTransform`（ワールド行列の読み出し。SoA は既にあるので露出の設計だけ）、イベント（ホストへの通知経路の設計が要る）、ミキシング / ステートマシン（前者は SDK に primitives が揃っており、後者は SDK 側 Phase 3 待ち）。
+**進捗**: **パーツ単位オーバーライド ✅ / `getPartTransform`（= `part_transform`）✅ 実装済**（いずれも rs / js / ffi の三面。API と決定事項は §9.3）。上の見立てどおり層2 の改修は不要だった。残りは **イベント**（ホストへの通知経路の設計が要る。フレームスキップで飛ばしたフレーム上のイベントを取りこぼさないこと、再生終了時の扱いが全 Player で統一されていることに注意）、`is_part_hidden`（§9.3 の注記）、ミキシング / ステートマシン（前者は SDK に primitives が揃っており、後者は SDK 側 Phase 3 待ち）。
 
 ---
 
