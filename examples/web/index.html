@@ -36,7 +36,7 @@
       <option value="assets">embedded（アトラス埋め込み）</option>
       <option value="assets-ref">reference（外部 PNG）</option>
     </select>
-    <span class="hint">— どちらも <code>loadSsab</code> の1コールで揃います</span>
+    <span class="hint">— <code>load()</code> 1コールでアトラスも兄弟 ssab（<code>Instance</code>）も揃います</span>
   </p>
 
   <!-- The custom element creates its own <canvas> and drives requestAnimationFrame. -->
@@ -67,8 +67,10 @@
     // Standalone single-pack animations from tests/overall (no external instance refs).
     // TextureChange is here on purpose: its parts bind by texture *file name*
     // hash (`external_textures()`, SPEC §8.1), so it is the one that turns into
-    // white silhouettes if only the cellmaps get loaded.
-    const PACKS = ['Basic', 'PartsColor', 'BlendMode', 'Mask', 'Shape', 'Mesh', 'Effect', 'Shader', 'TextureChange'];
+    // white silhouettes if only the cellmaps get loaded. Instance is here for the
+    // other resolution `load` performs: its parts play an animation out of a
+    // sibling `Instance_SourceAnime.ssab`, fetched by name (SPEC §7.1).
+    const PACKS = ['Basic', 'PartsColor', 'BlendMode', 'Mask', 'Shape', 'Mesh', 'Effect', 'Shader', 'TextureChange', 'Instance'];
     const pick = document.getElementById('pick');
     const mode = document.getElementById('mode');
     const player = document.getElementById('player');

@@ -111,14 +111,17 @@ fn warn(message: &str) {
 /// Fetch every path **once**, in parallel, resolved against `base_url` (or the
 /// document's URL).
 ///
-/// One request per file rather than per hash: `external_textures()` can name an
-/// image a cellmap already named, under a different hash (SPEC §8.1), and that
-/// must not become two downloads. `allSettled` rather than `all` so a single 404
-/// costs one atlas instead of every atlas.
-async fn fetch_atlases(paths: &[String], base_url: Option<&str>) -> HashMap<String, Rc<[u8]>> {
+/// Used for both of the things a pack asks the host to go and get: its atlases
+/// (SPEC §8.1) and the sibling `.ssab`s its instance parts play from (§7.1).
+///
+/// One request per path rather than per requester: `external_textures()` can
+/// name an image a cellmap already named, under a different hash, and two packs
+/// can reference a third — neither must become two downloads. `allSettled`
+/// rather than `all` so a single 404 costs one file instead of every file.
+async fn fetch_files(paths: &[String], base_url: Option<&str>) -> HashMap<String, Rc<[u8]>> {
     let mut out = HashMap::new();
     let Some(window) = web_sys::window() else {
-        warn("[ssplayer-wgpu] no `window`: reference-mode atlases cannot be fetched");
+        warn("[ssplayer-wgpu] no `window`: nothing can be fetched");
         return out;
     };
     let base = base_url.map(str::to_owned).or_else(|| window.document().and_then(|d| d.url().ok()));
@@ -129,7 +132,7 @@ async fn fetch_atlases(paths: &[String], base_url: Option<&str>) -> HashMap<Stri
         let url = match base.as_deref().and_then(|base| web_sys::Url::new_with_base(path, base).ok()) {
             Some(url) => url.href(),
             None => {
-                warn(&format!("[ssplayer-wgpu] atlas {path}: cannot resolve against a base URL; pass `baseUrl` to loadSsab"));
+                warn(&format!("[ssplayer-wgpu] {path}: cannot resolve against a base URL; pass `baseUrl` to loadSsab"));
                 continue;
             }
         };
@@ -143,7 +146,7 @@ async fn fetch_atlases(paths: &[String], base_url: Option<&str>) -> HashMap<Stri
     let settled = match wasm_bindgen_futures::JsFuture::from(js_sys::Promise::all_settled(&requests)).await {
         Ok(value) => js_sys::Array::from(&value),
         Err(e) => {
-            warn(&format!("[ssplayer-wgpu] atlas fetch failed: {e:?}"));
+            warn(&format!("[ssplayer-wgpu] fetch failed: {e:?}"));
             return out;
         }
     };
@@ -157,11 +160,11 @@ async fn fetch_atlases(paths: &[String], base_url: Option<&str>) -> HashMap<Stri
         let entry = settled.get(i as u32);
         let value = js_sys::Reflect::get(&entry, &JsValue::from_str("value")).unwrap_or(JsValue::UNDEFINED);
         let Ok(response) = value.dyn_into::<web_sys::Response>() else {
-            warn(&format!("[ssplayer-wgpu] atlas {path}: fetch rejected"));
+            warn(&format!("[ssplayer-wgpu] {path}: fetch rejected"));
             continue;
         };
         if !response.ok() {
-            warn(&format!("[ssplayer-wgpu] atlas {path}: HTTP {}", response.status()));
+            warn(&format!("[ssplayer-wgpu] {path}: HTTP {}", response.status()));
             continue;
         }
         match response.array_buffer() {
@@ -169,7 +172,7 @@ async fn fetch_atlases(paths: &[String], base_url: Option<&str>) -> HashMap<Stri
                 bodies.push(&promise);
                 with_body.push(path);
             }
-            Err(e) => warn(&format!("[ssplayer-wgpu] atlas {path}: {e:?}")),
+            Err(e) => warn(&format!("[ssplayer-wgpu] {path}: {e:?}")),
         }
     }
     if with_body.is_empty() {
@@ -179,7 +182,7 @@ async fn fetch_atlases(paths: &[String], base_url: Option<&str>) -> HashMap<Stri
     let settled = match wasm_bindgen_futures::JsFuture::from(js_sys::Promise::all_settled(&bodies)).await {
         Ok(value) => js_sys::Array::from(&value),
         Err(e) => {
-            warn(&format!("[ssplayer-wgpu] atlas body read failed: {e:?}"));
+            warn(&format!("[ssplayer-wgpu] body read failed: {e:?}"));
             return out;
         }
     };
@@ -190,7 +193,7 @@ async fn fetch_atlases(paths: &[String], base_url: Option<&str>) -> HashMap<Stri
             Ok(buffer) => {
                 out.insert((*path).clone(), Rc::from(js_sys::Uint8Array::new(&buffer).to_vec()));
             }
-            Err(_) => warn(&format!("[ssplayer-wgpu] atlas {path}: body could not be read")),
+            Err(_) => warn(&format!("[ssplayer-wgpu] {path}: body could not be read")),
         }
     }
     out
@@ -739,7 +742,7 @@ impl SsPlayerWeb {
         let mut to_fetch: Vec<String> = wanted.iter().filter(|t| !carried.contains_key(&t.hash)).map(|t| t.path.clone()).collect();
         to_fetch.sort();
         to_fetch.dedup();
-        let fetched = if to_fetch.is_empty() { HashMap::new() } else { fetch_atlases(&to_fetch, base_url).await };
+        let fetched = if to_fetch.is_empty() { HashMap::new() } else { fetch_files(&to_fetch, base_url).await };
 
         // Decoding stays sequential: the uploads behind it take the context's one
         // `RefMut` each, so overlapping them would buy nothing but a borrow panic.
@@ -748,6 +751,63 @@ impl SsPlayerWeb {
             let Some(bytes) = carried.get(&texture.hash).or_else(|| fetched.get(&texture.path)) else { continue };
             if let Err(e) = upload_encoded(&self.ctx, texture.hash, Rc::clone(bytes)).await {
                 warn(&format!("[ssplayer-wgpu] atlas {} could not be decoded: {e:?}", texture.path));
+            }
+        }
+        Ok(())
+    }
+
+    /// Fetch and register every pack `root`'s instance parts play from, and every
+    /// pack *those* reference, with their textures (SPEC §7.1).
+    ///
+    /// `SS6PlayerForGodot`'s `_load_external_ssabs` and `ssplayer-core`'s
+    /// `resolveInstancePacks` do the same thing by the same rule: the exporter
+    /// writes the referenced pack's own name, so it is both the file's stem and
+    /// the key `ref_anime_pack` resolves against, and `<the .ssab's
+    /// directory>/<name>.ssab` finds it. Godot reaches the deeper levels by
+    /// giving each child player its own resource; a player here holds one flat
+    /// pack table, so the walk is transitive instead.
+    ///
+    /// One level per round trip, all of a level's packs fetched together — the
+    /// depth is the number of waits, not the count. A pack already registered is
+    /// not fetched again, which is also what stops two packs referencing each
+    /// other from looping.
+    async fn load_instance_packs(&self, root: &SSPack, base_url: Option<&str>) -> Result<(), JsValue> {
+        let mut queue = root.instance_packs();
+        while !queue.is_empty() {
+            let missing: Result<Vec<String>, JsValue> = with_player!(self, |p| {
+                let mut missing: Vec<String> = queue.drain(..).filter(|name| !p.has_pack(name)).collect();
+                missing.sort();
+                missing.dedup();
+                missing
+            });
+            let missing = missing?;
+            if missing.is_empty() {
+                return Ok(());
+            }
+
+            let files: Vec<String> = missing.iter().map(|name| format!("{name}.ssab")).collect();
+            let fetched = fetch_files(&files, base_url).await;
+
+            let mut loaded = Vec::new();
+            for (name, file) in missing.iter().zip(&files) {
+                let Some(bytes) = fetched.get(file) else {
+                    warn(&format!("[ssplayer-wgpu] instance pack \"{name}\" could not be loaded; parts that play it will not appear"));
+                    continue;
+                };
+                // Never renamed: `ref_anime_pack` is matched against the name the
+                // exporter wrote, so overriding it here would be a reference that
+                // resolves to nothing.
+                match SSPack::load(bytes) {
+                    Ok(pack) => loaded.push(pack),
+                    Err(e) => warn(&format!("[ssplayer-wgpu] instance pack \"{name}\": {e:?}")),
+                }
+            }
+
+            for pack in &loaded {
+                let registered: Result<(), JsValue> = with_player!(self, |p| p.add_pack(pack));
+                registered?;
+                self.load_textures(pack, base_url).await?;
+                queue.extend(pack.instance_packs());
             }
         }
         Ok(())
@@ -786,12 +846,39 @@ impl SsPlayerWeb {
     #[wasm_bindgen(js_name = loadSsab)]
     pub async fn load_ssab(&self, bytes: Vec<u8>, pack: Option<String>, base_url: Option<String>) -> Result<(), JsValue> {
         let pack = self.register(&bytes, pack, true)?;
-        self.load_textures(&pack, base_url.as_deref()).await
+        self.load_textures(&pack, base_url.as_deref()).await?;
+        self.load_instance_packs(&pack, base_url.as_deref()).await
+    }
+
+    /// Fetch a `.ssab` **and everything it needs**, then select it (SPEC §8.1, §7.1).
+    ///
+    /// The shortest form, and the one `ssplayer-core`'s `load(ssabUrl)` takes: a
+    /// URL is the one input that answers both questions a pack raises — what the
+    /// bytes are, and what its sibling files resolve against. `src` may be
+    /// absolute or relative (resolved against the document, like any URL a page
+    /// uses), and the pack keeps the name the exporter gave it.
+    ///
+    /// Use [`SsPlayerWeb::load_ssab`] when the bytes come from somewhere that is
+    /// not URL-addressable — a drop, a bundler, an archive — and pass `baseUrl`
+    /// if that pack still has siblings to find.
+    pub async fn load(&self, src: &str) -> Result<(), JsValue> {
+        let fetched = fetch_files(std::slice::from_ref(&src.to_owned()), None).await;
+        let bytes = fetched.get(src).ok_or_else(|| JsValue::from_str(&format!("could not load {src}")))?;
+        let pack = self.register(bytes, None, true)?;
+        // Resolved once here so siblings resolve against the `.ssab` rather than
+        // against the document, which are different whenever `src` is relative.
+        let base = web_sys::window().and_then(|w| w.document()).and_then(|d| d.url().ok()).and_then(|doc| web_sys::Url::new_with_base(src, &doc).ok()).map(|url| url.href());
+        self.load_textures(&pack, base.as_deref()).await?;
+        self.load_instance_packs(&pack, base.as_deref()).await
     }
 
     /// [`SsPlayerWeb::load_ssab`] without changing what plays: registers an
-    /// additional pack for external instance references, and loads its textures
+    /// additional pack for external instance references, and loads its assets
     /// too — a sub-animation's cells come out of its own pack's atlases.
+    ///
+    /// Rarely needed now that [`SsPlayerWeb::load_ssab`] resolves those
+    /// references itself; it remains for packs that are not URL-addressable, the
+    /// case `ssplayer-core` covers with its `InstancePackProvider` hook.
     #[wasm_bindgen(js_name = addSsab)]
     pub async fn add_ssab(&self, bytes: Vec<u8>, pack: Option<String>, base_url: Option<String>) -> Result<(), JsValue> {
         let pack = self.register(&bytes, pack, false)?;
