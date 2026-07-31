@@ -1223,6 +1223,25 @@ impl SsPlayerWeb {
         with_player!(self, |p| p.clear_all_part_overrides())
     }
 
+    /// How many parts the root animation has; 0 before one is set up.
+    #[wasm_bindgen(js_name = partCount)]
+    pub fn part_count(&self) -> Result<usize, JsValue> {
+        with_player!(self, |p| p.part_count())
+    }
+
+    /// The part's transform on the current frame as the 2D affine
+    /// `[m00, m01, m10, m11, tx, ty]` — the same six numbers `ssplayer-webgl`'s
+    /// `getPartTransform` returns, in animation-local (Y-down) space, with
+    /// neither `setTransform` nor the canvas projection applied.
+    ///
+    /// Empty when no animation is set up or `part` is out of range. Read it
+    /// after `frame()`: it describes the frame that produced. Hidden parts still
+    /// report where they would have been.
+    #[wasm_bindgen(js_name = partTransform)]
+    pub fn part_transform(&self, part: u32) -> Result<Vec<f32>, JsValue> {
+        with_player!(self, |p| p.part_transform(part).map(|m| m.to_vec()).unwrap_or_default())
+    }
+
     /// Place this player in the scene, in pixels from the canvas centre.
     /// `rotation` is in radians.
     #[wasm_bindgen(js_name = setTransform)]
