@@ -575,11 +575,15 @@ int32_t ss_player_texture_at(ss_player_t *handle,
 
  ```c
  if (ss_player_load(player, path) != SS_OK) {
-     /* the .ssab itself */
+     // the .ssab itself
  } else if (ss_player_missing_count(player) > 0) {
-     /* it plays, but something is a silhouette or absent */
+     // it plays, but something is a silhouette or absent
  }
  ```
+
+ (Line comments above, deliberately: cbindgen renders these docs into a C
+ block comment, so a nested block-comment terminator would close it early
+ and break the generated header for every C and C++ host.)
 
  Describes the most recent load, not the player's history. Zero for a null or
  destroyed handle, which is indistinguishable from success — check the load's
