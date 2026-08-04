@@ -11,7 +11,7 @@
 // ten of these on a page still costs one `GPUDevice` and one atlas upload. For a
 // canvas with several characters, drive `SsContextWeb` directly (see index.html).
 //
-// Build the wasm package first with ./build.sh (outputs ./pkg).
+// Build the wasm package first with ../../scripts/build.sh platform=web (outputs ./wasm).
 import { sharedContext, restoreSharedDevice } from './ss-context.js';
 
 export class SsPlayerWebGPU extends HTMLElement {

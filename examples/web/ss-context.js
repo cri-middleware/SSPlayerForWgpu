@@ -8,7 +8,7 @@
 //
 // Importing this module does not initialise WebGPU; the first `sharedContext()`
 // call does, and every later call gets the same promise.
-import init, { SsContextWeb } from './pkg/ssplayer_wgpu.js';
+import init, { SsContextWeb } from './wasm/ssplayer_wgpu.js';
 
 let contextPromise = null;
 
