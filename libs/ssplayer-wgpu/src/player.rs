@@ -361,9 +361,11 @@ struct EffectPart {
     ///
     /// Copied rather than borrowed: the buffer behind `step`'s result belongs to
     /// the slot, and the draw walk that consumes it runs after every slot has
-    /// stepped. Keeping the raw pointer instead would cost `SSPlayer: Send`,
-    /// which the parallel player walk needs (`SSScene::update`). The allocation
-    /// is reused frame to frame, so the price is one memcpy per effect.
+    /// stepped. Keeping the raw pointer instead would additionally cost
+    /// `SSPlayer: Send` — which `SSScene::update` no longer needs now that its
+    /// walk is serial again (SPEC §14.2 item 6), but a host that moves players
+    /// between its own threads does. The allocation is reused frame to frame, so
+    /// the price is one memcpy per effect.
     plan: Vec<u8>,
 }
 

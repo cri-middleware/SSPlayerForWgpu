@@ -1068,12 +1068,10 @@ impl FrameChunk {
 /// Fill one chunk per player.
 ///
 /// Each player owns its own `Context`, its own runtime buffers and its own
-/// chunk, so nothing is shared but the immutable [`SSRenderer`] — the walk is
-/// embarrassingly parallel and only ever ran serially because it was ported from
-/// single-threaded JS (SPEC §14.2 item 6).
-///
-/// **Threads only pay for a large cast**, and the threshold below is measured,
-/// not guessed (`tests/scale.rs`, 14 cores, release):
+/// chunk, so nothing is shared but the immutable [`SSRenderer`]: the walk is
+/// embarrassingly parallel, and for a while it ran on `std::thread::scope` above
+/// a measured cast size. **It is serial again** — the numbers never supported
+/// carrying a second code path (`tests/scale.rs`, 14 cores, release):
 ///
 /// | players | serial | threaded |
 /// |---|---|---|
@@ -1084,45 +1082,21 @@ impl FrameChunk {
 /// | 256 | 1.053 ms | 0.580 ms |
 ///
 /// Spawning a scope's worth of threads costs more than the walk itself until
-/// around 64 players — because the walk got cheap when P7-6 stopped building
-/// vertices on the CPU. Note the scale: even 256 characters cost about 1 ms
-/// serially, so this is worth threads only at counts a game is unlikely to
-/// reach. A persistent pool would move the threshold down, but that is a
-/// dependency to buy a fraction of a millisecond, and the numbers do not
-/// justify it.
+/// around 64 players — the walk got cheap when P7-6 stopped building vertices on
+/// the CPU. Past that the win is real but small next to the scale it buys: 256
+/// characters cost about 1 ms serially, 6% of a 16.6 ms frame, at a cast size a
+/// game is unlikely to reach. A persistent pool (rayon) would move the crossover
+/// down and is the wrong shape twice over — a player that borrows the host's
+/// device has no business spawning its own threads inside a host that already
+/// owns a pool, and `wasm32-unknown-unknown`, the primary distribution face, has
+/// no threads at all, so the threaded path was native-only and no web build ever
+/// compiled it.
 ///
-/// The split is by player, not by work: characters differ in part count, so a
-/// thread can finish early. Balancing that is what a work-stealing pool would
-/// fix — revisit together with the dependency question if a future change makes
-/// per-player work heavier.
-#[cfg(not(target_arch = "wasm32"))]
-fn build_chunks(players: &mut [&mut crate::SSPlayer], chunks: &mut [FrameChunk], renderer: &SSRenderer, delta_secs: f32) {
-    /// Cast size at which threading stops costing more than it saves.
-    const PARALLEL_THRESHOLD: usize = 64;
-
-    let threads = if players.len() < PARALLEL_THRESHOLD { 1 } else { std::thread::available_parallelism().map(|n| n.get()).unwrap_or(1).min(players.len()) };
-    if threads <= 1 {
-        for (player, chunk) in players.iter_mut().zip(chunks.iter_mut()) {
-            player.build_frame(chunk, renderer, delta_secs);
-        }
-        return;
-    }
-
-    let mut work: Vec<(&mut &mut crate::SSPlayer, &mut FrameChunk)> = players.iter_mut().zip(chunks.iter_mut()).collect();
-    let per_thread = work.len().div_ceil(threads);
-    std::thread::scope(|scope| {
-        for group in work.chunks_mut(per_thread) {
-            scope.spawn(move || {
-                for (player, chunk) in group.iter_mut() {
-                    player.build_frame(chunk, renderer, delta_secs);
-                }
-            });
-        }
-    });
-}
-
-/// `wasm32-unknown-unknown` has no threads, so the walk stays serial there.
-#[cfg(target_arch = "wasm32")]
+/// `FrameChunk` stays. It decouples the players from each other, costs nothing
+/// serially (`absorb`'s rebase, nothing more) and leaves the door open: if a
+/// future change makes per-player work heavy enough to move these numbers, the
+/// parallel version is a `scope` around this loop. Measure first (SPEC §14.2
+/// item 6).
 fn build_chunks(players: &mut [&mut crate::SSPlayer], chunks: &mut [FrameChunk], renderer: &SSRenderer, delta_secs: f32) {
     for (player, chunk) in players.iter_mut().zip(chunks.iter_mut()) {
         player.build_frame(chunk, renderer, delta_secs);
