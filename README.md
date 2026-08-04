@@ -43,23 +43,62 @@ cd SSPlayerForWgpu
 # (if you cloned without --recursive)
 git submodule update --init
 
-./scripts/deploy-examples.sh          # build ssconverter-cli and convert the demo assets
+./scripts/deploy-examples.sh          # convert the SDK's test projects into assets/
+./scripts/build.sh                    # build the library for this host
 cargo run -p ssplayer-wgpu-viewer     # native winit viewer
 ```
 
 The viewer plays `assets/overall`. Right/Left switches `.ssab` packs, Up/Down
 switches animations, Space pauses, `F` flips the Y axis.
 
+## Build scripts
+
+Two scripts, split by what they produce — the same shape as the sibling players'
+`build-runtime.*` / `deploy-examples.*`, with their `key=value` argument style.
+
+**`scripts/build.sh`** (`build.ps1` on Windows) builds the **library** and
+collects its artifacts:
+
 ```bash
-cargo test --workspace                # includes headless GPU readback tests
-cd examples/web && ./build.sh && python3 -m http.server   # WebGPU demo
+./scripts/build.sh                            # = platform=host build=release
+./scripts/build.sh platform=web build=debug   # wasm/js face, deployed into examples/web
+./scripts/build.sh --help                     # every option
 ```
 
-The C API is behind the `ffi` feature; building it also regenerates
-`libs/ssplayer-wgpu/include/ssplayer_wgpu.h` with cbindgen.
+| Option | Values | What it does |
+|---|---|---|
+| `platform` | `host` (default), `web` | `host` builds the Rust library and the C face; `web` builds the wasm/js face with wasm-pack. It does not cross-compile, so `macos`/`windows`/`linux` are accepted only when they name the host |
+| `build` | `release` (default), `debug` | Cargo profile; `debug` also means `wasm-pack --dev`, which skips `wasm-opt` — never quote its size |
+| `ffi` | `yes` (default), `no` | `host` only: also build `--features ffi`, which regenerates `libs/ssplayer-wgpu/include/ssplayer_wgpu.h` with cbindgen |
+| `deploy` | `yes` (default), `no` | `web` only: copy the wasm package into `examples/web/wasm` |
+
+What it builds is gathered in one place, so a packaging script reads a fixed
+layout instead of knowing where each toolchain drops its output:
+
+```
+bin/include/ssplayer_wgpu.h                 # ffi=yes (cbindgen)
+bin/LICENSE.md
+bin/libs/<platform>/<arch>/libssplayer_wgpu.{a,dylib}    # .lib/.dll on Windows
+pkg/                                        # platform=web: the wasm-pack package
+```
+
+**`scripts/deploy-examples.sh`** (`.ps1`) owns the playback data end to end — it
+builds `ssconverter-cli` from the SDK submodule, converts the test projects into
+`assets/` in **both** export modes, and deploys them to `examples/web`:
+`assets/` (reference, plus its sibling `.png`) and `assets_emb/` (embedded, atlas
+baked in), because the demo page has a selector for the two. `build.sh` never
+touches `.ssab`.
 
 ```bash
-cargo build -p ssplayer-wgpu --features ffi
+cargo test --workspace                                     # includes headless GPU readback tests
+./scripts/deploy-examples.sh && ./scripts/build.sh platform=web   # then serve the demo:
+cd examples/web && python3 -m http.server                  # → http://localhost:8000
+```
+
+The C/C++ viewer drives the same `ffi` library through CMake, which runs cargo
+itself:
+
+```bash
 cd examples/viewer-metal-cpp && cmake -B build && cmake --build build && ./build/ssviewer-metal
 ```
 
@@ -71,7 +110,9 @@ cd examples/viewer-metal-cpp && cmake -B build && cmake --build build && ./build
 | `examples/viewer/` | crate `ssplayer-wgpu-viewer` — native winit viewer used for development |
 | `examples/web/` | `<ss-player-webgpu>` custom element + WebGPU demo page |
 | `examples/viewer-metal-cpp/` | Cocoa/Objective-C++ viewer driving the C API on Metal |
-| `scripts/deploy-examples.sh` | converts the SDK's test projects into `assets/` |
+| `scripts/build.sh` / `.ps1` | builds the library for one platform (`platform=host\|web`), collecting it into `bin/` |
+| `scripts/deploy-examples.sh` / `.ps1` | converts the SDK's test projects into `assets/` and deploys both export modes to `examples/web` |
+| `bin/` | collected library artifacts. Gitignored |
 | `SpriteStudio-SDK/` | the SDK, as a git submodule |
 
 The two crates are versioned independently — the library and the development

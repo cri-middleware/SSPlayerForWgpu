@@ -21,9 +21,11 @@ A wgpu renderer for SpriteStudio 7 animations, split out of the SpriteStudio-SDK
 |---|---|---|
 | `libs/ssplayer-wgpu/` | Crate `ssplayer-wgpu`. `lib` / `frame` / `renderer` (device-scoped: pipelines, shaders, texture map) / `scene` (target-scoped: projection, frame arena, draw calls) / `player` (playback node tree) / `pack` (the shared `.ssab`) / `mask` (stencil planner) / `metrics` (frame counters + GPU timing) / `roster` (generation-tagged handles, shared by the web and C faces) / `web` (`web` feature) / `host` + `ffi` (`ffi` feature). | [SPEC](./SSPLAYER_WGPU_SPEC.md) |
 | `examples/viewer/` | Crate `ssplayer-wgpu-viewer`. Native winit host used for development and visual checks. | — |
-| `examples/web/` | `ss-context.js` (the page's single `SsContextWeb`), the `<ss-player-webgpu>` convenience element, demo page and `build.sh` (wasm-pack). | [README](./examples/web/README.md) |
+| `examples/web/` | `ss-context.js` (the page's single `SsContextWeb`), the `<ss-player-webgpu>` convenience element and the demo page. It carries no build script — `scripts/build.sh platform=web` builds the wasm and stages it here. | [README](./examples/web/README.md) |
 | `examples/viewer-metal-cpp/` | Cocoa/Objective-C++ host that drives the C API on Metal. CMake builds the library through cargo. | [README](./examples/viewer-metal-cpp/README.md) |
-| `scripts/deploy-examples.sh` | Builds `ssconverter-cli` from the submodule and converts the SDK's test projects into `assets/`. | — |
+| `scripts/build.sh` / `.ps1` | Builds the **library** and collects it: `platform=host\|web`, `build=release\|debug`, plus `ffi` / `deploy`. Same `key=value` shape and collect-phase as the sibling players' `build-runtime.*`. | — |
+| `scripts/deploy-examples.sh` / `.ps1` | Builds `ssconverter-cli` from the submodule, converts the SDK's test projects into `assets/`, and deploys **both** export modes to `examples/web` (`assets/` reference + atlases, `assets_emb/` embedded). | — |
+| `bin/` | Where `build.sh platform=host` collects what it built: `include/ssplayer_wgpu.h`, `LICENSE.md`, `libs/<platform>/<arch>/`. Gitignored. `platform=web` writes `pkg/` instead — wasm-pack's own name, and that output is already a package. | — |
 | `SpriteStudio-SDK/` | The SDK, as a git submodule. `ssruntime` / `ssab` are path dependencies into it. | [SDK AGENTS](./SpriteStudio-SDK/AGENTS.md) |
 | `assets/` | Generated playback data. Gitignored — never commit it, never hand-edit it. | — |
 
@@ -48,6 +50,7 @@ A wgpu renderer for SpriteStudio 7 animations, split out of the SpriteStudio-SDK
 |---|---|
 | Fetch the SDK | `git submodule update --init` |
 | Generate demo assets (required once) | `./scripts/deploy-examples.sh` |
+| Build the library for this host | `./scripts/build.sh` — `platform=host build=release`, C face included, collected into `bin/` |
 | Lint (check) | `cargo clippy --workspace --all-targets -- -D warnings` |
 | Lint (auto-fix) | **After `git add` your edits**: `cargo clippy --workspace --all-targets --fix --allow-staged -- -D warnings` |
 | Format check / apply | `cargo fmt --all -- --check` / `cargo fmt --all` |
@@ -57,9 +60,11 @@ A wgpu renderer for SpriteStudio 7 animations, split out of the SpriteStudio-SDK
 | C / ffi handle lifetimes | `cargo test -p ssplayer-wgpu --features ffi --lib` |
 | Native viewer | `cargo run -p ssplayer-wgpu-viewer` |
 | Metal C++ viewer (macOS) | `cd examples/viewer-metal-cpp && cmake -B build && cmake --build build && ./build/ssviewer-metal` |
-| Web demo | `cd examples/web && ./build.sh && python3 -m http.server` |
+| Web demo | `./scripts/build.sh platform=web && (cd examples/web && python3 -m http.server)` |
 
 The tests read `assets/`, so `deploy-examples.sh` is a prerequisite, not an optional step.
+
+**`build.*` builds the library, `deploy-examples.*` produces the data.** The split is by *product*, not by convenience: `build.sh` compiles `ssplayer-wgpu` (host: the Rust library + the C face; web: the wasm/js face) and collects it under `bin/`; it never converts a `.ssab` and never builds `ssconverter-cli` — that whole chain, and the deploy of both export modes into `examples/web`, is `deploy-examples.sh`. So there is exactly one script to change when a fixture moves, and one when the library layout does. The native and C++ viewers keep their own entry points because cargo and cmake already are one. This mirrors the sibling players' `build-runtime.*` (build, then collect lib + header + licence into a fixed tree) and is what will let `release-<platform>.*` package from `bin/` without re-deriving where each toolchain drops its output. The cargo commands in the rows above stay valid — `build.sh` is a front door, never the only way in, and CI deliberately calls cargo/clippy directly so a script bug cannot mask a compile error.
 
 **The wasm build is not optional.** `libs/ssplayer-wgpu/src/web.rs` sits behind the `web` feature and is compiled by *no* native command — not `build`, not `clippy --all-targets`, not `test`. Breakage there is invisible until the wasm target is built, which is how three of the four wgpu-30→29 API changes escaped the native checks. Nothing in `web.rs` is covered by a test either, so the invariants it rests on are pinned natively instead: one device-scoped `SSRenderer` serving several render targets (`tests/pack.rs::scenes_share_one_renderer`), and an embedded pack handing out its atlases undecoded (`tests/pack.rs::an_embedded_pack_hands_out_its_atlases_undecoded`).
 

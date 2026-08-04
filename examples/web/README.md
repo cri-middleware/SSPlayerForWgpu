@@ -13,20 +13,32 @@ not a separate crate — the WebGPU player lives in `libs/ssplayer-wgpu` behind
 
 ## Build & run
 
+This directory has no build script of its own. Two repository scripts fill it,
+split by what they produce — the code and the data:
+
 ```sh
-./build.sh          # release wasm (or ./build.sh --dev for a fast, larger build)
-python3 -m http.server   # serve THIS directory
+../../scripts/deploy-examples.sh       # .ssab + atlases, both export modes
+../../scripts/build.sh platform=web    # release wasm (build=debug for a fast, larger one)
+python3 -m http.server                 # serve THIS directory
 # open http://localhost:8000
 ```
 
-`build.sh` does two things:
-1. `wasm-pack build` of `libs/ssplayer-wgpu` with `--features web` → `./pkg` (wasm + JS bindings).
-2. Generates the demo assets in **both export modes**: embedded-mode `.ssab`
-   (`ssconverter-cli --embedded`, atlas PNG baked in) → `./assets`, and
-   reference-mode `.ssab` plus its sibling PNGs → `./assets-ref`. The page has a
-   selector for the two, so the fetch path is exercised as well as the embedded one.
+1. `build.sh platform=web` runs `wasm-pack build` on `libs/ssplayer-wgpu` with
+   `--features web` → `pkg/` (wasm + JS bindings), then copies it to
+   `./wasm`. `deploy=no` stops at the package, for a release script that wants the
+   artifact and not the demo.
+2. `deploy-examples.sh` deploys the demo data in **both export modes**:
+   reference-mode `.ssab` plus its sibling PNGs → `./assets`, and embedded-mode
+   `.ssab` (`ssconverter-cli --embedded`, atlas PNG baked in) → `./assets_emb`.
+   The page has a selector for the two, so the fetch path is exercised as well as
+   the embedded one. Run it on its own to refresh the data without rebuilding the
+   wasm; the `_emb` suffix is the same one the repository's `assets/overall` vs
+   `assets/overall_emb` uses.
 
-`pkg/`, `assets/` and `assets-ref/` are all generated (git-ignored).
+`wasm/`, `assets/` and `assets_emb/` are all generated (git-ignored).
+
+`build=debug` passes `--dev` to wasm-pack, which skips `wasm-opt` — the result is
+several times larger, so never quote it for the size figures in SPEC §14.1.
 
 ## Usage
 
@@ -34,7 +46,7 @@ python3 -m http.server   # serve THIS directory
 
 ```html
 <script type="module" src="ss-player-webgpu.js"></script>
-<ss-player-webgpu src="assets-ref/Basic.ssab" style="width:360px;height:360px"></ss-player-webgpu>
+<ss-player-webgpu src="assets/Basic.ssab" style="width:360px;height:360px"></ss-player-webgpu>
 ```
 
 The element makes its own canvas, takes a surface from the page's shared context
@@ -67,7 +79,7 @@ const ctx     = await sharedContext();        // once for the page
 const surface = ctx.createSurface(canvas);    // once per canvas
 const player  = surface.createPlayer();       // as many as you like
 
-await player.load('assets-ref/Basic.ssab');   // pack + assets (see below)
+await player.load('assets/Basic.ssab');       // pack + assets (see below)
 player.setAnimation('idle');                  // selecting allocates …
 player.play();                                // … starting does not (SPEC §9.3)
 player.setTransform(x, y, scaleX, scaleY, rotation);
@@ -151,6 +163,7 @@ redesigned `ssplayer-webgl`; the old single `play(name)` is not carried over.
   mergeableDraws / redundantTextureBinds / uploadedBytes, plus `gpuPassTimeNs`
   when the browser grants `timestamp-query`). SPEC §14.2 was measured on native
   only; this is how to take the same numbers in a browser.
-- The dev wasm is ~3 MB; a `--release` build (wasm-opt) is much smaller — 497 KB
-  raw, **147 KB brotli**. Dropping the bundled `image` crate in favour of
+- The dev wasm is ~3 MB; a `build=release` build (wasm-opt) is much smaller —
+  580,700 B raw, **165,896 B brotli** (measured 2026-08-05; SPEC §14.1 has the
+  breakdown and the comparison against ssplayer-webgl). Dropping the bundled `image` crate in favour of
   `createImageBitmap` took 54 KB (−27%) off that; see SPEC §8.1 for the numbers.

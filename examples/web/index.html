@@ -35,14 +35,14 @@
     <select id="pick"></select>
     <label for="mode">形態:</label>
     <select id="mode">
-      <option value="assets-ref">reference（外部 PNG）</option>
-      <option value="assets">embedded（アトラス埋め込み）</option>
+      <option value="assets">reference（外部 PNG）</option>
+      <option value="assets_emb">embedded（アトラス埋め込み）</option>
     </select>
     <span class="hint">— <code>load()</code> 1コールでアトラスも兄弟 ssab（<code>Instance</code>）も揃います</span>
   </p>
 
   <!-- The custom element creates its own <canvas> and drives requestAnimationFrame. -->
-  <ss-player-webgpu id="player" class="stage" src="assets-ref/Basic.ssab"></ss-player-webgpu>
+  <ss-player-webgpu id="player" class="stage" src="assets/Basic.ssab"></ss-player-webgpu>
 
   <h2>② 1 canvas に N 体（<code>SsContextWeb</code> を直接駆動）</h2>
   <p class="hint">1枚の canvas ＝ 1 <code>SSScene</code> に何体でも載る形（SPEC §10）。
@@ -59,7 +59,7 @@
 
   <p class="hint">
     WebGPU 対応ブラウザ（Chrome / Edge 113+ など）＋ <code>http://localhost</code> 配信が必要です。
-    ビルド: <code>./build.sh</code> → <code>python3 -m http.server</code> で本ディレクトリを配信。
+    ビルド: <code>../../scripts/build.sh platform=web</code> → <code>python3 -m http.server</code> で本ディレクトリを配信。
   </p>
 
   <script type="module">
@@ -93,7 +93,7 @@
     // it (SPEC §8.2 — "registered wins", so the second one skips the decode).
     const packBytes = new Map();
     async function bytesFor(name) {
-      if (!packBytes.has(name)) packBytes.set(name, new Uint8Array(await (await fetch(`assets-ref/${name}.ssab`)).arrayBuffer()));
+      if (!packBytes.has(name)) packBytes.set(name, new Uint8Array(await (await fetch(`assets/${name}.ssab`)).arrayBuffer()));
       return packBytes.get(name);
     }
 
@@ -123,7 +123,7 @@
         // browser into the shared, device-scoped renderer, so the second player
         // of a pack finds them already there and loads nothing (SPEC §8.2 —
         // "registered wins").
-        await p.loadSsab(await bytesFor(name), null, new URL(`assets-ref/${name}.ssab`, location.href).href);
+        await p.loadSsab(await bytesFor(name), null, new URL(`assets/${name}.ssab`, location.href).href);
         // Select, then start — two calls (SPEC §9.3), both synchronous.
         p.setAnimation(p.animationNames()[0]);
         p.play();

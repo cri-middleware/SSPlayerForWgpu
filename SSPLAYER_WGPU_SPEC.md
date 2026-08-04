@@ -505,7 +505,7 @@ ssconverter は `.ssab` を2形態で出力しうるので、SSPlayer はどち�
   player.load("assets/overall/Instance.ssab")?;   // Rust: 同期・GPU 引数ゼロ
   ```
   ```js
-  await player.load('assets-ref/Instance.ssab');  // js: 非同期はここ1箇所だけ
+  await player.load('assets/Instance.ssab');     // js: 非同期はここ1箇所だけ
   ```
   ```c
   ss_player_load(player, "assets/Instance.ssab"); /* C */
@@ -516,7 +516,7 @@ ssconverter は `.ssab` を2形態で出力しうるので、SSPlayer はどち�
 - **統一供給 API**: 最終的にはどちらも「hash で1枚登録する」に集約される。embedded は Player 内部（`upload_texture`）またはホスト（`addTextureFromBytes`）、reference はホスト。ブラウザの `TexImageSource` 供給・ネイティブの RGBA 供給と対称。
 - **借用モデルとの整合**: `add_ssab`/`load_ssab` は device/queue を借りないので、デコードは load 時（CPU）、GPU upload は次の `update`（queue 貸与時）に `pending_textures` を flush。
 - **★デコーダはどの層に置くか（兄弟プレイヤーとの整合）**: **可搬コアには置かない**が3実装で一致している。SS6PlayerForCPP は `Common/` がピクセルを知らず、`Platform/OpenGL/ss6player_texture.cpp` の `Texture::CacheStore` が stb_image でデコードする（アプリ側で持つ経路も `_COMPILEOPTION_TEXTURE_EXTERNALENTITY_` で選べる）。ssplayer-core は `extractEmbeddedTextures` が**バイト列を返すだけ**で、`ssplayer-webgl` の `loadTextureFromBytes` が `createImageBitmap` に渡す——だから WebGL 版は**デコーダを同梱せずに両形態に対応できている**。本実装の `embedded_images()` / `decode_embedded()` の分割はこれに合わせたもの。
-- **feature `embedded`（default on。ただし `web` は引かない）**: Player 内蔵 `image`（PNG のみ）でデコード。**`web` feature はこれを引かない**——ブラウザには既にデコーダがあり、`image` を積むのは二重持ちだから。**計測: brotli 201,386 B → 142,418 B（−29.3%）、gzip 249,331 → 178,011（−28.6%）**（wasm-pack release + `wasm-opt -Oz`）。ブラウザ経路の実装ぶんを戻した最終形は **brotli 147,161 B（対現行 −26.9%）**。自分でグルーコードを書きたくないページは `web` に `embedded` を足せば従来どおり動く。
+- **feature `embedded`（default on。ただし `web` は引かない）**: Player 内蔵 `image`（PNG のみ）でデコード。**`web` feature はこれを引かない**——ブラウザには既にデコーダがあり、`image` を積むのは二重持ちだから。**この変更の効果（2026-07 実測、wasm-pack release + `wasm-opt -Oz`）: brotli 201,386 B → 142,418 B（−29.3%）、gzip 249,331 → 178,011（−28.6%）**。ブラウザ経路の実装ぶんを戻した当時の最終形が **brotli 147,161 B**。**以上は `image` 除去の前後を測った当時の値**であって現在値ではない——その後に入った機能ぶんで wasm は伸びており、**現在は wasm 単体で brotli 165,896 B（raw 580,700 B）**。内訳と経緯は §14.1。自分でグルーコードを書きたくないページは `web` に `embedded` を足せば従来どおり動く。
 - **検証**: `render.rs::render_embedded_ssab`（埋め込み `Basic.ssab` をテクスチャ無供給でロード → reference レンダーとピクセル完全一致 14378/14378）。埋め込みフィクスチャは `assets/overall_emb/`（`ssconverter-cli --embedded` 生成）。
 
 ### 8.2 SSPack とテクスチャ供給（★P7-5）— **GPU テクスチャは所有しない** ✅ 実装済（`libs/ssplayer-wgpu/src/pack.rs`）
@@ -948,7 +948,7 @@ const char*  ss_last_error(void);                             // スレッドロ
 | Phase | 内容 | 完了条件 |
 |---|---|---|
 | **P0（初手）3層リファクタ＋借用モデル Rust API** ✅ | 現 `core/`（Player/Renderer）を単一クレート内の `internal`(SSInternalPlayer) / `player`(SSPlayer) モジュールへ再編。**SSPlayer を借用モデル（`&Device`/`&Queue` を借りる §9）に確定**。データ所有契約（§1.1）を配線。viewer が wgpu 一式を所有し SSPlayer を駆動 | 現状の描画（Normal/Mesh/4blend）が3層＋借用モデルで従来通り動く。**これが ① rs 面の土台**（完了） |
-| **P1 ssab 両対応 + WebGPU（② js）** ✅ | **ssab embedded/reference 両ロード（§8.1）** ＋ **WebGPU/js**：`ssplayer-wgpu` の `web` feature（wasm-bindgen、`libs/ssplayer-wgpu/src/web.rs` の `SsPlayerWeb` が canvas から wgpu を所有し借用モデル SSPlayer を駆動）、`examples/web` の `<ss-player-webgpu>` カスタム要素＋build.sh。別 crate は作らず単一クレート。**wasm ビルド要件**: `web` feature が `ssruntime/std` を有効化（cargo は依存の全 crate-type を build するため、ssruntime の no_std cdylib/staticlib が wasm でアロケータ/パニック不足になる。std ならその衝突が消える。`ssruntime/panic-handler` は player の std と `panic_impl` 重複で不可）。release wasm-opt 用に `[package.metadata.wasm-pack.profile.release]` の SIMD 等フラグを player crate にも付与 | **ブラウザ実機で WebGPU 描画確認済**（release wasm 537KB） |
+| **P1 ssab 両対応 + WebGPU（② js）** ✅ | **ssab embedded/reference 両ロード（§8.1）** ＋ **WebGPU/js**：`ssplayer-wgpu` の `web` feature（wasm-bindgen、`libs/ssplayer-wgpu/src/web.rs` の `SsPlayerWeb` が canvas から wgpu を所有し借用モデル SSPlayer を駆動）、`examples/web` の `<ss-player-webgpu>` カスタム要素（ビルドは `scripts/build.sh platform=web`）。別 crate は作らず単一クレート。**wasm ビルド要件**: `web` feature が `ssruntime/std` を有効化（cargo は依存の全 crate-type を build するため、ssruntime の no_std cdylib/staticlib が wasm でアロケータ/パニック不足になる。std ならその衝突が消える。`ssruntime/panic-handler` は player の std と `panic_impl` 重複で不可）。release wasm-opt 用に `[package.metadata.wasm-pack.profile.release]` の SIMD 等フラグを player crate にも付与 | **ブラウザ実機で WebGPU 描画確認済**（P1 当時の release wasm 537KB。現在値は §14.1） |
 | **P2 描画パリティ①** ✅ | varg 追加（PartColor blend 由来）、BlendType 全12種のパイプラインマトリクス、premul 厳密化（upload premul ＋ 逆/再premul シェーダ ＋ premul ブレンド係数） | PartsColor / BlendMode / Basic / Effect を PNG 目視で確認。既存フィクスチャのピクセル数は不変。WebGL 版と色・ブレンド一致 |
 | **P3 マスク** ✅ | stencil 付きターゲット（config opt-in）、MaskPlanner 移植（`libs/ssplayer-wgpu/src/mask.rs`）、write/test パイプライン、pure マスク色スキップ、インスタンス継承、**Shape 幾何のマスク writer ＋ Shape content 描画**、白フォールバック初期化（§6） | マスク/Shape アニメが描画（Mask.ssab / Shape.ssab をヘッドレス GPU readback ＋ 実機で確認） |
 | **P4 エフェクト/インスタンス** ✅ | **P0 の次に先行実施**。①内部を `begin_frame`/`append_batch`/`append_effect`/`end_frame` の累積 API＋transform へ（Stage 1）②インスタンス木＝子ごと独立 Context（Stage 2, §7.1）③エフェクト＝EffectSlot/EffectDrawPlan（Stage 3, §7.2） | エフェクト/インスタンスが描画される（実機確認済） |
@@ -1015,7 +1015,7 @@ const char*  ss_last_error(void);                             // スレッドロ
 | **複数プレイヤー（目視）** ✅ | `examples/viewer` が **1 パスに N 体**（既定2体、`+/-` で 1〜8）。要点は**重ねられること**——`L` で Row / Stack（中央に重ねる）を切り替え、`O` で描画順を反転する。相互干渉は重なりの上でしか起きないので、Row だけでは 1 体固定と同じものしか見えない。`Tab` の focus で**体ごとに別の `.ssab`／アニメ**を選べるので、`Mask` × `Basic` を重ねて「先の体のマスクが後の体をクリップしない」（`unwind_masks`、§6）が一目で分かる。`V` / `[` `]` は per-player の `set_visible` / `set_alpha`。パックは `SSPack` を1回パースして全体で共有する（§8.2）。ステータス欄は 0.5 秒ごとに `stats()` を出し直すので、体数を変えながら `players` / `prims` / `draw_calls` / GPU 時間の動きが読める |
 | **体数スケール（計測）** ✅ P8-6 | `tests/scale.rs::frame_cost_by_player_count`（`#[ignore]`、**release で**）。1〜256体の `update` ＋ pass encode を**同一ループで**実測。**項目6（スレッド化）の撤去と項目5（render bundle）の却下はこの数字で決めた**。`update` の中身を変えたら再測定すること |
 | **フレームコスト** ✅ P8-10 | `SSScene::stats()`（`tests/scene.rs::a_frame_reports_what_it_cost` / `gpu_pass_time_comes_back`）。viewer と Metal viewer が毎フレーム表示する。**§14.2 の 4〜9 に着手する前後で必ずここを比べること**——「速くなるはず」で入れた変更が実際どうだったかは、これ以外に判定材料が無い |
-| **wasm サイズ** | `cd examples/web && ./build.sh`（**release**。`--dev` は wasm-opt を飛ばすので測ってはいけない）→ `ls -l pkg/*.wasm pkg/*.js` ＋ `gzip -9 -c ... \| wc -c`。§14.1 の表を更新する |
+| **wasm サイズ** | `./scripts/build.sh platform=web`（**release**。`build=debug` は wasm-pack `--dev` = wasm-opt を飛ばすので測ってはいけない）→ `ls -l pkg/*.wasm pkg/*.js` ＋ `gzip -9 -c ... \| wc -c`。**比較対象の ssplayer-webgl も同一マシンの release で測る**（`SpriteStudio-SDK/pkg/runtime-web/release/`。`packages/ssplayer-core/wasm/` は debug のコピーが置かれていることがあり、踏むと 5 倍の値を掴む）。§14.1 の表を更新する |
 | WebGL 版との一致 | 同一 ssab を両者で再生し目視/スクリーンショット比較（色・ブレンド・マスク）。**P7 以降は「複数体を置いた画」でも比較する**（ssplayer-webgl も surface+players 構成のため同条件） |
 | Rust 品質 | `cargo clippy --workspace --all-targets -- -D warnings` / `cargo fmt --all -- --check` / `cargo test` |
 
@@ -1070,18 +1070,33 @@ const char*  ss_last_error(void);                             // スレッドロ
 3. **フォールバックの二重保守。** 非対応なら別レンダラが要る＝ WebGL 版は結局残る。
 4. **canvas 周りの機能差**（`desynchronized` / `failIfMajorPerformanceCaveat` / `preserveDrawingBuffer` に等価なし）、**premul の非対称**（§8）、**ツールの成熟度**（Spector.js 相当が弱い）。
 
-**バイナリサイズは弱点ではない（★2026-07 実測で訂正）**
+**バイナリサイズは弱点ではない（★2026-08-05 実測に更新）**
+
+両者とも **release ビルドを同一マシンで**測った値。ssplayer-webgl 側は `SpriteStudio-SDK/pkg/runtime-web/**release**/ssruntime_bg.wasm` と `packages/ssplayer-webgl/dist/browser/ss-player.element.min.js`。
 
 |  | ssplayer-wgpu (WebGPU) | ssplayer-webgl | 比 |
 |---|---|---|---|
-| wasm | 624,883 B | 277,601 B（`ssruntime_bg.wasm`） | |
-| JS | 83,399 B（wasm-bindgen glue） | 301,707 B（`ss-player.element.min.js`） | |
-| **raw 合計** | **708,282 B** | **579,308 B** | **1.22×** |
-| **gzip 合計** | **264,144 B** | **147,415 B** | **1.79×** |
+| wasm | 580,700 B | 277,601 B（`ssruntime_bg.wasm`） | 2.09× |
+| JS | 125,867 B（wasm-bindgen glue） | 307,415 B（`ss-player.element.min.js`） | 0.41× |
+| **raw 合計** | **706,567 B** | **585,016 B** | **1.21×** |
+| **gzip 合計** | **233,129 B** | **146,864 B** | **1.59×** |
 
-wgpu の WebGPU バックエンドは WGSL をブラウザへそのまま渡すので **naga のバックエンド群が丸ごと落ちる**のが効いている。`image` を外せば（§8）さらに縮む。
+wgpu の WebGPU バックエンドは WGSL をブラウザへそのまま渡すので **naga のバックエンド群が丸ごと落ちる**のが効いている。
 
-**P7-9（3オブジェクト化）のサイズ代償**（同一マシン・同一ツールチェインで前後を測ったもの。表の値もこの実測に更新した）:
+**wasm 単体の 2.09× を見て焦らないこと。両者は同じものを wasm に入れていない**——ssplayer-webgl の wasm は ssruntime だけで、**描画は 307 KB の JS 側**にある。wgpu 版は runtime も描画も wasm に入っている。だから比較に意味があるのは raw / gzip の**合計**行だけで、そこでは 1.21× / 1.59×。**転送量（gzip 合計）は前回計測の 264,144 B → 233,129 B（−11.7%）、対 webgl 比も 1.79× → 1.59× と改善している**。`image` を外したぶん（§8.1）が効いた。
+
+> **wasm が 497 KB → 580,700 B に戻っている件**（2026-08-05、`9632474` を worktree に出して同一マシン・同一ツールチェインで測り直した実測）:
+>
+> |  | `9632474`（`image` 除去直後） | 現在 | 差 |
+> |---|---|---|---|
+> | wasm | 496,616 B | 580,700 B | +84,084（+16.9%） |
+> | JS glue | 93,332 B | 125,867 B | +32,535（+34.9%） |
+>
+> 間に入ったのは**ロード走査一式（§8.1）・トランスポート・パーツ上書き・パーツ読み出し・イベント**で、いずれも js 面へ露出している。**JS glue が +34.9% 伸びているのがその指紋**——`#[wasm_bindgen]` のメソッドが増えれば wasm 側と JS 側の両方に glue が出る。機能ぶんであって、無駄が混ざったわけではない（release wasm のセクション内訳は code 86.2% / data 9.4%、`name` セクションは wasm-opt が落としている）。
+>
+> **`ssruntime/std` は原因ではない。** `web` feature の定義は `9632474` と現在で1バイトも変わっておらず、`std` が入ったのは crate 再配置の `43089ea`（`9632474` より前）。つまり 497 KB の時点で既に std 込みだった。
+
+**P7-9（3オブジェクト化）のサイズ代償**（当時、同一マシン・同一ツールチェインで前後を測ったもの。**上の表とは計測時点が違う**——ここは履歴として残す）:
 
 |  | 7-9 前 | 7-9 後 | 差 |
 |---|---|---|---|
@@ -1091,7 +1106,7 @@ wgpu の WebGPU バックエンドは WGSL をブラウザへそのまま渡す�
 
 エクスポートするクラスが1つから3つになり、メソッド数がおよそ3倍になったぶん。**gzip +10 KB は、canvas を2枚置いた時点で device・パイプライン・アトラスの二重持ちが消えることの対価**として明確に釣り合う（2048² アトラス1枚＝VRAM 16 MB、§1.2）。1要素しか置かない用途でも、払うのは 10 KB だけで損はしない。
 
-> **注意（この訂正の経緯）**: 当初「約10倍・3.8 MB」と書いていたが、それは `build.sh --dev` の成果物だった（wasm-opt 未適用、`name` カスタムセクションだけで 1.76 MB）。**サイズを語るときは必ず release ビルドを測ること。** 計測コマンドは §13。
+> **注意（この訂正の経緯）**: 当初「約10倍・3.8 MB」と書いていたが、それは `build.sh platform=web build=debug`（wasm-pack `--dev`）の成果物だった（wasm-opt 未適用、`name` カスタムセクションだけで 1.76 MB）。**サイズを語るときは必ず release ビルドを測ること。** 計測コマンドは §13。
 
 **方針**: WebGPU 面は「表現力と native 統合」を取りに行く。**到達率**が要件の案件は ssplayer-webgl を使う——サイズは選択理由にならない。`<ss-player-webgpu>` は非対応ブラウザで**エラー表示ではなく WebGL 版へ退避できる形**を目標にする（実装方針は未定）。
 
