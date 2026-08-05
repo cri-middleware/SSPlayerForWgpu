@@ -26,8 +26,12 @@ integration shaders, stencil-based masking, and both texture modes (embedded and
 reference). WebGPU has been verified in a browser, and the native C-API (`ffi`
 feature) on Metal via the C++ viewer.
 
-Not yet implemented: the DX12 and Vulkan C++ verification viewers, Text and
-9-slice geometry, and the Bevy adapter.
+The DX12 C++ viewer (`examples/viewer-dx12-cpp`) is written but has not been run
+on Windows hardware yet, so the Win32 → surface path and the DX12 backend are
+still unverified.
+
+Not yet implemented: the Vulkan C++ verification viewer, Text and 9-slice
+geometry, and the Bevy adapter.
 
 ## Requirements
 
@@ -95,11 +99,15 @@ cargo test --workspace                                     # includes headless G
 cd examples/web && python3 -m http.server                  # → http://localhost:8000
 ```
 
-The C/C++ viewer drives the same `ffi` library through CMake, which runs cargo
-itself:
+The C/C++ viewers drive the same `ffi` library through CMake, which runs cargo
+itself — one per backend, each self-contained:
 
 ```bash
 cd examples/viewer-metal-cpp && cmake -B build && cmake --build build && ./build/ssviewer-metal
+```
+
+```powershell
+cd examples\viewer-dx12-cpp; cmake -B build; cmake --build build --config Release; .\build\Release\ssviewer-dx12.exe
 ```
 
 ## Layout
@@ -110,6 +118,7 @@ cd examples/viewer-metal-cpp && cmake -B build && cmake --build build && ./build
 | `examples/viewer/` | crate `ssplayer-wgpu-viewer` — native winit viewer used for development |
 | `examples/web/` | `<ss-player-webgpu>` custom element + WebGPU demo page |
 | `examples/viewer-metal-cpp/` | Cocoa/Objective-C++ viewer driving the C API on Metal |
+| `examples/viewer-dx12-cpp/` | Win32/C++ viewer driving the C API on DX12 (untested on hardware) |
 | `scripts/build.sh` / `.ps1` | builds the library for one platform (`platform=host\|web`), collecting it into `bin/` |
 | `scripts/deploy-examples.sh` / `.ps1` | converts the SDK's test projects into `assets/` and deploys both export modes to `examples/web` |
 | `bin/` | collected library artifacts. Gitignored |
