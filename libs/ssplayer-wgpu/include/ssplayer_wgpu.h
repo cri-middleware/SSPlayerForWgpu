@@ -588,6 +588,9 @@ int32_t ss_player_texture_at(ss_player_t *handle,
  Describes the most recent load, not the player's history. Zero for a null or
  destroyed handle, which is indistinguishable from success — check the load's
  own return value for that.
+
+ # Safety
+ `handle` must be a live handle or null.
  */
 uint32_t ss_player_missing_count(ss_player_t *handle);
 

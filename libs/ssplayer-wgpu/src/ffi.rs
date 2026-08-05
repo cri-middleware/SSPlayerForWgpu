@@ -739,6 +739,9 @@ pub unsafe extern "C" fn ss_player_texture_at(handle: *mut SsPlayer, pack_name: 
 /// Describes the most recent load, not the player's history. Zero for a null or
 /// destroyed handle, which is indistinguishable from success — check the load's
 /// own return value for that.
+///
+/// # Safety
+/// `handle` must be a live handle or null.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn ss_player_missing_count(handle: *mut SsPlayer) -> u32 {
     unsafe { player(handle) }.map(|p| p.missing_assets().len() as u32).unwrap_or(0)
