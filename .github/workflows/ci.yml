@@ -65,6 +65,38 @@ jobs:
       - name: Check the generated header is up to date
         run: git diff --exit-code -- libs/ssplayer-wgpu/include/ssplayer_wgpu.h
 
+  windows:
+    name: 🪟 DX12 viewer (Windows)
+    runs-on: windows-latest
+    timeout-minutes: 40
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+        with:
+          token: ${{ secrets.SDK_SUBMODULE_TOKEN || github.token }}
+          submodules: recursive
+
+      - name: Setup Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Setup Rust cache
+        uses: Swatinem/rust-cache@v2
+
+      # The Win32 half of the C face compiles on no other runner: `ffi.rs`'s
+      # `SS_WINDOW_WIN32` arm and the whole of examples/viewer-dx12-cpp are
+      # `cfg`-ed or `#include`-d out everywhere else. The runner has no GPU, so
+      # this is a compile check and nothing more — DX12 itself still has to be
+      # exercised by running the viewer on real hardware (SPEC §14).
+      - name: Build the ffi face (MSVC)
+        run: cargo build -p ssplayer-wgpu --features ffi --release
+
+      - name: Build the DX12 C++ viewer
+        run: |
+          cmake -S examples/viewer-dx12-cpp -B examples/viewer-dx12-cpp/build
+          cmake --build examples/viewer-dx12-cpp/build --config Release
+
   wasm:
     name: 🌐 Web (wasm32)
     runs-on: ubuntu-latest
