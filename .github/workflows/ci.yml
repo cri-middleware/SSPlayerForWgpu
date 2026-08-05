@@ -51,10 +51,37 @@ jobs:
       - name: Clippy
         run: cargo clippy --workspace --all-targets -- -D warnings
 
+      - name: Install a software GPU (Mesa lavapipe)
+        # The runner has no real adapter, and every offscreen-rendering test skips
+        # itself when `request_adapter` fails — so the half of the suite that
+        # actually draws (render.rs, scene.rs, pack.rs, events.rs, timing.rs) used
+        # to verify nothing here. lavapipe is Mesa's software Vulkan device: wgpu
+        # sees a conformant adapter and those tests run for real.
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y mesa-vulkan-drivers vulkan-tools
+
+      - name: Show the adapter the tests will use
+        env:
+          VK_DRIVER_FILES: /usr/share/vulkan/icd.d/lvp_icd.x86_64.json
+          VK_ICD_FILENAMES: /usr/share/vulkan/icd.d/lvp_icd.x86_64.json
+        # Deliberately a hard failure: the rendering tests skip themselves when
+        # there is no adapter, so without this a broken driver install would come
+        # back as a green run that drew nothing (AGENTS.md, "Beware green
+        # rendering tests").
+        run: vulkaninfo --summary
+
       - name: Test
-        # Runners have no GPU adapter, so the offscreen rendering tests in
-        # libs/ssplayer-wgpu/tests/render.rs skip themselves here. Rendering changes must be
-        # verified locally on a real adapter.
+        env:
+          # Point the Vulkan loader at lavapipe alone, so the suite cannot pick up
+          # some other adapter the image happens to carry. VK_DRIVER_FILES is the
+          # current name, VK_ICD_FILENAMES the one older loaders read.
+          VK_DRIVER_FILES: /usr/share/vulkan/icd.d/lvp_icd.x86_64.json
+          VK_ICD_FILENAMES: /usr/share/vulkan/icd.d/lvp_icd.x86_64.json
+        # `golden_corpus` stays out of this: it byte-compares against a dump from
+        # the same machine, so it is `#[ignore]`d and remains a local before/after
+        # tool (SPEC §13). What CI now covers is everything that asserts on an
+        # invariant rather than on a reference image.
         run: cargo test --workspace
 
       - name: Build the ffi face
