@@ -303,19 +303,14 @@ impl SSPack {
     /// The filter runs *before* the PNG decode, which is the whole point: a player
     /// joining a scene where its atlas is already registered skips the decode
     /// entirely, so N players of one pack cost one decode and one upload.
+    /// The decodes overlap where there is more than one image; the result stays in
+    /// pack order, so an image that will not decode drops out without shifting the
+    /// ones after it.
     #[cfg(feature = "embedded")]
     pub fn decode_embedded_where(&self, wanted: impl Fn(u32) -> bool) -> Vec<EmbeddedTexture> {
-        let mut out = Vec::new();
-        for embedded in self.embedded_images() {
-            if !wanted(embedded.hash) {
-                continue;
-            }
-            let Ok(img) = image::load_from_memory(embedded.bytes) else { continue };
-            let rgba = img.to_rgba8();
-            let (width, height) = rgba.dimensions();
-            out.push(EmbeddedTexture { hash: embedded.hash, rgba: rgba.into_raw(), width, height });
-        }
-        out
+        let images: Vec<EmbeddedImage<'_>> = self.embedded_images().into_iter().filter(|i| wanted(i.hash)).collect();
+        let encoded: Vec<&[u8]> = images.iter().map(|i| i.bytes).collect();
+        crate::decode::decode_all(&encoded, false).into_iter().zip(&images).filter_map(|(decoded, image)| decoded.map(|d| EmbeddedTexture { hash: image.hash, rgba: d.rgba, width: d.width, height: d.height })).collect()
     }
 
     /// Without the `embedded` feature the player carries no image decoder, so the

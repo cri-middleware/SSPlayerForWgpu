@@ -20,7 +20,7 @@ use ssab::ssab::ss::format::{PartType, root_as_ss_anime_binary_unchecked};
 use ssruntime::error::SSRuntimeError;
 use ssruntime::runtime::framedata::ss::runtime::{DrawBatchKind, root_as_frame_data_unchecked};
 use ssruntime::{Context, EffectSlot, InstanceSlot};
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 /// Column-major 4x4 identity.
 const IDENTITY: [f32; 16] = [1.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 1.0];
@@ -1241,32 +1241,46 @@ impl SSPlayer {
     /// image for a hash keeps it. A host that wants the embedded pixels instead
     /// calls [`SSRenderer::forget_texture`] first.
     pub(crate) fn flush_textures(&mut self, renderer: &mut SSRenderer, device: &wgpu::Device, queue: &wgpu::Queue) {
-        // Host-read atlases first, so a reference-mode image wins over an
-        // embedded one for the same hash — the order [`SSPlayer::load`] read them
-        // in. Both routes skip a hash the renderer already holds, which is what
-        // keeps N players of one pack to one upload between them.
-        for (hash, encoded) in std::mem::take(&mut self.pending_images) {
-            if renderer.texture_size(hash).is_some() {
-                continue;
-            }
-            decode_and_upload(renderer, device, queue, hash, &encoded);
-        }
-        if self.packs_awaiting_textures.is_empty() {
+        let pending = std::mem::take(&mut self.pending_images);
+        let mut names = std::mem::take(&mut self.packs_awaiting_textures);
+        if pending.is_empty() && names.is_empty() {
             return;
         }
         // Sorted because packs that disagree about a texture hash resolve by who
         // registers first, and that answer must not depend on load order.
-        let mut names = std::mem::take(&mut self.packs_awaiting_textures);
         names.sort();
         names.dedup();
-        for name in names {
-            let Some(pack) = self.packs.get(&name) else { continue };
-            for tex in pack.decode_embedded_where(|hash| renderer.texture_size(hash).is_none()) {
-                // Reproducible: this player still holds the `.ssab` and can decode
-                // the atlas again, so the renderer need not retain a second copy.
-                renderer.upload_texture(device, queue, tex.hash, &tex.rgba, (tex.width, tex.height), Retention::Reproducible);
+
+        // The batch is assembled before anything is decoded, because the decode is
+        // no longer sequential and "already registered" therefore cannot be re-read
+        // between images. `claimed` is what used to be implicit in the loop: a hash
+        // that an earlier entry took is not decoded a second time.
+        //
+        // Host-read atlases come first, so a reference-mode image wins over an
+        // embedded one for the same hash — the order [`SSPlayer::load`] read them
+        // in. Both routes skip a hash the renderer already holds, which is what
+        // keeps N players of one pack to one upload between them.
+        let mut claimed: HashSet<u32> = HashSet::new();
+        let mut jobs: Vec<(u32, &[u8], Retention)> = Vec::new();
+        for (hash, encoded) in &pending {
+            if renderer.texture_size(*hash).is_none() && claimed.insert(*hash) {
+                // Retained: the bytes came from outside, so this player has nothing
+                // it could decode again after a device loss.
+                jobs.push((*hash, encoded, Retention::Retain));
             }
         }
+        for name in &names {
+            let Some(pack) = self.packs.get(name) else { continue };
+            for image in pack.embedded_images() {
+                if renderer.texture_size(image.hash).is_none() && claimed.insert(image.hash) {
+                    // Reproducible: this player still holds the `.ssab` and can
+                    // decode the atlas again, so the renderer need not retain a
+                    // second copy.
+                    jobs.push((image.hash, image.bytes, Retention::Reproducible));
+                }
+            }
+        }
+        decode_and_register(renderer, device, queue, &jobs);
     }
 
     /// Advance this player by `delta_secs` and append its geometry to `scene`.
@@ -1742,23 +1756,28 @@ unsafe fn slice_i32<'a>(ptr: *const i32, len: usize) -> &'a [i32] {
     if ptr.is_null() || len == 0 { &[] } else { unsafe { std::slice::from_raw_parts(ptr, len) } }
 }
 
-/// Decode an encoded atlas and register it (SPEC §8.1).
+/// Decode a flush's whole batch of atlases and register them **in `jobs` order**
+/// (SPEC §8.1).
 ///
-/// Retained rather than reproducible: unlike an embedded atlas, this player holds
-/// nothing it could decode again — the bytes came from outside — so a device loss
-/// has to be recoverable from the renderer's own copy (SPEC §14).
+/// One call for the batch rather than one per image so the decodes can overlap: a
+/// character with three 4096² atlases otherwise pays for them end to end on the
+/// host's thread, which is the load stall this exists to avoid. The registration
+/// order is still the caller's, not the order the decodes happened to finish in.
 #[cfg(feature = "embedded")]
-fn decode_and_upload(renderer: &mut SSRenderer, device: &wgpu::Device, queue: &wgpu::Queue, hash: u32, encoded: &[u8]) {
-    let Ok(decoded) = image::load_from_memory(encoded) else {
-        eprintln!("[ssplayer-wgpu] an image for {hash:#010x} could not be decoded");
-        return;
-    };
-    let rgba = decoded.to_rgba8();
-    let (width, height) = rgba.dimensions();
-    renderer.upload_texture(device, queue, hash, &rgba, (width, height), Retention::Retain);
+fn decode_and_register(renderer: &mut SSRenderer, device: &wgpu::Device, queue: &wgpu::Queue, jobs: &[(u32, &[u8], Retention)]) {
+    let encoded: Vec<&[u8]> = jobs.iter().map(|(_, bytes, _)| *bytes).collect();
+    // Premultiplied on the worker (SPEC §5.2), so all that is left for this thread
+    // is creating the texture and writing it.
+    for (decoded, (hash, _, retention)) in crate::decode::decode_all(&encoded, true).into_iter().zip(jobs) {
+        let Some(decoded) = decoded else {
+            eprintln!("[ssplayer-wgpu] an image for {hash:#010x} could not be decoded");
+            continue;
+        };
+        renderer.register_premultiplied(device, queue, *hash, decoded.rgba, (decoded.width, decoded.height), *retention);
+    }
 }
 
 /// Without a decoder there is nothing to do here: on that build the host supplies
 /// textures itself (the web face decodes with `createImageBitmap`, SPEC §10).
 #[cfg(not(feature = "embedded"))]
-fn decode_and_upload(_: &mut SSRenderer, _: &wgpu::Device, _: &wgpu::Queue, _: u32, _: &[u8]) {}
+fn decode_and_register(_: &mut SSRenderer, _: &wgpu::Device, _: &wgpu::Queue, _: &[(u32, &[u8], Retention)]) {}

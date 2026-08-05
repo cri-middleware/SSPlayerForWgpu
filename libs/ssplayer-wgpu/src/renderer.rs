@@ -202,6 +202,12 @@ pub struct SSRenderer {
     textures: HashMap<u32, TextureEntry>,
     /// Retained pixels for [`Retention::Retain`] uploads, so a device loss can be
     /// recovered without the host re-supplying them (SPEC §14).
+    ///
+    /// **Premultiplied**, not straight: these are the very buffer that was written
+    /// to the texture, kept instead of copied, and nothing ever needs the straight
+    /// form back — [`SSRenderer::restore_device`] writes them out again as they
+    /// are. Keeping straight pixels would cost a second full-size copy per atlas
+    /// (16 MB at 2048²) to buy a form no caller asks for.
     texture_sources: HashMap<u32, (Vec<u8>, u32, u32)>,
     /// How many times [`SSRenderer::upload_texture`] has actually created a
     /// texture. A diagnostic (SPEC §13): the point of a device-scoped texture map
@@ -1153,21 +1159,44 @@ impl SSRenderer {
     /// the whole pipeline stays premultiplied (SPEC §5.2, matching WebGL's
     /// `UNPACK_PREMULTIPLY_ALPHA_WEBGL`). The premul shader recovers straight RGB
     /// before applying PartsColor.
+    ///
+    /// This copies `rgba` so it can premultiply without touching the caller's
+    /// buffer. A caller that can give the buffer up — anything that just decoded it
+    /// — wants [`SSRenderer::upload_texture_owned`] instead, which premultiplies in
+    /// place and copies nothing.
     pub fn upload_texture(&mut self, device: &wgpu::Device, queue: &wgpu::Queue, hash: u32, rgba: &[u8], (width, height): (u32, u32), retention: Retention) {
+        self.upload_texture_owned(device, queue, hash, rgba.to_vec(), (width, height), retention);
+    }
+
+    /// [`SSRenderer::upload_texture`], taking the pixels rather than borrowing them.
+    ///
+    /// The whole point is that no full-size copy happens: `rgba` is premultiplied in
+    /// place, written to the texture, and — for [`Retention::Retain`] — retained as
+    /// itself. A 4096² atlas is 64 MB, so the two copies the borrowing form makes
+    /// are worth a second entry point.
+    pub fn upload_texture_owned(&mut self, device: &wgpu::Device, queue: &wgpu::Queue, hash: u32, mut rgba: Vec<u8>, (width, height): (u32, u32), retention: Retention) {
+        premultiply(&mut rgba);
+        self.register_premultiplied(device, queue, hash, rgba, (width, height), retention);
+    }
+
+    /// [`SSRenderer::upload_texture_owned`] for pixels that are premultiplied
+    /// already — what the loading path hands over, having premultiplied off the
+    /// host's thread while it was decoding (SPEC §8.1).
+    pub(crate) fn register_premultiplied(&mut self, device: &wgpu::Device, queue: &wgpu::Queue, hash: u32, premul: Vec<u8>, (width, height): (u32, u32), retention: Retention) {
+        self.write_and_register(device, queue, hash, &premul, (width, height));
         if retention == Retention::Retain {
-            self.texture_sources.insert(hash, (rgba.to_vec(), width, height));
+            self.texture_sources.insert(hash, (premul, width, height));
         }
+    }
+
+    /// Create the texture, write `premul` into it and register the bind group.
+    ///
+    /// Everything that varies between the upload paths (premultiplying, retaining)
+    /// has happened by the time this runs, so this is the only part that needs the
+    /// device and the queue — and the only part a device-loss restore has to repeat.
+    fn write_and_register(&mut self, device: &wgpu::Device, queue: &wgpu::Queue, hash: u32, premul: &[u8], (width, height): (u32, u32)) {
         self.texture_uploads += 1;
         let size = wgpu::Extent3d { width, height, depth_or_array_layers: 1 };
-
-        // Premultiply straight-alpha RGBA in place (rgb *= a/255, rounded).
-        let mut premul = rgba.to_vec();
-        for px in premul.chunks_exact_mut(4) {
-            let a = px[3] as u32;
-            px[0] = ((px[0] as u32 * a + 127) / 255) as u8;
-            px[1] = ((px[1] as u32 * a + 127) / 255) as u8;
-            px[2] = ((px[2] as u32 * a + 127) / 255) as u8;
-        }
 
         let texture = device.create_texture(&wgpu::TextureDescriptor {
             label: Some("SpriteStudio Texture"),
@@ -1182,7 +1211,7 @@ impl SSRenderer {
 
         queue.write_texture(
             wgpu::TexelCopyTextureInfo { texture: &texture, mip_level: 0, origin: wgpu::Origin3d::ZERO, aspect: wgpu::TextureAspect::All },
-            &premul,
+            premul,
             wgpu::TexelCopyBufferLayout { offset: 0, bytes_per_row: Some(4 * width), rows_per_image: Some(height) },
             size,
         );
@@ -1274,11 +1303,28 @@ impl SSRenderer {
         let uploads = self.texture_uploads;
         *self = Self::new(device);
         self.texture_uploads = uploads;
-        for (hash, (rgba, w, h)) in &sources {
-            // Already held below, so re-uploading must not retain a second copy.
-            self.upload_texture(device, queue, *hash, rgba, (*w, *h), Retention::Reproducible);
+        for (hash, (premul, w, h)) in &sources {
+            // Straight back out to the new device: these were retained *after*
+            // premultiplying, so putting them through it again would darken every
+            // partially transparent texel a second time.
+            self.write_and_register(device, queue, *hash, premul, (*w, *h));
         }
         self.texture_sources = sources;
+    }
+}
+
+/// Premultiply straight-alpha RGBA in place (rgb *= a/255, rounded).
+///
+/// The rounding is `(c * a + 127) / 255` and not something cheaper: it is what the
+/// WebGL player's `UNPACK_PREMULTIPLY_ALPHA_WEBGL` produces, and the fixtures that
+/// compare an uploaded atlas against a host-premultiplied one are byte-for-byte
+/// (SPEC §5.2).
+pub(crate) fn premultiply(rgba: &mut [u8]) {
+    for px in rgba.chunks_exact_mut(4) {
+        let a = px[3] as u32;
+        px[0] = ((px[0] as u32 * a + 127) / 255) as u8;
+        px[1] = ((px[1] as u32 * a + 127) / 255) as u8;
+        px[2] = ((px[2] as u32 * a + 127) / 255) as u8;
     }
 }
 
