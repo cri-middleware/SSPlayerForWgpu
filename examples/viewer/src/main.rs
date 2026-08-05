@@ -519,7 +519,7 @@ impl ApplicationHandler for App {
 
         let size = window.inner_size();
         let capabilities = surface.get_capabilities(&adapter);
-        let format = capabilities.formats.iter().copied().find(|f| f.is_srgb()).unwrap_or(capabilities.formats[0]);
+        let format = capabilities.formats.iter().copied().find(|f| !f.is_srgb()).unwrap_or(capabilities.formats[0]);
 
         let config = SurfaceConfiguration {
             usage: wgpu::TextureUsages::RENDER_ATTACHMENT,
