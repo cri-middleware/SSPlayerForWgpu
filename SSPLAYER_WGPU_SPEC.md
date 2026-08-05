@@ -807,6 +807,7 @@ pub fn events(&self) -> &[SsEvent];          // UserData / Signal / Audio（所�
 - **`is_looped` はパルス**（update 先頭でクリア）。update 直後にそのまま読む。1 update で複数周した場合も 1 報にまとまる。
 - **`is_finished` は状態**（次の `play`/`setup_animation` までスティッキー）。**必ず立ち上がりエッジで通知**し、`play()` でラッチ（`prev_finished`）を戻す。生で通知すると完了後は毎フレーム発火し、ラッチを戻し忘れると**次の**完了を取りこぼす。無限ループでは発火せず、`stop()` でも発火しない。`!is_playing` や「最終フレーム到達」で代用しないこと（`end_frame_reached` は誤用が続いたため C-API から削除済み）。
 - **イベント収集は描画をスキップし得る処理より前に置く。** Godot は「整数フレームが変わったか」で門を作り、`play()` 直後のフレーム 0 のイベントを落とした。本実装は `context.update()` の直後、`step_slots`/`render_node` の前で集める。
+- **非表示（`set_visible(false)`）の tick は「何も起きていない」と報告する（✅ 修正済）。** 非表示プレイヤーはタイムラインを進めない＝報告すべき tick が無いのに、報告フィールドを前回のまま残していたため、`events()` が**最後に見えていた tick のイベントを毎 update 返し続けた**——イベント毎に音を鳴らすホストは、カリングされている間ずっと鳴らす。`build_frame` は早期 return の**前**に `events` / `looped` / `finished_edge` をクリアする。`prev_finished` は**残す**（消費済みの完了エッジを再表示時に再発火させないため）。`set_animation` も同じ理由でクリアする（別のアニメの tick を引き継がない）。回帰は `tests/events.rs::a_hidden_player_reports_no_events`。
 - **イベント index はアニメの `events()` サイズで範囲チェックする。** -1 や別アニメ由来の index が FlatBuffer 外を読む。
 
 イベントは**所有型にデコードして返す**（`FrameView` と違い保持してよい）。ホストの反応（音を鳴らす、当たり判定を出す、スクリプトを進める）は raise した tick より長生きするのが普通なため。生 index を返すだけの形（Flutter の `onEvents` 相当）は採らない。
@@ -1024,6 +1025,7 @@ const char*  ss_last_error(void);                             // スレッドロ
 | **フレームコスト** ✅ P8-10 | `SSScene::stats()`（`tests/scene.rs::a_frame_reports_what_it_cost` / `gpu_pass_time_comes_back`）。viewer と Metal viewer が毎フレーム表示する。**§14.2 の 4〜9 に着手する前後で必ずここを比べること**——「速くなるはず」で入れた変更が実際どうだったかは、これ以外に判定材料が無い |
 | **wasm サイズ** | `./scripts/build.sh platform=web`（**release**。`build=debug` は wasm-pack `--dev` = wasm-opt を飛ばすので測ってはいけない）→ `ls -l pkg/*.wasm pkg/*.js` ＋ `gzip -9 -c ... \| wc -c`。**比較対象の ssplayer-webgl も同一マシンの release で測る**（`SpriteStudio-SDK/pkg/runtime-web/release/`。`packages/ssplayer-core/wasm/` は debug のコピーが置かれていることがあり、踏むと 5 倍の値を掴む）。§14.1 の表を更新する |
 | WebGL 版との一致 | 同一 ssab を両者で再生し目視/スクリーンショット比較（色・ブレンド・マスク）。**P7 以降は「複数体を置いた画」でも比較する**（ssplayer-webgl も surface+players 構成のため同条件） |
+| **CI の GPU（ヘッドレス）** ✅ | runner に adapter が無いと、上の readback 系テストは**全部自分を skip する**——緑なのに一枚も描いていない（AGENTS.md「Beware green rendering tests」）。Linux job に **Mesa lavapipe**（`mesa-vulkan-drivers`、ICD は `VK_DRIVER_FILES` / `VK_ICD_FILENAMES` で lavapipe 1本に固定）を入れ、`vulkaninfo --summary` を**失敗させるステップとして**前に置いた（ドライバ導入が壊れたら緑にならない）。これで render / scene / pack / events / timing が CI で実際に走る。`golden_corpus` は同一マシンのダンプ比較なので対象外（`#[ignore]` のまま、ローカルの before/after ツール）。ソフトウェアラスタライザなので**速度は測れない**——`scale.rs` も `#[ignore]` のまま |
 | Rust 品質 | `cargo clippy --workspace --all-targets -- -D warnings` / `cargo fmt --all -- --check` / `cargo test` |
 
 ---
@@ -1045,6 +1047,10 @@ const char*  ss_last_error(void);                             // スレッドロ
   - 検証: `tests/loader_contract.rs::a_provider_answers_for_packs_with_no_path`（provider が答えた分はファイルを探しに行かないことまで）／`::declining_the_provider_falls_back_to_the_path`／`::a_pre_registered_pack_is_not_looked_for`。
   - **C / js 面に provider は出していない**。あちらは `add_ssab` の事前登録で同じことができ、コールバックを ABI と JS 境界に通す価値が今は無いため。engine アダプタは `AssetLoader` を自分で実装するので、そちらが本来の利用者。
 - **データ所有契約（§1.1）**: ssab は Player 所有→ssruntime へ borrow、FrameData/SoA は ssruntime 所有→Player が borrow。ssab を Context より先に破棄しない／FrameData 借用をフレーム跨ぎで保持しない。
+- **★パックの resource 寿命（✅ 修正済）**: 上の「ssab を Context より先に破棄しない」が**同名再登録という経路で破れていた**。`build_node` は各 `Context` を pack の resource に**生ポインタ**で束ねる（`SsabResource::resource_static_ptr` の契約は「ポインタを使っている間、どこかの `Arc` を生かしておくこと」）が、その `Arc` を持っているのは Player の pack マップだけ。したがって**再生中の木が使っているパックを同名で再登録する**と（`add_pack` / `add_ssab`）`HashMap::insert` が旧 pack を落とし、木が解放済みの resource を評価し続ける = use-after-free になっていた。safe な Rust から到達し、`ss_player_add_ssab` / js の `addSsab` も同じ経路で、次の `update` がランタイム内部で落ちる。`set_pack` だけは `root = None` に救われていた。
+  - 対処: `add_pack` は置換された `SSPack` を `retired` へ退避し、**木を作り直す `set_animation`**（と木を捨てる `set_pack`）で解放する。木が無い間は退避せずその場で落とす。
+  - 同時に契約が確定した: **再登録は再生中の中身を差し替えない。** 木は組まれた時の resource を最後まで使い、新しいパックを見るのは次に組む木。差し替えたければ `set_animation` を呼ぶ。
+  - 回帰は `tests/pack.rs::re_registering_a_pack_does_not_pull_it_out_from_under_the_tree`（無改修だとランタイム内で index out of bounds、修正後は「再登録しても無中断再生とピクセル一致」＋「作り直した木も一致」）。
 - **エフェクト blend はコマンド毎**（batch.blend_type ではない）点を実装で取り違えない。
 - **ss_shader 統合シェーダ13種** ✅ 実装済（`renderer.rs` `SS_SHADER_WGSL`、WebGL `SSShaderLib.ts` を WGSL 移植）。残課題: map0/map1 セカンダリテクスチャ・shader×マスク結合・GLSL 版との厳密ピクセル一致検証。
 - **WebGL 版からの堅牢性 carry-over（借用モデル前提）** ✅ 実装済: WebGL 版 Player（`SSPlayerForWeb`）で実装済みの広告向け堅牢性を wgpu へ持ち込む対応表。Device/Queue/Surface は**ホスト所有**（§1.1 借用モデル）なので、喪失検知・再生成が**ホスト責務**になる点が WebGL 版との最大の差。

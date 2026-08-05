@@ -262,3 +262,59 @@ fn events_describe_only_the_tick_that_just_ran() {
     assert!(ticks_with_events > 1, "expected a looping pack to raise events on several ticks");
     assert!(peak < 64, "events accumulated across ticks (peaked at {peak} in one tick)");
 }
+
+/// A hidden player reports nothing, rather than the last tick it was visible for.
+///
+/// `set_visible(false)` skips the timeline advance entirely (SPEC §9.3), so there
+/// is no tick to describe — but the report fields used to be left as they were,
+/// and `events()` then answered with the same event on every update for as long
+/// as the player stayed hidden. A host that plays a sound per event hears it
+/// repeat once the player is culled, which is the whole point of polling per tick.
+#[test]
+fn a_hidden_player_reports_no_events() {
+    let Some((device, queue)) = gpu() else {
+        eprintln!("no adapter — skipping");
+        return;
+    };
+    let mut renderer = SSRenderer::new(&device);
+    let mut scene = scene(&device, &queue);
+    let Some(mut player) = player_for(EVENT_PACKS[0]) else {
+        eprintln!("{} missing — skipping", EVENT_PACKS[0]);
+        return;
+    };
+
+    player.set_loop_count(-1);
+    player.play();
+
+    // Stop on a tick that actually reported something: with an empty list the
+    // assertion below would hold either way.
+    let mut reported = 0;
+    for _ in 0..2000 {
+        scene.update(&mut renderer, &device, &queue, 1.0 / 60.0, &mut [&mut player]);
+        reported = player.events().len();
+        if reported > 0 {
+            break;
+        }
+    }
+    assert!(reported > 0, "no tick of {} raised an event — nothing to hide", EVENT_PACKS[0]);
+
+    player.set_visible(false);
+    for tick in 0..5 {
+        scene.update(&mut renderer, &device, &queue, 1.0 / 60.0, &mut [&mut player]);
+        assert!(player.events().is_empty(), "a hidden player replayed the last visible tick's events (tick {tick})");
+        assert!(!player.looped_last_update(), "a hidden player reported a loop it did not cross (tick {tick})");
+        assert!(!player.finished_last_update(), "a hidden player reported a completion it did not reach (tick {tick})");
+    }
+
+    // Visible again, the reports come from the ticks that do run.
+    player.set_visible(true);
+    let mut reported_again = false;
+    for _ in 0..2000 {
+        scene.update(&mut renderer, &device, &queue, 1.0 / 60.0, &mut [&mut player]);
+        if !player.events().is_empty() {
+            reported_again = true;
+            break;
+        }
+    }
+    assert!(reported_again, "events stopped coming after the player was made visible again");
+}

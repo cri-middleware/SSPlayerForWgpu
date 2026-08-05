@@ -375,6 +375,18 @@ pub struct SSPlayer {
     /// Cloning a pack shares its parse and its bytes (SPEC §8.2), so N players of
     /// one character cost one copy of the `.ssab` between them.
     packs: HashMap<String, SSPack>,
+    /// Packs that were replaced under a name the live tree may still be playing
+    /// from, kept alive until the tree is rebuilt.
+    ///
+    /// [`build_node`] binds each `Context` to a resource by **raw pointer**, and
+    /// the `Arc` keeping that resource alive lives in `packs` — so re-registering
+    /// a name (`add_pack` / `add_ssab`) used to free the very resource the tree
+    /// was still evaluating. Retiring the old pack here is what keeps
+    /// `resource_static_ptr`'s contract ("keep some `Arc` alive for as long as
+    /// the pointer is in use"); the tree goes on playing the data it was built
+    /// from, and [`SSPlayer::set_animation`] — the one call that rebuilds it —
+    /// releases these.
+    retired: Vec<SSPack>,
     main_pack: Option<String>,
     root: Option<PlaybackNode>,
     current_animation: Option<String>,
@@ -446,6 +458,7 @@ impl SSPlayer {
     pub fn new() -> Self {
         Self {
             packs: HashMap::new(),
+            retired: Vec::new(),
             main_pack: None,
             root: None,
             current_animation: None,
@@ -698,12 +711,23 @@ impl SSPlayer {
     /// Sharing one pack between players is the intended shape (SPEC §8.2): the
     /// clone is an `Arc` bump, and the atlas reaches the GPU once no matter how
     /// many players hold it.
+    ///
+    /// Re-registering a name a live animation is playing from does **not** change
+    /// what is playing: the tree keeps the resource it was built from until the
+    /// next [`SSPlayer::set_animation`], because its `Context`s point at that
+    /// resource directly (see `retired`).
     pub fn add_pack(&mut self, pack: &SSPack) {
         let name = pack.name().to_string();
         if pack.has_embedded_textures() {
             self.packs_awaiting_textures.push(name.clone());
         }
-        self.packs.insert(name, pack.clone());
+        // Only while a tree exists is there anything pointing into the pack being
+        // replaced; without one the old pack is free to go here and now.
+        if let Some(previous) = self.packs.insert(name, pack.clone())
+            && self.root.is_some()
+        {
+            self.retired.push(previous);
+        }
     }
 
     /// Register `pack` and make it the one [`SSPlayer::set_animation`] selects
@@ -713,6 +737,8 @@ impl SSPlayer {
         self.main_pack = Some(pack.name().to_string());
         self.root = None;
         self.current_animation = None;
+        // Nothing points into a retired pack once the tree is gone.
+        self.retired.clear();
     }
 
     /// Parse `data` and register it under `pack_name` — [`SSPack::load_named`] +
@@ -741,8 +767,17 @@ impl SSPlayer {
     pub fn set_animation(&mut self, anim_name: &str) -> Result<(), SSRuntimeError> {
         let main_pack = self.main_pack.clone().ok_or(SSRuntimeError::NotLoaded)?;
         let root = build_node(&self.packs, &main_pack, anim_name, 0).ok_or(SSRuntimeError::NotLoaded)?;
+        // Assigning drops the previous tree, and with it the last raw pointer into
+        // any pack a re-registration retired — so they can go now. The new tree was
+        // built from `packs`, which is where a replacement went.
         self.root = Some(root);
+        self.retired.clear();
         self.current_animation = Some(anim_name.to_string());
+        // Nothing that happened under the previous animation describes this one.
+        self.events.clear();
+        self.looped = false;
+        self.finished_edge = false;
+        self.prev_finished = false;
         Ok(())
     }
 
@@ -1293,6 +1328,14 @@ impl SSPlayer {
         // advance and no geometry. Textures are still flushed above, so it can be
         // made visible again without re-loading anything.
         if !self.visible {
+            // What the last visible tick reported is not this tick's news. Leaving
+            // it in place made a hidden player answer `events()` with the same
+            // footstep on every update — a host that plays a sound per event fires
+            // it for as long as the player stays hidden — and kept a loop or finish
+            // edge readable long after it was crossed.
+            self.events.clear();
+            self.looped = false;
+            self.finished_edge = false;
             return;
         }
 

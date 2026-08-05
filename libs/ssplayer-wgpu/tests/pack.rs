@@ -631,3 +631,55 @@ fn embedded_pixels_can_be_routed_through_the_borrowed_channel() {
     assert_eq!(renderer.texture_upload_count(), 0, "the player uploaded the embedded atlas even though it was already registered");
     assert_eq!(by_supplier, by_player, "routing the embedded pixels through set_texture rendered differently");
 }
+
+/// Re-registering a pack a live animation plays from must not pull the resource
+/// out from under it (SPEC §8.2).
+///
+/// `build_node` binds every `Context` to its pack's resource by **raw pointer**,
+/// and the only `Arc` keeping that resource alive is the one in the player's pack
+/// map. `add_pack` / `add_ssab` therefore used to free the resource the tree was
+/// still evaluating — a use-after-free reachable from safe Rust and from
+/// `ss_player_add_ssab` / `addSsab`, which crashed inside the runtime on the next
+/// update. The pack that arrives is registered for the *next* tree; what is
+/// playing keeps the data it was built from.
+#[test]
+fn re_registering_a_pack_does_not_pull_it_out_from_under_the_tree() {
+    let Some((device, queue)) = gpu() else {
+        eprintln!("no GPU adapter available, skipping headless render test");
+        return;
+    };
+    let main_path = format!("{}/Instance.ssab", asset_dir());
+    let sub_bytes = std::fs::read(format!("{}/Instance_SourceAnime.ssab", asset_dir())).unwrap();
+
+    let mut renderer = SSRenderer::new(&device);
+    let mut scene = scene_for(&device, &queue);
+
+    // What eleven uninterrupted frames look like.
+    let mut control = SSPlayer::new();
+    control.load(&main_path).unwrap();
+    let anim = control.animation_names().unwrap()[0].clone();
+    control.set_animation(&anim).unwrap();
+    control.play();
+    let expected = render(&device, &queue, &mut renderer, &mut scene, &mut [&mut control], 11);
+    assert!(drawn_pixels(&expected) > 0, "the instance fixture drew nothing — fixture/texture problem");
+
+    // The same eleven frames, with the sub-pack re-registered after the first.
+    let mut player = SSPlayer::new();
+    player.load(&main_path).unwrap();
+    player.set_animation(&anim).unwrap();
+    player.play();
+    assert!(player.instance_node_count() > 0, "the fixture built no instance child, so nothing points into the sub-pack");
+    let _ = render(&device, &queue, &mut renderer, &mut scene, &mut [&mut player], 1);
+
+    player.add_ssab("Instance_SourceAnime", &sub_bytes).unwrap();
+    let after = render(&device, &queue, &mut renderer, &mut scene, &mut [&mut player], 10);
+    assert_eq!(after, expected, "playback changed (or read freed memory) when the pack it plays from was re-registered");
+
+    // The replacement is what the next tree is built from, and building it is what
+    // releases the retired one — so this both picks up the new pack and frees the
+    // old. The bytes are identical, so the render must be too.
+    player.set_animation(&anim).unwrap();
+    player.play();
+    let rebuilt = render(&device, &queue, &mut renderer, &mut scene, &mut [&mut player], 11);
+    assert_eq!(rebuilt, expected, "the tree rebuilt from the re-registered pack does not match the original");
+}
