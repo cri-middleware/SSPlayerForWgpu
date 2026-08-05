@@ -137,7 +137,7 @@ wgpu が単一コードベースから WebGPU / Vulkan / DX12 / Metal / GL を�
 |---|---|---|---|
 | pipeline / bind group layout / sampler / 白フォールバック | **device** | `SSRenderer`（ホスト所有） | 12ブレンド×stencil3＋mask で約39本 × 体数。起動時のコンパイル時間とメモリ |
 | アトラステクスチャ（hash → view + bind group） | **device** | `SSRenderer` が**参照を保持**（実体の所有は供給側。engine 統合時は engine のアセット系、§8.2） | 2048² アトラス1枚 = VRAM 16MB × 体数。同じキャラを2体出すだけで倍 |
-| 復帰用のテクスチャ元データ | **供給元** | `upload_texture` 経路のみ `SSRenderer`。`set_texture`（借り物）は供給側の責務 | CPU 側にも 16MB × 体数（旧設計は premul 一時コピーと合わせて2重） |
+| 復帰用のテクスチャ元データ | **供給元** | `upload_texture` 経路のみ `SSRenderer`。`set_texture`（借り物）は供給側の責務 | CPU 側にも 16MB／2048²（アトラス1枚につき1本。**premul 済みバッファをそのまま保持**するので、旧設計の「retain コピー＋premul 一時コピー」の2本は消えた——§14） |
 | 投影 uniform / 頂点・インデックスアリーナ / draw_call 列 | **描画ターゲット** | `SSScene` | ターゲット毎に必要なので重複ではない。ただし **Player 毎に持つと player 境界をまたいだ draw call マージが原理的に不可能**になる |
 | 再生木（Context / Slot / mask_flags）・transform・order | **プレイヤー** | `SSPlayer` | ここだけが本来 player 毎 |
 | `.ssab` バイト列 | **pack** | `SSPack`（`Arc`、CPU のみ） | 同じキャラ N 体で N 部 |
@@ -482,9 +482,10 @@ Godot / Unity のネイティブプレイヤー実績と C-API 契約から、�
 
 - **hash → `{texture, width, height}`** の Map。textureHash は atlas 識別子（fnv1a）。**★P7: この Map は `SSRenderer`（device スコープ）が持つ**——同じキャラを N 体出しても VRAM もアップロードも1回で済ませるため（§1.2）。WebGL 版が `SSWebGLTextureCache` を surface 側に置いたのと同じ判断で、wgpu は pipeline 同様テクスチャも device 単位なので**共有範囲はさらに広い**（複数 canvas 間でも共有できる）。
 - **premultiply を必ず適用**（SS 必須）。ネイティブは RGBA デコード後に自前で premul、または premul 済みテクスチャを供給。
-  - **★注意（WebGPU の弱点）**: WebGL の `UNPACK_PREMULTIPLY_ALPHA_WEBGL` はドライバが無料でやってくれるが、**WebGPU の `writeTexture` に等価は無い**。現行は `upload_texture` が CPU で premul しており、2048² で 16 MB の一時コピーが発生する。
+  - **★注意（WebGPU の弱点）**: WebGL の `UNPACK_PREMULTIPLY_ALPHA_WEBGL` はドライバが無料でやってくれるが、**WebGPU の `writeTexture` に等価は無い**。CPU で premul するしかない。
   - **★P7 の対処（web）**: `Queue::copy_external_image_to_texture`（wgpu 29 にあり）＋ `createImageBitmap` を使えば、**デコードはブラウザのネイティブ実装（オフスレッド）、premultiply は GPU 側**に寄せられる。主目的はこの2点で、wasm から PNG デコーダ（`image` crate）が落ちるサイズ減はおまけ（§14.1 のとおりサイズは元々問題ではない）。
-  - ネイティブ側は CPU premul のままだが、使い回しスクラッチバッファにしてアップロード毎の alloc を無くす。
+  - **ネイティブ側は CPU premul のまま。ただし一時コピーは0本**（✅ 実装済）。デコード結果の `Vec<u8>` を `upload_texture_owned` が**受け取って**その場で premul し、`Retention::Retain` ならその同じバッファを保持ピクセルにする（`renderer.rs` `upload_texture_owned` / `register_premultiplied` / `write_and_register`）。旧実装は retain 用と premul 用に `to_vec()` を2本取っており、2048² なら 16 MB × 2、4096² なら 64 MB × 2 の純粋な無駄だった。借用形の `upload_texture(&[u8])` は残置（C-API / web / engine 供給用）で、そちらは1本だけコピーする。
+  - **premul はデコードワーカー側で済ませる**（✅ 実装済、§8.1）。ロード経路は premul 済みで返ってくるので、ホストのスレッドに残るのは `create_texture` ＋ `write_texture` だけになる。
 - フィルタ/wrap: `ClampToEdge`（NPOT 対応）＋ `Linear`、mipmap なし。
 - **texture_hash 0 / 未ロード → 1x1 白テクスチャ**にフォールバック（Shape content・純カラー対応）。**この白テクスチャは必ず白(255,255,255,255)で初期化すること**（`create_texture` だけだと透明黒で `tex*color=0` になり Shape が不可視）。`new()` は queue を持たないため `end_frame` 初回に `write_texture` で遅延初期化（§6）。
 
@@ -515,6 +516,10 @@ ssconverter は `.ssab` を2形態で出力しうるので、SSPlayer はどち�
 - **★`load` は device も queue も借りない**。読んだアトラスは**エンコード済みのまま** `pending_images` に積まれ、最初の `update` が `flush_textures` でデコード＋アップロードする——embedded がずっとそうしてきた経路に合流させただけ。借用モデル（device/queue が貸されるのは `update` から）を壊さずに1コールを実現する唯一の形で、デコード済み RGBA で持つと 2048² あたり 16 MB を初回フレームまで抱えることになる。**`load` 直後は `texture_size(hash)` がまだ `None`** なのはこのため。
 - **統一供給 API**: 最終的にはどちらも「hash で1枚登録する」に集約される。embedded は Player 内部（`upload_texture`）またはホスト（`addTextureFromBytes`）、reference はホスト。ブラウザの `TexImageSource` 供給・ネイティブの RGBA 供給と対称。
 - **借用モデルとの整合**: `add_ssab`/`load_ssab` は device/queue を借りないので、デコードは load 時（CPU）、GPU upload は次の `update`（queue 貸与時）に `pending_textures` を flush。
+- **★フラッシュは1枚ずつではなくバッチで回す**（`decode.rs` `decode_all`、✅ 実装済）。`flush_textures` はまず**そのフラッシュで登録する全 hash を確定させてから**デコードに入る（reference の `pending_images` → パック名昇順の embedded、という §8.1 の優先順のまま）。理由は2つ:
+  - **デコードを重ねられる**。4096² の PNG は1枚で 29〜51 ms あり、3枚のキャラクターは直列だとホストのイベントループを 86 ms 止める。`std::thread::scope` で重ねると**一番重い1枚の時間**まで縮む。premul（§5.2）もワーカー側でやるので、ホストのスレッドに残るのは `create_texture` ＋ `write_texture` だけ。常駐プールは作らない（§14.2 item 6 の但し書き）。
+  - **順序が完了順に流されない**。「先に登録したものが勝つ」を「デコード後に `texture_size` を見る」で担保すると、並列化した瞬間に勝者がレースで決まってしまう。重複排除を**ディスパッチ時**に済ませ、結果は要求順に登録する。`decode_all` の戻り値が位置対応（デコードできなかった画像は `None` で、後続をずらさない）なのはこのため。
+  - `web` は `embedded` を引かないので、このモジュールは web ビルドに一切入らない。
 - **★デコーダはどの層に置くか（兄弟プレイヤーとの整合）**: **可搬コアには置かない**が3実装で一致している。SS6PlayerForCPP は `Common/` がピクセルを知らず、`Platform/OpenGL/ss6player_texture.cpp` の `Texture::CacheStore` が stb_image でデコードする（アプリ側で持つ経路も `_COMPILEOPTION_TEXTURE_EXTERNALENTITY_` で選べる）。ssplayer-core は `extractEmbeddedTextures` が**バイト列を返すだけ**で、`ssplayer-webgl` の `loadTextureFromBytes` が `createImageBitmap` に渡す——だから WebGL 版は**デコーダを同梱せずに両形態に対応できている**。本実装の `embedded_images()` / `decode_embedded()` の分割はこれに合わせたもの。
 - **feature `embedded`（default on。ただし `web` は引かない）**: Player 内蔵 `image`（PNG のみ）でデコード。**`web` feature はこれを引かない**——ブラウザには既にデコーダがあり、`image` を積むのは二重持ちだから。**この変更の効果（2026-07 実測、wasm-pack release + `wasm-opt -Oz`）: brotli 201,386 B → 142,418 B（−29.3%）、gzip 249,331 → 178,011（−28.6%）**。ブラウザ経路の実装ぶんを戻した当時の最終形が **brotli 147,161 B**。**以上は `image` 除去の前後を測った当時の値**であって現在値ではない——その後に入った機能ぶんで wasm は伸びており、**現在は wasm 単体で brotli 165,896 B（raw 580,700 B）**。内訳と経緯は §14.1。自分でグルーコードを書きたくないページは `web` に `embedded` を足せば従来どおり動く。
 - **検証**: `render.rs::render_embedded_ssab`（埋め込み `Basic.ssab` をテクスチャ無供給でロード → reference レンダーとピクセル完全一致 14378/14378）。埋め込みフィクスチャは `assets/overall_emb/`（`ssconverter-cli --embedded` 生成）。
@@ -990,7 +995,7 @@ const char*  ss_last_error(void);                             // スレッドロ
 | 7-9 ✅ **実装済** | web 面を `SsContextWeb`（ページ）/ `SsSurfaceWeb`（canvas）/ `SsPlayerWeb`（体）の3オブジェクトへ。**adapter/device/`SSRenderer` はページで1つ**、canvas ごとに `SSScene`、1 canvas に N 体。喪失復帰もページで1回。`setAnimation` + `play` へ分離し、`surface.stats()` で web 側の計測器を用意（§14.2）。7-7 と `roster.rs` を共有 | §10 | 7-4 の後 |
 | 7-8 ⏸ **保留（計測）** | draw_call マージ、マスクのランレングス結合（**indexless 化は 7-6 で完了**——index buffer 自体が無くなった）。**上限を測ったら 256体で 0.03 ms**（`mergeable_draws` が 31%、encode 自体が 0.09 ms）。ステンシル境界と `shader_slot` を跨げない条件付き実装になるので、§14.2 が項目 7 / 4 を見送ったのと同じ理由で見送る | §5.5 / §6 / §14.2 | — |
 
-**単独で先に入る小改善**（P7 を待たない）: 7-1 / 7-2 / パイプライン遅延生成 / マスク時のランレングス結合 / `position.z` 削除（§5.1） / premul スクラッチ再利用（§8）。
+**単独で先に入る小改善**（P7 を待たない）: 7-1 / 7-2 / パイプライン遅延生成 / マスク時のランレングス結合 / `position.z` 削除（§5.1） / ~~premul スクラッチ再利用（§8）~~ → **バッファを受け取って in-place premul する形で解消済み**（§8 / §14.2 item 9）。
 
 ---
 
@@ -1041,7 +1046,7 @@ const char*  ss_last_error(void);                             // スレッドロ
 - **エフェクト blend はコマンド毎**（batch.blend_type ではない）点を実装で取り違えない。
 - **ss_shader 統合シェーダ13種** ✅ 実装済（`renderer.rs` `SS_SHADER_WGSL`、WebGL `SSShaderLib.ts` を WGSL 移植）。残課題: map0/map1 セカンダリテクスチャ・shader×マスク結合・GLSL 版との厳密ピクセル一致検証。
 - **WebGL 版からの堅牢性 carry-over（借用モデル前提）** ✅ 実装済: WebGL 版 Player（`SSPlayerForWeb`）で実装済みの広告向け堅牢性を wgpu へ持ち込む対応表。Device/Queue/Surface は**ホスト所有**（§1.1 借用モデル）なので、喪失検知・再生成が**ホスト責務**になる点が WebGL 版との最大の差。
-  - **デバイス/サーフェス喪失復帰** ✅ 実装済: **`SSPlayer::restore_device(&Device, &Queue)`**（`player.rs`）が旧デバイス向けの pipeline / buffer / bind group / texture / 投影行列を新デバイスへ全再生成する（WebGL 版 `SSWebGLRenderer.restoreContext()` ＋ `SSWebGLResourceManager.restoreContext()` 相当）。再生状態（ロード済みパック・インスタンス木・現在フレーム）は CPU 側なので無傷——**中断したフレームから再開**する。テクスチャは**生成元を保持して再アップロード**（retained-source）: embedded は Player が所有する `.ssab` から**再デコード**するのでピクセル複製を持たず、ホスト供給分のみ `upload_texture` の straight RGBA を保持する（複製を嫌うホストは `forget_texture_sources()` で破棄し自前で再供給）。**カラー/ステンシルのフォーマットが変わった場合は対象外**——SSPlayer を作り直すこと。
+  - **デバイス/サーフェス喪失復帰** ✅ 実装済: **`SSPlayer::restore_device(&Device, &Queue)`**（`player.rs`）が旧デバイス向けの pipeline / buffer / bind group / texture / 投影行列を新デバイスへ全再生成する（WebGL 版 `SSWebGLRenderer.restoreContext()` ＋ `SSWebGLResourceManager.restoreContext()` 相当）。再生状態（ロード済みパック・インスタンス木・現在フレーム）は CPU 側なので無傷——**中断したフレームから再開**する。テクスチャは**生成元を保持して再アップロード**（retained-source）: embedded は Player が所有する `.ssab` から**再デコード**するのでピクセル複製を持たず、ホスト供給分のみ `upload_texture` が**アップロードしたそのバッファ（premul 済み）**を保持する（複製を嫌うホストは `forget_texture_sources()` で破棄し自前で再供給）。**straight ではなく premul 済みを持つ**のは、保持のためだけに straight のコピーをもう1本取る理由が無いから——復帰は `write_and_register` で書き戻すだけで、premul を通し直さない（通せば半透明テクセルが二重に暗くなる）。straight を要求する経路はどこにも無い。**カラー/ステンシルのフォーマットが変わった場合は対象外**——SSPlayer を作り直すこと。
     - web(§10): **`SsContextWeb`**（ページで1つ）が `Device::set_device_lost_callback`（wgpu の webgpu バックエンドが `GPUDevice.lost` を購読）で喪失を検知し、`isDeviceLost()` で公開。`restoreDevice()`（async）が adapter/device を再取得 → renderer → **各 canvas の surface / stencil / scene → 各 player のアトラス**、の順に復帰させる。**喪失は device のものなのでページで1回**——`ss-context.js` が N 個の canvas から同時に来る呼び出しを1本の promise に畳む（畳まないと置換 device を N 個要求して最後の1つしか残らない）。喪失中の `frame()` / `resize()` は GPU に触れない（`resize` はサイズのみ記録し、復帰時に反映）。
     - native(§11): `SurfaceError::Lost/Outdated` は `NativeHost::render` が**サーフェス再構成**（resize と同経路）で吸収済み。全デバイス喪失は稀なので `NativeHost` 側の再生成経路は未実装（必要になれば `SSPlayer::restore_device` を呼ぶだけ）。
     - 検証: `tests/render.rs::restore_device_rebuilds_gpu_state`（**2枚目の Device** へ復帰させ、無中断レンダーとピクセル一致を要求。`forget_texture_sources` 後は不一致になることを negative control として確認）。
@@ -1163,9 +1168,31 @@ P7-6 で頂点生成経路（§5.5）を WebGPU 本来の形へ移したが、**
   GPU 時間は 0.185 ms で不変（層2 の CPU 走査の話なので当然）。**払ったのは 256体で 0.53 ms**、それでも 16.6 ms 予算の 14%。上の 14 コア機の表と絶対値が違うのは測定機が別だから——**比較は必ず同一マシンの before/after で**取ること。
 - **そもそも「体数で殴る」ケースは別機能で受ける**: 同じ `.ssab` の同じアニメを大量に出す用途は、**N 体の Player を進める**のではなく **1データ : N インスタンス（群衆）** で描く。走査も `FrameData` も1体分のまま `draw(vertices, 0..N)` になるので、**CPU は体数に比例しない**——スレッド化が縮めようとしていたコストは、そもそも発生しない。§14.3 を参照。
 - **`FrameChunk` への分解自体は残す**: Player 間の結合が切れ、直列時のコストはゼロ（`absorb` の rebase のみ）で、**将来ここが重くなったら並列版はこのループを `scope` で囲むだけ**に戻せる。再測定は `cargo test --release --test scale -- --ignored --nocapture`——数字が桁で動かない限り再挑戦しないこと。
+
+**★この却下は「毎フレームの Player ウォーク」に限る**（`decode.rs`、✅ 実装済）
+
+上の3つの理由は**予算の数%を毎フレーム削る話**に対するもので、**ロード時のアトラスデコードには当たらない**。区別して読むこと:
+
+- **買えるものが小さい、が当たらない**。デコードは1枚 4096² で 29〜51 ms、3枚で 86 ms。16.6 ms 予算の数%ではなく**予算を5フレームぶん飛ばす一発のストール**で、ユーザーには「D&D したら固まる」として見える。
+- **web で使えない、が当たらない**。デコード経路は `embedded` feature 配下にあり、`web` は意図的に `embedded` を含めない（§10：ブラウザが既にデコーダを持っているため）。**web ビルドは元からこのコードをコンパイルしていない**ので、「native 専用パスを web が一度もコンパイルしない」というリスクは新たに増えない。
+- **永続プールが借用モデルと相容れない、は同意**。だから常駐プールも rayon も入れない。`std::thread::scope` で**呼び出しから戻る前に消える**短命スレッドだけを使い、依存は増やさない（`decode.rs` `decode_all`）。
+- **順序は守る**。完了順は非決定的なので、重複排除を「デコード後に `texture_size` を見る」から**ディスパッチ時に確定させる**方へ前倒しした（`player.rs` `flush_textures`）。reference が embedded に勝ち、embedded 同士はパック名昇順、という §8.1 の「先に登録したものが勝つ」は完了順に依存しない。
+
+**計測（同一マシン・release、4096²×2 ＋ 2048²×1 = 37.6 Mpx の reference モードパックを viewer に D&D、ドロップ直後の1フレーム）**:
+
+| | before | after |
+|---|---|---|
+| ドロップ直後のフレーム | 134 ms | **74 ms** |
+| 内訳: PNG デコード | 86 ms（直列） | ワーカーへ |
+| 内訳: premul ループ | 17 ms | ワーカーへ |
+| 内訳: 全画素コピー2本 | 13 ms | **0** |
+| 内訳: `create_texture` ＋ `write_texture` | 12 ms | 12 ms（ホスト側に残る） |
+| ピーク CPU ピクセル | 450 MB | **150 MB** |
+
+`frame_cost_by_player_count` は before/after で不変（256体 2.03 ms）——定常フレームには触っていないので当然。残りの 74 ms は**一番重い1枚のデコード（51 ms）＋ GPU 書き込み**で、これ以上縮めるにはフレームをまたぐ非同期化が要る。それは「アトラスは load の次の `update` で上がる」（§8.1）という契約を変えるので**別の判断**。
 | 7 | **テクスチャ bind group を毎 draw 無条件に再設定**。同じテクスチャが続いても再バインドする | `scene.rs` `draw` | 直前と同じならスキップ（pipeline 側の `_lastBlend` 相当の去重がテクスチャには無い） | 小さいが 4 の前段として自然 |
 | 8 | **Shape は常に 30 頂点**（`SHAPE_FAN_VERTS` 固定ストライド）。余りは面積ゼロに潰している | §5.5 / `renderer.rs` `vs_shape` | prefix sum ＋ **indirect draw** で実頂点数ぶんだけ回す | Shape は稀なので優先度は低い。7-6 で「算術で引ける」ことを優先した意図的な割り切り |
-| 9 | **テクスチャの premultiply を CPU でやる**。WebGL は `UNPACK_PREMULTIPLY_ALPHA_WEBGL` がドライバ側で無料だった | §8 / `renderer.rs` `upload_texture` | web は `createImageBitmap` ＋ `copy_external_image_to_texture` で**デコードをオフスレッド・premul を GPU へ** | §8 に既に案として書いてある。2048² で 16 MB の一時コピーが消える。native 側は premul のまま（線形補間の正しさのため、§14） |
+| 9 ✅ **native 側は解消**（web は未着手） | **テクスチャの premultiply を CPU でやる**。WebGL は `UNPACK_PREMULTIPLY_ALPHA_WEBGL` がドライバ側で無料だった | §8 / `renderer.rs` `upload_texture` | web は `createImageBitmap` ＋ `copy_external_image_to_texture` で**デコードをオフスレッド・premul を GPU へ** | native は**一時コピー0本＋premul をデコードワーカーへ**で片付いた（§8 / §8.1）。premul そのものは残す（線形補間の正しさのため、§14）。web 側の案は据え置き |
 
 **5 の計測結果（★実装して却下した例）**
 

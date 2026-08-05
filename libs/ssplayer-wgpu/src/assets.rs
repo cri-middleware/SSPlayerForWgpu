@@ -25,11 +25,14 @@ pub(crate) struct FsLoader {
     root: std::path::PathBuf,
     /// What was read, in the order the walk asked for it; the player takes it.
     pub(crate) images: Vec<(u32, Vec<u8>)>,
+    /// Hashes already read during *this* load, so the walk does not re-read an
+    /// atlas two sibling packs both name (see [`FsLoader::has_texture`]).
+    supplied: std::collections::HashSet<u32>,
 }
 
 impl FsLoader {
     pub(crate) fn new(root: impl AsRef<std::path::Path>) -> Self {
-        Self { root: root.as_ref().to_path_buf(), images: Vec::new() }
+        Self { root: root.as_ref().to_path_buf(), images: Vec::new(), supplied: std::collections::HashSet::new() }
     }
 }
 
@@ -42,15 +45,25 @@ impl AssetLoader for FsLoader {
     }
 
     async fn supply_texture(&mut self, hash: u32, encoded: &[u8]) {
+        self.supplied.insert(hash);
         self.images.push((hash, encoded.to_vec()));
     }
 
-    /// Always false: this loader cannot see the renderer, so the authoritative
-    /// "already registered" check happens at the flush instead. The cost is that
-    /// a second player of a reference-mode pack re-reads its atlas files before
-    /// the flush discards them — file reads, not uploads or decodes.
-    fn has_texture(&self, _hash: u32) -> bool {
-        false
+    /// Only what this load has already read.
+    ///
+    /// That much is safe to answer because a `FsLoader` lives for exactly one
+    /// [`SSPlayer::load`], so it cannot go stale against a renderer it never saw —
+    /// and it is worth answering, because the instance-pack walk asks once per pack
+    /// and sibling packs routinely share an atlas (SPEC §7.1, §8.1).
+    ///
+    /// It stays `false` for anything the *renderer* already holds: the authoritative
+    /// "already registered" check happens at the flush instead. The cost is that a
+    /// second player of a reference-mode pack re-reads its atlas files before the
+    /// flush discards them — file reads, not uploads or decodes.
+    ///
+    /// [`SSPlayer::load`]: crate::SSPlayer::load
+    fn has_texture(&self, hash: u32) -> bool {
+        self.supplied.contains(&hash)
     }
 
     fn warn(&self, message: &str) {

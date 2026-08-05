@@ -16,6 +16,10 @@
 /// the decoder) and a target that has a filesystem.
 #[cfg(all(feature = "embedded", not(target_arch = "wasm32")))]
 mod assets;
+/// Bulk atlas decoding for the loading path. Needs the `embedded` feature, which
+/// is what carries the decoder.
+#[cfg(feature = "embedded")]
+mod decode;
 mod events;
 /// The C-ABI face (`ffi` feature): a thin translation layer whose `ss_player_*`
 /// entry points are exported from the cdylib/staticlib and described by the
