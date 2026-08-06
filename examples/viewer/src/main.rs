@@ -495,7 +495,13 @@ impl ApplicationHandler for App {
         let window = Arc::new(event_loop.create_window(attributes).expect("Failed to create window"));
 
         let mut instance_desc = wgpu::InstanceDescriptor::new_without_display_handle();
-        instance_desc.backends = wgpu::Backends::METAL;
+        // `PRIMARY` is Metal here, DX12 on Windows, Vulkan on Linux. Naming one
+        // backend leaves the instance with none of them on the other two, and the
+        // failure is a surface that cannot be created "for any backend" with an
+        // empty list of what was tried — nothing was. `WGPU_BACKEND` still wins,
+        // so isolating a backend stays an environment variable rather than an
+        // edit, which is what this viewer is for.
+        instance_desc.backends = wgpu::Backends::from_env().unwrap_or(wgpu::Backends::PRIMARY);
         let instance = wgpu::Instance::new(instance_desc);
 
         let surface = instance.create_surface(window.clone()).expect("Failed to create surface");
