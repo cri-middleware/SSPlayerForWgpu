@@ -69,6 +69,9 @@
 static const size_t kInitialPlayers = 2;
 /// Most players the +/- keys will go to.
 static const size_t kMaxPlayers = 6;
+/// Stand-in canvas for a player that has not been given an animation yet, so the
+/// first lay-out has something to divide by. Same value the Rust viewer uses.
+static const float kFallbackCanvas = 320.0f;
 /// Timer fired while a modal resize/move loop owns the thread, so the animation
 /// keeps running while the window is being dragged (the Win32 equivalent of the
 /// Metal viewer's NSRunLoopCommonModes timer).
@@ -257,6 +260,11 @@ class Viewer {
 
     HWND hwnd_ = nullptr;
     ss_scene_t *scene_ = nullptr;
+    /// The scene's size in physical pixels, which is also what placement is
+    /// measured in — the projection maps one unit to one target pixel. Kept
+    /// here because the lay-out divides the window between the cast.
+    uint32_t width_ = 0;
+    uint32_t height_ = 0;
     /// One handle per character. All of them draw into `scene_`.
     std::vector<ss_player_t *> players_;
 
@@ -291,6 +299,10 @@ bool Viewer::Start(HWND hwnd) {
     desc.backend = SS_BACKEND_DX12;
     desc.width = (uint32_t)(client.right - client.left);
     desc.height = (uint32_t)(client.bottom - client.top);
+    // The first `AddPlayer` lays the cast out, so the size has to be known by
+    // then rather than only from the first WM_SIZE.
+    width_ = desc.width;
+    height_ = desc.height;
     desc.clear_color[0] = 0.08f;
     desc.clear_color[1] = 0.08f;
     desc.clear_color[2] = 0.12f;
@@ -355,14 +367,42 @@ void Viewer::RemovePlayer() {
     LayOutPlayers();
 }
 
-/// Spread the characters across the window and stack them front to back.
-/// Placement is per player (SPEC §5.4); the projection belongs to the scene.
+/// Give each character an equal slice of the window, fit it to that slice, and
+/// stack the cast front to back.
+///
+/// Placement is per player (SPEC §5.4); the projection belongs to the scene, and
+/// it maps one unit to one target pixel, so the window's own size is the right
+/// thing to divide. Fitting rather than a fixed scale is what the demo packs
+/// need: they disagree about canvas size, so one constant either crowds two
+/// characters into each other or runs a tall pack off the top. This is the Rust
+/// viewer's Row layout, so the two faces can be read side by side.
 void Viewer::LayOutPlayers() {
     size_t count = players_.size();
-    float spacing = count > 1 ? 220.0f : 0.0f;
-    float first = -spacing * (float)(count - 1) * 0.5f;
+    if (count == 0 || width_ == 0 || height_ == 0) {
+        return; // minimised, or nothing to place
+    }
+    float slot = (float)width_ / (float)count;
+    float last = (float)(count - 1);
     for (size_t i = 0; i < count; i++) {
-        ss_player_set_transform(players_[i], first + spacing * (float)i, 0.0f, 0.85f, 0.85f, 0.0f);
+        // Each pack names its own canvas. Before a pack is loaded there is none,
+        // and the stand-in keeps the first lay-out finite.
+        float cw = 0.0f, ch = 0.0f;
+        if (ss_player_canvas_size(players_[i], &cw, &ch) != SS_OK) {
+            cw = ch = kFallbackCanvas;
+        }
+        cw = cw > 1.0f ? cw : 1.0f;
+        ch = ch > 1.0f ? ch : 1.0f;
+
+        // The tighter of the two axes wins, so a tall pack stays on screen.
+        float scale = slot * 0.9f / cw;
+        float fitHeight = (float)height_ * 0.9f / ch;
+        if (fitHeight < scale) {
+            scale = fitHeight;
+        }
+        scale = scale < 0.05f ? 0.05f : (scale > 1.0f ? 1.0f : scale);
+
+        float offset = (float)i - last * 0.5f;
+        ss_player_set_transform(players_[i], offset * slot, 0.0f, scale, scale, 0.0f);
         ss_player_set_order(players_[i], (int32_t)i);
     }
 }
@@ -452,6 +492,9 @@ void Viewer::LoadPackAtIndex(size_t index) {
     }
     packIndex_ = index;
     PlayAnimationAtIndex(0);
+    // Packs differ in canvas size, and a player only has one once it has an
+    // animation, so the fit is recomputed here rather than at load.
+    LayOutPlayers();
 }
 
 void Viewer::PlayAnimationAtIndex(size_t index) {
@@ -501,6 +544,11 @@ void Viewer::Resize(uint32_t width, uint32_t height) {
         return; // minimised; the scene keeps its last good size
     }
     ss_scene_resize(scene_, width, height);
+    // Placement is in projection units, which are the target's pixels, so the
+    // cast has to be re-fitted to the new window rather than left where it was.
+    width_ = width;
+    height_ = height;
+    LayOutPlayers();
 }
 
 // --- input ---------------------------------------------------------------

@@ -290,13 +290,23 @@ impl OverridePriority {
     }
 }
 
-/// Everything in `path` up to the last `/`, with the separator — the directory a
+/// Everything in `path` up to the last separator, with it — the directory a
 /// pack's siblings are named relative to (SPEC §8.1).
 ///
 /// Deliberately string surgery rather than `Path`: the same joins have to hold
-/// for a URL, and `'/'` is the separator in both worlds (Windows accepts it too).
+/// for a URL, where `'/'` is the only separator. `'\\'` is the second one because
+/// a Win32 host hands in native paths and nothing normalises them on the way —
+/// [`SSPlayer::load`] takes a `Path`, `ss_player_load` gets whatever `argv` or
+/// `DragQueryFileW` produced, and a `canonicalize`d path is `\\?\`-prefixed and
+/// carries no `'/'` at all. Cutting such a path at the wrong separator is silent:
+/// the atlases resolve one directory too high, every part that uses them falls
+/// back to the 1x1 white texture, and nothing errors (SPEC §8.1).
+///
+/// Both separators are ASCII, so the byte slice below stays on a char boundary.
+/// The join that follows may mix the two (`a/b\c.png`); Win32 accepts that, and
+/// a `\\?\` path keeps the backslashes it needs.
 fn parent_of(path: &str) -> String {
-    match path.rfind('/') {
+    match path.rfind(['/', '\\']) {
         Some(cut) => path[..=cut].to_string(),
         None => String::new(),
     }
@@ -1824,3 +1834,36 @@ fn decode_and_register(renderer: &mut SSRenderer, device: &wgpu::Device, queue: 
 /// textures itself (the web face decodes with `createImageBitmap`, SPEC §10).
 #[cfg(not(feature = "embedded"))]
 fn decode_and_register(_: &mut SSRenderer, _: &wgpu::Device, _: &wgpu::Queue, _: &[(u32, &[u8], Retention)]) {}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// `parent_of` is the one place a host's path vocabulary reaches the walk, and
+    /// it is pure string surgery — so every shape below is checked on every
+    /// platform, including the CI job that is the only one running tests at all.
+    /// The two Windows cases are not hypothetical: they are what the DX12 viewer
+    /// and the native viewer actually handed in the first time each was run here.
+    #[test]
+    fn parent_of_cuts_at_either_separator() {
+        // The URL / POSIX shape, unchanged.
+        assert_eq!(parent_of("overall/Instance.ssab"), "overall/");
+        assert_eq!(parent_of("https://example.com/a/b.ssab"), "https://example.com/a/");
+
+        // A native Win32 path, e.g. from `argv` or `DragQueryFileW`.
+        assert_eq!(parent_of("overall\\Instance.ssab"), "overall\\");
+
+        // Mixed: a forward-slash root with a backslash joined onto it, which is
+        // what a Win32 host building on a CMake-supplied directory produces.
+        assert_eq!(parent_of("U:/assets/overall\\Basic.ssab"), "U:/assets/overall\\");
+
+        // A verbatim path, what `std::fs::canonicalize` returns on Windows. It
+        // carries no '/' at all, so a '/'-only cut would drop the directory
+        // entirely and resolve every atlas against the process CWD.
+        assert_eq!(parent_of("\\\\?\\U:\\assets\\overall\\Basic.ssab"), "\\\\?\\U:\\assets\\overall\\");
+
+        // Nothing to cut: the caller gave a bare name, so the siblings are bare
+        // too and a loader rooted at the pack's own directory has nothing to strip.
+        assert_eq!(parent_of("Instance.ssab"), "");
+    }
+}

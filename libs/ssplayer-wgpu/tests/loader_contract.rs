@@ -15,7 +15,8 @@
 //!
 //! 1. the first thing asked for is `src`, **verbatim**;
 //! 2. everything else is `<src's directory>/<name>` — so a loader has exactly one
-//!    base to resolve against, the one `src` is already relative to;
+//!    base to resolve against, the one `src` is already relative to, and that
+//!    directory is cut at whichever separator `src` itself used;
 //! 3. one file is asked for once, however many hashes name it;
 //! 4. what comes back is offered as a texture under every hash that named it.
 //!
@@ -59,7 +60,11 @@ impl Recorder {
 impl AssetLoader for Recorder {
     async fn read(&mut self, paths: &[String]) -> Vec<Option<Vec<u8>>> {
         self.reads.push(paths.to_vec());
-        paths.iter().map(|path| std::fs::read(self.root.join(path)).ok()).collect()
+        // Recorded verbatim above — the assertions read that. Only the disk lookup
+        // folds `\` to `/`, the way a real Win32 loader accepts either separator.
+        // Without it the backslash test finds no fixture on a non-Windows host,
+        // `load_with` returns Err, and the test skips itself **green**.
+        paths.iter().map(|path| std::fs::read(self.root.join(path.replace('\\', "/"))).ok()).collect()
     }
 
     async fn supply_texture(&mut self, hash: u32, encoded: &[u8]) {
@@ -115,6 +120,35 @@ fn every_request_shares_one_base() {
     assert!(!recorder.supplied.is_empty(), "no atlas was offered");
 }
 
+/// The same contract, with the separator a Win32 host hands in.
+///
+/// `SSPlayer::load` takes a `Path` and `ss_player_load` takes whatever `argv` or
+/// `DragQueryFileW` produced, so `src` arrives backslash-separated on Windows and
+/// nothing on the way normalises it. Cutting it at `'/'` alone put every atlas one
+/// directory too high, which costs no error and no counter — the parts just fall
+/// back to the white texture (SPEC §8.1).
+///
+/// The base being a pure string property is what lets this run everywhere: it
+/// needs no Windows runner, which matters because the Windows CI job builds and
+/// never tests. Keep it free of `cfg`.
+#[test]
+fn a_backslash_src_shares_one_base_too() {
+    let mut recorder = Recorder::new(asset_root());
+    let src = "overall\\Instance.ssab";
+    let Some(player) = load(&mut recorder, src) else { return };
+
+    assert_eq!(recorder.reads.first().map(Vec::as_slice), Some([src.to_string()].as_slice()), "the walk did not ask for `src` verbatim, or asked for something else first");
+    for path in recorder.requested().iter().skip(1) {
+        assert!(path.starts_with("overall\\"), "{path} is not relative to the pack's directory; the base was cut at the wrong separator");
+    }
+
+    // The walk really ran, rather than resolving nothing and reporting nothing.
+    assert!(recorder.requested().contains(&"overall\\Instance_SourceAnime.ssab"), "the referenced instance pack was never requested: {:?}", recorder.requested());
+    assert!(player.has_pack("Instance_SourceAnime"));
+    assert!(!recorder.supplied.is_empty(), "no atlas was offered");
+    assert!(player.missing_assets().is_empty(), "a complete load reported something missing: {:?}", player.missing_assets());
+}
+
 /// The same pack named without a directory: then there is nothing to join, and
 /// every request is bare. This is the shape a loader rooted at the pack's own
 /// directory sees, and it must not have to strip anything.
@@ -124,7 +158,10 @@ fn a_src_with_no_directory_yields_bare_requests() {
     let Some(_) = load(&mut recorder, "Instance.ssab") else { return };
 
     for path in recorder.requested() {
-        assert!(!path.contains('/'), "{path} gained a directory the caller never gave");
+        // Both separators: a bare `src` must not acquire a directory under either
+        // vocabulary, and only checking `'/'` would miss the one this file exists
+        // for.
+        assert!(!path.contains(['/', '\\']), "{path} gained a directory the caller never gave");
     }
     assert!(recorder.requested().contains(&"Instance_SourceAnime.ssab"));
 }
