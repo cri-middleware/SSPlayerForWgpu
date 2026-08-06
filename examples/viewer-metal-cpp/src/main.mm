@@ -121,11 +121,19 @@ static NSArray<NSString *> *SSCollectSsabPaths(NSArray<NSURL *> *urls) {
 static const NSUInteger kInitialPlayers = 2;
 /// Most players the +/- keys will go to.
 static const NSUInteger kMaxPlayers = 6;
+/// Stand-in canvas for a player that has not been given an animation yet, so the
+/// first lay-out has something to divide by. Same value the Rust viewer uses.
+static const float kFallbackCanvas = 320.0f;
 
 @implementation SSViewerApp {
     NSWindow *_window;
     SSMetalView *_view;
     ss_scene_t *_scene;
+    /// The scene's size in backing pixels, which is also what placement is
+    /// measured in — the projection maps one unit to one target pixel. Kept
+    /// here because the lay-out divides the drawable between the cast.
+    uint32_t _width;
+    uint32_t _height;
     /// One handle per character. All of them draw into `_scene`.
     NSMutableArray<NSValue *> *_players;
 
@@ -183,6 +191,10 @@ static const NSUInteger kMaxPlayers = 6;
     desc.backend = SS_BACKEND_METAL;
     desc.width = (uint32_t)pixels.width;
     desc.height = (uint32_t)pixels.height;
+    // The first `addPlayer` lays the cast out, so the size has to be known by
+    // then rather than only from the first resize notification.
+    _width = desc.width;
+    _height = desc.height;
     desc.clear_color[0] = 0.08f;
     desc.clear_color[1] = 0.08f;
     desc.clear_color[2] = 0.12f;
@@ -259,15 +271,43 @@ static const NSUInteger kMaxPlayers = 6;
     [self layOutPlayers];
 }
 
-/// Spread the characters across the window and stack them front to back.
-/// Placement is per player (SPEC §5.4); the projection belongs to the scene.
+/// Give each character an equal slice of the window, fit it to that slice, and
+/// stack the cast front to back.
+///
+/// Placement is per player (SPEC §5.4); the projection belongs to the scene, and
+/// it maps one unit to one target pixel, so the drawable's own size is the right
+/// thing to divide. Fitting rather than a fixed scale is what the demo packs
+/// need: they disagree about canvas size, so one constant either crowds two
+/// characters into each other or runs a tall pack off the top. This is the Rust
+/// viewer's Row layout, so the two faces can be read side by side.
 - (void)layOutPlayers {
     NSUInteger count = _players.count;
-    float spacing = count > 1 ? 220.0f : 0.0f;
-    float first = -spacing * (float)(count - 1) * 0.5f;
+    if (count == 0 || _width == 0 || _height == 0) {
+        return; // zero-sized drawable, or nothing to place
+    }
+    float slot = (float)_width / (float)count;
+    float last = (float)(count - 1);
     for (NSUInteger i = 0; i < count; i++) {
         ss_player_t *player = [self playerAt:i];
-        ss_player_set_transform(player, first + spacing * (float)i, 0.0f, 0.85f, 0.85f, 0.0f);
+        // Each pack names its own canvas. Before a pack is loaded there is none,
+        // and the stand-in keeps the first lay-out finite.
+        float cw = 0.0f, ch = 0.0f;
+        if (ss_player_canvas_size(player, &cw, &ch) != SS_OK) {
+            cw = ch = kFallbackCanvas;
+        }
+        cw = cw > 1.0f ? cw : 1.0f;
+        ch = ch > 1.0f ? ch : 1.0f;
+
+        // The tighter of the two axes wins, so a tall pack stays on screen.
+        float scale = slot * 0.9f / cw;
+        float fitHeight = (float)_height * 0.9f / ch;
+        if (fitHeight < scale) {
+            scale = fitHeight;
+        }
+        scale = scale < 0.05f ? 0.05f : (scale > 1.0f ? 1.0f : scale);
+
+        float offset = (float)i - last * 0.5f;
+        ss_player_set_transform(player, offset * slot, 0.0f, scale, scale, 0.0f);
         ss_player_set_order(player, (int32_t)i);
     }
 }
@@ -372,6 +412,9 @@ static const NSUInteger kMaxPlayers = 6;
     _anims = anims;
     _packIndex = index;
     [self playAnimationAtIndex:0];
+    // Packs differ in canvas size, and a player only has one once it has an
+    // animation, so the fit is recomputed here rather than at load.
+    [self layOutPlayers];
 }
 
 - (void)playAnimationAtIndex:(NSUInteger)index {
@@ -419,6 +462,11 @@ static const NSUInteger kMaxPlayers = 6;
 - (void)syncDrawableSize {
     NSSize pixels = [_view convertSizeToBacking:_view.bounds.size];
     ss_scene_resize(_scene, (uint32_t)pixels.width, (uint32_t)pixels.height);
+    // Placement is in projection units, which are the target's pixels, so the
+    // cast has to be re-fitted to the new drawable rather than left where it was.
+    _width = (uint32_t)pixels.width;
+    _height = (uint32_t)pixels.height;
+    [self layOutPlayers];
 }
 
 // --- input ---------------------------------------------------------------
