@@ -13,12 +13,17 @@
 //!
 //! These tests pin the contract itself rather than either implementation:
 //!
-//! 1. the first thing asked for is `src`, **verbatim**;
-//! 2. everything else is `<src's directory>/<name>` — so a loader has exactly one
-//!    base to resolve against, the one `src` is already relative to, and that
-//!    directory is cut at whichever separator `src` itself used;
+//! 1. the first thing asked for is `src`, **verbatim**, while the loader is still
+//!    rooted wherever the caller left it;
+//! 2. `set_base` is then called once, with `src` verbatim, and everything asked
+//!    for after it is a **bare name** — the walk joins nothing onto anything, so
+//!    resolving is the loader's whole job and its vocabulary is its own business;
 //! 3. one file is asked for once, however many hashes name it;
 //! 4. what comes back is offered as a texture under every hash that named it.
+//!
+//! Rule 1 before rule 2 is what makes the historical bug unrepresentable rather
+//! than merely tested for: `src` is read before any base derived from it exists,
+//! so no implementation can resolve it against itself however it is written.
 //!
 //! A recording loader stands in for a face. It reads real fixture bytes, so the
 //! walk does real work — the pack parses, its instance references resolve, both
@@ -32,23 +37,27 @@ fn asset_root() -> &'static str {
 
 /// Stands in for a face: serves bytes from disk and records what was asked for.
 ///
-/// `root` is where it resolves requests against, the way the filesystem loader
-/// resolves against its own root and the web one against the document. **Nothing
-/// here derives a base from what it is asked for** — that is the property under
-/// test, and the bug this file exists for was a loader that did.
+/// `root` is where it resolves requests against — and it moves exactly when the
+/// walk says so, which is the property under test. It derives the new root the
+/// way the filesystem loader does, with `Path::parent`; a web face would use a
+/// `URL` base instead, and the walk is meant not to care which.
 struct Recorder {
     root: std::path::PathBuf,
     /// One entry per `read` call, so the batching is visible too: the walk is
     /// meant to ask for a whole level at once, which is what lets a face overlap
     /// the waiting (`Promise.allSettled` on the web one).
     reads: Vec<Vec<String>>,
+    /// Every `set_base`, verbatim, tagged with how many `read` calls had already
+    /// happened — so the ordering rule 1-before-2 rests on is assertable and not
+    /// just described.
+    rebases: Vec<(usize, String)>,
     /// Hashes offered, in order, and how many bytes each came with.
     supplied: Vec<(u32, usize)>,
 }
 
 impl Recorder {
     fn new(root: impl AsRef<std::path::Path>) -> Self {
-        Self { root: root.as_ref().to_path_buf(), reads: Vec::new(), supplied: Vec::new() }
+        Self { root: root.as_ref().to_path_buf(), reads: Vec::new(), rebases: Vec::new(), supplied: Vec::new() }
     }
 
     /// Every path asked for, flattened, in request order.
@@ -58,13 +67,14 @@ impl Recorder {
 }
 
 impl AssetLoader for Recorder {
+    fn set_base(&mut self, src: &str) {
+        self.rebases.push((self.reads.len(), src.to_owned()));
+        self.root = self.root.join(src).parent().map(std::path::Path::to_path_buf).unwrap_or_default();
+    }
+
     async fn read(&mut self, paths: &[String]) -> Vec<Option<Vec<u8>>> {
         self.reads.push(paths.to_vec());
-        // Recorded verbatim above — the assertions read that. Only the disk lookup
-        // folds `\` to `/`, the way a real Win32 loader accepts either separator.
-        // Without it the backslash test finds no fixture on a non-Windows host,
-        // `load_with` returns Err, and the test skips itself **green**.
-        paths.iter().map(|path| std::fs::read(self.root.join(path.replace('\\', "/"))).ok()).collect()
+        paths.iter().map(|path| std::fs::read(self.root.join(path)).ok()).collect()
     }
 
     async fn supply_texture(&mut self, hash: u32, encoded: &[u8]) {
@@ -83,87 +93,93 @@ impl AssetLoader for Recorder {
     }
 }
 
-fn load(recorder: &mut Recorder, src: &str) -> Option<SSPlayer> {
-    let mut player = SSPlayer::new();
-    match pollster::block_on(player.load_with(recorder, src)) {
-        Ok(()) => Some(player),
-        Err(_) => {
-            eprintln!("fixture missing; run scripts/deploy-examples.sh. skipping.");
-            None
-        }
-    }
+/// True once `scripts/deploy-examples.sh` has been run. The tests skip rather
+/// than fail without it, since the fixtures are generated and not committed.
+fn fixtures_present() -> bool {
+    std::path::Path::new(asset_root()).join("overall/Instance.ssab").exists()
 }
 
-/// The two rules a loader can rely on: `src` arrives verbatim, and everything
-/// else arrives already joined onto its directory.
+/// Load `src` through `recorder`, skipping the test only if the fixture is not on
+/// disk.
+///
+/// **The existence check comes first, and a load that then fails is a failure.**
+/// Treating every `Err` as "no fixtures" is how a test that has broken the walk
+/// reports itself green, and that is not hypothetical: it swallowed a `set_base`
+/// called *before* the pack was read — the precise ordering this file calls
+/// load-bearing — because re-rooting early made the pack unreadable, and an
+/// unreadable pack looked exactly like an ungenerated one.
+fn load(recorder: &mut Recorder, src: &str) -> Option<SSPlayer> {
+    if !recorder.root.join(src).exists() {
+        eprintln!("fixture missing; run scripts/deploy-examples.sh. skipping.");
+        return None;
+    }
+    let mut player = SSPlayer::new();
+    pollster::block_on(player.load_with(recorder, src)).expect("the fixture is on disk, so a load that fails is the walk's doing, not a missing file");
+    Some(player)
+}
+
+/// Rule 1 then rule 2: the pack is read exactly as handed in, and only then does
+/// the base move — once, to `src` verbatim.
+///
+/// The order is the whole safety property. While `src` is being read there is no
+/// base derived from it yet, so "resolve `src` against `src`" is not a mistake an
+/// implementation is in a position to make, however it chooses to derive a
+/// directory afterwards.
 #[test]
-fn every_request_shares_one_base() {
+fn the_pack_is_read_before_the_base_moves() {
     let mut recorder = Recorder::new(asset_root());
     let src = "overall/Instance.ssab";
-    let Some(player) = load(&mut recorder, src) else { return };
+    let Some(_) = load(&mut recorder, src) else { return };
 
-    // 1. The pack itself, exactly as handed in. A loader that resolves this
-    //    against a base of its own devising must get the same file back, which
-    //    is only true if that base is the one `src` is already relative to.
     assert_eq!(recorder.reads.first().map(Vec::as_slice), Some([src.to_string()].as_slice()), "the walk did not ask for `src` verbatim, or asked for something else first");
 
-    // 2. Everything after it under the pack's own directory — never bare, never
-    //    absolute, never re-rooted.
-    for path in recorder.requested().iter().skip(1) {
-        assert!(path.starts_with("overall/"), "{path} is not relative to the pack's directory; a loader would have to guess a second base");
-    }
-
-    // The walk really ran: the sibling pack was fetched by name, and the
-    // atlases of both packs were asked for.
-    assert!(recorder.requested().contains(&"overall/Instance_SourceAnime.ssab"), "the referenced instance pack was never requested: {:?}", recorder.requested());
-    assert!(player.has_pack("Instance_SourceAnime"));
-    assert!(!recorder.supplied.is_empty(), "no atlas was offered");
+    assert_eq!(recorder.rebases.len(), 1, "the base moved {} times; a loader cannot track a base that moves under it: {:?}", recorder.rebases.len(), recorder.rebases);
+    let (reads_before, given) = &recorder.rebases[0];
+    assert_eq!(given, src, "`set_base` was handed something other than `src`; deriving the directory is the loader's job, not the walk's");
+    assert_eq!(*reads_before, 1, "the base moved before the pack was read, so `src` can be resolved against itself — the bug this file exists for");
 }
 
-/// The same contract, with the separator a Win32 host hands in.
+/// Rule 2: everything after the pack is a **bare name**, relative to the base.
 ///
-/// `SSPlayer::load` takes a `Path` and `ss_player_load` takes whatever `argv` or
-/// `DragQueryFileW` produced, so `src` arrives backslash-separated on Windows and
-/// nothing on the way normalises it. Cutting it at `'/'` alone put every atlas one
-/// directory too high, which costs no error and no counter — the parts just fall
-/// back to the white texture (SPEC §8.1).
-///
-/// The base being a pure string property is what lets this run everywhere: it
-/// needs no Windows runner, which matters because the Windows CI job builds and
-/// never tests. Keep it free of `cfg`.
+/// The walk joins nothing. That is what let its `parent_of` go, and with it every
+/// question about `\`, `\\?\` and mixed separators: a caller's path vocabulary now
+/// reaches only the loader that speaks it (SPEC §8.1).
 #[test]
-fn a_backslash_src_shares_one_base_too() {
+fn everything_after_the_pack_is_named_relative_to_the_base() {
     let mut recorder = Recorder::new(asset_root());
-    let src = "overall\\Instance.ssab";
-    let Some(player) = load(&mut recorder, src) else { return };
+    let Some(player) = load(&mut recorder, "overall/Instance.ssab") else { return };
 
-    assert_eq!(recorder.reads.first().map(Vec::as_slice), Some([src.to_string()].as_slice()), "the walk did not ask for `src` verbatim, or asked for something else first");
     for path in recorder.requested().iter().skip(1) {
-        assert!(path.starts_with("overall\\"), "{path} is not relative to the pack's directory; the base was cut at the wrong separator");
+        assert!(!path.starts_with("overall"), "{path} arrived with `src`'s directory joined onto it; the walk resolved a path the loader was meant to");
     }
 
-    // The walk really ran, rather than resolving nothing and reporting nothing.
-    assert!(recorder.requested().contains(&"overall\\Instance_SourceAnime.ssab"), "the referenced instance pack was never requested: {:?}", recorder.requested());
+    // The walk really ran: the sibling pack was asked for by bare name, and the
+    // atlases of both packs were offered.
+    assert!(recorder.requested().contains(&"Instance_SourceAnime.ssab"), "the referenced instance pack was never requested: {:?}", recorder.requested());
     assert!(player.has_pack("Instance_SourceAnime"));
     assert!(!recorder.supplied.is_empty(), "no atlas was offered");
     assert!(player.missing_assets().is_empty(), "a complete load reported something missing: {:?}", player.missing_assets());
 }
 
-/// The same pack named without a directory: then there is nothing to join, and
-/// every request is bare. This is the shape a loader rooted at the pack's own
-/// directory sees, and it must not have to strip anything.
+/// And the consequence worth stating on its own: **the walk never looks inside
+/// `src`**, so how a host spells it cannot change what gets asked for.
+///
+/// Two loads of the same pack — one named through a directory, one from a loader
+/// already rooted there — must issue an identical sequence of requests after the
+/// first. When that holds there is nowhere left for a separator, a drive letter or
+/// a URL scheme to be misread, because nothing reads them. It is the property the
+/// old `parent_of` could not have: it took `src` apart on every load, and had to
+/// pick one answer for filesystems and URLs both.
 #[test]
-fn a_src_with_no_directory_yields_bare_requests() {
-    let mut recorder = Recorder::new(format!("{}/overall", asset_root()));
-    let Some(_) = load(&mut recorder, "Instance.ssab") else { return };
+fn what_is_asked_for_does_not_depend_on_how_src_is_spelled() {
+    let mut through_a_directory = Recorder::new(asset_root());
+    let Some(_) = load(&mut through_a_directory, "overall/Instance.ssab") else { return };
 
-    for path in recorder.requested() {
-        // Both separators: a bare `src` must not acquire a directory under either
-        // vocabulary, and only checking `'/'` would miss the one this file exists
-        // for.
-        assert!(!path.contains(['/', '\\']), "{path} gained a directory the caller never gave");
-    }
-    assert!(recorder.requested().contains(&"Instance_SourceAnime.ssab"));
+    let mut already_rooted = Recorder::new(format!("{}/overall", asset_root()));
+    let Some(_) = load(&mut already_rooted, "Instance.ssab") else { return };
+
+    assert!(through_a_directory.requested().len() > 1, "the walk asked for nothing beyond the pack itself; this test would prove nothing");
+    assert_eq!(&through_a_directory.requested()[1..], &already_rooted.requested()[1..], "the walk asked for different things depending on how `src` was spelled, so something is still reading it");
 }
 
 /// One file, one request — however many hashes name it. `external_textures()`
@@ -174,7 +190,7 @@ fn a_file_named_twice_is_read_once() {
     let mut recorder = Recorder::new(asset_root());
     let Some(player) = load(&mut recorder, "overall/TextureChange.ssab") else { return };
 
-    let common = "overall/common.png";
+    let common = "common.png";
     let requests = recorder.requested().iter().filter(|p| **p == common).count();
     assert_eq!(requests, 1, "common.png was requested {requests} times: {:?}", recorder.requested());
 
@@ -223,7 +239,7 @@ fn an_embedded_pack_asks_for_nothing_else() {
     assert!(extra.is_empty(), "an embedded pack asked for images: {extra:?}");
 
     // The sibling pack is still a file, so that one is still fetched.
-    assert!(recorder.requested().contains(&"overall_emb/Instance_SourceAnime.ssab"));
+    assert!(recorder.requested().contains(&"Instance_SourceAnime.ssab"));
     for name in ["Instance", "Instance_SourceAnime"] {
         for texture in player.textures(Some(name)).unwrap() {
             assert!(recorder.supplied.iter().any(|(hash, _)| *hash == texture.hash), "{name} needs {} ({:#010x}), which was never offered", texture.path, texture.hash);
@@ -238,6 +254,9 @@ fn one_missing_file_does_not_fail_the_load() {
     /// Serves nothing at all.
     struct Empty(Vec<String>);
     impl AssetLoader for Empty {
+        // Serves nothing, so it has no base to keep track of.
+        fn set_base(&mut self, _src: &str) {}
+
         async fn read(&mut self, paths: &[String]) -> Vec<Option<Vec<u8>>> {
             self.0.extend(paths.iter().cloned());
             paths.iter().map(|_| None).collect()
@@ -274,6 +293,10 @@ fn a_partial_load_is_reported_without_failing() {
         root: std::path::PathBuf,
     }
     impl AssetLoader for NoImages {
+        fn set_base(&mut self, src: &str) {
+            self.root = self.root.join(src).parent().map(std::path::Path::to_path_buf).unwrap_or_default();
+        }
+
         async fn read(&mut self, paths: &[String]) -> Vec<Option<Vec<u8>>> {
             paths.iter().map(|path| if path.ends_with(".png") { None } else { std::fs::read(self.root.join(path)).ok() }).collect()
         }
@@ -286,10 +309,11 @@ fn a_partial_load_is_reported_without_failing() {
 
     let mut loader = NoImages { root: asset_root().into() };
     let mut player = SSPlayer::new();
-    if pollster::block_on(player.load_with(&mut loader, "overall/Instance.ssab")).is_err() {
+    if !fixtures_present() {
         eprintln!("fixture missing; run scripts/deploy-examples.sh. skipping.");
         return;
     }
+    pollster::block_on(player.load_with(&mut loader, "overall/Instance.ssab")).expect("the fixture is on disk, so a load that fails is the walk's doing");
 
     // It loaded, and it plays.
     let anim = player.animation_names().unwrap().first().cloned().unwrap();
@@ -317,6 +341,10 @@ fn a_missing_sub_pack_is_reported_by_name() {
         first: bool,
     }
     impl AssetLoader for NoSiblings {
+        fn set_base(&mut self, src: &str) {
+            self.root = self.root.join(src).parent().map(std::path::Path::to_path_buf).unwrap_or_default();
+        }
+
         async fn read(&mut self, paths: &[String]) -> Vec<Option<Vec<u8>>> {
             let root_pack = std::mem::take(&mut self.first);
             paths.iter().map(|path| if path.ends_with(".ssab") && !root_pack { None } else { std::fs::read(self.root.join(path)).ok() }).collect()
@@ -330,10 +358,11 @@ fn a_missing_sub_pack_is_reported_by_name() {
 
     let mut loader = NoSiblings { root: asset_root().into(), first: true };
     let mut player = SSPlayer::new();
-    if pollster::block_on(player.load_with(&mut loader, "overall/Instance.ssab")).is_err() {
+    if !fixtures_present() {
         eprintln!("fixture missing; run scripts/deploy-examples.sh. skipping.");
         return;
     }
+    pollster::block_on(player.load_with(&mut loader, "overall/Instance.ssab")).expect("the fixture is on disk, so a load that fails is the walk's doing");
 
     let packs: Vec<&str> = player.missing_assets().iter().filter(|m| m.kind == MissingKind::Pack).map(|m| m.name.as_str()).collect();
     assert_eq!(packs, ["Instance_SourceAnime"], "the missing sub-pack was not reported by the name `ref_anime_pack` resolves against: {:?}", player.missing_assets());
@@ -352,13 +381,17 @@ fn a_provider_answers_for_packs_with_no_path() {
         provided: Vec<String>,
     }
     impl AssetLoader for ByName {
+        fn set_base(&mut self, src: &str) {
+            self.root = self.root.join(src).parent().map(std::path::Path::to_path_buf).unwrap_or_default();
+        }
+
         async fn read(&mut self, paths: &[String]) -> Vec<Option<Vec<u8>>> {
             self.asked_for.extend(paths.iter().cloned());
             paths.iter().map(|path| std::fs::read(self.root.join(path)).ok()).collect()
         }
         async fn read_pack(&mut self, name: &str) -> Option<Vec<u8>> {
             self.provided.push(name.to_string());
-            std::fs::read(self.root.join(format!("overall/{name}.ssab"))).ok()
+            std::fs::read(self.root.join(format!("{name}.ssab"))).ok()
         }
         async fn supply_texture(&mut self, _hash: u32, _encoded: &[u8]) {}
         fn has_texture(&self, _hash: u32) -> bool {
@@ -369,10 +402,11 @@ fn a_provider_answers_for_packs_with_no_path() {
 
     let mut loader = ByName { root: asset_root().into(), asked_for: Vec::new(), provided: Vec::new() };
     let mut player = SSPlayer::new();
-    if pollster::block_on(player.load_with(&mut loader, "overall/Instance.ssab")).is_err() {
+    if !fixtures_present() {
         eprintln!("fixture missing; run scripts/deploy-examples.sh. skipping.");
         return;
     }
+    pollster::block_on(player.load_with(&mut loader, "overall/Instance.ssab")).expect("the fixture is on disk, so a load that fails is the walk's doing");
 
     assert!(player.has_pack("Instance_SourceAnime"), "the provider's pack was not registered");
     assert_eq!(loader.provided, ["Instance_SourceAnime"], "the provider was asked for the wrong thing: {:?}", loader.provided);
@@ -391,7 +425,7 @@ fn declining_the_provider_falls_back_to_the_path() {
     let Some(player) = load(&mut recorder, "overall/Instance.ssab") else { return };
 
     assert!(player.has_pack("Instance_SourceAnime"));
-    assert!(recorder.requested().contains(&"overall/Instance_SourceAnime.ssab"), "the sibling was not read by path: {:?}", recorder.requested());
+    assert!(recorder.requested().contains(&"Instance_SourceAnime.ssab"), "the sibling was not read by path: {:?}", recorder.requested());
 }
 
 /// The other way to get a pack the walk cannot reach: register it first. The walk

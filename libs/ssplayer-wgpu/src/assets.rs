@@ -22,6 +22,10 @@ use crate::player::AssetLoader;
 ///
 /// [`SSPlayer::load`]: crate::SSPlayer::load
 pub(crate) struct FsLoader {
+    /// What every path is resolved against. Empty until the walk calls
+    /// [`AssetLoader::set_base`], which is deliberate: the `.ssab` itself is read
+    /// exactly as the caller named it, and only then does its directory become
+    /// the base for everything the pack points at.
     root: std::path::PathBuf,
     /// What was read, in the order the walk asked for it; the player takes it.
     pub(crate) images: Vec<(u32, Vec<u8>)>,
@@ -31,12 +35,28 @@ pub(crate) struct FsLoader {
 }
 
 impl FsLoader {
-    pub(crate) fn new(root: impl AsRef<std::path::Path>) -> Self {
-        Self { root: root.as_ref().to_path_buf(), images: Vec::new(), supplied: std::collections::HashSet::new() }
+    pub(crate) fn new() -> Self {
+        Self { root: std::path::PathBuf::new(), images: Vec::new(), supplied: std::collections::HashSet::new() }
     }
 }
 
 impl AssetLoader for FsLoader {
+    /// `Path::parent` **is** the platform's answer to "which directory is this
+    /// in", and that is the whole reason this method exists (SPEC §8.1).
+    ///
+    /// It cuts a native `\`, a `/`, the mix of the two that `read_dir` produces on
+    /// Windows, and a `\\?\` verbatim prefix — each correctly, on the platform
+    /// where that shape is meaningful, and none of them on the platforms where a
+    /// backslash is simply a character a file is allowed to be named with. The
+    /// walk used to do this itself by scanning for both separators, which got the
+    /// Windows cases right by taking the POSIX one wrong.
+    ///
+    /// Joined onto the existing root rather than replacing it, so a loader handed
+    /// a subtree stays inside it.
+    fn set_base(&mut self, src: &str) {
+        self.root = self.root.join(src).parent().map(std::path::Path::to_path_buf).unwrap_or_default();
+    }
+
     /// Sequential: overlapping filesystem reads is not where the time goes, and a
     /// thread pool here would buy a dependency rather than latency. The batch
     /// shape exists for the face where it does matter (SPEC §10).
@@ -90,5 +110,74 @@ pub(crate) fn block_on<F: Future>(future: F) -> F::Output {
     match future.as_mut().poll(&mut Context::from_waker(&waker)) {
         Poll::Ready(out) => out,
         Poll::Pending => unreachable!("the filesystem loader awaited something; it needs a real executor now"),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Where a pack's siblings are looked for, and who decides.
+    ///
+    /// This replaces a test of the walk's own `parent_of`, which scanned `src` for
+    /// `'/'` *and* `'\\'` because it had to serve every host with one answer. It
+    /// does not any more: `Path::parent` is the answer on this face, `URL` is the
+    /// answer on the web one, and each is right about its own vocabulary (SPEC
+    /// §8.1). So the shapes worth asserting are the ones meaningful here.
+    #[test]
+    fn the_base_becomes_the_packs_directory() {
+        let mut loader = FsLoader::new();
+        loader.set_base("overall/Instance.ssab");
+        assert_eq!(loader.root, std::path::Path::new("overall"));
+
+        // A bare name leaves it where it was: there is no directory to move into,
+        // and the siblings will be bare too.
+        let mut loader = FsLoader::new();
+        loader.set_base("Instance.ssab");
+        assert_eq!(loader.root, std::path::Path::new(""));
+    }
+
+    /// Joined onto the root already in force rather than replacing it, so a loader
+    /// handed a subtree stays inside it — the shape an engine adapter rooted at a
+    /// `res://` prefix or an archive needs.
+    #[test]
+    fn the_base_stays_inside_the_root_it_started_from() {
+        let mut loader = FsLoader::new();
+        loader.root = std::path::PathBuf::from("chars");
+        loader.set_base("hero/hero.ssab");
+        assert_eq!(loader.root, std::path::Path::new("chars/hero"));
+    }
+
+    /// Off Windows a backslash is a character a file may be named with, not a
+    /// separator — so the base is the directory the file is really in.
+    ///
+    /// This is the case the string cut got wrong, silently: it took `overall/weird\`
+    /// for a directory, every atlas resolved one level too deep, and the parts drew
+    /// as white silhouettes with no error and no counter moving. Nothing about it
+    /// is Windows-specific to get right; it is simply what `Path` already knows.
+    #[cfg(not(windows))]
+    #[test]
+    fn a_backslash_is_part_of_the_name_here() {
+        let mut loader = FsLoader::new();
+        loader.set_base("overall/weird\\name.ssab");
+        assert_eq!(loader.root, std::path::Path::new("overall"));
+    }
+
+    /// And on Windows the same call cuts every native shape, including the two the
+    /// walk had to be taught by hand: `read_dir` joining a backslash onto a
+    /// forward-slash root, and a `\\?\` verbatim path that carries no `'/'` at all.
+    ///
+    /// It compiles everywhere and runs only where those shapes mean anything, which
+    /// is the trade the string version could not make. The Windows CI job builds
+    /// without testing, so treat this as documentation that `Path` is load-bearing
+    /// here rather than as a check that runs.
+    #[cfg(windows)]
+    #[test]
+    fn the_base_cuts_every_native_shape_on_windows() {
+        for (src, want) in [(r"overall\Instance.ssab", r"overall"), (r"U:/assets/overall\Basic.ssab", r"U:/assets/overall"), (r"\\?\U:\assets\overall\Basic.ssab", r"\\?\U:\assets\overall")] {
+            let mut loader = FsLoader::new();
+            loader.set_base(src);
+            assert_eq!(loader.root, std::path::Path::new(want), "{src}");
+        }
     }
 }
