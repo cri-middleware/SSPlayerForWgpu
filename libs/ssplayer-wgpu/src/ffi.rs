@@ -162,6 +162,11 @@ pub struct SsMissingAsset {
     pub hash: u32,
     /// The path asked for, or the pack's name.
     ///
+    /// For a texture this is the path the exporter wrote, **relative to its
+    /// pack's directory** — the walk hands the loader bare names and never
+    /// builds a full path, so no full path exists to report (SPEC §8.1). Join it
+    /// onto the directory of what you passed `ss_player_load` if you want one.
+    ///
     /// Owned by the scene and valid until the next `ss_player_missing_at` on it;
     /// copy it if you need to keep it. Never null.
     pub name: *const c_char,

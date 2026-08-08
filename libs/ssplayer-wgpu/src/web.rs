@@ -109,6 +109,33 @@ fn warn(message: &str) {
     web_sys::console::warn_1(&JsValue::from_str(message));
 }
 
+/// The absolute URL relative references are resolved against: whatever base is in
+/// force, or the document's URL when there is none.
+///
+/// A base is resolved against the page because it may itself be relative — a host
+/// calling `loadSsab(bytes, null, 'assets/overall/')` is giving a page-relative
+/// directory, and `URL(relative, base)` requires an absolute base.
+///
+/// An absolute base is taken **without consulting the document**, so a host that
+/// supplied a full URL is served even where there is no document to resolve
+/// against. Only a relative one needs the page, and only then is its absence a
+/// reason to give up — which is what the caller's warning goes on to say.
+fn resolved_base(base_url: Option<&str>) -> Option<String> {
+    let document = || web_sys::window()?.document()?.url().ok();
+    match base_url {
+        Some(base) => match web_sys::Url::new(base) {
+            Ok(url) => Some(url.href()),
+            Err(_) => Some(web_sys::Url::new_with_base(base, &document()?).ok()?.href()),
+        },
+        None => document(),
+    }
+}
+
+/// `url` resolved against the base in force, into something `fetch` can take.
+fn absolute_url(url: &str, base_url: Option<&str>) -> Option<String> {
+    Some(web_sys::Url::new_with_base(url, &resolved_base(base_url)?).ok()?.href())
+}
+
 /// Fetch every path **once**, in parallel, resolved against `base_url` (or the
 /// document's URL).
 ///
@@ -125,7 +152,7 @@ async fn fetch_files(paths: &[String], base_url: Option<&str>) -> HashMap<String
         warn("[ssplayer-wgpu] no `window`: nothing can be fetched");
         return out;
     };
-    let base = base_url.map(str::to_owned).or_else(|| window.document().and_then(|d| d.url().ok()));
+    let base = resolved_base(base_url);
 
     let requests = js_sys::Array::new();
     let mut ordered: Vec<&String> = Vec::new();
@@ -714,12 +741,45 @@ macro_rules! with_player {
 /// over a yield point would still be held when it does.
 struct WebAssetLoader {
     ctx: Rc<RefCell<WebContext>>,
+    /// The base the host gave us, which [`AssetLoader::set_base`] never moves.
+    /// Every base is derived from *this*, so one loader survives several loads.
+    /// `None` means "the document's URL".
+    origin_url: Option<String>,
     /// What the pack's relative paths resolve against — the `.ssab`'s own URL.
     /// `None` falls back to the document's.
     base_url: Option<String>,
 }
 
+impl WebAssetLoader {
+    /// Rooted wherever the host said, or at the document when it said nothing.
+    fn new(ctx: Rc<RefCell<WebContext>>, base_url: Option<String>) -> Self {
+        Self { ctx, origin_url: base_url.clone(), base_url }
+    }
+}
+
 impl AssetLoader for WebAssetLoader {
+    fn reset_base(&mut self) {
+        self.base_url.clone_from(&self.origin_url);
+    }
+
+    /// URL resolution **is** the answer here, the way `Path::parent` is on the
+    /// filesystem face (SPEC §8.1): a base that names a file has its last segment
+    /// replaced, so keeping the `.ssab`'s own URL as the base is what makes
+    /// `atlas.png` next to it resolve correctly — and what makes `../` and a
+    /// query string behave the way every other URL on the page does.
+    ///
+    /// Resolved against `origin_url` — what the host gave us — and not against the
+    /// base a previous load left behind, so this is idempotent and a reused loader
+    /// does not walk `assets/assets/` deeper on every call. Stored absolute,
+    /// because `URL(relative, base)` needs an absolute base and a host may well
+    /// have passed `assets/overall/`.
+    fn set_base(&mut self, src: &str) {
+        match absolute_url(src, self.origin_url.as_deref()) {
+            Some(url) => self.base_url = Some(url),
+            None => self.warn(&format!("{src}: cannot be resolved to a URL; the pack's siblings will be looked for against the document")),
+        }
+    }
+
     /// One `fetch` per path, settled together: this is the face where overlapping
     /// the waiting is the difference between one round trip and N.
     async fn read(&mut self, paths: &[String]) -> Vec<Option<Vec<u8>>> {
@@ -829,12 +889,14 @@ impl SsPlayerWeb {
     #[wasm_bindgen(js_name = loadSsab)]
     pub async fn load_ssab(&self, bytes: Vec<u8>, pack: Option<String>, base_url: Option<String>) -> Result<(), JsValue> {
         let registered = self.register(&bytes, pack, true)?;
-        let mut loader = WebAssetLoader { ctx: Rc::clone(&self.ctx), base_url };
+        let mut loader = WebAssetLoader::new(Rc::clone(&self.ctx), base_url);
         let name = registered.name().to_string();
         self.with_player_detached(|mut player| async move {
             // The pack is registered; only the assets around it are left, so the
             // walk starts from what is already loaded rather than re-reading it.
-            player.load_assets(&mut loader, &name, "").await;
+            // There is no `src` to re-root on — the bytes came from the host — so
+            // `baseUrl` is the base, exactly as documented.
+            player.load_assets(&mut loader, &name).await;
             (player, ())
         })
         .await
@@ -854,13 +916,13 @@ impl SsPlayerWeb {
     /// come from somewhere that is not URL-addressable — a drop, a bundler, an
     /// archive — and pass `baseUrl` if that pack still has siblings to find.
     pub async fn load(&self, src: &str) -> Result<(), JsValue> {
-        // No base of our own: `src` is already what the document resolves, and the
-        // walk joins the pack's siblings onto its directory before asking. Giving
-        // the loader the `.ssab`'s own URL instead would resolve `src` against
-        // itself — `assets/assets/Basic.ssab` — which is what
-        // `SSPlayer::load` avoids by rooting its loader at the same place the path
-        // is relative to.
-        let mut loader = WebAssetLoader { ctx: Rc::clone(&self.ctx), base_url: None };
+        // No base of our own: `src` is page-relative like any other URL here, so
+        // the document resolves it. The walk then hands `src` to `set_base` — after
+        // it has been read, never before — and the `.ssab`'s own URL becomes what
+        // its siblings resolve against. Setting it here instead is what once made
+        // `src` resolve against itself and fetch `assets/assets/Basic.ssab`; the
+        // ordering is now what rules that out (SPEC §8.1).
+        let mut loader = WebAssetLoader::new(Rc::clone(&self.ctx), None);
         let src = src.to_owned();
         self.with_player_detached(|mut player| async move {
             let out = player.load_with(&mut loader, &src).await;
@@ -880,10 +942,10 @@ impl SsPlayerWeb {
     #[wasm_bindgen(js_name = addSsab)]
     pub async fn add_ssab(&self, bytes: Vec<u8>, pack: Option<String>, base_url: Option<String>) -> Result<(), JsValue> {
         let registered = self.register(&bytes, pack, false)?;
-        let mut loader = WebAssetLoader { ctx: Rc::clone(&self.ctx), base_url };
+        let mut loader = WebAssetLoader::new(Rc::clone(&self.ctx), base_url);
         let name = registered.name().to_string();
         self.with_player_detached(|mut player| async move {
-            player.load_assets(&mut loader, &name, "").await;
+            player.load_assets(&mut loader, &name).await;
             (player, ())
         })
         .await

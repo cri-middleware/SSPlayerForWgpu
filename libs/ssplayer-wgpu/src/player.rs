@@ -48,14 +48,58 @@ const IDENTITY: [f32; 16] = [1.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 1
 // spawned onto another thread.
 #[allow(async_fn_in_trait)]
 pub trait AssetLoader {
+    /// Go back to the root you were built with, discarding whatever base a
+    /// previous load left behind.
+    ///
+    /// [`SSPlayer::load_with`] calls this first, before it reads anything. It is
+    /// what lets one loader serve more than one load: without it the base set by
+    /// the last load is still in force when the next `src` is read, and a second
+    /// `load_with(loader, "overall/Other.ssab")` goes looking in
+    /// `overall/overall`. An engine adapter holding a single loader over its
+    /// `AssetServer` / `ResourceLoader` / `.pck` handle is the shape that needs
+    /// this; nothing else about the walk changes.
+    ///
+    /// Keep the root the caller gave you, and restore it here — do not try to undo
+    /// [`AssetLoader::set_base`] by walking back up, which cannot be right for a
+    /// URL and is not always right for a path.
+    fn reset_base(&mut self);
+
+    /// Re-root yourself at the directory `src` turned out to live in: every path
+    /// the walk asks for after this is named relative to **that**.
+    ///
+    /// `src` is the pack's own path — *not* its directory. Resolving it, and
+    /// deciding what "its directory" means, is the whole reason this method
+    /// exists: only the implementation knows whether it is holding a filesystem
+    /// path, a URL, or an archive key, and each of those cuts a directory
+    /// differently. `Path::parent` and a `URL` base already know their own
+    /// vocabulary; the walk, serving all three at once, did not (SPEC §8.1).
+    ///
+    /// Resolve `src` **against the base you were constructed with**, then take its
+    /// directory, so a loader that starts out rooted somewhere (a Godot `res://`
+    /// prefix, an archive subtree) stays inside it.
+    ///
+    /// **Derived from the root you were built with, not folded into the base a
+    /// previous call left behind**, so that this is idempotent and pairs with
+    /// [`AssetLoader::reset_base`]: two loads through one loader land on the same
+    /// base the two would have reached separately.
+    ///
+    /// [`SSPlayer::load_with`] calls this exactly once per load, **after** reading
+    /// the pack and before asking for anything else. That order is what makes the
+    /// bug this contract exists for unrepresentable: `src` is read while the base
+    /// is still whatever the caller set up, so it can never be resolved against
+    /// itself. [`SSPlayer::load_assets`] does not call it at all — a caller
+    /// reaching for that one is expected to have rooted the loader itself.
+    fn set_base(&mut self, src: &str);
+
     /// Read every path — **all of them at once**, so an implementation that can
     /// overlap the waiting does (the web one issues one `fetch` per path and
     /// settles them together). Results are positional; `None` is "this one did
     /// not arrive", which is never fatal to the rest.
     ///
-    /// Paths arrive relative to whatever the caller passed [`SSPlayer::load_with`]
-    /// as `src`, already joined against its directory — resolving that against a
-    /// base directory or URL is the implementation's business.
+    /// Every path is relative to the base — bare, never joined onto anything by
+    /// the caller. The one exception is the first call of a
+    /// [`SSPlayer::load_with`], which is `src` itself, verbatim, before
+    /// [`AssetLoader::set_base`] has been called.
     async fn read(&mut self, paths: &[String]) -> Vec<Option<Vec<u8>>>;
 
     /// Bytes for an instance-referenced pack, **by the name it is referenced
@@ -120,7 +164,9 @@ pub enum MissingKind {
 #[derive(Clone, Debug)]
 pub struct MissingAsset {
     pub kind: MissingKind,
-    /// What was asked for: a path for a texture, a pack name for a pack.
+    /// What was asked for: for a texture, the path the exporter wrote —
+    /// relative to its pack's directory, which is what the loader resolved it
+    /// against and the only form the walk ever sees. For a pack, its name.
     pub name: String,
     /// For a texture, the key a draw batch will ask for. Zero for a pack, whose
     /// identity is its name (SPEC §7.1).
@@ -287,28 +333,6 @@ impl OverridePriority {
             2 => Some(Self::Permanent),
             _ => None,
         }
-    }
-}
-
-/// Everything in `path` up to the last separator, with it — the directory a
-/// pack's siblings are named relative to (SPEC §8.1).
-///
-/// Deliberately string surgery rather than `Path`: the same joins have to hold
-/// for a URL, where `'/'` is the only separator. `'\\'` is the second one because
-/// a Win32 host hands in native paths and nothing normalises them on the way —
-/// [`SSPlayer::load`] takes a `Path`, `ss_player_load` gets whatever `argv` or
-/// `DragQueryFileW` produced, and a `canonicalize`d path is `\\?\`-prefixed and
-/// carries no `'/'` at all. Cutting such a path at the wrong separator is silent:
-/// the atlases resolve one directory too high, every part that uses them falls
-/// back to the 1x1 white texture, and nothing errors (SPEC §8.1).
-///
-/// Both separators are ASCII, so the byte slice below stays on a char boundary.
-/// The join that follows may mix the two (`a/b\c.png`); Win32 accepts that, and
-/// a `\\?\` path keeps the backslashes it needs.
-fn parent_of(path: &str) -> String {
-    match path.rfind(['/', '\\']) {
-        Some(cut) => path[..=cut].to_string(),
-        None => String::new(),
     }
 }
 
@@ -513,7 +537,9 @@ impl SSPlayer {
     /// `src` is where the pack is, in whatever terms `loader` understands — a
     /// path for [`SSPlayer::load`], a URL for the web face. Everything the
     /// pack names is resolved against its **directory**, because that is what the
-    /// exporter wrote the paths relative to.
+    /// exporter wrote the paths relative to; the walk never joins those paths
+    /// itself, it hands `src` to [`AssetLoader::set_base`] once and asks for bare
+    /// names after that.
     ///
     /// A pack keeps the name inside the `.ssab`. That is the name instance
     /// references are matched against (`ref_anime_pack`), and the same string is
@@ -536,6 +562,10 @@ impl SSPlayer {
         // This load's tally, not the player's history: a caller checks it against
         // the call it just made.
         self.missing.clear();
+        // Back to where the caller rooted it, discarding any base a previous load
+        // left behind — that is what makes `src` below mean the same thing on the
+        // second call as on the first.
+        loader.reset_base();
         let Some(bytes) = loader.read(std::slice::from_ref(&src.to_owned())).await.into_iter().next().flatten() else {
             loader.warn(&format!("could not read {src}"));
             return Err(SSRuntimeError::NotLoaded);
@@ -543,7 +573,11 @@ impl SSPlayer {
         let pack = SSPack::load(&bytes)?;
         let name = pack.name().to_string();
         self.set_pack(&pack);
-        self.load_assets(loader, &name, &parent_of(src)).await;
+        // Read first, re-root second. Everything from here is named relative to
+        // wherever `src` turned out to be, and working that out belongs to the
+        // loader — it is the only party that knows which vocabulary it is in.
+        loader.set_base(src);
+        self.load_assets(loader, &name).await;
         Ok(())
     }
 
@@ -570,14 +604,17 @@ impl SSPlayer {
     /// `path` is resolved by the process's working directory; everything the pack
     /// names — its atlases, the sibling packs its instance parts play from — is
     /// resolved against **the `.ssab`'s own directory**, because that is what the
-    /// exporter wrote those paths relative to.
+    /// exporter wrote those paths relative to. That directory is `Path::parent`'s
+    /// answer, so the platform decides it rather than us (SPEC §8.1).
     ///
     /// Use [`SSPlayer::load_with`] where a `File::open` cannot reach the bytes: a
     /// Godot `.pck`, an APK, an engine's asset server, a browser (SPEC §8.2).
     #[cfg(all(feature = "embedded", not(target_arch = "wasm32")))]
     pub fn load(&mut self, path: impl AsRef<std::path::Path>) -> Result<(), SSRuntimeError> {
         let path = path.as_ref();
-        let mut loader = crate::assets::FsLoader::new("");
+        // Rooted nowhere: `path` is read as given, and the walk then re-roots the
+        // loader at its directory through `set_base`.
+        let mut loader = crate::assets::FsLoader::new();
         let out = crate::assets::block_on(self.load_with(&mut loader, &path.to_string_lossy()));
         // Queued rather than uploaded: see the note on `pending_images`.
         self.pending_images.append(&mut loader.images);
@@ -588,15 +625,18 @@ impl SSPlayer {
     /// pack: its atlases, and the packs it plays from, transitively.
     ///
     /// For a host that got the bytes some other way — a drop, a bundler, an
-    /// archive — and registered them with [`SSPlayer::load_ssab`]. `base` is what
-    /// the pack's relative paths resolve against, in the loader's terms; pass
-    /// `""` when the loader is already rooted there.
-    pub async fn load_assets(&mut self, loader: &mut impl AssetLoader, pack_name: &str, base: &str) {
+    /// archive — and registered them with [`SSPlayer::load_ssab`].
+    ///
+    /// **`loader` must already be rooted where the pack's relative paths resolve**,
+    /// because this entry point has no `src` to hand [`AssetLoader::set_base`]:
+    /// the bytes came from somewhere it never saw. Everything asked for here is a
+    /// bare name — an atlas path as the exporter wrote it, or `<pack>.ssab`.
+    pub async fn load_assets(&mut self, loader: &mut impl AssetLoader, pack_name: &str) {
         let Some(pack) = self.packs.get(pack_name).cloned() else {
             loader.warn(&format!("no pack named \"{pack_name}\" is registered"));
             return;
         };
-        self.load_textures(loader, &pack, base).await;
+        self.load_textures(loader, &pack).await;
 
         // Breadth first, one round trip per level: `read` takes the whole level
         // at once so an implementation that can overlap the waiting does. A pack
@@ -617,14 +657,16 @@ impl SSPlayer {
             for name in &wanted {
                 provided.push(loader.read_pack(name).await);
             }
-            let paths: Vec<String> = wanted.iter().map(|name| format!("{base}{name}.ssab")).collect();
+            // A bare sibling name: the loader is rooted at the pack's own
+            // directory, which is what the exporter wrote these relative to.
+            let paths: Vec<String> = wanted.iter().map(|name| format!("{name}.ssab")).collect();
             let unprovided: Vec<String> = paths.iter().zip(&provided).filter(|(_, bytes)| bytes.is_none()).map(|(path, _)| path.clone()).collect();
             let mut fetched = loader.read(&unprovided).await.into_iter();
             let fetched: Vec<Option<Vec<u8>>> = provided.into_iter().map(|bytes| if bytes.is_some() { bytes } else { fetched.next().flatten() }).collect();
 
-            for ((name, path), bytes) in wanted.iter().zip(&paths).zip(fetched) {
+            for (name, bytes) in wanted.iter().zip(fetched) {
                 let Some(bytes) = bytes else {
-                    loader.warn(&format!("instance pack \"{name}\" ({path}) did not load; parts that play it will not appear"));
+                    loader.warn(&format!("instance pack \"{name}\" did not load; parts that play it will not appear"));
                     self.missing.push(MissingAsset { kind: MissingKind::Pack, name: name.clone(), hash: 0 });
                     continue;
                 };
@@ -634,11 +676,11 @@ impl SSPlayer {
                 match SSPack::load(&bytes) {
                     Ok(sub) => {
                         self.add_pack(&sub);
-                        self.load_textures(loader, &sub, base).await;
+                        self.load_textures(loader, &sub).await;
                         queue.extend(sub.instance_packs());
                     }
                     Err(e) => {
-                        loader.warn(&format!("instance pack \"{name}\" ({path}) is not a valid .ssab: {e:?}"));
+                        loader.warn(&format!("instance pack \"{name}\" is not a valid .ssab: {e:?}"));
                         self.missing.push(MissingAsset { kind: MissingKind::Pack, name: name.clone(), hash: 0 });
                     }
                 }
@@ -652,27 +694,31 @@ impl SSPlayer {
     /// Embedded images come out of the pack; the rest are read through `loader`,
     /// **once per file**: `external_textures()` can name an image a cellmap
     /// already named, under a different hash, and that must not become two reads.
-    async fn load_textures(&mut self, loader: &mut impl AssetLoader, pack: &SSPack, base: &str) {
+    ///
+    /// The paths asked for are `TextureRef::path` exactly as the exporter wrote
+    /// it, resolved by the loader against its base — so the name that reaches
+    /// [`SSPlayer::missing_assets`] is that same relative path, and the warning
+    /// names the pack to say which directory it was relative to.
+    async fn load_textures(&mut self, loader: &mut impl AssetLoader, pack: &SSPack) {
         let wanted: Vec<TextureRef> = pack.textures().iter().filter(|t| !loader.has_texture(t.hash)).cloned().collect();
         if wanted.is_empty() {
             return;
         }
 
         let carried: HashMap<u32, Vec<u8>> = pack.embedded_images().into_iter().filter(|i| wanted.iter().any(|t| t.hash == i.hash)).map(|i| (i.hash, i.bytes.to_vec())).collect();
-        let mut paths: Vec<String> = wanted.iter().filter(|t| !carried.contains_key(&t.hash)).map(|t| format!("{base}{}", t.path)).collect();
+        let mut paths: Vec<String> = wanted.iter().filter(|t| !carried.contains_key(&t.hash)).map(|t| t.path.clone()).collect();
         paths.sort();
         paths.dedup();
         let fetched: HashMap<&String, Option<Vec<u8>>> = paths.iter().zip(loader.read(&paths).await).collect();
 
         for texture in &wanted {
-            let joined = format!("{base}{}", texture.path);
             let bytes = match carried.get(&texture.hash) {
                 Some(bytes) => bytes.as_slice(),
-                None => match fetched.get(&joined).and_then(|b| b.as_deref()) {
+                None => match fetched.get(&texture.path).and_then(|b| b.as_deref()) {
                     Some(bytes) => bytes,
                     None => {
-                        loader.warn(&format!("atlas {joined} did not load; parts that use it will draw white"));
-                        self.missing.push(MissingAsset { kind: MissingKind::Texture, name: joined, hash: texture.hash });
+                        loader.warn(&format!("atlas {} for pack \"{}\" did not load; parts that use it will draw white", texture.path, pack.name()));
+                        self.missing.push(MissingAsset { kind: MissingKind::Texture, name: texture.path.clone(), hash: texture.hash });
                         continue;
                     }
                 },
@@ -1834,36 +1880,3 @@ fn decode_and_register(renderer: &mut SSRenderer, device: &wgpu::Device, queue: 
 /// textures itself (the web face decodes with `createImageBitmap`, SPEC §10).
 #[cfg(not(feature = "embedded"))]
 fn decode_and_register(_: &mut SSRenderer, _: &wgpu::Device, _: &wgpu::Queue, _: &[(u32, &[u8], Retention)]) {}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    /// `parent_of` is the one place a host's path vocabulary reaches the walk, and
-    /// it is pure string surgery — so every shape below is checked on every
-    /// platform, including the CI job that is the only one running tests at all.
-    /// The two Windows cases are not hypothetical: they are what the DX12 viewer
-    /// and the native viewer actually handed in the first time each was run here.
-    #[test]
-    fn parent_of_cuts_at_either_separator() {
-        // The URL / POSIX shape, unchanged.
-        assert_eq!(parent_of("overall/Instance.ssab"), "overall/");
-        assert_eq!(parent_of("https://example.com/a/b.ssab"), "https://example.com/a/");
-
-        // A native Win32 path, e.g. from `argv` or `DragQueryFileW`.
-        assert_eq!(parent_of("overall\\Instance.ssab"), "overall\\");
-
-        // Mixed: a forward-slash root with a backslash joined onto it, which is
-        // what a Win32 host building on a CMake-supplied directory produces.
-        assert_eq!(parent_of("U:/assets/overall\\Basic.ssab"), "U:/assets/overall\\");
-
-        // A verbatim path, what `std::fs::canonicalize` returns on Windows. It
-        // carries no '/' at all, so a '/'-only cut would drop the directory
-        // entirely and resolve every atlas against the process CWD.
-        assert_eq!(parent_of("\\\\?\\U:\\assets\\overall\\Basic.ssab"), "\\\\?\\U:\\assets\\overall\\");
-
-        // Nothing to cut: the caller gave a bare name, so the siblings are bare
-        // too and a loader rooted at the pack's own directory has nothing to strip.
-        assert_eq!(parent_of("Instance.ssab"), "");
-    }
-}

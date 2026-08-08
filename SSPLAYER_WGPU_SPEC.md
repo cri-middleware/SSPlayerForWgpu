@@ -560,12 +560,27 @@ player.textures(None) -> Option<&[TextureRef]>;             // 主パック（So
 
 ```rust
 pub trait AssetLoader {
+    fn reset_base(&mut self);                   // ★構築時の root に戻る（前のロードの base を捨てる）
+    fn set_base(&mut self, src: &str);          // ★src の在り処に根付き直す（ディレクトリの切り出しは実装の仕事）
     async fn read(&mut self, paths: &[String]) -> Vec<Option<Vec<u8>>>;  // ★まとめて渡す（並列化の余地は実装側）
     async fn supply_texture(&mut self, hash: u32, encoded: &[u8]);
     fn has_texture(&self, hash: u32) -> bool;   // 取りに行かなくて済むかのヒント
     fn warn(&self, message: &str);              // 1枚欠けても続行（ERR_PRINT / console.warn 相当）
 }
 ```
+
+**★パス解決はローダの仕事で、走査は文字列を1つも組み立てない**（契約は `tests/loader_contract.rs`）:
+
+0. `load_with` はまず `reset_base()` を呼ぶ。ローダは**構築時の root** に戻り、前のロードが動かした base は捨てられる。
+1. 最初の `read` は `src` を**そのまま**。このときローダは呼び出し側が置いた場所に根付いている。
+2. 続いて `set_base(src)` が**1回だけ**呼ばれる。以降 `read` に渡るのは**裸の名前**——エクスポータが書いたアトラスパスと `<pack 名>.ssab`——であって、走査側が何かを前置することは無い。
+3. `load_assets` は `reset_base` も `set_base` も呼ばない。バイト列がどこから来たか知らない入口なので、**ローダは呼ぶ側が根付かせておく**（web の `loadSsab(bytes, pack?, baseUrl?)` がまさにこれ）。
+
+**1 が 2 より先であることが安全性の本体**。`src` を読む時点で `src` 由来の base はまだ存在しないので、「`src` を自分自身に対して解決する」という過去のバグが**書きようがない**（テストで見つける対象ではなくなった）。
+
+**0 は 1 の前提**。`set_base` は「構築時の root から導く」——前回の答えに畳み込まない——ので冪等であり、`reset_base` と対で**1つのローダが何回でもロードに使える**。これが無いと base が積み上がり、2回目の `load_with(loader, "overall/Other.ssab")` が `overall/overall/` を見に行って落ちる。engine アダプタが `AssetServer` / `ResourceLoader` / `.pck` ハンドルを1つのローダに包んで全キャラをロードする形がまさにこれで、`::one_loader_serves_a_second_load` が固定している。
+
+**なぜ走査側で切らないか（★設計判断）**: パスの語彙を知っているのはローダだけで、走査は3面（fs / URL / アーカイブ）を同時に相手にする以上どれか1つの語彙しか選べない。セパレータの判断を走査側に置くと、その1つ以外が黙って壊れる——base が1階層ずれてもエラーもカウンタも動かず、アトラスが白シルエットになるだけなので気づけない。`Path::parent` は Windows で `\` を切り POSIX で切らない、`URL` は最終セグメントを置き換える、と**それぞれが自分の語彙で正しく答える**ので、走査は何も組み立てない。**走査が `src` の中身を読まない**ことは `::what_is_asked_for_does_not_depend_on_how_src_is_spelled` が固定している。
 
 出荷実装は2つ——`SSPlayer::load` の裏の fs（`assets.rs`）と web 面の `fetch` ＋ `createImageBitmap`（後者はピクセルが wasm メモリを一度も通らない、§10）。**走査（両テクスチャテーブル／パス単位の重複排除／参照パックの推移的解決）は `player.rs` に1本だけ**あり、面が半分だけ実装することが構造的にできない。SS6PlayerForCPP の `Common/` と `Platform/`、`ssplayer-core` の `IResourceManager` と同じ線。
 
@@ -714,7 +729,7 @@ impl SSPlayer {
     // --- ロード（★1コールで全部揃う。§8.1）---
     pub fn load(&mut self, path: impl AsRef<Path>) -> Result<(), SSRuntimeError>;  // ★既定。fs。GPU 引数なし
     pub async fn load_with(&mut self, loader: &mut impl AssetLoader, src: &str) -> Result<(), SSRuntimeError>;  // 差し替え版
-    pub async fn load_assets(&mut self, loader: &mut impl AssetLoader, pack_name: &str, base: &str);  // 登録済みパックの資産だけ
+    pub async fn load_assets(&mut self, loader: &mut impl AssetLoader, pack_name: &str);  // 登録済みパックの資産だけ（★ローダは呼ぶ側が根付かせる）
 
     // --- pack 登録 / 再生制御（★P7-5 実装済）---
     pub fn add_pack(&mut self, pack: &SSPack);      // 外部参照解決用に全 pack 登録（§8.2）
@@ -875,7 +890,7 @@ player.destroy(); surface.destroy();            // ★明示。実体は ctx に
   - reference → **`player.textureRefs(pack?)`** = `{ hash, path, embedded }[]`（同 `extractTexturePaths`）。`embedded` が false のエントリを `new URL(path, ssabUrl)` で fetch して渡す。
 - **★`player.load(src)` が最短形（✅ 実装済）**——`ssplayer-core` の `load(ssabUrl)` に相当。**URL 1つで2つの問いが同時に決まる**（バイト列は何か／兄弟は何を基準に解決するか）ので、これが既定の入口。パック名の上書きが要る場合だけ `loadSsab` を使う。
   - **中身は Rust の `SSPlayer::load_with` そのもの**（§9）。この面が足すのは `AssetLoader` の実装1つだけで、走査は3面で共有している。
-  - **★base の落とし穴**: ローダの base は **`src` 自身が解決される場所**（既定は document）であって、`.ssab` の URL ではない。兄弟パスは走査側が `parent_of(src)` を前置してから `read` に渡すので、ここで `.ssab` の URL を base にすると `src` が自分自身に対して解決されて `assets/assets/Basic.ssab` を取りに行く。ネイティブ側が `FsLoader::new("")` にフルパスを渡すのと同じ構造にすること。**一度これで壊した**（js 面にテストが無く、ネイティブのテストでは base が `""` なので再現しない）。
+  - **★base はローダが持ち、走査が順序で守る**: `load(src)` は `base_url: None`（＝document 基準）でローダを作る。`src` を**読んだあとに**走査が `set_base(src)` を呼び、そこで `.ssab` 自身の URL が base になる——URL 解決は base の最終セグメントを置き換えるので、これで隣の `atlas.png` も `../` もクエリ文字列も仕様どおりに解決する。**構築時に `.ssab` の URL を base にしてはいけない**（`src` が自分自身に対して解決されて `assets/assets/Basic.ssab` を取りに行く。**一度これで壊した**）が、順序がそれを構造的に防ぐようになったので、これは注意ではなく不変条件になった。`set_base` はホストが渡した `baseUrl`（`origin_url`）から解決し、前回の base に畳み込まないので、同じローダで2回ロードしても `assets/assets/` に潜っていかない——戻す側が `reset_base`。`loadSsab` は `src` が無いので `baseUrl` がそのまま base（相対で渡されても document に対して1回絶対化される。絶対 URL なら document を参照しない）。
 - **★`player.loadSsab(bytes, pack?, baseUrl?)` がテクスチャまでロードする（✅ 実装済）**——`SS6PlayerForGodot` の `setSSABResource` と同じ形。**テクスチャロードは初期化に属し、アニメーション選択には属さない**（移植ガイド `30_core/10_initialization.ja.md` §3）。`setAnimation` は**同期のまま**で、モーション切り替えのたびに `Promise` を挟まない——これが置き場所を決める理由。
   - `async` なのはブラウザ側の事情だけ（Godot の `ResourceLoader::load` は同期、`fetch` / `createImageBitmap` は非同期）。**非同期はこの1箇所に閉じ込める。**
   - `pack` を省略すると `.ssab` 自身の名前を使う。**これが既定であるべき**——`ref_anime_pack`（§7.1）はエクスポータが書いた文字列で引くので、ホストが別名を付けると外部インスタンス参照が黙って解決されなくなる。
@@ -887,7 +902,7 @@ player.destroy(); surface.destroy();            // ★明示。実体は ctx に
 - **`ctx.addTexture(hash, rgba, w, h)`**（生 RGBA）は残置。CPU premul と `Retention::Retain` を通るので、エンコード済み画像を持っているなら `addTextureFromBytes` のほうが速く小さい。
 - **`surface.stats()`** がフレームカウンタを JS オブジェクトで返す（players / prims / drawCalls / mergeableDraws / redundantTextureBinds / uploadedBytes ＋ `timestamp-query` があれば `gpuPassTimeNs`）。**§14.2 は native でしか測っていない**——ブラウザで同じ数字を取る手段がこれ。`examples/web/index.html` の②が毎フレーム表示する。
 - `<ss-player-webgpu>` カスタム要素は「1要素 = 1 canvas = 1 player」の**便利ラッパ**として残す（広告のような単体用途はこれが最短）。ただし内部では上記の共有 context から surface を1枚取るだけなので、要素を何個置いても device は1つ。
-- ssab は embedded / reference 両対応（§8.1）。**embedded のデコードは `createImageBitmap` ＋ `copy_external_image_to_texture` に寄せ、`image` crate を wasm から外した** ✅（`web` feature は `embedded` を引かない。brotli −26.9%、§8.1 に計測値）。**残課題**: web 面はテストが1つも無い。**ローダに何が渡されるか**は native で固定してある（`tests/loader_contract.rs`。`src` は verbatim、以降は `<src のディレクトリ>` 前置、という契約）が、**渡されたものをどう扱うか**——`fetch` / `createImageBitmap` / `copy_external_image_to_texture`——はブラウザ実機の目視が唯一の検証。`wasm-bindgen-test` ＋ CI のヘッドレスブラウザで埋める案は、WebGPU にフラグが要り CI が重くなるため**見送り**（2026-07-31）。
+- ssab は embedded / reference 両対応（§8.1）。**embedded のデコードは `createImageBitmap` ＋ `copy_external_image_to_texture` に寄せ、`image` crate を wasm から外した** ✅（`web` feature は `embedded` を引かない。brotli −26.9%、§8.1 に計測値）。**残課題**: web 面はテストが1つも無い。**ローダに何が渡されるか**は native で固定してある（`tests/loader_contract.rs`。`src` は verbatim、そのあと `set_base(src)` が1回、以降は裸の名前、という契約）が、**渡されたものをどう扱うか**——`fetch` / `createImageBitmap` / `copy_external_image_to_texture`——はブラウザ実機の目視が唯一の検証。`wasm-bindgen-test` ＋ CI のヘッドレスブラウザで埋める案は、WebGPU にフラグが要り CI が重くなるため**見送り**（2026-07-31）。
 - ビルド/パッケージは `scripts/release-web.sh` 相当を追加し `pkg/ssplayer-wgpu-web/` を吐く。◻ 未着手。
 - 注意: WebGPU 未対応ブラウザへのフォールバック方針（WebGL 版へ退避 or エラー表示）を Web Component 層で定義（§14）。現状は `sharedContext()` が非対応を検知して reject し、要素がエラー表示へ落ちるところまで。
 
