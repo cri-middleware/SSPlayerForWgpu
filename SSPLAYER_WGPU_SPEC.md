@@ -560,6 +560,7 @@ player.textures(None) -> Option<&[TextureRef]>;             // 主パック（So
 
 ```rust
 pub trait AssetLoader {
+    fn reset_base(&mut self);                   // ★構築時の root に戻る（前のロードの base を捨てる）
     fn set_base(&mut self, src: &str);          // ★src の在り処に根付き直す（ディレクトリの切り出しは実装の仕事）
     async fn read(&mut self, paths: &[String]) -> Vec<Option<Vec<u8>>>;  // ★まとめて渡す（並列化の余地は実装側）
     async fn supply_texture(&mut self, hash: u32, encoded: &[u8]);
@@ -570,13 +571,16 @@ pub trait AssetLoader {
 
 **★パス解決はローダの仕事で、走査は文字列を1つも組み立てない**（契約は `tests/loader_contract.rs`）:
 
-1. 最初の `read` は `src` を**そのまま**。このときローダはまだ呼び出し側が置いた場所に根付いている。
+0. `load_with` はまず `reset_base()` を呼ぶ。ローダは**構築時の root** に戻り、前のロードが動かした base は捨てられる。
+1. 最初の `read` は `src` を**そのまま**。このときローダは呼び出し側が置いた場所に根付いている。
 2. 続いて `set_base(src)` が**1回だけ**呼ばれる。以降 `read` に渡るのは**裸の名前**——エクスポータが書いたアトラスパスと `<pack 名>.ssab`——であって、走査側が何かを前置することは無い。
-3. `load_assets` は `set_base` を呼ばない。バイト列がどこから来たか知らない入口なので、**ローダは呼ぶ側が根付かせておく**（web の `loadSsab(bytes, pack?, baseUrl?)` がまさにこれ）。
+3. `load_assets` は `reset_base` も `set_base` も呼ばない。バイト列がどこから来たか知らない入口なので、**ローダは呼ぶ側が根付かせておく**（web の `loadSsab(bytes, pack?, baseUrl?)` がまさにこれ）。
 
 **1 が 2 より先であることが安全性の本体**。`src` を読む時点で `src` 由来の base はまだ存在しないので、「`src` を自分自身に対して解決する」という過去のバグが**書きようがない**（テストで見つける対象ではなくなった）。
 
-**なぜ走査側で切らないか（★設計判断・2026-08-07 に反転）**: 以前は走査が `parent_of(src)` で `src` を切って `format!("{base}{name}")` で連結していた。これは**ローダ側の解決器を殺す**設計で（ネイティブは `FsLoader::new("")`、web は `base_url: None` を渡していた）、その結果「セパレータの語彙を全部走査側が背負う」ことになる。実際 `parent_of` は `'/'` に加えて `'\\'` を覚える羽目になり、Windows の3形（native / mixed / `\\?\`）を正しくする代わりに **POSIX の `a\b.ssab` を黙って壊した**（base が1階層深くなり、アトラスが白シルエットになる。エラーもカウンタも動かない）。反転後は `Path::parent` と `URL` がそれぞれ自分の語彙で答えるので、この問題自体が消える——`Path::parent` は Windows で `\` を切り、POSIX で切らない。**走査が `src` の中身を読まない**ことは `::what_is_asked_for_does_not_depend_on_how_src_is_spelled` が固定している。
+**0 は 1 の前提**。`set_base` は「構築時の root から導く」——前回の答えに畳み込まない——ので冪等であり、`reset_base` と対で**1つのローダが何回でもロードに使える**。これが無いと base が積み上がり、2回目の `load_with(loader, "overall/Other.ssab")` が `overall/overall/` を見に行って落ちる。engine アダプタが `AssetServer` / `ResourceLoader` / `.pck` ハンドルを1つのローダに包んで全キャラをロードする形がまさにこれで、`::one_loader_serves_a_second_load` が固定している。
+
+**なぜ走査側で切らないか（★設計判断）**: パスの語彙を知っているのはローダだけで、走査は3面（fs / URL / アーカイブ）を同時に相手にする以上どれか1つの語彙しか選べない。セパレータの判断を走査側に置くと、その1つ以外が黙って壊れる——base が1階層ずれてもエラーもカウンタも動かず、アトラスが白シルエットになるだけなので気づけない。`Path::parent` は Windows で `\` を切り POSIX で切らない、`URL` は最終セグメントを置き換える、と**それぞれが自分の語彙で正しく答える**ので、走査は何も組み立てない。**走査が `src` の中身を読まない**ことは `::what_is_asked_for_does_not_depend_on_how_src_is_spelled` が固定している。
 
 出荷実装は2つ——`SSPlayer::load` の裏の fs（`assets.rs`）と web 面の `fetch` ＋ `createImageBitmap`（後者はピクセルが wasm メモリを一度も通らない、§10）。**走査（両テクスチャテーブル／パス単位の重複排除／参照パックの推移的解決）は `player.rs` に1本だけ**あり、面が半分だけ実装することが構造的にできない。SS6PlayerForCPP の `Common/` と `Platform/`、`ssplayer-core` の `IResourceManager` と同じ線。
 
@@ -886,7 +890,7 @@ player.destroy(); surface.destroy();            // ★明示。実体は ctx に
   - reference → **`player.textureRefs(pack?)`** = `{ hash, path, embedded }[]`（同 `extractTexturePaths`）。`embedded` が false のエントリを `new URL(path, ssabUrl)` で fetch して渡す。
 - **★`player.load(src)` が最短形（✅ 実装済）**——`ssplayer-core` の `load(ssabUrl)` に相当。**URL 1つで2つの問いが同時に決まる**（バイト列は何か／兄弟は何を基準に解決するか）ので、これが既定の入口。パック名の上書きが要る場合だけ `loadSsab` を使う。
   - **中身は Rust の `SSPlayer::load_with` そのもの**（§9）。この面が足すのは `AssetLoader` の実装1つだけで、走査は3面で共有している。
-  - **★base はローダが持ち、走査が順序で守る**: `load(src)` は `base_url: None`（＝document 基準）でローダを作る。`src` を**読んだあとに**走査が `set_base(src)` を呼び、そこで `.ssab` 自身の URL が base になる——URL 解決は base の最終セグメントを置き換えるので、これで隣の `atlas.png` も `../` もクエリ文字列も仕様どおりに解決する。**構築時に `.ssab` の URL を base にしてはいけない**（`src` が自分自身に対して解決されて `assets/assets/Basic.ssab` を取りに行く。**一度これで壊した**）が、順序がそれを構造的に防ぐようになったので、これは注意ではなく不変条件になった。`loadSsab` は `src` が無いので `baseUrl` がそのまま base（相対で渡されても document に対して1回絶対化される）。
+  - **★base はローダが持ち、走査が順序で守る**: `load(src)` は `base_url: None`（＝document 基準）でローダを作る。`src` を**読んだあとに**走査が `set_base(src)` を呼び、そこで `.ssab` 自身の URL が base になる——URL 解決は base の最終セグメントを置き換えるので、これで隣の `atlas.png` も `../` もクエリ文字列も仕様どおりに解決する。**構築時に `.ssab` の URL を base にしてはいけない**（`src` が自分自身に対して解決されて `assets/assets/Basic.ssab` を取りに行く。**一度これで壊した**）が、順序がそれを構造的に防ぐようになったので、これは注意ではなく不変条件になった。`set_base` はホストが渡した `baseUrl`（`origin_url`）から解決し、前回の base に畳み込まないので、同じローダで2回ロードしても `assets/assets/` に潜っていかない——戻す側が `reset_base`。`loadSsab` は `src` が無いので `baseUrl` がそのまま base（相対で渡されても document に対して1回絶対化される。絶対 URL なら document を参照しない）。
 - **★`player.loadSsab(bytes, pack?, baseUrl?)` がテクスチャまでロードする（✅ 実装済）**——`SS6PlayerForGodot` の `setSSABResource` と同じ形。**テクスチャロードは初期化に属し、アニメーション選択には属さない**（移植ガイド `30_core/10_initialization.ja.md` §3）。`setAnimation` は**同期のまま**で、モーション切り替えのたびに `Promise` を挟まない——これが置き場所を決める理由。
   - `async` なのはブラウザ側の事情だけ（Godot の `ResourceLoader::load` は同期、`fetch` / `createImageBitmap` は非同期）。**非同期はこの1箇所に閉じ込める。**
   - `pack` を省略すると `.ssab` 自身の名前を使う。**これが既定であるべき**——`ref_anime_pack`（§7.1）はエクスポータが書いた文字列で引くので、ホストが別名を付けると外部インスタンス参照が黙って解決されなくなる。

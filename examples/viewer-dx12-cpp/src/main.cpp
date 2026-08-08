@@ -50,6 +50,7 @@
 #include <cstdio>
 #include <cstring>
 #include <cwchar>
+#include <filesystem>
 #include <string>
 #include <vector>
 
@@ -110,22 +111,25 @@ static std::wstring Wide(const std::string &utf8) {
     return out;
 }
 
+// Path questions go to `std::filesystem::path`, not to a scan for separators —
+// the same call the player makes when it hands `src` to the loader instead of
+// cutting it itself (SPEC §8.1). It already knows that both `\` and `/` separate
+// here, that a trailing one must not be doubled, and where a `\\?\` prefix or a
+// drive letter ends; a `find_last_of` has to be told each of those by hand.
+
 static bool HasExtension(const std::wstring &path, const wchar_t *ext) {
-    size_t dot = path.find_last_of(L'.');
-    return dot != std::wstring::npos && _wcsicmp(path.c_str() + dot + 1, ext) == 0;
+    // `extension()` keeps the dot and, unlike a `find_last_of(L'.')`, looks only
+    // at the file name — a dot in a parent directory is not an extension.
+    std::wstring found = std::filesystem::path(path).extension().native();
+    return !found.empty() && _wcsicmp(found.c_str() + 1, ext) == 0;
 }
 
 static std::wstring FileName(const std::wstring &path) {
-    size_t slash = path.find_last_of(L"\\/");
-    return slash == std::wstring::npos ? path : path.substr(slash + 1);
+    return std::filesystem::path(path).filename().native();
 }
 
 static std::wstring Join(const std::wstring &dir, const std::wstring &leaf) {
-    if (dir.empty()) {
-        return leaf;
-    }
-    wchar_t last = dir[dir.size() - 1];
-    return last == L'\\' || last == L'/' ? dir + leaf : dir + L'\\' + leaf;
+    return (std::filesystem::path(dir) / leaf).native();
 }
 
 static bool IsDirectory(const std::wstring &path) {

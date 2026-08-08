@@ -48,6 +48,22 @@ const IDENTITY: [f32; 16] = [1.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 1
 // spawned onto another thread.
 #[allow(async_fn_in_trait)]
 pub trait AssetLoader {
+    /// Go back to the root you were built with, discarding whatever base a
+    /// previous load left behind.
+    ///
+    /// [`SSPlayer::load_with`] calls this first, before it reads anything. It is
+    /// what lets one loader serve more than one load: without it the base set by
+    /// the last load is still in force when the next `src` is read, and a second
+    /// `load_with(loader, "overall/Other.ssab")` goes looking in
+    /// `overall/overall`. An engine adapter holding a single loader over its
+    /// `AssetServer` / `ResourceLoader` / `.pck` handle is the shape that needs
+    /// this; nothing else about the walk changes.
+    ///
+    /// Keep the root the caller gave you, and restore it here — do not try to undo
+    /// [`AssetLoader::set_base`] by walking back up, which cannot be right for a
+    /// URL and is not always right for a path.
+    fn reset_base(&mut self);
+
     /// Re-root yourself at the directory `src` turned out to live in: every path
     /// the walk asks for after this is named relative to **that**.
     ///
@@ -55,20 +71,24 @@ pub trait AssetLoader {
     /// deciding what "its directory" means, is the whole reason this method
     /// exists: only the implementation knows whether it is holding a filesystem
     /// path, a URL, or an archive key, and each of those cuts a directory
-    /// differently. The walk used to do it with `rfind('/')` and had to learn
-    /// about `'\\'`, `\\?\` and mixed separators to serve one of the three; a
-    /// `Path::parent` and a `URL` base already know their own vocabulary.
+    /// differently. `Path::parent` and a `URL` base already know their own
+    /// vocabulary; the walk, serving all three at once, did not (SPEC §8.1).
     ///
-    /// Resolve `src` **against your current base**, then take its directory, so a
-    /// loader that starts out rooted somewhere (a Godot `res://` prefix, an
-    /// archive subtree) stays inside it.
+    /// Resolve `src` **against the base you were constructed with**, then take its
+    /// directory, so a loader that starts out rooted somewhere (a Godot `res://`
+    /// prefix, an archive subtree) stays inside it.
     ///
-    /// [`SSPlayer::load_with`] calls this exactly once, **after** reading the pack
-    /// and before asking for anything else. That order is what makes the bug this
-    /// contract exists for unrepresentable: `src` is read while the base is still
-    /// whatever the caller set up, so it can never be resolved against itself.
-    /// [`SSPlayer::load_assets`] does not call it at all — a caller reaching for
-    /// that one is expected to have rooted the loader itself.
+    /// **Derived from the root you were built with, not folded into the base a
+    /// previous call left behind**, so that this is idempotent and pairs with
+    /// [`AssetLoader::reset_base`]: two loads through one loader land on the same
+    /// base the two would have reached separately.
+    ///
+    /// [`SSPlayer::load_with`] calls this exactly once per load, **after** reading
+    /// the pack and before asking for anything else. That order is what makes the
+    /// bug this contract exists for unrepresentable: `src` is read while the base
+    /// is still whatever the caller set up, so it can never be resolved against
+    /// itself. [`SSPlayer::load_assets`] does not call it at all — a caller
+    /// reaching for that one is expected to have rooted the loader itself.
     fn set_base(&mut self, src: &str);
 
     /// Read every path — **all of them at once**, so an implementation that can
@@ -542,6 +562,10 @@ impl SSPlayer {
         // This load's tally, not the player's history: a caller checks it against
         // the call it just made.
         self.missing.clear();
+        // Back to where the caller rooted it, discarding any base a previous load
+        // left behind — that is what makes `src` below mean the same thing on the
+        // second call as on the first.
+        loader.reset_base();
         let Some(bytes) = loader.read(std::slice::from_ref(&src.to_owned())).await.into_iter().next().flatten() else {
             loader.warn(&format!("could not read {src}"));
             return Err(SSRuntimeError::NotLoaded);
@@ -581,8 +605,7 @@ impl SSPlayer {
     /// names — its atlases, the sibling packs its instance parts play from — is
     /// resolved against **the `.ssab`'s own directory**, because that is what the
     /// exporter wrote those paths relative to. That directory is `Path::parent`'s
-    /// answer, so a native separator, a mixed one and a `\\?\` prefix are all
-    /// handled by the platform rather than by us (SPEC §8.1).
+    /// answer, so the platform decides it rather than us (SPEC §8.1).
     ///
     /// Use [`SSPlayer::load_with`] where a `File::open` cannot reach the bytes: a
     /// Godot `.pck`, an APK, an engine's asset server, a browser (SPEC §8.2).
