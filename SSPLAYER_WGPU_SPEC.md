@@ -981,6 +981,7 @@ const char*  ss_last_error(void);                             // スレッドロ
 | （任意）Bevy アダプタ | `ssplayer-wgpu-bevy`（借用モデルの一利用例）。コアに依存を入れず別立て。**前提だった `set_texture` 借用チャネル（§8.2）は P7-5 で入った**ので着手可能 | Bevy の render graph で `SSScene` が描画。テクスチャは `GpuImage` を借用（二重アップロードなし） |
 | **P8（候補）WebGL 由来の設計の解消** 🚧 | **§14.2 の棚卸し 10 件**（**10 = 計測 ✅ 実装済**）。P7-6 が頂点経路に対してやったことを、マスク / ブレンド / draw 発行に対しても行う（**並列化＝項目6 は実装・計測のうえ撤去**） | 項目ごとに個別。共通の完了条件は「`golden_corpus`（§13）が変更前とビット一致、または差分が意図どおりと説明できる」 |
 | （後回し）Text / Nines | 旧版も未実装 | 必要時 |
+| **（リリース）配布整備** 🚧 | 詳細は §12.2。配布面は **web（npm、`pkg/`）** と **desktop FFI（cdylib/staticlib ＋ ヘッダ）** の2つ。`release.yml` が無く、CI も Linux / Windows / Web だけで **macOS ジョブが無い**。macOS の cdylib は署名＋公証が要る | tag から各面が自動で出る。macOS 成果物が公証済み（`notarytool` が `Accepted` を返す） |
 
 ### 12.1 P7 の分解と依存関係
 
@@ -1014,6 +1015,23 @@ const char*  ss_last_error(void);                             // スレッドロ
 | 7-8 ⏸ **保留（計測）** | draw_call マージ、マスクのランレングス結合（**indexless 化は 7-6 で完了**——index buffer 自体が無くなった）。**上限を測ったら 256体で 0.03 ms**（`mergeable_draws` が 31%、encode 自体が 0.09 ms）。ステンシル境界と `shader_slot` を跨げない条件付き実装になるので、§14.2 が項目 7 / 4 を見送ったのと同じ理由で見送る | §5.5 / §6 / §14.2 | — |
 
 **単独で先に入る小改善**（P7 を待たない）: 7-1 / 7-2 / パイプライン遅延生成 / マスク時のランレングス結合 / `position.z` 削除（§5.1） / ~~premul スクラッチ再利用（§8）~~ → **バッファを受け取って in-place premul する形で解消済み**（§8 / §14.2 item 9）。
+
+### 12.2 配布・リリース整備（未着手）
+
+公開前に要る作業。描画機能とは独立なので P7 / P8 の進行を待たない。
+
+**配布面は2つ**。crate 自体の crates.io 公開は現状の配布面に入れていない。
+
+- **web**: `scripts/build.sh platform=web` が wasm-pack 出力を `pkg/` に吐く。`pkg/` は `.gitignore` が `*` のビルド生成物（追跡していない）で、`pkg/package.json` は name `ssplayer-wgpu` / version `0.1.0`。npm publish の配線は未着手。
+- **desktop FFI**: `build.sh` が `bin/libs/<platform>/<arch>/` に cdylib / staticlib を集め、ヘッダは `build.rs` の cbindgen が `include/ssplayer_wgpu.h` に吐く。**host ビルドのみでクロスコンパイル非対応**なので、プラットフォームごとにランナーが要る。
+
+**crates.io は SDK 待ち**: `ssruntime` / `ssab` は submodule への path 依存（§2）。cargo は path のみの依存を持つ crate を publish できないので、`ssplayer-wgpu` を crates.io に出すなら SDK 側の crates.io 公開が先になる。
+
+**macOS の署名・公証**: cdylib（`libssplayer_wgpu.dylib`）は他 Player と同じ理由で署名＋公証が要る——配布 zip をブラウザで落とすと `com.apple.quarantine` が付き、Gatekeeper が未公証コードの `dlopen` を拒むため。staticlib（`.a`）は公証不可・不要（リンク先のバイナリを消費側が署名する）。配線は SpriteStudio-SDK #355 / SSPlayerForGodot #264 をそのまま移植でき、組織 secret（`APPLE_DEV_ID_APP_*` / `ASC_API_*`）も既存のものを使う。**ただし現在の CI に macOS ジョブが無い**ので、まずそこから。`examples/viewer-metal-cpp` も CI では一度もビルドされていない。
+
+**版と SDK の紐付け**: 版の stamping が無い（crate と `pkg/package.json` の `0.1.0` は手書き）。かつ SDK を**リリース zip ではなく submodule** で取り込んでいるため、他 Player の `scripts/SDK_VERSION.txt` 方式が使えない。成果物には**ビルド元の SDK commit** を記録する必要がある。
+
+**不足しているリポジトリ資材**: `CHANGELOG.md` / `THIRD_PARTY_NOTICES.md` / 成果物の `SHA256SUMS`。いずれも他 Player は持っている。
 
 ---
 
