@@ -1,10 +1,10 @@
 # viewer-dx12-cpp — DX12 verification viewer (C API)
 
-> **Status: written, not yet run on real hardware.** It was ported from
+> **Status: run on Windows hardware, and it works.** It was ported from
 > `viewer-metal-cpp` on macOS, where neither the Win32 code nor the DX12 backend
-> can be compiled or executed. SPEC §14 lists Win32/DX12 as the untested leg of
-> the C face — this viewer is the harness for that check, not evidence that it
-> passed. Expect to fix something the first time it runs, and please record what.
+> can be compiled or executed, so the first real run was the check this viewer
+> exists for — and it passed. What that covered beyond "it draws" is not recorded
+> here yet; the list below is still the one to work through, and to annotate.
 
 A Win32 host that drives `ssplayer-wgpu` through its **C API** with the DX12
 backend forced, so the "③ ffi" face of [SPEC §11](../../SSPLAYER_WGPU_SPEC.md) is
