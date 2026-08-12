@@ -24,7 +24,7 @@ jobs:
       contents: read
     steps:
       - name: Checkout
-        uses: actions/checkout@v5
+        uses: actions/checkout@v7
         with:
           # SpriteStudio-SDK is a private submodule in a different repository, so
           # the job-scoped GITHUB_TOKEN cannot fetch it. Supply a fine-grained PAT
@@ -100,7 +100,7 @@ jobs:
       contents: read
     steps:
       - name: Checkout
-        uses: actions/checkout@v5
+        uses: actions/checkout@v7
         with:
           token: ${{ secrets.SDK_SUBMODULE_TOKEN || github.token }}
           submodules: recursive
@@ -132,7 +132,7 @@ jobs:
       contents: read
     steps:
       - name: Checkout
-        uses: actions/checkout@v5
+        uses: actions/checkout@v7
         with:
           token: ${{ secrets.SDK_SUBMODULE_TOKEN || github.token }}
           submodules: recursive
