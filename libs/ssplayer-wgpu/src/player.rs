@@ -359,9 +359,6 @@ fn collect_events(node: &PlaybackNode, animation: Option<&str>, out: &mut Vec<Ss
     decode_events(&anim, indices, out);
 }
 
-/// Guards against cyclic instance references blowing the stack.
-const MAX_INSTANCE_DEPTH: u32 = 12;
-
 /// One node in the playback tree: a runtime context plus its instance children
 /// and effect slots.
 struct PlaybackNode {
@@ -822,7 +819,7 @@ impl SSPlayer {
     /// own `setup_animation` + `play` split.
     pub fn set_animation(&mut self, anim_name: &str) -> Result<(), SSRuntimeError> {
         let main_pack = self.main_pack.clone().ok_or(SSRuntimeError::NotLoaded)?;
-        let root = build_node(&self.packs, &main_pack, anim_name, 0).ok_or(SSRuntimeError::NotLoaded)?;
+        let root = build_node(&self.packs, &main_pack, anim_name).ok_or(SSRuntimeError::NotLoaded)?;
         // Assigning drops the previous tree, and with it the last raw pointer into
         // any pack a re-registration retired — so they can go now. The new tree was
         // built from `packs`, which is where a replacement went.
@@ -1454,10 +1451,7 @@ impl SSPlayer {
 /// Recursively build a playback node: create a context bound to `pack`'s
 /// resource, set up `anime`, and build an instance child for every instance
 /// part found in the pack. Child failures are skipped (not fatal).
-fn build_node(packs: &HashMap<String, SSPack>, pack: &str, anime: &str, depth: u32) -> Option<PlaybackNode> {
-    if depth > MAX_INSTANCE_DEPTH {
-        return None;
-    }
+fn build_node(packs: &HashMap<String, SSPack>, pack: &str, anime: &str) -> Option<PlaybackNode> {
     let resource = packs.get(pack)?.resource();
     let res_ptr = resource.resource_static_ptr();
     if res_ptr.is_null() {
@@ -1494,7 +1488,7 @@ fn build_node(packs: &HashMap<String, SSPack>, pack: &str, anime: &str, depth: u
             match part_type {
                 PartType::PartTypeInstance => {
                     if let Some(inst) = part.part_type_as_part_type_instance()
-                        && let Some(child) = build_node(packs, inst.ref_anime_pack(), inst.ref_anime_name(), depth + 1)
+                        && let Some(child) = build_node(packs, inst.ref_anime_pack(), inst.ref_anime_name())
                     {
                         let frame_no = child.context.get_frame_no();
                         instances.insert(i, InstanceChild { slot: InstanceSlot::new(), node: Box::new(child), frame_no, visible: false });
