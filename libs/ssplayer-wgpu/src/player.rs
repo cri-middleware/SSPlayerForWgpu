@@ -12,7 +12,7 @@
 
 use crate::events::{SsEvent, decode_events};
 use crate::frame::FrameView;
-use crate::mask::{GeomKind, MaskOp, MaskWriter, PartMaskFlags, StencilTest, plan_writers};
+use crate::mask::{GeomKind, MaskOp, MaskWriter, MaskWriters, PartMaskFlags, StencilTest, plan_writers};
 use crate::pack::{EmbeddedImage, SSPack, TextureRef};
 use crate::renderer::{Retention, SSRenderer};
 use crate::scene::{BatchInfo, FrameChunk, NodeSlot};
@@ -1645,7 +1645,7 @@ fn render_node(node: &mut PlaybackNode, build: &mut FrameBuild<'_>, draw: NodeDr
 
     // Own masking runs only at the root scope; a masked sub-animation inherits.
     let masking = build.scene.stencil_enabled() && inherited_stencil == StencilTest::None;
-    let writers = if masking { plan_writers(&frame, &node.mask_flags) } else { Vec::new() };
+    let writers = if masking { plan_writers(&frame, &node.mask_flags) } else { MaskWriters::default() };
 
     // Pre-write pure masks so they are active for lower-rank content (§2-1).
     for w in &writers {

@@ -111,7 +111,7 @@ impl PartMaskFlags {
 }
 
 /// One planned stencil writer for the current frame.
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Copy, Debug, Default)]
 pub struct MaskWriter {
     /// Part index (into parts / draw_order / SoA).
     pub part_idx: usize,
@@ -132,6 +132,57 @@ pub struct MaskWriter {
     pub geom: GeomKind,
 }
 
+/// A frame's planned writers, held inline.
+///
+/// The plan is capped at [`MAX_MASK_WRITERS`] and [`plan_writers`] runs once per
+/// node per frame, so a `Vec` here spent its life growing from empty to a bound
+/// it already knew — six reallocations to reach a buffer under a kilobyte, on
+/// every masking node of every frame. A fixed array costs the same bytes and
+/// none of the allocator. Everything that reads a plan reads it as a slice
+/// (`Deref`), which is what it read when this was a `Vec`.
+#[derive(Clone, Copy, Debug)]
+pub struct MaskWriters {
+    writers: [MaskWriter; MAX_MASK_WRITERS],
+    len: usize,
+}
+
+// Written out rather than derived: the array `Default` impls stop at 32, and the
+// cap is this module's to choose.
+impl Default for MaskWriters {
+    fn default() -> Self {
+        Self { writers: [MaskWriter::default(); MAX_MASK_WRITERS], len: 0 }
+    }
+}
+
+impl MaskWriters {
+    /// Append a writer.
+    ///
+    /// Panics past [`MAX_MASK_WRITERS`]. Respecting the cap is the planner's
+    /// job — it stops walking batches at it — so arriving here full is a bug in
+    /// the planner, and a writer dropped quietly instead would clip the frame
+    /// wrong with nothing left to point at.
+    pub fn push(&mut self, writer: MaskWriter) {
+        self.writers[self.len] = writer;
+        self.len += 1;
+    }
+}
+
+impl std::ops::Deref for MaskWriters {
+    type Target = [MaskWriter];
+    fn deref(&self) -> &[MaskWriter] {
+        &self.writers[..self.len]
+    }
+}
+
+impl<'a> IntoIterator for &'a MaskWriters {
+    type Item = &'a MaskWriter;
+    type IntoIter = std::slice::Iter<'a, MaskWriter>;
+
+    fn into_iter(self) -> Self::IntoIter {
+        self.iter()
+    }
+}
+
 /// Plan the frame's stencil writers by walking `draw_batches`, mirroring the
 /// WebGL `MaskPlanner.plan`. `mask_flags` is indexed by part index (static
 /// ssab data). Returns writers in ascending rank order, capped at
@@ -140,8 +191,8 @@ pub struct MaskWriter {
 /// A writer's `texture_hash` comes from the *batch* it belongs to (like WebGL):
 /// pure `Mask` batches carry `texture_hash == 0` (→ no cutout, whole geometry),
 /// while clipping writers inherit their content batch's real texture.
-pub fn plan_writers(frame: &FrameView, mask_flags: &[PartMaskFlags]) -> Vec<MaskWriter> {
-    let mut writers = Vec::new();
+pub fn plan_writers(frame: &FrameView, mask_flags: &[PartMaskFlags]) -> MaskWriters {
+    let mut writers = MaskWriters::default();
     if frame.frame_data.is_empty() {
         return writers;
     }
