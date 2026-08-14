@@ -91,6 +91,15 @@ jobs:
         # the feature explicitly. This also regenerates the cbindgen header.
         run: cargo clippy -p ssplayer-wgpu --features ffi --all-targets -- -D warnings
 
+      - name: Test the ffi face
+        # The `cargo test --workspace` above runs with default features, which do
+        # not compile src/ffi.rs at all — so until this step the C face was linted
+        # and built but never *run*, and a unit test written next to it would have
+        # been dead weight. `--lib` keeps this to the tests that only exist under
+        # the feature: every entry point in `ffi.rs` needs a window and a device,
+        # so the integration suite has nothing here it can drive.
+        run: cargo test -p ssplayer-wgpu --features ffi --lib
+
       - name: Check the generated header is up to date
         run: git diff --exit-code -- libs/ssplayer-wgpu/include/ssplayer_wgpu.h
 
