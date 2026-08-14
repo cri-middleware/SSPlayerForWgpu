@@ -288,9 +288,40 @@ pub struct SsScene {
     /// `ss_player_event_signal_param_at`. Three separate slots for the same
     /// reason the ones above are separate: reading an event's payload must not
     /// invalidate the parameter a caller is part-way through walking.
-    event_text_scratch: CString,
-    param_id_scratch: CString,
-    param_text_scratch: CString,
+    ///
+    /// [`CScratch`] rather than `CString`, unlike the three above: these three
+    /// are on the frame path — a host drains the event list every tick — and the
+    /// ones above are walked once, after a load.
+    event_text_scratch: CScratch,
+    param_id_scratch: CScratch,
+    param_text_scratch: CScratch,
+}
+
+/// A NUL-terminated string handed back to C, refilled in place.
+///
+/// `CString` cannot be refilled: assigning a new one frees the old buffer and
+/// allocates another, which is an allocation per call on a path called once per
+/// event per frame. The bytes live in a `Vec` that keeps its capacity instead,
+/// so a steady stream of events reuses one buffer.
+#[derive(Default)]
+struct CScratch(Vec<u8>);
+
+impl CScratch {
+    /// Refill with `s`, and return a pointer good until the next call on this
+    /// slot — the same contract the `CString` fields carry.
+    ///
+    /// A string with an interior NUL comes back empty, which is what
+    /// `CString::new(..).unwrap_or_default()` did here before: C cannot be handed
+    /// the tail past a NUL, and quietly delivering only the head would be a
+    /// different string wearing the right name.
+    fn set(&mut self, s: &str) -> *const c_char {
+        self.0.clear();
+        if !s.as_bytes().contains(&0) {
+            self.0.extend_from_slice(s.as_bytes());
+        }
+        self.0.push(0);
+        self.0.as_ptr().cast()
+    }
 }
 
 /// Opaque player handle: which scene, and which player within it.
@@ -464,9 +495,9 @@ pub unsafe extern "C" fn ss_scene_create(desc: *const SsSceneDesc) -> *mut SsSce
             name_scratch: CString::default(),
             path_scratch: CString::default(),
             missing_scratch: CString::default(),
-            event_text_scratch: CString::default(),
-            param_id_scratch: CString::default(),
-            param_text_scratch: CString::default(),
+            event_text_scratch: CScratch::default(),
+            param_id_scratch: CScratch::default(),
+            param_text_scratch: CScratch::default(),
         })),
         Err(msg) => {
             set_last_error(msg);
@@ -1274,9 +1305,13 @@ pub unsafe extern "C" fn ss_player_event_at(handle: *mut SsPlayer, index: u32, o
         return fail(SS_ERROR_INVALID_ARGUMENT, "out is null");
     }
     let Some((scene, id)) = (unsafe { scene_of(handle) }) else { return fail(SS_ERROR_INVALID_ARGUMENT, "player handle is null or destroyed") };
-    // Cloned before the scratch is touched: the borrow of the player has to end
-    // before `scene` can be used mutably to own the string handed back.
-    let Some(event) = scene.host.player_mut(id).and_then(|p| p.events().get(index as usize)).cloned() else {
+    // Split into the two fields this needs rather than borrowing the scene whole:
+    // the event is read straight out of the player and the string is copied into
+    // the scratch beside it, so nothing is cloned to end a borrow. Cloning the
+    // event to get there duplicated every string it carried — and a signal's
+    // whole parameter list — once per event per frame.
+    let SsScene { host, event_text_scratch, .. } = scene;
+    let Some(event) = host.player_mut(id).and_then(|p| p.events().get(index as usize)) else {
         return fail(SS_ERROR_INVALID_ARGUMENT, format!("event {index} is out of range"));
     };
 
@@ -1296,7 +1331,7 @@ pub unsafe extern "C" fn ss_player_event_at(handle: *mut SsPlayer, index: u32, o
         sound_name_hash: 0,
         loop_num: 0,
     };
-    let text = match &event {
+    let text: &str = match event {
         SsEvent::UserData(u) => {
             data.kind = SS_EVENT_USER_DATA;
             data.has_integer = u.integer.is_some();
@@ -1306,24 +1341,23 @@ pub unsafe extern "C" fn ss_player_event_at(handle: *mut SsPlayer, index: u32, o
             data.integer = u.integer.unwrap_or(0);
             data.rect = u.rect.unwrap_or([0.0; 4]);
             data.point = u.point.unwrap_or([0.0; 2]);
-            u.text.clone().unwrap_or_default()
+            u.text.as_deref().unwrap_or_default()
         }
         SsEvent::Signal(sig) => {
             data.kind = SS_EVENT_SIGNAL;
             data.param_count = sig.params.len() as u32;
-            sig.command_id.clone()
+            &sig.command_id
         }
         SsEvent::Audio(a) => {
             data.kind = SS_EVENT_AUDIO;
             data.sound_list_name_hash = a.sound_list_name_hash;
             data.sound_name_hash = a.sound_name_hash;
             data.loop_num = a.loop_num;
-            a.sound_name.clone()
+            &a.sound_name
         }
     };
 
-    scene.event_text_scratch = CString::new(text).unwrap_or_default();
-    data.text = scene.event_text_scratch.as_ptr();
+    data.text = event_text_scratch.set(text);
     unsafe { out.write(data) };
     SS_OK
 }
@@ -1357,8 +1391,10 @@ pub unsafe extern "C" fn ss_player_event_signal_param_at(handle: *mut SsPlayer, 
         return fail(SS_ERROR_INVALID_ARGUMENT, "out is null");
     }
     let Some((scene, id)) = (unsafe { scene_of(handle) }) else { return fail(SS_ERROR_INVALID_ARGUMENT, "player handle is null or destroyed") };
-    let found = scene.host.player_mut(id).and_then(|p| match p.events().get(index as usize) {
-        Some(SsEvent::Signal(s)) => s.params.get(param as usize).cloned(),
+    // Two scratch slots and the host, borrowed apart — see `ss_player_event_at`.
+    let SsScene { host, param_id_scratch, param_text_scratch, .. } = scene;
+    let found = host.player_mut(id).and_then(|p| match p.events().get(index as usize) {
+        Some(SsEvent::Signal(s)) => s.params.get(param as usize),
         _ => None,
     });
     let Some(p) = found else {
@@ -1366,7 +1402,7 @@ pub unsafe extern "C" fn ss_player_event_signal_param_at(handle: *mut SsPlayer, 
     };
 
     let mut data = SsSignalParamData { id: std::ptr::null(), value_type: SS_SIGNAL_VALUE_NONE, bool_value: false, int_value: 0, float_value: 0.0, text: std::ptr::null() };
-    let mut text = String::new();
+    let mut text = "";
     match &p.value {
         SignalValue::Bool(b) => {
             data.value_type = SS_SIGNAL_VALUE_BOOL;
@@ -1386,15 +1422,13 @@ pub unsafe extern "C" fn ss_player_event_signal_param_at(handle: *mut SsPlayer, 
         }
         SignalValue::Text(t) => {
             data.value_type = SS_SIGNAL_VALUE_TEXT;
-            text = t.clone();
+            text = t;
         }
         SignalValue::None => {}
     }
 
-    scene.param_id_scratch = CString::new(p.id).unwrap_or_default();
-    scene.param_text_scratch = CString::new(text).unwrap_or_default();
-    data.id = scene.param_id_scratch.as_ptr();
-    data.text = scene.param_text_scratch.as_ptr();
+    data.id = param_id_scratch.set(&p.id);
+    data.text = param_text_scratch.set(text);
     unsafe { out.write(data) };
     SS_OK
 }
@@ -1588,5 +1622,40 @@ pub unsafe extern "C" fn ss_scene_stats(scene: *mut SsScene, out: *mut SsSceneSt
 pub unsafe extern "C" fn ss_scene_resize(scene: *mut SsScene, width: u32, height: u32) {
     if let Some(scene) = unsafe { scene.as_mut() } {
         scene.host.resize(width, height);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// The string slots hand C a pointer rather than a copy, so what is behind it
+    /// has to be NUL-terminated and has to stay put until the next call on that
+    /// slot. Neither half is visible from the C side until something reads past
+    /// the end, and the reuse is what keeps `ss_player_event_at` from allocating
+    /// once per event per frame — a `CString` field cannot be refilled, only
+    /// replaced.
+    ///
+    /// Everything else in this module needs a window and a device, so this is the
+    /// one thing here a test can reach.
+    #[test]
+    fn a_refilled_slot_stays_a_valid_c_string() {
+        let mut slot = CScratch::default();
+
+        assert_eq!(unsafe { CStr::from_ptr(slot.set("OnFootstep")) }.to_str().unwrap(), "OnFootstep");
+        assert_eq!(unsafe { CStr::from_ptr(slot.set("")) }.to_bytes(), b"");
+
+        // An interior NUL comes back empty, which is what the
+        // `CString::new(..).unwrap_or_default()` this replaced did: the tail past
+        // a NUL cannot reach C, and handing over the head alone would be a
+        // different string wearing the right name.
+        assert_eq!(unsafe { CStr::from_ptr(slot.set("bad\0tail")) }.to_bytes(), b"");
+
+        // A shorter refill reuses the buffer instead of allocating a new one,
+        // which is the whole reason this type exists rather than a `CString`.
+        let long = slot.set("a-command-id-considerably-longer-than-the-next-one");
+        let short = slot.set("x");
+        assert_eq!(long.addr(), short.addr(), "the slot was reallocated instead of refilled");
+        assert_eq!(unsafe { CStr::from_ptr(short) }.to_str().unwrap(), "x");
     }
 }
