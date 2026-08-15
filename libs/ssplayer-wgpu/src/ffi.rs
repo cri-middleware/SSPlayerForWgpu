@@ -1625,6 +1625,33 @@ pub unsafe extern "C" fn ss_scene_resize(scene: *mut SsScene, width: u32, height
     }
 }
 
+/// Whether the driver has taken the GPU device away (SPEC §14). False for a null
+/// scene. While this is true `ss_scene_update` / `ss_scene_render` do nothing and
+/// `ss_scene_resize` only records the size.
+///
+/// # Safety
+/// `scene` must be a live handle or null.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn ss_scene_is_device_lost(scene: *mut SsScene) -> bool {
+    unsafe { scene.as_ref() }.is_some_and(|s| s.host.is_device_lost())
+}
+
+/// Rebuild the GPU stack after a device loss and restore every player drawing into
+/// this window, resuming playback where it was interrupted (SPEC §14).
+///
+/// `SS_ERROR_GPU` means the window has to be rebuilt from `ss_scene_create`.
+///
+/// # Safety
+/// `scene` must be a live handle or null.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn ss_scene_restore_device(scene: *mut SsScene) -> i32 {
+    let Some(scene) = (unsafe { scene.as_mut() }) else { return fail(SS_ERROR_INVALID_ARGUMENT, "scene is null") };
+    match scene.host.restore_device() {
+        Ok(()) => SS_OK,
+        Err(msg) => fail(SS_ERROR_GPU, msg),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
