@@ -979,7 +979,7 @@ const char*  ss_last_error(void);                             // スレッドロ
 
 ---
 
-## §12 実装フェーズ（P0〜P6 完了 → **現在 P7**）
+## §12 実装フェーズ（P0〜P7 完了 → **残るは P8（表現力）と配布整備**）
 
 | Phase | 内容 | 完了条件 |
 |---|---|---|
@@ -992,7 +992,7 @@ const char*  ss_last_error(void);                             // スレッドロ
 | **P6 統合シェーダ13種** ✅ | ss_shader 全13種（sepia/hsb/step/pix/noise/bmask/outline/blur/wave/move/scatter/circle/spot）を WGSL 移植（`internal.rs` `SS_SHADER_WGSL`）。パーツ属性 SHDR を per-part ディスパッチ：`(id_hash, blend)` 毎に**遅延生成**するシェーダパイプライン＋group(2) の動的オフセット uniform（param0..7 / cell_rect / pixel_size）。各シェーダは straight-alpha の Pixel を計算し `ss_finish`（＝P2 の PartsColor tail）で合成（blur のみ例外）。`ssTex` は逆premul＋`textureSampleLevel`（ループ/discard 後のサンプル可）。**制限（WebGL v1 同）**: map0/map1 未対応・shader×マスク非結合・Normal パーツのみ | Shader.ssab をヘッドレス GPU＋PNG 目視（13種の効果を確認）。shader 無しアニメはコスト0 |
 | **P7 シーン再設計（複数プレイヤー）** ✅（7-1〜7-7・7-9。**7-8 は計測により保留**） | 下表。`SSInternalPlayer` を `SSRenderer`(device) / `SSScene`(ターゲット) へ解体し、`SSPlayer` から GPU リソースを剥がす（§1.2）。**破壊的変更・後方互換は取らない**（プロト段階） | 1つの描画ターゲットに複数体を正しく描ける（マスク持ち同士を含む）✅。web は device 1個で N 要素 ✅。C は 1 window に N 体 ✅ |
 | （任意）Bevy アダプタ | `ssplayer-wgpu-bevy`（借用モデルの一利用例）。コアに依存を入れず別立て。**前提だった `set_texture` 借用チャネル（§8.2）は P7-5 で入った**ので着手可能 | Bevy の render graph で `SSScene` が描画。テクスチャは `GpuImage` を借用（二重アップロードなし） |
-| **P8（候補）WebGL 由来の設計の解消** 🚧 | **§14.2 の棚卸し 10 件**（**10 = 計測 ✅ 実装済**）。P7-6 が頂点経路に対してやったことを、マスク / ブレンド / draw 発行に対しても行う（**並列化＝項目6 は実装・計測のうえ撤去**） | 項目ごとに個別。共通の完了条件は「`golden_corpus`（§13）が変更前とビット一致、または差分が意図どおりと説明できる」 |
+| **P8 WebGL 由来の設計の解消** 🚧 | **§14.2 の棚卸し 10 件のうち、速度側は決着済み**——10（計測）✅ 実装済、6（並列化）と 5（render bundle）は実装・計測のうえ撤去、4 / 7 / 8 / 9 は上限を測って見送り（256体で CPU 1.3〜2.3 ms ＋ GPU 0.19 ms なので削る先が無い）。**残っているのは表現力の 1（マスクの coverage-bitmap 厳密化）と 2（オフスクリーン経路）だけ**で、2 の一番手は group alpha（`Div2`/`Overlay2` は式の出所が無い、§4.3） | 項目ごとに個別。共通の完了条件は「`golden_corpus`（§13）が変更前とビット一致、または差分が意図どおりと説明できる」 |
 | （後回し）Text / Nines | 旧版も未実装 | 必要時 |
 | **（リリース）配布整備** 🚧 | 詳細は §12.2。配布面は **web（npm、`pkg/`）** と **desktop FFI（cdylib/staticlib ＋ ヘッダ）** の2つ。`release.yml` が無く、CI も Linux / Windows / Web だけで **macOS ジョブが無い**。macOS の cdylib は署名＋公証が要る | tag から各面が自動で出る。macOS 成果物が公証済み（`notarytool` が `Accepted` を返す） |
 
@@ -1183,7 +1183,7 @@ wgpu の WebGPU バックエンドは WGSL をブラウザへそのまま渡す�
 
 **方針**: WebGPU 面は「表現力と native 統合」を取りに行く。**到達率**が要件の案件は ssplayer-webgl を使う——サイズは選択理由にならない。`<ss-player-webgpu>` は非対応ブラウザで**エラー表示ではなく WebGL 版へ退避できる形**を目標にする（実装方針は未定）。
 
-### 14.2 「WebGL でできることを wgpu で書いた」箇所の棚卸し（★P8 候補）
+### 14.2 「WebGL でできることを wgpu で書いた」箇所の棚卸し（★P8。速度側は決着済み）
 
 P7-6 で頂点生成経路（§5.5）を WebGPU 本来の形へ移したが、**同じ出自の設計は他にも残っている**。WebGL2 の制約——SSBO 無し / テクスチャユニット束縛 / マスクはステンシルのみ / コマンドバッファ再利用なし / シングルスレッドの JS——を前提に書かれた部分で、wgpu では別の答えがある。
 
