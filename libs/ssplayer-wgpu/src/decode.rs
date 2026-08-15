@@ -1,20 +1,11 @@
-//! Bulk atlas decoding for the loading path (SPEC §8.1).
+//! Bulk atlas decoding for the loading path.
 //!
-//! Decoding is the expensive half of a load — a 4096² PNG costs tens of
-//! milliseconds — and it all lands in one `flush_textures`, on whatever thread the
-//! host drives its frame from. A character with three atlases therefore freezes the
-//! window for the sum of three decodes, so this splits the batch across threads and
-//! returns the results **in request order**.
+//! A load decodes every atlas at once, on the thread the host drives its frame
+//! from, and a 4096² PNG costs tens of milliseconds. This splits the batch
+//! across short-lived threads and returns the results **in request order**.
 //!
-//! Why a thread here, when SPEC §14.2 item 6 removed threading from the per-frame
-//! player walk: that walk was 0.5 ms of a 16.6 ms budget at 256 players, spent every
-//! frame; this is ~86 ms spent once, at load, and it is a visible stall rather than
-//! a slice of the budget. The two structural objections raised there are answered
-//! rather than ignored — nothing persistent is created (a `std::thread::scope` that
-//! is gone before the call returns, not a pool the borrow-model player owns beside
-//! the host's), and no dependency is added. The wasm objection does not reach this
-//! module at all: it lives behind the `embedded` feature, which the `web` face
-//! deliberately does not enable, so no web build ever compiled this code either way.
+//! The threads come from a `std::thread::scope` that is gone before the call
+//! returns; nothing persistent is created and no dependency is added.
 
 use crate::renderer::premultiply;
 
@@ -27,28 +18,26 @@ pub(crate) struct Decoded {
 
 /// Decode every entry of `encoded`, in parallel where that is worth it.
 ///
-/// The result is positional — `out[i]` is `encoded[i]` decoded, or `None` if it was
-/// not a readable image — because the caller's registration order is a contract
-/// (SPEC §8.1: whoever registers a hash first wins, and that answer must not depend
-/// on load order, let alone on which decode happened to finish first).
+/// The result is positional: `out[i]` is `encoded[i]` decoded, or `None` if it was
+/// not a readable image. Completion order never reaches the caller, whose own
+/// registration order decides which hash wins.
 ///
-/// `premultiplied` moves the premultiply pass (SPEC §5.2) onto the worker as well;
+/// `premultiplied` moves the premultiply pass onto the worker as well;
 /// the caller then hands the pixels to
 /// [`SSRenderer::register_premultiplied`](crate::SSRenderer::register_premultiplied)
 /// and the host's thread does nothing but create the texture and write it.
 pub(crate) fn decode_all(encoded: &[&[u8]], premultiplied: bool) -> Vec<Option<Decoded>> {
-    // One image is the common case (a character with a single atlas), and a thread
-    // that is joined immediately is pure overhead there.
+    // One image is the common case, and a thread joined immediately costs more
+    // than it saves.
     if encoded.len() < 2 || threads_for(encoded.len()) < 2 {
         return encoded.iter().map(|bytes| decode_one(bytes, premultiplied)).collect();
     }
 
-    // Filled by index, never appended to: a worker's results go back where they were
-    // asked for, so neither completion order nor a failed chunk can shift them.
+    // Filled by index, never appended to, so neither completion order nor a
+    // failed chunk can shift the results.
     let mut out: Vec<Option<Decoded>> = encoded.iter().map(|_| None).collect();
-    // `scope` rather than `spawn`: the workers borrow `encoded` (which borrows the
-    // player's `pending_images` and the pack's own buffer), and the scope is what
-    // makes that sound without copying the encoded bytes to hand them over.
+    // `scope` rather than `spawn`: the workers borrow `encoded`, so the bytes
+    // need not be copied to hand them over.
     std::thread::scope(|scope| {
         let workers: Vec<_> = split(encoded.len(), threads_for(encoded.len()))
             .map(|range| {
@@ -59,7 +48,7 @@ pub(crate) fn decode_all(encoded: &[&[u8]], premultiplied: bool) -> Vec<Option<D
         for (range, worker) in workers {
             // A panicking decoder must not take the host's frame with it: its chunk
             // stays `None`, so those hashes fall back to the 1x1 white texture
-            // (SPEC §8) exactly as an unreadable file would.
+            // exactly as an unreadable file would.
             let Ok(chunk) = worker.join() else { continue };
             for (slot, decoded) in out[range].iter_mut().zip(chunk) {
                 *slot = decoded;

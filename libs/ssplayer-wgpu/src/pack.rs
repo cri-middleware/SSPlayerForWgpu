@@ -1,15 +1,12 @@
-//! The shared unit of content (SPEC §8.2): one loaded `.ssab`, referenced by any
+//! The shared unit of content: one loaded `.ssab`, referenced by any
 //! number of players.
 //!
-//! **An `SSPack` holds CPU data only — never a GPU texture.** That is a design
-//! decision, not an omission (SPEC §8.2): owning textures here would put a second
-//! lifecycle in competition with the host's. In Bevy, `Assets<Image>` /
-//! `Handle<Image>` / `RenderAssets<GpuImage>` already own upload, hot reload and
-//! unload; a pack that also owned them would upload every atlas twice, free at the
-//! wrong moment, and take the format / mip / sampler decisions away from the
-//! engine. So a pack *describes* the textures it needs ([`SSPack::textures`])
-//! and can *hand over pixels* ([`SSPack::decode_embedded`]), and whoever owns GPU
-//! memory registers them with [`crate::SSRenderer`].
+//! **An `SSPack` holds CPU data only — never a GPU texture.** Owning textures
+//! here would compete with the host's own asset lifecycle (in Bevy,
+//! `Assets<Image>` / `RenderAssets<GpuImage>`), so a pack *describes* the
+//! textures it needs ([`SSPack::textures`]) and can *hand over pixels*
+//! ([`SSPack::decode_embedded`]); whoever owns GPU memory registers them with
+//! [`crate::SSRenderer`].
 //!
 //! Cloning a pack is cheap — an `Arc` bump and two small shared slices — so "the
 //! same character twenty times" costs one parse and one atlas.
@@ -20,7 +17,7 @@ use ssruntime::{SsabData, SsabResource};
 use std::collections::HashMap;
 use std::sync::Arc;
 
-/// One atlas image decoded out of an embedded `.ssab` (SPEC §8.1).
+/// One atlas image decoded out of an embedded `.ssab`.
 ///
 /// The pixels are **straight-alpha** RGBA8, exactly as the PNG decoded: whoever
 /// takes them decides what to do about premultiplication.
@@ -38,7 +35,7 @@ pub struct EmbeddedTexture {
 }
 
 /// One atlas an embedded `.ssab` carries, still in the form the exporter wrote
-/// it: **encoded image bytes (PNG), not pixels** (SPEC §8.1).
+/// it: **encoded image bytes (PNG), not pixels**.
 ///
 /// This is the *parsing* half of embedded support, and it deliberately has no
 /// decoder behind it — which is why it is available without the `embedded`
@@ -58,8 +55,7 @@ pub struct EmbeddedImage<'a> {
     pub bytes: &'a [u8],
 }
 
-/// One atlas a pack asks for, described the way the `.ssab` itself describes it
-/// (SPEC §8.1).
+/// One atlas a pack asks for, described the way the `.ssab` itself describes it.
 ///
 /// This is what makes reference mode loadable without the host guessing: the
 /// pack answers *what* it needs and *where the exporter put it*, and the host —
@@ -77,17 +73,17 @@ pub struct TextureRef {
     pub hash: u32,
     /// The image path the exporter wrote, relative to the `.ssab`'s own location.
     pub path: String,
-    /// Whether this image rides inside the `.ssab` (embedded mode, SPEC §8.1).
+    /// Whether this image rides inside the `.ssab` (embedded mode).
     /// `true` means the host has nothing to load: [`SSPack::decode_embedded`]
     /// already produces it, and a player registers it on the next update.
     pub embedded: bool,
 }
 
-/// A loaded `.ssab`, shareable between players (SPEC §8.2).
+/// A loaded `.ssab`, shareable between players.
 ///
 /// Loading costs a parse; sharing costs an `Arc` clone. [`SSPlayer::set_pack`]
 /// selects the pack to play from and [`SSPlayer::add_pack`] registers the extra
-/// packs that external instance parts reference by name (SPEC §7.1).
+/// packs that external instance parts reference by name.
 ///
 /// [`SSPlayer::set_pack`]: crate::SSPlayer::set_pack
 /// [`SSPlayer::add_pack`]: crate::SSPlayer::add_pack
@@ -97,7 +93,7 @@ pub struct SSPack {
     resource: Arc<SsabResource>,
     /// Every cellmap's atlas, in pack order.
     textures: Arc<[TextureRef]>,
-    /// Whether any cellmap's image is carried inside the `.ssab` (SPEC §8.1).
+    /// Whether any cellmap's image is carried inside the `.ssab`.
     has_embedded: bool,
 }
 
@@ -105,7 +101,7 @@ impl SSPack {
     /// Parse `bytes`, naming the pack after the `.ssab` itself.
     ///
     /// The name matters because instance parts resolve their sub-animation by
-    /// pack name (`ref_anime_pack`, SPEC §7.1), and the exporter writes that same
+    /// pack name (`ref_anime_pack`), and the exporter writes that same
     /// name into each pack — so the two agree without the host having to derive
     /// one from a file path. Use [`SSPack::load_named`] when the host names packs
     /// itself.
@@ -130,7 +126,7 @@ impl SSPack {
         let ab = unsafe { root_as_ss_anime_binary_unchecked(resource.data().as_slice()) };
         let name: Arc<str> = Arc::from(name.unwrap_or_else(|| ab.name()));
 
-        // The two hashes are different things and must not be swapped (SPEC §8.1):
+        // The two hashes are different things and must not be swapped:
         // `name_hash` is what a draw batch asks for, `image_path_hash` is the key
         // of the embedded byte blob.
         let embedded: Vec<u32> = ab.embedded_assets().map(|assets| assets.iter().map(|a| a.name_hash()).collect()).unwrap_or_default();
@@ -193,13 +189,13 @@ impl SSPack {
         &self.textures
     }
 
-    /// Whether the atlases ride inside the `.ssab` (embedded mode, SPEC §8.1).
+    /// Whether the atlases ride inside the `.ssab` (embedded mode).
     /// `false` means the host supplies them (reference mode).
     pub fn has_embedded_textures(&self) -> bool {
         self.has_embedded
     }
 
-    /// The names of the packs this one's instance parts play from (SPEC §7.1),
+    /// The names of the packs this one's instance parts play from,
     /// deduplicated, in `external_instances()` order.
     ///
     /// The counterpart of [`SSPack::textures`] for playback data rather than
@@ -235,7 +231,7 @@ impl SSPack {
         self.resource.resource().map(|r| r.get_animation_names()).unwrap_or_default()
     }
 
-    /// The encoded atlases this pack carries, in cellmap order (SPEC §8.1).
+    /// The encoded atlases this pack carries, in cellmap order.
     /// Empty for a reference-mode pack.
     ///
     /// Parsing only — no image decoder is involved, so this works in every build
@@ -244,7 +240,7 @@ impl SSPack {
     /// decodes off the main thread and premultiplies for free, which
     /// [`SSPack::decode_embedded`] cannot do and pays for in wasm size.
     ///
-    /// The two hashes are different things and must not be swapped (SPEC §8.1):
+    /// The two hashes are different things and must not be swapped:
     /// the blob is keyed by `image_path_hash`, and what comes back is keyed by
     /// `name_hash` — the one a draw batch asks for.
     pub fn embedded_images(&self) -> Vec<EmbeddedImage<'_>> {
@@ -288,7 +284,7 @@ impl SSPack {
         out
     }
 
-    /// Decode the atlases this pack carries (SPEC §8.1). Empty for a
+    /// Decode the atlases this pack carries. Empty for a
     /// reference-mode pack, and empty without the `embedded` feature.
     ///
     /// Decoding is not cached: the pixels are handed over so the caller can put
@@ -315,7 +311,7 @@ impl SSPack {
 
     /// Without the `embedded` feature the player carries no image decoder, so the
     /// host decodes instead — in the browser that is `createImageBitmap` over
-    /// [`SSPack::embedded_images`] (SPEC §10), which still needs no sibling files.
+    /// [`SSPack::embedded_images`], which still needs no sibling files.
     #[cfg(not(feature = "embedded"))]
     pub fn decode_embedded_where(&self, _wanted: impl Fn(u32) -> bool) -> Vec<EmbeddedTexture> {
         Vec::new()

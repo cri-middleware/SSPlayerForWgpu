@@ -1,33 +1,29 @@
-//! The "js" face (SPEC §10): a `wasm-bindgen` wrapper that renders SpriteStudio
+//! The "js" face: a `wasm-bindgen` wrapper that renders SpriteStudio
 //! animations to HTML canvases via **WebGPU**.
 //!
-//! Borrow model, browser edition: this module is the host. It owns the wgpu stack
-//! (instance / adapter / device / queue / surfaces) and lends device+queue to the
-//! borrow-model [`SSScene`] and [`SSPlayer`] each frame — exactly like the native
-//! viewer, but the event loop is JS `requestAnimationFrame` (`examples/web`).
+//! This module is the host: it owns the wgpu stack (instance / adapter / device
+//! / queue / surfaces) and lends device and queue to [`SSScene`] and
+//! [`SSPlayer`] each frame, driven by JS `requestAnimationFrame`.
 //!
-//! **The shape mirrors the redesigned `ssplayer-webgl`** (SPEC §0.2), and the
-//! resource scopes of §1.2 are what dictate the three objects:
+//! Three objects, one per resource scope:
 //!
 //! ```text
-//! SsContextWeb   one per page    device + queue + SSRenderer  (pipelines, atlases)
-//! SsSurfaceWeb   one per canvas  wgpu::Surface + SSScene       (projection, arena)
-//! SsPlayerWeb    any number      SSPlayer                      (playback tree only)
+//! SsContextWeb one per page device + queue + SSRenderer (pipelines, atlases)
+//! SsSurfaceWeb one per canvas wgpu::Surface + SSScene (projection, arena)
+//! SsPlayerWeb any number SSPlayer (playback tree only)
 //! ```
 //!
-//! The predecessor requested an adapter and a device **per canvas**, so a page
-//! with N elements built N `GPUDevice`s and re-uploaded the same atlas N times —
-//! the "1 canvas = 1 player" shape P7 exists to remove. Here the device is asked
-//! for once and every canvas shares it, which is also what makes the atlas cache
-//! in `SSRenderer` do its job (§8.2).
+//! **The device is asked for once and every canvas shares it.** Requesting one
+//! per canvas would build N `GPUDevice`s for a page of N elements and re-upload
+//! the same atlas into each, since nothing is shared across devices.
 //!
 //! Everything lives in one `Rc<RefCell<WebContext>>` and the exported types are
 //! generation-tagged handles into it ([`crate::roster`]), for the reason the C
-//! face has the same design (SPEC §11): JS cannot hold a Rust `&mut`, and a
+//! face has the same design: JS cannot hold a Rust `&mut`, and a
 //! stale handle must resolve to "destroyed" rather than to its successor. One
 //! cell rather than one per object means no borrow can be held across another.
 //!
-//! Embedded ssab (SPEC §8.1) is the natural web form: the atlas PNGs ride inside
+//! Embedded ssab is the natural web form: the atlas PNGs ride inside
 //! the `.ssab`, so a single fetched file needs no sibling image files. **The
 //! decoding of those PNGs is the browser's job here, not the player's** — the
 //! `web` feature carries no image decoder, because one is already installed on
@@ -85,7 +81,7 @@ fn create_stencil_view(device: &wgpu::Device, width: u32, height: u32) -> wgpu::
 /// `createImageBitmap` decodes off the main thread and premultiplies on the way,
 /// which is why the web face ships no decoder of its own: `image` would cost wasm
 /// size to do the same job worse, on the main thread. The premultiply matters as
-/// much as the decode — the whole pipeline composites premultiplied (SPEC §5.2),
+/// much as the decode — the whole pipeline composites premultiplied,
 /// and this is the WebGPU equivalent of the WebGL player's
 /// `UNPACK_PREMULTIPLY_ALPHA_WEBGL` (`SSWebGLResourceManager.createTextureFromSource`).
 async fn decode_image(bytes: &[u8]) -> Result<web_sys::ImageBitmap, JsValue> {
@@ -140,7 +136,7 @@ fn absolute_url(url: &str, base_url: Option<&str>) -> Option<String> {
 /// document's URL).
 ///
 /// Used for both of the things a pack asks the host to go and get: its atlases
-/// (SPEC §8.1) and the sibling `.ssab`s its instance parts play from (§7.1).
+/// and the sibling `.ssab`s its instance parts play from (§7.1).
 ///
 /// One request per path rather than per requester: `external_textures()` can
 /// name an image a cellmap already named, under a different hash, and two packs
@@ -227,12 +223,12 @@ async fn fetch_files(paths: &[String], base_url: Option<&str>) -> HashMap<String
     out
 }
 
-/// Request a device and subscribe to its `GPUDevice.lost` (SPEC §14). The returned
+/// Request a device and subscribe to its `GPUDevice.lost`. The returned
 /// flag flips when the browser drops the device — which it does on its own schedule
 /// (backgrounded tab, GPU process crash, driver reset), so a long-lived ad creative
 /// has to expect it. Once set, the host is meant to call [`SsContextWeb::restore_device`].
 async fn request_device(adapter: &wgpu::Adapter) -> Result<(wgpu::Device, wgpu::Queue, Arc<AtomicBool>), JsValue> {
-    // GPU timing when the browser offers it (SPEC §14.2 item 10) — Chrome gates
+    // GPU timing when the browser offers it — Chrome gates
     // `timestamp-query` behind a flag on some platforms, so this must not be
     // required, only taken when available.
     let device_desc = wgpu::DeviceDescriptor { required_features: adapter.features() & wgpu::Features::TIMESTAMP_QUERY, ..Default::default() };
@@ -255,21 +251,21 @@ async fn request_adapter(instance: &wgpu::Instance) -> Result<wgpu::Adapter, JsV
         .map_err(|_| JsValue::from_str("no WebGPU adapter (this browser/GPU may not support WebGPU)"))
 }
 
-/// One canvas: its swapchain and the scene drawn into it (SPEC §9.2).
+/// One canvas: its swapchain and the scene drawn into it.
 struct SurfaceEntry {
     surface: wgpu::Surface<'static>,
     config: wgpu::SurfaceConfiguration,
     stencil_view: wgpu::TextureView,
     scene: SSScene,
     /// The players drawn into this canvas. The scene borrows them per frame
-    /// rather than owning them (SPEC §1.2), so the owner is the host — here.
+    /// rather than owning them, so the owner is the host — here.
     players: Roster<SSPlayer>,
 }
 
 /// Everything the page owns. One instance behind an `Rc<RefCell<_>>`; the
 /// exported types are handles into it.
 struct WebContext {
-    /// Device-scoped renderer (SPEC §1.2): pipelines, sampler and the atlas
+    /// Device-scoped renderer: pipelines, sampler and the atlas
     /// cache. **Every surface and player on the page shares this one**, so the
     /// same character in two canvases is uploaded once.
     renderer: SSRenderer,
@@ -284,7 +280,7 @@ struct WebContext {
     device_lost: Arc<AtomicBool>,
     /// The **encoded** bytes behind every texture supplied through
     /// [`SsContextWeb::add_texture_from_bytes`], kept so a device loss can be
-    /// repaired without the page re-fetching or re-reading anything (SPEC §14).
+    /// repaired without the page re-fetching or re-reading anything.
     ///
     /// Affordable precisely because they are encoded: a 2048² atlas is a few
     /// hundred KB here against the 16 MB its pixels would take under
@@ -309,7 +305,7 @@ impl WebContext {
         let config = wgpu::SurfaceConfiguration { usage: wgpu::TextureUsages::RENDER_ATTACHMENT, format, width, height, present_mode: wgpu::PresentMode::Fifo, alpha_mode: caps.alpha_modes[0], view_formats: vec![], desired_maximum_frame_latency: 2 };
         surface.configure(&self.device, &config);
 
-        // The scene is format-specific; the renderer is not (SPEC §9.1), which is
+        // The scene is format-specific; the renderer is not, which is
         // what lets canvases with different formats share one of it.
         let mut scene = SSScene::new(&self.device, &SceneConfig { color_format: format, stencil_format: Some(STENCIL_FORMAT) });
         scene.set_viewport(&self.queue, width as f32, height as f32, false);
@@ -324,7 +320,7 @@ impl WebContext {
     /// because the pixels never pass through Rust: `copyExternalImageToTexture`
     /// moves them from the browser's decoded image straight into the texture,
     /// with none of the CPU premultiply pass (and none of its 16 MB temporary,
-    /// SPEC §14) that `upload_texture` needs. The renderer only borrows the view
+    ///) that `upload_texture` needs. The renderer only borrows the view
     /// — and since wgpu handles are refcounted, dropping our `Texture` here is
     /// fine: the view it hands over keeps it alive.
     fn set_texture_from_bitmap(&mut self, hash: u32, bitmap: &web_sys::ImageBitmap) {
@@ -364,11 +360,11 @@ impl WebContext {
 }
 
 /// The page's WebGPU context: **one adapter, one device, one [`SSRenderer`]**,
-/// shared by every canvas and every player on the page (SPEC §1.2, §10).
+/// shared by every canvas and every player on the page.
 ///
 /// ```js
-/// const ctx    = await SsContextWeb.create();
-/// const surf   = ctx.createSurface(canvas);
+/// const ctx = await SsContextWeb.create();
+/// const surf = ctx.createSurface(canvas);
 /// const player = surf.createPlayer();
 /// player.loadSsab('Basic', bytes);
 /// player.setAnimation('idle');
@@ -384,9 +380,8 @@ impl SsContextWeb {
     /// Initialise WebGPU for the page. Rejects if the browser has no WebGPU
     /// adapter/device (the caller should surface a fallback message).
     ///
-    /// Call this **once per page** and share the result — that is the whole point
-    /// of the type. Calling it twice builds two devices, which is the state P7
-    /// removed.
+    /// Call this **once per page** and share the result. Calling it twice builds
+    /// two devices, and nothing is shared between them.
     pub async fn create() -> Result<SsContextWeb, JsValue> {
         console_error_panic_hook::set_once();
 
@@ -408,7 +403,7 @@ impl SsContextWeb {
         Ok(SsSurfaceWeb { ctx: Rc::clone(&self.inner), id })
     }
 
-    /// Supply a texture by hash from **raw straight-alpha RGBA** (SPEC §8.1).
+    /// Supply a texture by hash from **raw straight-alpha RGBA**.
     ///
     /// Device-scoped, so it covers every canvas and every player at once — which
     /// is exactly why it is here and not on a surface or a player.
@@ -428,7 +423,7 @@ impl SsContextWeb {
     }
 
     /// Supply a texture by hash from **encoded image bytes** (PNG) — the main
-    /// texture path of this face (SPEC §8.1, §8.2).
+    /// texture path of this face.
     ///
     /// Both `.ssab` forms end here. An embedded pack's atlases come from
     /// [`SsPlayerWeb::embedded_textures`] and need no fetch; a reference pack's
@@ -451,7 +446,7 @@ impl SsContextWeb {
     /// [`crate::SSRenderer::set_texture`] and of the WebGL player's
     /// `bindTextureSource`. The bitmap must be premultiplied
     /// (`createImageBitmap(blob, { premultiplyAlpha: 'premultiply' })`), which is
-    /// what the whole pipeline composites in (SPEC §5.2).
+    /// what the whole pipeline composites in.
     ///
     /// Device loss is the supplier's to repair on this path, exactly as on the
     /// Rust one: nothing is retained here, so the page registers it again after
@@ -466,17 +461,17 @@ impl SsContextWeb {
 
     /// Whether an atlas is already registered for `hash`.
     ///
-    /// The texture map is device-scoped (SPEC §1.2), so this answers for the
+    /// The texture map is device-scoped, so this answers for the
     /// whole page: it is how a caller keeps "N players of one pack decode its
     /// atlas once between them" true now that the decode happens in JS. The
     /// player-side flush gets that for free (it filters before the decode,
-    /// SPEC §8.2); a page supplying textures itself has to ask.
+    ///); a page supplying textures itself has to ask.
     #[wasm_bindgen(js_name = hasTexture)]
     pub fn has_texture(&self, hash: u32) -> bool {
         self.inner.borrow().renderer.texture_size(hash).is_some()
     }
 
-    /// Whether the browser has taken the WebGPU device away (SPEC §14). While
+    /// Whether the browser has taken the WebGPU device away. While
     /// this is true every surface's `frame` is a no-op; call
     /// [`SsContextWeb::restore_device`] to bring the whole page back.
     #[wasm_bindgen(js_name = isDeviceLost)]
@@ -489,8 +484,7 @@ impl SsContextWeb {
     /// playback continues from the frame it was interrupted on, with no re-fetch
     /// of any `.ssab` and no re-fetch of any atlas.
     ///
-    /// **One call for the page**, where the predecessor ran the whole recovery —
-    /// including re-decoding the same atlas PNGs — once per canvas.
+    /// **One call for the page**, however many canvases it holds.
     ///
     /// Rejects if WebGPU is gone for good, or if the new adapter cannot present a
     /// surface's baked format (then the host should rebuild from `create`).
@@ -532,7 +526,7 @@ impl SsContextWeb {
         };
 
         // The atlases this context decoded itself went with the old device:
-        // `set_texture` is the supplier's to repair (SPEC §8.2), and here the
+        // `set_texture` is the supplier's to repair, and here the
         // supplier is us. Re-decoding is why the encoded bytes were kept — the
         // page fetches nothing. Last, so that a hash claimed by both an explicit
         // supply and an embedded pack ends up where it was before the loss:
@@ -554,7 +548,7 @@ impl SsContextWeb {
 /// bytes for device-loss recovery.
 ///
 /// A free function because both faces need it: the context supplies textures the
-/// page hands over, and a player supplies its own pack's (SPEC §8.1). Takes an
+/// page hands over, and a player supplies its own pack's. Takes an
 /// `Rc` so the restore path can re-run it without copying every retained atlas.
 /// Nothing is borrowed across the await — a `RefMut` held over a yield point
 /// would still be held when JS re-enters through a rAF callback.
@@ -570,7 +564,7 @@ async fn upload_encoded(ctx: &Rc<RefCell<WebContext>>, hash: u32, bytes: Rc<[u8]
     Ok(())
 }
 
-/// One canvas and the scene drawn into it (SPEC §9.2). Holds **any number of
+/// One canvas and the scene drawn into it. Holds **any number of
 /// players**, composited in ascending `order` in a single render pass.
 #[wasm_bindgen]
 pub struct SsSurfaceWeb {
@@ -580,8 +574,7 @@ pub struct SsSurfaceWeb {
 
 #[wasm_bindgen]
 impl SsSurfaceWeb {
-    /// Add a player to this canvas. Players hold no GPU resource of their own
-    /// (SPEC §1.2), so a canvas with a dozen characters still costs one device,
+    /// Add a player to this canvas. Players hold no GPU resource of their own, so a canvas with a dozen characters still costs one device,
     /// one renderer and one scene.
     #[wasm_bindgen(js_name = createPlayer)]
     pub fn create_player(&self) -> Result<SsPlayerWeb, JsValue> {
@@ -595,14 +588,14 @@ impl SsSurfaceWeb {
     ///
     /// A no-op while the device is lost — every GPU object it would touch is
     /// dead. The host polls [`SsContextWeb::is_device_lost`] and calls
-    /// `restoreDevice` to resume (SPEC §14).
+    /// `restoreDevice` to resume.
     pub fn frame(&self, dt: f32) -> Result<(), JsValue> {
         let ctx = &mut *self.ctx.borrow_mut();
         if ctx.device_lost.load(Ordering::Relaxed) {
             return Ok(());
         }
         // Split the borrow: the scene needs `&mut` on itself *and* on the
-        // renderer, which live in different fields of the same struct (SPEC §1.2).
+        // renderer, which live in different fields of the same struct.
         let WebContext { renderer, device, queue, surfaces, .. } = ctx;
         let entry = surfaces.get_mut(self.id).ok_or_else(|| gone("surface"))?;
 
@@ -660,7 +653,7 @@ impl SsSurfaceWeb {
         entry.scene.set_viewport(queue, entry.config.width as f32, entry.config.height as f32, false);
     }
 
-    /// What the last frame cost, as a plain JS object (SPEC §14.2 item 10).
+    /// What the last frame cost, as a plain JS object.
     ///
     /// `gpuPassTimeNs` is `undefined` unless the browser granted
     /// `timestamp-query`, and lags one or two frames by design. The counters are
@@ -703,7 +696,7 @@ impl SsSurfaceWeb {
     }
 }
 
-/// One character (SPEC §9.3). Holds the playback tree and its placement in the
+/// One character. Holds the playback tree and its placement in the
 /// scene — and no GPU resource at all, which is what makes it cheap to have many.
 #[wasm_bindgen]
 pub struct SsPlayerWeb {
@@ -727,7 +720,7 @@ macro_rules! with_player {
     }};
 }
 
-/// The web half of [`AssetLoader`] (SPEC §8.1): `fetch` for files,
+/// The web half of [`AssetLoader`]: `fetch` for files,
 /// `createImageBitmap` for images.
 ///
 /// The counterpart of the filesystem loader behind [`SSPlayer::load`], and the
@@ -763,7 +756,7 @@ impl AssetLoader for WebAssetLoader {
     }
 
     /// URL resolution **is** the answer here, the way `Path::parent` is on the
-    /// filesystem face (SPEC §8.1): a base that names a file has its last segment
+    /// filesystem face: a base that names a file has its last segment
     /// replaced, so keeping the `.ssab`'s own URL as the base is what makes
     /// `atlas.png` next to it resolve correctly — and what makes `../` and a
     /// query string behave the way every other URL on the page does.
@@ -807,7 +800,7 @@ impl SsPlayerWeb {
     ///
     /// A pack keeps the name the exporter wrote unless the caller overrides it,
     /// because that is the name external instance parts are resolved against
-    /// (`ref_anime_pack`, SPEC §7.1) and the exporter writes the same string on
+    /// (`ref_anime_pack`) and the exporter writes the same string on
     /// both sides. An override is a promise that the caller knows better.
     fn register(&self, bytes: &[u8], pack: Option<String>, select: bool) -> Result<SSPack, JsValue> {
         let pack = match pack.as_deref() {
@@ -832,7 +825,7 @@ impl SsPlayerWeb {
     ///
     /// If the handle is destroyed while the load is in flight, the finished
     /// player is dropped rather than written back over its successor — the same
-    /// rule the generation-tagged slots exist for (SPEC §11).
+    /// rule the generation-tagged slots exist for.
     async fn with_player_detached<F, Fut, T>(&self, body: F) -> Result<T, JsValue>
     where
         F: FnOnce(SSPlayer) -> Fut,
@@ -859,7 +852,7 @@ impl SsPlayerWeb {
 
 #[wasm_bindgen]
 impl SsPlayerWeb {
-    /// Register + select a `.ssab`, **and load the textures it needs** (SPEC §8.1).
+    /// Register + select a `.ssab`, **and load the textures it needs**.
     ///
     /// The shape of `SS6PlayerForGodot`'s `setSSABResource`, which loads the
     /// pack's textures before returning and leaves `setAnimation` a pure
@@ -874,15 +867,15 @@ impl SsPlayerWeb {
     /// is not. **That is the one place the asynchrony appears.**
     ///
     /// * `pack` names the pack for external instance references (`ref_anime_pack`,
-    ///   SPEC §7.1). Pass `null`/`undefined` — the usual case — to use the name
-    ///   the exporter wrote into the `.ssab`, which is the name those references
-    ///   are resolved against. A name of your own overrides it, and then any
-    ///   external instance reference to this pack stops resolving.
+    ///). Pass `null`/`undefined` — the usual case — to use the name
+    /// the exporter wrote into the `.ssab`, which is the name those references
+    /// are resolved against. A name of your own overrides it, and then any
+    /// external instance reference to this pack stops resolving.
     /// * `baseUrl` is where the `.ssab` came from; reference-mode atlas paths are
-    ///   relative to it. Defaults to the document's URL. Embedded packs ignore it.
+    /// relative to it. Defaults to the document's URL. Embedded packs ignore it.
     ///
     /// An atlas the renderer already has is left alone ("registered wins",
-    /// SPEC §8.2), so N players of one pack load it once between them. An atlas
+    ///), so N players of one pack load it once between them. An atlas
     /// that cannot be fetched or decoded is reported on the console and skipped,
     /// as in `_load_external_ssabs`' `ERR_PRINT` and `PackResolver`'s
     /// `console.warn`: one missing image should not cost you the character.
@@ -902,7 +895,7 @@ impl SsPlayerWeb {
         .await
     }
 
-    /// Fetch a `.ssab` **and everything it needs**, then select it (SPEC §8.1, §7.1).
+    /// Fetch a `.ssab` **and everything it needs**, then select it.
     ///
     /// The shortest form, and the one `ssplayer-core`'s `load(ssabUrl)` takes: a
     /// URL is the one input that answers both questions a pack raises — what the
@@ -921,7 +914,7 @@ impl SsPlayerWeb {
         // it has been read, never before — and the `.ssab`'s own URL becomes what
         // its siblings resolve against. Setting it here instead is what once made
         // `src` resolve against itself and fetch `assets/assets/Basic.ssab`; the
-        // ordering is now what rules that out (SPEC §8.1).
+        // ordering is now what rules that out.
         let mut loader = WebAssetLoader::new(Rc::clone(&self.ctx), None);
         let src = src.to_owned();
         self.with_player_detached(|mut player| async move {
@@ -958,7 +951,7 @@ impl SsPlayerWeb {
     }
 
     /// The atlases a registered pack asks for, as `{ hash, path, embedded }[]`
-    /// in pack order (SPEC §8.1). `pack` undefined selects the main pack.
+    /// in pack order. `pack` undefined selects the main pack.
     ///
     /// The counterpart of [`SsContextWeb::add_texture`], and the same shape the
     /// reference implementation exposes (`ssplayer-core`'s `extractTexturePaths`):
@@ -985,7 +978,7 @@ impl SsPlayerWeb {
     }
 
     /// The atlases a registered pack **carries**, as `{ hash, bytes }[]` — the
-    /// encoded images, not pixels (SPEC §8.1). Empty for a reference-mode pack.
+    /// encoded images, not pixels. Empty for a reference-mode pack.
     /// `pack` undefined selects the main pack.
     ///
     /// The embedded half of texture supply, and the counterpart of
@@ -1013,7 +1006,7 @@ impl SsPlayerWeb {
         })
     }
 
-    /// What the last load could not get, as `{ kind, name, hash }[]` (SPEC §8.1).
+    /// What the last load could not get, as `{ kind, name, hash }[]`.
     /// Empty means everything the packs asked for arrived.
     ///
     /// `load` rejects only when the `.ssab` itself is unreadable — one missing
@@ -1045,9 +1038,7 @@ impl SsPlayerWeb {
     }
 
     /// Select an animation: builds the instance tree, and the only call here that
-    /// allocates. Separate from [`SsPlayerWeb::play`] on purpose (SPEC §9.3) —
-    /// the reference implementation split the same way, so the old single
-    /// `play(name)` is deliberately not carried over.
+    /// allocates. Starting playback is [`SsPlayerWeb::play`], a separate call.
     #[wasm_bindgen(js_name = setAnimation)]
     pub fn set_animation(&self, name: &str) -> Result<(), JsValue> {
         with_player!(self, |p| p.set_animation(name).map_err(js_err)?)
@@ -1202,7 +1193,7 @@ impl SsPlayerWeb {
         with_player!(self, |p| p.skip_frames())
     }
 
-    // --- Per-part overrides (SPEC §9.5) ---
+    // --- Per-part overrides ---
     //
     // Indices address the root animation and are stable within one pack, so
     // resolve a name once with `findPartIndex` and keep the index. Overrides do
@@ -1292,7 +1283,7 @@ impl SsPlayerWeb {
         with_player!(self, |p| p.part_count())
     }
 
-    // --- Events (SPEC §9.5) ---
+    // --- Events ---
     //
     // Polled after `frame()`, which is what advanced the clock. All three
     // describe that tick and are replaced by the next one.
@@ -1317,8 +1308,8 @@ impl SsPlayerWeb {
     ///
     /// ```js
     /// { kind: 'userData', partIndex, integer?, rect?, point?, text? }
-    /// { kind: 'signal',   partIndex, commandId, params: [{ id, value }] }
-    /// { kind: 'audio',    partIndex, soundName, soundListNameHash, soundNameHash, loopNum }
+    /// { kind: 'signal', partIndex, commandId, params: [{ id, value }] }
+    /// { kind: 'audio', partIndex, soundName, soundListNameHash, soundNameHash, loopNum }
     /// ```
     ///
     /// **Frames skipped over are still represented**: a long tick reports every
@@ -1360,7 +1351,7 @@ impl SsPlayerWeb {
         with_player!(self, |p| p.reset_transform())
     }
 
-    /// Draw order within the canvas; lower draws first (SPEC §9.2).
+    /// Draw order within the canvas; lower draws first.
     #[wasm_bindgen(js_name = setOrder)]
     pub fn set_order(&self, order: i32) -> Result<(), JsValue> {
         with_player!(self, |p| p.set_order(order))
@@ -1388,7 +1379,7 @@ impl SsPlayerWeb {
 
     /// Remove this player from its canvas. Safe to call twice; afterwards every
     /// method on this handle reports that it is destroyed rather than acting on
-    /// whichever player later reuses the slot (SPEC §11).
+    /// whichever player later reuses the slot.
     pub fn destroy(&self) {
         let ctx = &mut *self.ctx.borrow_mut();
         if let Some(entry) = ctx.surfaces.get_mut(self.surface) {

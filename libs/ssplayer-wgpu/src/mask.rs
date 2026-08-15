@@ -8,7 +8,7 @@
 //! write coverage (writers) and how, so [`crate::player`] can drive the
 //! pre-write + scoped-replay interleave that a single hardware stencil needs.
 //!
-//! Data sources (SPEC §6, mask doc §1):
+//! Data sources (mask doc §1):
 //! * **Static per-part flags** ([`PartMaskFlags`]) come from ssab `PartData` and
 //!   are read once at node-build time.
 //! * **Per-frame values** (`PartState.mask`, draw order, batches) come from
@@ -24,7 +24,7 @@ pub const MAX_MASK_WRITERS: usize = 24;
 /// Stencil test mode baked into a content pipeline. Selected per masked part
 /// from the target's `visible_inside_mask` polarity (mask doc §2-4).
 ///
-/// Hashable because it is half of the renderer's pipeline cache key (SPEC §5.2).
+/// Hashable because it is half of the renderer's pipeline cache key.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum StencilTest {
     /// Not masked — compare `Always` (draw everywhere, ignore stencil).
@@ -51,7 +51,7 @@ pub enum MaskOp {
 }
 
 /// Geometry a part contributes as a mask writer. Text/Nines are not yet
-/// rendered (P6), so they cannot write coverage yet.
+/// rendered, so they cannot write coverage yet.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
 pub enum GeomKind {
     /// Sprite quad (Normal parts and `PartTypeMask` cells).

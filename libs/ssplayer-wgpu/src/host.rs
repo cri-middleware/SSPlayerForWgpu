@@ -1,19 +1,15 @@
-//! The self-contained native host (SPEC §9.4, "③ ffi"): owns a wgpu stack built
-//! from a raw window handle and drives **any number of** borrow-model
-//! [`SSPlayer`]s with it.
+//! A self-contained native host: owns a wgpu stack built from a raw window
+//! handle and drives **any number of** [`SSPlayer`]s with it.
 //!
-//! This is the native counterpart of `examples/viewer` (winit) and [`crate::web`]
-//! (canvas): `Instance`/`Surface`/`Device`/`Queue` live here, and the players
-//! borrow device+queue on every frame. All of the wgpu work for the C face lives
-//! in this module so that `ffi.rs` stays pure ABI translation.
+//! `Instance` / `Surface` / `Device` / `Queue` live here and the players borrow
+//! device and queue every frame. All of the wgpu work for the C face is in this
+//! module, so `ffi.rs` stays pure ABI translation.
 //!
-//! It is plain Rust, so a Rust host that only has a window handle (rather than a
-//! winit `Window`) can use it directly instead of assembling wgpu itself.
+//! It is plain Rust, so a Rust host that has a window handle rather than a winit
+//! `Window` can use it directly instead of assembling wgpu itself.
 //!
-//! **Players live here, behind [`PlayerId`]** (SPEC §11). The C face cannot hold a
-//! `&mut SSPlayer` across calls, so it needs something stable to name a player
-//! by; the bookkeeping that makes that safe lives in [`crate::roster`], which the
-//! web host uses for the same reason.
+//! **Players live here, behind [`PlayerId`]**, because the C face cannot hold a
+//! `&mut SSPlayer` across calls. [`crate::roster`] does that bookkeeping.
 
 use crate::player::SSPlayer;
 use crate::renderer::{Retention, SSRenderer};
@@ -22,11 +18,11 @@ use crate::scene::{SSScene, SceneConfig};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 
-/// Names one player owned by a [`NativeHost`] (SPEC §11).
+/// Names one player owned by a [`NativeHost`].
 pub use crate::roster::SlotId as PlayerId;
 
 /// Depth/stencil format allocated when masking is enabled. Matches the native
-/// viewer and the web host; the depth aspect is unused (SPEC §6).
+/// viewer and the web host; the depth aspect is unused.
 pub const STENCIL_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Depth24PlusStencil8;
 
 /// How to build a [`NativeHost`].
@@ -39,7 +35,7 @@ pub struct NativeHostConfig {
     pub height: u32,
     /// Clear colour, straight RGBA in 0..1.
     pub clear_color: [f32; 4],
-    /// Allocate a depth/stencil buffer so mask parts rasterise (SPEC §6).
+    /// Allocate a depth/stencil buffer so mask parts rasterise.
     pub enable_mask: bool,
     /// Flip the projection to Y-down (screen coordinates).
     pub y_down: bool,
@@ -48,7 +44,7 @@ pub struct NativeHostConfig {
 /// A window-owning wgpu host and the players drawing into it.
 pub struct NativeHost {
     players: Roster<SSPlayer>,
-    /// Device-scoped renderer (SPEC §1.2). Owned here because the host owns the
+    /// Device-scoped renderer. Owned here because the host owns the
     /// device; **every player above shares this one** — one atlas upload and one
     /// set of pipelines no matter how many characters are on screen.
     renderer: SSRenderer,
@@ -62,7 +58,7 @@ pub struct NativeHost {
     stencil_view: Option<wgpu::TextureView>,
     clear_color: wgpu::Color,
     y_down: bool,
-    /// Set by wgpu when the device is taken away (SPEC §14).
+    /// Set by wgpu when the device is taken away.
     device_lost: Arc<AtomicBool>,
     /// Kept last: the instance must outlive the surface it created. It survives a
     /// device loss, which is what lets `restore_device` ask it for a new adapter.
@@ -80,7 +76,7 @@ fn request_adapter(instance: &wgpu::Instance, surface: &wgpu::Surface<'static>) 
 
 /// Build a device+queue, and the flag wgpu raises if it is ever lost.
 ///
-/// GPU timing has to be asked for here or never (SPEC §14.2 item 10); an adapter
+/// GPU timing has to be asked for here or never; an adapter
 /// without it still draws, only `stats()` goes quiet.
 fn request_device(adapter: &wgpu::Adapter) -> Result<(wgpu::Device, wgpu::Queue, Arc<AtomicBool>), String> {
     let device_desc = wgpu::DeviceDescriptor { required_features: adapter.features() & wgpu::Features::TIMESTAMP_QUERY, ..Default::default() };
@@ -151,7 +147,7 @@ impl NativeHost {
 
     /// Add a player to this window and return its id.
     ///
-    /// Players are cheap — no GPU resource of their own (SPEC §1.2) — so a window
+    /// Players are cheap — no GPU resource of their own — so a window
     /// holding a dozen characters costs one device, one renderer and one scene.
     pub fn create_player(&mut self) -> PlayerId {
         self.players.insert(SSPlayer::new())
@@ -173,13 +169,13 @@ impl NativeHost {
         self.players.len()
     }
 
-    /// What the last frame cost (SPEC §14.2 item 10).
+    /// What the last frame cost.
     pub fn stats(&self) -> crate::SceneStats {
         self.scene.stats()
     }
 
     /// Register a texture for a reference-mode pack, lending the renderer this
-    /// host's device+queue (SPEC §8.1). Shared by every player in the window.
+    /// host's device+queue. Shared by every player in the window.
     pub fn upload_texture(&mut self, hash: u32, rgba: &[u8], width: u32, height: u32) {
         self.renderer.upload_texture(&self.device, &self.queue, hash, rgba, (width, height), Retention::Retain);
     }
@@ -187,10 +183,10 @@ impl NativeHost {
     /// Register a texture from **encoded** image bytes (PNG), for hosts that have
     /// no image decoder of their own — the C face's reference-mode path.
     ///
-    /// The library already carries a PNG decoder for embedded packs (SPEC §8.1),
+    /// The library already carries a PNG decoder for embedded packs,
     /// so lending it out costs nothing and saves every C viewer from bringing
     /// ImageIO / WIC / libpng along just to show a reference-mode `.ssab`. The
-    /// host still does the reading: nothing here opens a file (SPEC §8.2).
+    /// host still does the reading: nothing here opens a file.
     pub fn upload_texture_encoded(&mut self, hash: u32, encoded: &[u8]) -> Result<(), String> {
         let image = image::load_from_memory(encoded).map_err(|e| format!("decode image: {e}"))?;
         let rgba = image.to_rgba8();
@@ -200,7 +196,7 @@ impl NativeHost {
     }
 
     /// Advance every player and build this frame's GPU buffers. Players are drawn
-    /// in ascending `order` (SPEC §9.2), whatever order the slots happen to be in.
+    /// in ascending `order`, whatever order the slots happen to be in.
     pub fn update(&mut self, delta_secs: f32) {
         if self.is_device_lost() {
             return;
@@ -211,7 +207,7 @@ impl NativeHost {
 
     /// Acquire the swapchain image, draw the prepared frame, and present.
     ///
-    /// A lost/outdated/timed-out surface is absorbed by reconfiguring (SPEC §14),
+    /// A lost/outdated/timed-out surface is absorbed by reconfiguring,
     /// skipping one frame; that is reported as success.
     pub fn render(&mut self) -> Result<(), String> {
         use wgpu::CurrentSurfaceTexture;
@@ -274,18 +270,17 @@ impl NativeHost {
         self.scene.set_viewport(&self.queue, width as f32, height as f32, self.y_down);
     }
 
-    /// Whether the driver has taken the device away (SPEC §14). While this is true
+    /// Whether the driver has taken the device away. While this is true
     /// `update` / `render` / `resize` keep off the GPU.
     pub fn is_device_lost(&self) -> bool {
         self.device_lost.load(Ordering::Relaxed)
     }
 
     /// Rebuild the wgpu stack after a device loss and restore everything drawing
-    /// through it, resuming playback where it was interrupted (SPEC §14).
+    /// through it, resuming playback where it was interrupted.
     ///
     /// Errors if the GPU is gone for good, or if the replacement adapter cannot
-    /// present this window's format — the scene's pipelines are baked against it
-    /// (SPEC §5.2), so that case is a rebuild from [`NativeHost::new`].
+    /// present this window's format — the scene's pipelines are baked against it, so that case is a rebuild from [`NativeHost::new`].
     pub fn restore_device(&mut self) -> Result<(), String> {
         let adapter = request_adapter(&self.instance, &self.surface)?;
         let caps = self.surface.get_capabilities(&adapter);

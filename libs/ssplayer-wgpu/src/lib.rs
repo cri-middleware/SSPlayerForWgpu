@@ -1,16 +1,16 @@
 //! `ssplayer-wgpu` — a wgpu-based player for SpriteStudio 7 animations.
 //!
-//! Three layers (SPEC): the runtime (`ssruntime`, computation) feeds the
-//! rendering layer, which is driven by [`SSPlayer`] (operation) — the primary
-//! public API. The player borrows the host's wgpu device/queue/target rather
-//! than owning them, so it can render into any wgpu host (a standalone viewer,
-//! a browser canvas, or an engine like Bevy).
+//! The player borrows the host's wgpu device, queue and render target rather
+//! than owning them, so it draws into any wgpu host — a standalone viewer, a
+//! browser canvas, or an engine like Bevy.
 //!
-//! The rendering layer is split by how long its resources stay useful (SPEC
-//! §1.2): [`SSRenderer`] holds what belongs to the **device** — pipelines, bind
-//! group layouts, the sampler, the atlas textures — and the host owns exactly
-//! one, lending it like `Device` and `Queue`. `SSScene` holds what
-//! belongs to one **render target**: the projection and the frame's geometry.
+//! Three types, split by how long their resources stay useful:
+//!
+//! * [`SSRenderer`] — one per **device**: pipelines, bind group layouts, the
+//!   sampler and the atlas textures. The host owns it and lends it.
+//! * [`SSScene`] — one per **render target**: the projection and the frame's
+//!   geometry.
+//! * [`SSPlayer`] — one per character: the playback tree. Holds no GPU resource.
 
 /// The filesystem behind [`SSPlayer::load`]. Needs the `embedded` feature (for
 /// the decoder) and a target that has a filesystem.
@@ -36,7 +36,7 @@ mod metrics;
 mod pack;
 mod player;
 mod renderer;
-/// Generation-tagged slot storage for the handle-based hosts (SPEC §11).
+/// Generation-tagged slot storage for the handle-based hosts.
 #[cfg(any(feature = "ffi", feature = "web"))]
 mod roster;
 mod scene;

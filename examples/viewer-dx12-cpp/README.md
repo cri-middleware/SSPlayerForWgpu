@@ -7,7 +7,7 @@
 > here yet; the list below is still the one to work through, and to annotate.
 
 A Win32 host that drives `ssplayer-wgpu` through its **C API** with the DX12
-backend forced, so the "③ ffi" face of [SPEC §11](../../SSPLAYER_WGPU_SPEC.md) is
+backend forced, so the "③ ffi" face of the C API is
 exercised end to end: Win32 owns the window, hands its `HWND` to
 `ss_scene_create`, and calls `ss_scene_update` / `ss_scene_render` every frame.
 No Rust is involved on this side of the ABI.
@@ -15,18 +15,17 @@ No Rust is involved on this side of the ABI.
 It is the Windows twin of [`viewer-metal-cpp`](../viewer-metal-cpp/README.md),
 and the two deliberately duplicate the playback loop rather than share it: what
 actually differs is window and surface creation (`HWND` vs `CAMetalLayer`), and
-the sample's value is that one directory copies whole (SPEC §2). Everything
+the sample's value is that one directory copies whole. Everything
 below is the Metal viewer's behaviour, unchanged.
 
-**It opens with two characters in one window**, which is the point of the P7-7
-handle split: `ss_scene_t` is the window, `ss_player_t` is a character drawn into
-it, and they share one device, one renderer and one atlas upload.
+**It opens with two characters in one window**, which is the point of the handle
+split: `ss_scene_t` is the window, `ss_player_t` is a character drawn into it, and
+they share one device, one renderer and one atlas upload.
 
 The packs it starts on come from `assets/overall` — **reference-mode** `.ssab`
 that name their atlases as sibling files, matching the Rust viewer. Either mode
 is one call: `ss_player_load(player, path)` brings the pack, its atlases and the
-sibling `.ssab` files its instance parts play from
-([SPEC §8.1](../../SSPLAYER_WGPU_SPEC.md)). Pass `assets\overall_emb` as `argv[1]`
+sibling `.ssab` files its instance parts play from. Pass `assets\overall_emb` as `argv[1]`
 for the embedded set.
 
 ## Drop a `.ssab` on the window
@@ -35,14 +34,13 @@ Dropping a `.ssab` — or a folder of them — plays it, whichever way it was
 exported. Dropped packs join the list `Left`/`Right` walks rather than replacing
 it, so a character can be compared against the demo set; drop a whole folder when
 the pack has external instance references, since those resolve by pack name and
-every referenced pack has to be registered first (SPEC §7.1).
+every referenced pack has to be registered first.
 
 **Reference-mode packs work too, and that is the interesting part.** Their
 atlases stay as sibling files, and where those sit is the `.ssab`'s own business:
 `ss_player_load` resolves them against the directory the file was read from, and
 a host whose assets are not files answers the same question itself through
-`ss_player_texture_at` + `ss_scene_add_texture_png`
-([SPEC §8.2](../../SSPLAYER_WGPU_SPEC.md)).
+`ss_player_texture_at` + `ss_scene_add_texture_png`.
 
 ## Build and run
 
@@ -82,10 +80,10 @@ printed to the console the viewer was launched from, so run it from a terminal.
 | + / - | add / remove a player (1–6, all in the one scene) |
 | Escape | quit |
 
-## What to check when it first runs
+## What to check on a run
 
-The Win32 leg of `ffi.rs` (`SS_WINDOW_WIN32` → `rwh::Win32WindowHandle`) and
-`SS_BACKEND_DX12` have never executed. Worth confirming, in order:
+The first run confirmed that it draws; the rest of this list is not recorded as
+checked yet. Annotate it as you work through it, in order:
 
 1. `ss_scene_create` returns non-null — that is the raw-handle → surface path and
    the DX12 adapter request.

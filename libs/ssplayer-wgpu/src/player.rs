@@ -1,14 +1,12 @@
-//! Layer 3 (operation): SSPlayer — the primary public API.
+//! [`SSPlayer`] — the primary public API.
 //!
-//! Owns a tree of runtime `Context`s (one per animation instance) and a single
-//! shared `SSScene`. Borrow model: it holds no `Device`/`Queue`/
-//! `Surface`; the host lends them on every `update`/`draw`.
+//! Owns a tree of runtime `Context`s, one per animation instance, and holds no
+//! GPU resource: the host lends `Device` and `Queue` on every `update`.
 //!
-//! Instance parts reference a sub-animation in another `.ssab` pack. Each
-//! instance child gets its **own** `Context` (hence its own SoA buffer), which
-//! is how the single-buffer overwrite problem is avoided (see SPEC §7). The
-//! host registers every pack via [`SSPlayer::add_ssab`]; external references are
-//! resolved by pack name.
+//! Instance parts play a sub-animation from another `.ssab` pack. Each instance
+//! child gets its **own** `Context`, and so its own SoA buffer, which is what
+//! keeps a child's frame from overwriting its parent's. The host registers every
+//! pack via [`SSPlayer::add_ssab`]; external references resolve by pack name.
 
 use crate::events::{SsEvent, decode_events};
 use crate::frame::FrameView;
@@ -26,7 +24,7 @@ use std::collections::{HashMap, HashSet};
 const IDENTITY: [f32; 16] = [1.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 1.0];
 
 /// The three things the loading walk cannot do for itself: reach a file, decode
-/// an image, and know what the renderer already holds (SPEC §8.2).
+/// an image, and know what the renderer already holds.
 ///
 /// **This is the whole of the platform-specific part of loading.** Everything
 /// else — reading both texture tables, deduplicating by file, walking instance
@@ -37,7 +35,7 @@ const IDENTITY: [f32; 16] = [1.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 1
 ///
 /// Two implementations ship: the filesystem behind [`SSPlayer::load`], and the
 /// web face's (`fetch` + `createImageBitmap`, whose pixels reach the GPU without
-/// passing through wasm memory at all, SPEC §10). An engine integration writes a
+/// passing through wasm memory at all). An engine integration writes a
 /// third and gets the walk for free — which it must, because an exported Godot
 /// project keeps its resources in a `.pck` and a Unity one in an APK, where no
 /// `File::open` will reach them.
@@ -72,7 +70,7 @@ pub trait AssetLoader {
     /// exists: only the implementation knows whether it is holding a filesystem
     /// path, a URL, or an archive key, and each of those cuts a directory
     /// differently. `Path::parent` and a `URL` base already know their own
-    /// vocabulary; the walk, serving all three at once, did not (SPEC §8.1).
+    /// vocabulary; the walk, serving all three at once, did not.
     ///
     /// Resolve `src` **against the base you were constructed with**, then take its
     /// directory, so a loader that starts out rooted somewhere (a Godot `res://`
@@ -103,7 +101,7 @@ pub trait AssetLoader {
     async fn read(&mut self, paths: &[String]) -> Vec<Option<Vec<u8>>>;
 
     /// Bytes for an instance-referenced pack, **by the name it is referenced
-    /// under** rather than by a path (SPEC §7.1).
+    /// under** rather than by a path.
     ///
     /// Tried before `<the .ssab's directory>/<name>.ssab`, and returning `None`
     /// — the default — falls back to exactly that. Implement it where a pack is
@@ -125,15 +123,14 @@ pub trait AssetLoader {
     }
 
     /// Decode `encoded` (a PNG, as the exporter wrote it) and register it under
-    /// `hash` — the key a draw batch will ask for (SPEC §8.1).
+    /// `hash` — the key a draw batch will ask for.
     async fn supply_texture(&mut self, hash: u32, encoded: &[u8]);
 
     /// Whether an atlas is already registered for `hash` — a hint, used to skip
     /// reading a file nobody will need.
     ///
     /// Best effort: a loader that cannot see the renderer answers `false` and
-    /// lets the flush make the real decision. The texture map is device-scoped
-    /// (SPEC §1.2), so the authoritative check is the one that keeps N players of
+    /// lets the flush make the real decision. The texture map is device-scoped, so the authoritative check is the one that keeps N players of
     /// one pack to one decode and one upload between them.
     fn has_texture(&self, hash: u32) -> bool;
 
@@ -148,13 +145,13 @@ pub trait AssetLoader {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum MissingKind {
     /// An atlas. The parts that use it draw against the 1x1 white fallback, so
-    /// they appear as silhouettes rather than not at all (SPEC §8).
+    /// they appear as silhouettes rather than not at all.
     Texture,
     /// An animation pack an instance part plays from. Those parts do not appear.
     Pack,
 }
 
-/// Something a load needed and did not get (SPEC §8.1).
+/// Something a load needed and did not get.
 ///
 /// A missing file is deliberately **not** an error: one unreadable atlas must not
 /// cost you the character, so [`SSPlayer::load`] reports `Err` only when the
@@ -169,7 +166,7 @@ pub struct MissingAsset {
     /// against and the only form the walk ever sees. For a pack, its name.
     pub name: String,
     /// For a texture, the key a draw batch will ask for. Zero for a pack, whose
-    /// identity is its name (SPEC §7.1).
+    /// identity is its name.
     pub hash: u32,
 }
 
@@ -369,7 +366,7 @@ struct PlaybackNode {
     /// (no separate context, unlike instances).
     effects: HashMap<usize, EffectPart>,
     /// Static per-part mask flags, indexed by part index. Read once from ssab
-    /// `PartData` at build time (SPEC §6). Empty when the pack has no ssab data.
+    /// `PartData` at build time. Empty when the pack has no ssab data.
     mask_flags: Vec<PartMaskFlags>,
 }
 
@@ -393,8 +390,8 @@ struct EffectPart {
     /// Copied rather than borrowed: the buffer behind `step`'s result belongs to
     /// the slot, and the draw walk that consumes it runs after every slot has
     /// stepped. Keeping the raw pointer instead would additionally cost
-    /// `SSPlayer: Send` — which `SSScene::update` no longer needs now that its
-    /// walk is serial again (SPEC §14.2 item 6), but a host that moves players
+    /// `SSPlayer: Send`, which `SSScene::update` does not require now that its
+    /// walk is serial again, but a host that moves players
     /// between its own threads does. The allocation is reused frame to frame, so
     /// the price is one memcpy per effect.
     plan: Vec<u8>,
@@ -403,7 +400,7 @@ struct EffectPart {
 /// The SpriteStudio player. One instance owns one animation-instance tree.
 pub struct SSPlayer {
     /// All registered packs, keyed by pack name (matches `ref_anime_pack`).
-    /// Cloning a pack shares its parse and its bytes (SPEC §8.2), so N players of
+    /// Cloning a pack shares its parse and its bytes, so N players of
     /// one character cost one copy of the `.ssab` between them.
     packs: HashMap<String, SSPack>,
     /// Packs that were replaced under a name the live tree may still be playing
@@ -421,14 +418,14 @@ pub struct SSPlayer {
     main_pack: Option<String>,
     root: Option<PlaybackNode>,
     current_animation: Option<String>,
-    /// Names of packs whose embedded atlases (SPEC §8.1) have not been offered to
+    /// Names of packs whose embedded atlases have not been offered to
     /// a renderer yet. The offer happens on the next `update`, which is the
     /// earliest point the borrow model lends a `Device`/`Queue`; the decode itself
     /// waits until then too, so a pack whose atlas is already registered is never
     /// decoded at all.
     packs_awaiting_textures: Vec<String>,
     /// Atlases a host-side load read but has not handed to a renderer yet, still
-    /// **encoded** (SPEC §8.1).
+    /// **encoded**.
     ///
     /// The reference-mode twin of `packs_awaiting_textures`, and deliberately the
     /// same mechanism: [`SSPlayer::load`] borrows no `Device`/`Queue` — the borrow
@@ -437,7 +434,7 @@ pub struct SSPlayer {
     /// because a 2048² atlas is a few hundred KB here against 16 MB of pixels,
     /// and because it puts both routes on one timeline.
     pending_images: Vec<(u32, Vec<u8>)>,
-    /// What the last load could not get (SPEC §8.1). Reset by each
+    /// What the last load could not get. Reset by each
     /// [`SSPlayer::load_with`], appended to as the walk gives up on a file.
     missing: Vec<MissingAsset>,
     /// Timeline events the last `build_frame` crossed. Cleared and refilled per
@@ -460,14 +457,13 @@ pub struct SSPlayer {
     /// (the *next* completion goes missing) as defects that really happened in
     /// sibling Players.
     prev_finished: bool,
-    /// Where this player sits in the scene — the root transform of its tree
-    /// (SPEC §5.4). Composed by [`SSPlayer::set_transform`]; only the matrix is
+    /// Where this player sits in the scene — the root transform of its tree. Composed by [`SSPlayer::set_transform`]; only the matrix is
     /// kept because nothing yet re-composes it. A future `box` (§9.3, the
     /// WebGL player's viewport-tracking rect) moves after `set_transform` runs,
     /// so it will need the authored parameters retained as well.
     transform: [f32; 16],
     /// Draw order within a scene; lower draws first. Nothing in this file reads
-    /// it — it exists so the host, and from P7-4 `SSScene`, can sort by it.
+    /// it — it exists so the host and [`crate::SSScene`] can sort by it.
     order: i32,
     /// Skip this player entirely when false (see [`SSPlayer::set_visible`]).
     visible: bool,
@@ -482,8 +478,7 @@ impl Default for SSPlayer {
 }
 
 impl SSPlayer {
-    /// Create a player. Takes nothing: a player holds no GPU resource at all
-    /// (SPEC §1.2), which is what makes putting a hundred of them in a scene
+    /// Create a player. Takes nothing: a player holds no GPU resource at all, which is what makes putting a hundred of them in a scene
     /// cheap. The device-scoped [`SSRenderer`] and the target-scoped
     /// [`SSScene`] are lent to it per frame by [`SSScene::update`].
     pub fn new() -> Self {
@@ -507,7 +502,7 @@ impl SSPlayer {
         }
     }
 
-    /// Re-offer this player's embedded atlases after a device loss (SPEC §14).
+    /// Re-offer this player's embedded atlases after a device loss.
     ///
     /// The player itself has nothing to rebuild — it owns no GPU resource. What it
     /// does own is the `.ssab`, which is the only place a [`Retention::Reproducible`]
@@ -521,8 +516,7 @@ impl SSPlayer {
         self.flush_textures(renderer, device, queue);
     }
 
-    /// Load a `.ssab` **and everything it depends on**, then select it
-    /// (SPEC §8.1, §7.1).
+    /// Load a `.ssab` **and everything it depends on**, then select it.
     ///
     /// One call is the whole of loading: the pack, both of its texture tables in
     /// either export mode, and — transitively — the sibling packs its instance
@@ -579,7 +573,7 @@ impl SSPlayer {
     }
 
     /// Load a `.ssab` off the filesystem **and everything it depends on**, then
-    /// select it (SPEC §8.1, §7.1).
+    /// select it.
     ///
     /// The whole of loading, in one call and with no wgpu state in sight:
     ///
@@ -602,10 +596,10 @@ impl SSPlayer {
     /// names — its atlases, the sibling packs its instance parts play from — is
     /// resolved against **the `.ssab`'s own directory**, because that is what the
     /// exporter wrote those paths relative to. That directory is `Path::parent`'s
-    /// answer, so the platform decides it rather than us (SPEC §8.1).
+    /// answer, so the platform decides it rather than us.
     ///
     /// Use [`SSPlayer::load_with`] where a `File::open` cannot reach the bytes: a
-    /// Godot `.pck`, an APK, an engine's asset server, a browser (SPEC §8.2).
+    /// Godot `.pck`, an APK, an engine's asset server, a browser.
     #[cfg(all(feature = "embedded", not(target_arch = "wasm32")))]
     pub fn load(&mut self, path: impl AsRef<std::path::Path>) -> Result<(), SSRuntimeError> {
         let path = path.as_ref();
@@ -686,7 +680,7 @@ impl SSPlayer {
     }
 
     /// Supply every atlas `pack` asks for that the renderer does not already
-    /// hold — both texture tables, either export mode (SPEC §8.1).
+    /// hold — both texture tables, either export mode.
     ///
     /// Embedded images come out of the pack; the rest are read through `loader`,
     /// **once per file**: `external_textures()` can name an image a cellmap
@@ -724,7 +718,7 @@ impl SSPlayer {
         }
     }
 
-    /// What the last load could not get, in the order it gave up (SPEC §8.1).
+    /// What the last load could not get, in the order it gave up.
     /// Empty means everything the packs asked for arrived.
     ///
     /// A load reports `Err` only when the `.ssab` itself is unreadable, because
@@ -735,9 +729,9 @@ impl SSPlayer {
     /// ```no_run
     /// # use ssplayer_wgpu::SSPlayer;
     /// # fn go(player: &mut SSPlayer) -> Result<(), Box<dyn std::error::Error>> {
-    /// player.load("assets/overall/Instance.ssab")?;   // the pack was readable …
-    /// for missing in player.missing_assets() {        // … but maybe not all of it
-    ///     eprintln!("{:?} {} is not there", missing.kind, missing.name);
+    /// player.load("assets/overall/Instance.ssab")?; // the pack was readable …
+    /// for missing in player.missing_assets() { // … but maybe not all of it
+    /// eprintln!("{:?} {} is not there", missing.kind, missing.name);
     /// }
     /// # Ok(()) }
     /// ```
@@ -749,7 +743,7 @@ impl SSPlayer {
     }
 
     /// Whether a pack is registered under `name` — what an instance part's
-    /// `ref_anime_pack` will be looked up by (SPEC §7.1).
+    /// `ref_anime_pack` will be looked up by.
     ///
     /// For a host resolving those references itself: it answers "have I already
     /// fetched this one", which is what keeps a cycle of packs referencing each
@@ -758,10 +752,10 @@ impl SSPlayer {
         self.packs.contains_key(name)
     }
 
-    /// Register a pack for external instance references (SPEC §7.1) without
+    /// Register a pack for external instance references without
     /// changing what is playing. Registration is by [`SSPack::name`].
     ///
-    /// Sharing one pack between players is the intended shape (SPEC §8.2): the
+    /// Sharing one pack between players is the intended shape: the
     /// clone is an `Arc` bump, and the atlas reaches the GPU once no matter how
     /// many players hold it.
     ///
@@ -892,8 +886,8 @@ impl SSPlayer {
     // --- Playhead ----------------------------------------------------------
     //
     // Everything below reads or writes the ROOT context only. Instance children
-    // run their own clocks, driven by their slots from the root's frame (SPEC
-    // §7.1), so seeking the root carries them with it on the next update.
+    // run their own clocks, driven by their slots from the root's frame, so
+    // seeking the root carries them with it on the next update.
 
     /// Jump to `frame`. Fractional values are honoured — the tree is evaluated
     /// at the sub-frame position on the next update.
@@ -933,9 +927,8 @@ impl SSPlayer {
     //
     // NOTE: `set_animation` rebuilds the tree from scratch, so it resets every
     // setting here (and `set_speed`) to the pack's defaults. Re-apply whatever
-    // you chose after each call. Caching them on the player, as the Flutter and
-    // Unity Players do, is deliberately left out of this layer for now — see the
-    // note in SPEC §9.3.
+    // you chose after each call. This layer does not cache them for you, as the
+    // Flutter and Unity Players do.
 
     /// `count` cycles then stop; `-1` (or `0`) loops forever. Under
     /// [`PlaybackStyle::PingPong`] one cycle is a full round trip.
@@ -1015,7 +1008,7 @@ impl SSPlayer {
         self.root.as_ref().map(|r| r.context.get_skip_frames()).unwrap_or(true)
     }
 
-    // --- Per-part overrides (SPEC §9.5) -------------------------------------
+    // --- Per-part overrides -------------------------------------
     //
     // Say "make this part this colour / this cell / hidden **now**", beating the
     // keyframes underneath. The runtime owns the override table and its whole
@@ -1025,11 +1018,11 @@ impl SSPlayer {
     // Two things to know before reaching for them:
     //
     // * Part indices address the ROOT animation, and are stable within one pack.
-    //   Resolve a name once with [`SSPlayer::find_part_index`] and keep the
-    //   index if you override often.
+    // Resolve a name once with [`SSPlayer::find_part_index`] and keep the
+    // index if you override often.
     // * **Overrides do not reach inside an instance part.** Its child animation
-    //   runs as its own context (SPEC §7.1), so an override on the part that
-    //   *hosts* an instance does not touch what the instance draws.
+    // runs as its own context, so an override on the part that
+    // *hosts* an instance does not touch what the instance draws.
     //
     // Every call needs an animation: the runtime sizes its override table in
     // `set_animation`, which is also what clears everything but
@@ -1120,7 +1113,7 @@ impl SSPlayer {
         }
     }
 
-    // --- Events (SPEC §9.5) -------------------------------------------------
+    // --- Events -------------------------------------------------
     //
     // Polled, not called back. The borrow model has the host lending the player
     // its device per frame and driving the clock, so "read what happened after
@@ -1171,7 +1164,7 @@ impl SSPlayer {
         &self.events
     }
 
-    // --- Part read-outs (SPEC §9.5) ----------------------------------------
+    // --- Part read-outs ----------------------------------------
 
     /// How many parts the root animation has. Zero before one is set up.
     ///
@@ -1215,8 +1208,8 @@ impl SSPlayer {
     /// Place this player: translation, scale, then rotation in radians, composed
     /// into the root transform of its tree.
     ///
-    /// This is the per-player half of SPEC §5.4 — the projection belongs to the
-    /// render target ([`SSScene::set_viewport`]), the placement to the player.
+    /// The per-player half of placement: the projection belongs to the render
+    /// target ([`SSScene::set_viewport`]), the placement to the player.
     /// It costs nothing extra to draw: the tree walk already composes an
     /// arbitrary parent matrix for every instance child, so a non-identity root
     /// simply rides along.
@@ -1226,10 +1219,10 @@ impl SSPlayer {
         // scale*rotation for x and y, then z, then the translation.
         #[rustfmt::skip]
         let m = [
-            scale_x * cos,  scale_x * sin, 0.0, 0.0,
+            scale_x * cos, scale_x * sin, 0.0, 0.0,
             -scale_y * sin, scale_y * cos, 0.0, 0.0,
-            0.0,            0.0,           1.0, 0.0,
-            x,              y,             0.0, 1.0,
+            0.0, 0.0, 1.0, 0.0,
+            x, y, 0.0, 1.0,
         ];
         self.transform = m;
     }
@@ -1280,7 +1273,7 @@ impl SSPlayer {
         Some(anim_resource.get_animation_names())
     }
 
-    /// The atlases a registered pack asks for (SPEC §8.1), or `None` if
+    /// The atlases a registered pack asks for, or `None` if
     /// `pack_name` names no pack this player holds. `None` selects the main pack.
     ///
     /// This is the reference-mode half of texture supply, and it exists because
@@ -1290,20 +1283,20 @@ impl SSPlayer {
     /// [`TextureRef::path`] against the directory the `.ssab` came from, and hands
     /// the pixels to [`SSRenderer::upload_texture`]. The player never opens a
     /// file itself — it has no filesystem on the web face, and on any face the
-    /// host's asset system is the one that should own the bytes (SPEC §8.2).
+    /// host's asset system is the one that should own the bytes.
     pub fn textures(&self, pack_name: Option<&str>) -> Option<&[TextureRef]> {
         let name = pack_name.or(self.main_pack.as_deref())?;
         Some(self.packs.get(name)?.textures())
     }
 
-    /// The encoded atlases a registered pack carries (SPEC §8.1), or `None` if
+    /// The encoded atlases a registered pack carries, or `None` if
     /// `pack_name` names no pack this player holds. `None` selects the main pack.
     ///
     /// The embedded-mode counterpart of [`SSPlayer::textures`]: there is nothing
     /// for the host to fetch, but there is something for it to decode. A host
     /// with its own decoder walks this and registers the results, rather than
     /// leaving it to [`SSPlayer::flush_textures`] — which needs the `embedded`
-    /// feature and only knows how to decode PNG (SPEC §8.2).
+    /// feature and only knows how to decode PNG.
     pub fn embedded_images(&self, pack_name: Option<&str>) -> Option<Vec<EmbeddedImage<'_>>> {
         let name = pack_name.or(self.main_pack.as_deref())?;
         Some(self.packs.get(name)?.embedded_images())
@@ -1318,7 +1311,7 @@ impl SSPlayer {
         Some((anim_meta.canvas_width, anim_meta.canvas_height))
     }
 
-    /// Hand the renderer any embedded atlas it does not already have (SPEC §8.1).
+    /// Hand the renderer any embedded atlas it does not already have.
     /// Called at the start of each `update` — the earliest point the borrow model
     /// lends a `Device`/`Queue` — and by `restore_textures`, which re-queues every
     /// pack against the new device.
@@ -1475,8 +1468,8 @@ fn build_node(packs: &HashMap<String, SSPack>, pack: &str, anime: &str) -> Optio
         for (i, part) in parts.iter().enumerate() {
             let part_type = part.part_type_type();
 
-            // Static mask flags (SPEC §6 / mask doc §1). Geometry kind picks the
-            // writer builder; Shape/Text/Nines can't write coverage yet (P6).
+            // Static mask flags (mask doc §1). Geometry kind picks the
+            // writer builder; Shape/Text/Nines can't write coverage yet.
             let geom = match part_type {
                 PartType::PartTypeNormal | PartType::PartTypeMask => GeomKind::Quad,
                 PartType::PartTypeMesh => GeomKind::Mesh,
@@ -1604,8 +1597,7 @@ struct FrameBuild<'a> {
 /// `transform` changes per recursion level (each instance child composes its
 /// part's world matrix onto its parent's), `alpha` is the owning player's and is
 /// constant for the whole walk. They travel together so `render_node` keeps a
-/// readable signature as more player-level properties land — tint, clip and
-/// backdrop are all queued behind SPEC §5.5.
+/// readable signature as more player-level properties land.
 #[derive(Clone, Copy)]
 struct NodeDraw<'a> {
     transform: &'a [f32; 16],
@@ -1621,7 +1613,7 @@ struct NodeDraw<'a> {
 /// context is already at `frame_no` (root by `update`, children by their
 /// parent's `InstanceSlot::step`).
 ///
-/// Masking (SPEC §6): when the renderer has a stencil buffer and this is the
+/// Masking: when the renderer has a stencil buffer and this is the
 /// root scope (`inherited_stencil == None`), pure masks are pre-written and the
 /// coverage is scoped-replayed as content is drawn in rank order; masked content
 /// is tested per part by its polarity. When `inherited_stencil` is set, this
@@ -1640,7 +1632,7 @@ fn render_node(node: &mut PlaybackNode, build: &mut FrameBuild<'_>, draw: NodeDr
     };
     let frame = frame_view(&mut node.context, frame_data);
     // Hand this node's runtime buffers to the scene once, up front: everything
-    // below refers to them by arena offset rather than expanding them (SPEC §5.5).
+    // below refers to them by arena offset rather than expanding them.
     let node_slot = build.scene.begin_node(&frame, transform);
 
     // Own masking runs only at the root scope; a masked sub-animation inherits.
@@ -1768,7 +1760,7 @@ fn render_node(node: &mut PlaybackNode, build: &mut FrameBuild<'_>, draw: NodeDr
     }
 }
 
-/// Take back every bit of stencil coverage this scope wrote (SPEC §6).
+/// Take back every bit of stencil coverage this scope wrote.
 ///
 /// The batch loop leaves the buffer unbalanced in two ways, because the scoped
 /// replay only runs as far as the last masked target it met:
@@ -1849,8 +1841,7 @@ unsafe fn slice_i32<'a>(ptr: *const i32, len: usize) -> &'a [i32] {
     if ptr.is_null() || len == 0 { &[] } else { unsafe { std::slice::from_raw_parts(ptr, len) } }
 }
 
-/// Decode a flush's whole batch of atlases and register them **in `jobs` order**
-/// (SPEC §8.1).
+/// Decode a flush's whole batch of atlases and register them **in `jobs` order**.
 ///
 /// One call for the batch rather than one per image so the decodes can overlap: a
 /// character with three 4096² atlases otherwise pays for them end to end on the
@@ -1859,7 +1850,7 @@ unsafe fn slice_i32<'a>(ptr: *const i32, len: usize) -> &'a [i32] {
 #[cfg(feature = "embedded")]
 fn decode_and_register(renderer: &mut SSRenderer, device: &wgpu::Device, queue: &wgpu::Queue, jobs: &[(u32, &[u8], Retention)]) {
     let encoded: Vec<&[u8]> = jobs.iter().map(|(_, bytes, _)| *bytes).collect();
-    // Premultiplied on the worker (SPEC §5.2), so all that is left for this thread
+    // Premultiplied on the worker, so all that is left for this thread
     // is creating the texture and writing it.
     for (decoded, (hash, _, retention)) in crate::decode::decode_all(&encoded, true).into_iter().zip(jobs) {
         let Some(decoded) = decoded else {
@@ -1871,6 +1862,6 @@ fn decode_and_register(renderer: &mut SSRenderer, device: &wgpu::Device, queue: 
 }
 
 /// Without a decoder there is nothing to do here: on that build the host supplies
-/// textures itself (the web face decodes with `createImageBitmap`, SPEC §10).
+/// textures itself (the web face decodes with `createImageBitmap`).
 #[cfg(not(feature = "embedded"))]
 fn decode_and_register(_: &mut SSRenderer, _: &wgpu::Device, _: &wgpu::Queue, _: &[(u32, &[u8], Retention)]) {}

@@ -1,16 +1,12 @@
 //! A borrowed view of one frame's rendering input.
 //!
-//! Ownership contract (SPEC §1.1): the FrameData and SoA buffers are owned by
-//! the runtime. `FrameView` only references them — it never copies or owns.
-//! These slices are valid only immediately after the runtime produces the frame
-//! and may be invalidated by the next frame fetch, so they must not be held
-//! across frames.
+//! The runtime owns the FrameData and SoA buffers; this only references them.
+//! The slices are valid immediately after the runtime produces the frame and
+//! may be invalidated by the next frame fetch, so do not hold them across
+//! frames.
 
-/// Everything SSScene needs to draw one frame, as borrows into
+/// Everything [`crate::SSScene`] needs to draw one frame, as borrows into
 /// runtime-owned data.
-///
-/// `frame_data` is the FlatBuffers-encoded `FrameData`. The layout and meaning
-/// of each SoA slice is documented in SPEC §3.2.
 #[derive(Clone, Copy, Default)]
 pub struct FrameView<'a> {
     /// FlatBuffers-encoded `FrameData` (draw_order / draw_batches / parts / parts_color).
@@ -34,8 +30,7 @@ pub struct FrameView<'a> {
     /// Prefix-sum of length parts+1 for mesh index ranges.
     pub mesh_index_offsets: &'a [u32],
     /// Shape vertices (local xy), `part_index * SHAPE_VERTICES_STRIDE` (=24);
-    /// each part's live vertex count is in `shape_vertex_counts`. Used to
-    /// rasterise Shape mask writers and Shape content (SPEC §6).
+    /// each part's live vertex count is in `shape_vertex_counts`.
     pub shape_vertices: &'a [f32],
     /// Per-part shape vertex box coordinates (fx, fy in 0..1), same stride as
     /// `shape_vertices`. Used to bilinearly interpolate the shape's fill color.

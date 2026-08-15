@@ -1,15 +1,8 @@
-//! Generation-tagged slot storage, shared by the hosts that hand out handles
-//! (SPEC §11).
+//! Generation-tagged slot storage, shared by the hosts that hand out handles.
 //!
-//! Both non-Rust faces have the same problem: the caller cannot hold a
-//! `&mut SSPlayer` across calls, so it needs something stable to name one by.
-//! A raw pointer into a `Vec` dangles the moment the vector grows, and a bare
-//! index silently starts naming whichever value later reuses the slot. The
-//! generation is what separates those two cases: a stale [`SlotId`] resolves to
-//! `None` instead of to its successor.
-//!
-//! Slots are reused, so a host that spawns and drops characters does not grow a
-//! slot per spawn.
+//! A [`SlotId`] stays meaningful after the value it named is removed: it
+//! resolves to `None` rather than to whichever value later reuses the slot.
+//! Slots are reused, so churn does not grow the roster.
 
 /// Names one value in a [`Roster`]. Safe to hold past its removal.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -54,14 +47,14 @@ impl<T> Roster<T> {
     }
 
     /// Drop the value `id` names. Returns whether it named a live one; a stale
-    /// id is an inert no-op rather than a mistake made silently.
+    /// id is an inert no-op.
     pub fn remove(&mut self, id: SlotId) -> bool {
         let Some(slot) = self.slots.get_mut(id.index as usize) else { return false };
         if slot.generation != id.generation || slot.value.is_none() {
             return false;
         }
         slot.value = None;
-        // Retiring the generation is what stops the next value in this slot from
+        // Retiring the generation stops the next value in this slot from
         // answering to the id just released.
         slot.generation = slot.generation.wrapping_add(1);
         self.free.push(id.index);
@@ -89,8 +82,8 @@ impl<T> Roster<T> {
 mod tests {
     use super::*;
 
-    /// SPEC §11: a handle outliving its value must resolve to "gone", not to
-    /// whatever took over the slot.
+    /// A handle outliving its value resolves to "gone", not to whatever took
+    /// over the slot.
     #[test]
     fn a_removed_id_never_names_its_successor() {
         let mut roster: Roster<u32> = Roster::default();
@@ -102,8 +95,7 @@ mod tests {
         assert!(roster.remove(first), "removing a live value reported failure");
         assert!(roster.get_mut(first).is_none(), "a removed id still resolved");
         assert_eq!(roster.len(), 0);
-        // Double destroy is the easy C mistake; it has to be inert, not a panic
-        // and not a second slot release.
+        // A double destroy must be inert: no panic, no second slot release.
         assert!(!roster.remove(first), "removing the same id twice reported success");
 
         // The slot comes back, but the id does not.
