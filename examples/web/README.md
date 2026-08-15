@@ -1,7 +1,7 @@
 # ssplayer-wgpu — WebGPU demo (js face)
 
 Renders a SpriteStudio 7 `.ssab` to an HTML `<canvas>` via **WebGPU**, using the
-wasm-bindgen bindings from the player's `web` feature (SPEC §12 P1). This is
+wasm-bindgen bindings from the player's `web` feature. This is
 not a separate crate — the WebGPU player lives in `libs/ssplayer-wgpu` behind
 `--features web`; this directory is just the static page + build glue.
 
@@ -38,7 +38,7 @@ python3 -m http.server                 # serve THIS directory
 `wasm/`, `assets/` and `assets_emb/` are all generated (git-ignored).
 
 `build=debug` passes `--dev` to wasm-pack, which skips `wasm-opt` — the result is
-several times larger, so never quote it for the size figures in SPEC §14.1.
+several times larger, so never quote its size.
 
 ## Usage
 
@@ -64,7 +64,7 @@ they still share **one `GPUDevice`** — see below.
 ### Several characters — drive the context directly
 
 The element is a convenience wrapper, not the shape of the API. Underneath are
-three objects, one per resource scope (SPEC §1.2, §10):
+three objects, one per resource scope:
 
 | Object | How many | Owns |
 |---|---|---|
@@ -81,7 +81,7 @@ const player  = surface.createPlayer();       // as many as you like
 
 await player.load('assets/Basic.ssab');       // pack + assets (see below)
 player.setAnimation('idle');                  // selecting allocates …
-player.play();                                // … starting does not (SPEC §9.3)
+player.play();                                // … starting does not
 player.setTransform(x, y, scaleX, scaleY, rotation);
 player.setOrder(1);                           // lower draws first
 
@@ -124,8 +124,7 @@ each other terminates. Anything that cannot be fetched or decoded is reported on
 the console and skipped: a missing file costs you that file, not the character.
 
 **The wasm carries no image decoder** — one is already installed on every page,
-and bundling a second cost ~29% of the transferred bytes to do the same job worse
-(SPEC §8.1). Decoding is `createImageBitmap` (off the main thread,
+and bundling a second cost ~29% of the transferred bytes to do the same job worse. Decoding is `createImageBitmap` (off the main thread,
 premultiplied) and `copyExternalImageToTexture` moves the pixels straight into
 the texture without passing through wasm memory. The *encoded* bytes are kept, so
 `ctx.restoreDevice()` rebuilds every texture after a device loss with no re-fetch.
@@ -152,7 +151,7 @@ redesigned `ssplayer-webgl`; the old single `play(name)` is not carried over.
   players each frame, exactly like the native `viewer`. The event loop is the
   browser's rAF.
 - Masks/shaders work: the demo configures a depth/stencil buffer.
-- **Device loss is recovered, not fatal** (SPEC §14): the browser can take the
+- **Device loss is recovered, not fatal**: the browser can take the
   WebGPU device at any time (backgrounded tab, GPU process crash). `SsContextWeb`
   watches `GPUDevice.lost`; drawing stops and `ctx.restoreDevice()` rebuilds every
   pipeline/buffer/atlas on the page against the replacement — playback resumes on
@@ -161,9 +160,9 @@ redesigned `ssplayer-webgl`; the old single `play(name)` is not carried over.
   `ss-context.js` collapses the concurrent calls from N canvases into one.
 - **`surface.stats()`** returns the frame counters (players / prims / drawCalls /
   mergeableDraws / redundantTextureBinds / uploadedBytes, plus `gpuPassTimeNs`
-  when the browser grants `timestamp-query`). SPEC §14.2 was measured on native
-  only; this is how to take the same numbers in a browser.
-- The dev wasm is ~3 MB; a `build=release` build (wasm-opt) is much smaller —
-  580,700 B raw, **165,896 B brotli** (measured 2026-08-05; SPEC §14.1 has the
-  breakdown and the comparison against ssplayer-webgl). Dropping the bundled `image` crate in favour of
-  `createImageBitmap` took 54 KB (−27%) off that; see SPEC §8.1 for the numbers.
+  when the browser grants `timestamp-query`). The throughput trade-offs in
+  [`ROADMAP.md`](../../ROADMAP.md) were measured on native only — one WebGPU
+  command is one JS call, so this is how to take the same numbers in a browser.
+- Measure size from a `build=release` build only, and with `wasm-opt` applied.
+  The web face deliberately leaves out the bundled `image` crate and decodes
+  through `createImageBitmap` instead, which is a large share of the payload.

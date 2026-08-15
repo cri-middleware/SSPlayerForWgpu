@@ -1,22 +1,21 @@
 # viewer-metal-cpp — Metal verification viewer (C API)
 
 A macOS/Cocoa host that drives `ssplayer-wgpu` through its **C API** with the
-Metal backend forced, so the "③ ffi" face of [SPEC §11](../../SSPLAYER_WGPU_SPEC.md)
+Metal backend forced, so the "③ ffi" face of the C API
 is exercised end to end: Cocoa owns the window and its `CAMetalLayer`, hands the
 layer to `ss_scene_create`, and calls `ss_scene_update` / `ss_scene_render`
 every frame. No Rust is involved on this side of the ABI.
 
-**It opens with two characters in one window**, which is the point of the P7-7
-handle split: `ss_scene_t` is the window, `ss_player_t` is a character drawn into
-it, and they share one device, one renderer and one atlas upload. Before the
-split a handle was both at once, so a second character meant a second surface on
-the same window and the two presented over each other.
+**It opens with two characters in one window**, which is the point of the handle
+split: `ss_scene_t` is the window, `ss_player_t` is a character drawn into it, and
+they share one device, one renderer and one atlas upload. Fusing the two would
+make a second character need a second surface on the same window, and the two
+would present over each other.
 
 The packs it starts on come from `assets/overall` — **reference-mode** `.ssab`
 that name their atlases as sibling files, matching the Rust viewer. Either mode
 is one call: `ss_player_load(player, path)` brings the pack, its atlases and the
-sibling `.ssab` files its instance parts play from
-([SPEC §8.1](../../SSPLAYER_WGPU_SPEC.md)). Pass `assets/overall_emb` as `argv[1]`
+sibling `.ssab` files its instance parts play from. Pass `assets/overall_emb` as `argv[1]`
 for the embedded set.
 
 ## Drop a `.ssab` on the window
@@ -25,7 +24,7 @@ Dropping a `.ssab` — or a folder of them — plays it, whichever way it was
 exported. Dropped packs join the list `Left`/`Right` walks rather than replacing
 it, so a character can be compared against the demo set; drop a whole folder when
 the pack has external instance references, since those resolve by pack name and
-every referenced pack has to be registered first (SPEC §7.1).
+every referenced pack has to be registered first.
 
 **Reference-mode packs work too, and that is the interesting part.** Their
 atlases stay as sibling files, and where those sit is the `.ssab`'s own business:
@@ -34,7 +33,7 @@ atlases stay as sibling files, and where those sit is the `.ssab`'s own business
 viewer joins that path with the directory the drop came from and hands the bytes
 to `ss_scene_add_texture_png`, which decodes with the PNG decoder the library
 already carries for embedded packs. So the pack answers *what it needs and from
-where*, and the host only reads files ([SPEC §8.2](../../SSPLAYER_WGPU_SPEC.md)).
+where*, and the host only reads files.
 It is the same division of labour the sibling players use.
 
 ## Build and run
@@ -77,5 +76,4 @@ frameworks wgpu's Metal backend needs.
 
 The DX12 and Vulkan viewers repeat this play loop rather than sharing it. Only
 the window/surface creation differs between them, and a shared helper would cost
-the property that makes a sample useful: copy one directory and it builds
-(SPEC §2).
+the property that makes a sample useful: copy one directory and it builds.
