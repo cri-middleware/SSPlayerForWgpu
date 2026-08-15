@@ -1,27 +1,16 @@
 //! Timeline events, decoded into owned Rust values.
 //!
-//! **Everything here is owned, not borrowed.** The rest of the frame path hands
-//! out views into runtime memory that die with the frame (SPEC §1.1), but an
-//! event is something a host reacts to — it fires a sound, spawns a hit box,
-//! advances a script — and that reaction routinely outlives the tick that
-//! raised it. Copying a handful of small values per event is the price of the
-//! host not having to care.
+//! **Everything here is owned, not borrowed**, so a host's reaction to an event
+//! may outlive the tick that raised it.
 //!
-//! ## Where the values come from
+//! The runtime reports which frames of the timeline the last update crossed; the
+//! payloads live in the `.ssab`, addressed by the same index. [`decode_events`]
+//! joins the two.
 //!
-//! The runtime reports *which* frames of the timeline the last update crossed;
-//! the payloads themselves live in the `.ssab`, addressed by the same index.
-//! [`decode_events`] is the join between the two.
-//!
-//! ## Why the update is what collects them
-//!
-//! Playback does not visit every frame. Under frame skipping a slow tick jumps
-//! several frames at once, and a loop can wrap mid-tick — but the runtime
-//! records **every frame it stepped through** (`passed_frames`, which the SDK's
-//! own tests pin as `[4, 5, 6, 7, 8]` across a long tick and `[3, 4, 5, 0, 1]`
-//! across a loop), so polling it right after the update is what makes a
-//! footstep on a skipped frame still fire. Walking frames yourself, or reading
-//! only the frame that was landed on, loses them.
+//! Events are collected during the update, which is what makes them complete: a
+//! slow tick under frame skipping crosses several frames at once and a loop can
+//! wrap mid-tick, and every frame stepped through raises its events. Reading
+//! only the frame that was landed on loses the rest.
 
 use ssab::ssab::ss::format::{AnimationData, SignalCommandParamValue};
 

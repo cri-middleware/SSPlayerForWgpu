@@ -1,24 +1,22 @@
-//! The filesystem behind [`SSPlayer::load`] (SPEC §8.1).
+//! The filesystem behind [`SSPlayer::load`].
 //!
-//! One of the two [`AssetLoader`] implementations that ship — the other is the
-//! web face's (`fetch` + `createImageBitmap`, SPEC §10). Between them they are
-//! the entire platform-specific part of loading; the walk they serve is shared.
+//! One of the two [`AssetLoader`] implementations that ship; the other is the
+//! web face's (`fetch` + `createImageBitmap`). Between them they are the entire
+//! platform-specific part of loading, and the walk they serve is shared.
 //!
 //! **Nothing here is privileged.** An engine integration writes its own and gets
-//! the same walk: Bevy answers out of its `AssetServer`, a Godot host out of
-//! `ResourceLoader` — which it must, because an exported Godot project keeps its
+//! the same walk — which it must, because an exported Godot project keeps its
 //! resources inside a `.pck` and a Unity one inside an APK, where no `File::open`
-//! will reach them (SPEC §8.2).
+//! will reach them.
 
 use crate::player::AssetLoader;
 
 /// Reads with `std::fs` and hands the bytes back **encoded**, for the player to
 /// decode and upload on the next `update`.
 ///
-/// It borrows no GPU state, which is the point: [`SSPlayer::load`] must not need
-/// a `Device` or a `Queue`, because the borrow model does not lend it any until
-/// the frame starts (SPEC §8.1). Uploading is the flush's job, on the same
-/// timeline an embedded atlas already takes.
+/// It borrows no GPU state: [`SSPlayer::load`] takes no `Device` or `Queue`, so
+/// uploading is the next `update`'s job — the same timeline an embedded atlas
+/// already takes.
 ///
 /// [`SSPlayer::load`]: crate::SSPlayer::load
 pub(crate) struct FsLoader {
@@ -52,28 +50,21 @@ impl AssetLoader for FsLoader {
     /// `Path::parent` **is** the platform's answer to "which directory is this
     /// in", and that is the whole reason this method exists.
     ///
-    /// **Do not cut `src` by hand here.** Separators are `Path`'s business: it
-    /// knows which characters divide a path on the platform it was compiled for,
-    /// and we do not have to. Getting that wrong does not fail loudly — the base
-    /// lands one directory off, the atlases fall back to the 1x1 white texture,
-    /// and the parts draw as silhouettes behind a single `warn` (SPEC §8.1).
+    /// **Do not cut `src` by hand here.** Separators are `Path`'s business.
+    /// Getting it wrong fails quietly: the base lands one directory off, the
+    /// atlases fall back to the 1x1 white texture, and the parts draw as
+    /// silhouettes behind a single `warn`.
     ///
-    /// Derived from `origin` — where the caller rooted this loader — rather than
-    /// from the base a previous load left behind. A relative `src` therefore stays
-    /// inside the subtree the loader was handed, and, because `origin` never
-    /// moves, one loader serves any number of loads: the second `load_with` sees
-    /// the same base the first one did, not `overall/overall`.
-    ///
-    /// (An absolute `src` replaces `origin` entirely, which is `Path::join`'s
-    /// meaning of absolute and the right answer here — a caller naming a full path
-    /// is not asking to stay anywhere.)
+    /// Derived from `origin` rather than from the base a previous load left
+    /// behind, so a relative `src` stays inside the subtree the loader was handed
+    /// and one loader serves any number of loads. An absolute `src` replaces
+    /// `origin` entirely, which is `Path::join`'s meaning of absolute.
     fn set_base(&mut self, src: &str) {
         self.root = self.origin.join(src).parent().map(std::path::Path::to_path_buf).unwrap_or_default();
     }
 
-    /// Sequential: overlapping filesystem reads is not where the time goes, and a
-    /// thread pool here would buy a dependency rather than latency. The batch
-    /// shape exists for the face where it does matter (SPEC §10).
+    /// Sequential. The batch shape exists for the web face, where overlapping
+    /// the reads does matter.
     async fn read(&mut self, paths: &[String]) -> Vec<Option<Vec<u8>>> {
         paths.iter().map(|path| std::fs::read(self.root.join(path)).ok()).collect()
     }
@@ -85,15 +76,13 @@ impl AssetLoader for FsLoader {
 
     /// Only what this load has already read.
     ///
-    /// That much is safe to answer because a `FsLoader` lives for exactly one
-    /// [`SSPlayer::load`], so it cannot go stale against a renderer it never saw —
-    /// and it is worth answering, because the instance-pack walk asks once per pack
-    /// and sibling packs routinely share an atlas (SPEC §7.1, §8.1).
+    /// A `FsLoader` lives for exactly one [`SSPlayer::load`], and sibling packs
+    /// routinely share an atlas, so this stops the walk re-reading one.
     ///
-    /// It stays `false` for anything the *renderer* already holds: the authoritative
-    /// "already registered" check happens at the flush instead. The cost is that a
-    /// second player of a reference-mode pack re-reads its atlas files before the
-    /// flush discards them — file reads, not uploads or decodes.
+    /// It stays `false` for anything the *renderer* already holds; that check
+    /// happens at the flush. So a second player of a reference-mode pack re-reads
+    /// its atlas files before the flush discards them — file reads, not uploads
+    /// or decodes.
     ///
     /// [`SSPlayer::load`]: crate::SSPlayer::load
     fn has_texture(&self, hash: u32) -> bool {
