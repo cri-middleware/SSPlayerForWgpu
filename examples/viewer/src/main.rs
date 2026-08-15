@@ -1,24 +1,23 @@
-// Native development viewer for `ssplayer-wgpu` (SPEC §13).
+// Native development viewer for `ssplayer-wgpu`.
 //
 // The viewer is a host: it owns the whole wgpu stack (instance / device / queue
-// / surface) and lends it to the borrow-model player each frame (SPEC §1).
+// / surface) and lends it to the borrow-model player each frame.
 //
 // **It shows a cast, not a character.** One `SSRenderer` (device-scoped), one
-// `SSScene` (this window), and N `SSPlayer`s built into a single render pass —
-// which is what P7 rebuilt the drawing layer to allow. The multi-player faults
-// that only the eye catches live here: one player's mask clipping the next (the
-// `Stack` layout piles them on top of each other on purpose), a blend reading
-// through a neighbour, and who ends up in front when `order` is reversed.
-// `tests/scene.rs` pins those headless as pixel counts; this is where you look
-// at them.
+// `SSScene` (this window), and N `SSPlayer`s built into a single render pass.
+// The multi-player faults that only the eye catches live here: one player's mask
+// clipping the next (the `Stack` layout piles them on top of each other on
+// purpose), a blend reading through a neighbour, and who ends up in front when
+// `order` is reversed. `tests/scene.rs` pins those headless as pixel counts;
+// this is where you look at them.
 //
-//   Space       pause / resume            +/-     add / remove a player
-//   Left/Right  previous / next .ssab     Tab     cycle focus (all / #1 / #2 …)
-//   Up/Down     previous / next animation V       toggle visibility
-//   R           restart animation         [ / ]   alpha down / up
-//   L           layout: Row / Stack       O       reverse draw order
-//   F           toggle Y-axis flip        Escape  quit
-//   drop        play a dropped .ssab, or every .ssab in a dropped folder
+// Space pause / resume +/- add / remove a player
+// Left/Right previous / next .ssab Tab cycle focus (all / #1 / #2 …)
+// Up/Down previous / next animation V toggle visibility
+// R           restart animation [ / ] alpha down / up
+// L           layout: Row / Stack O       reverse draw order
+// F           toggle Y-axis flip Escape quit
+// drop play a dropped .ssab, or every .ssab in a dropped folder
 //
 // The pack, animation, visibility and alpha keys act on the **focused** member;
 // focus starts at "all", so they drive the whole cast until you press Tab.
@@ -33,13 +32,12 @@ use winit::event::WindowEvent;
 use winit::event_loop::{ActiveEventLoop, EventLoop};
 use winit::window::{Window, WindowAttributes};
 
-/// Depth/stencil format the host attaches so the player can rasterise masks
-/// (SPEC §6). The depth aspect is unused (compare Always, no write).
+/// Depth/stencil format the host attaches so the player can rasterise masks.
+/// The depth aspect is unused (compare Always, no write).
 const STENCIL_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Depth24PlusStencil8;
 
-/// Cast size at startup. Two, because one is the case that worked before P7 —
-/// starting there means a regression in player isolation is on screen from the
-/// first frame rather than behind a keypress.
+/// Cast size at startup. Two rather than one, so a regression in player
+/// isolation is on screen from the first frame rather than behind a keypress.
 const INITIAL_CAST: usize = 2;
 /// Most players `+` will go to. Throughput is `tests/scale.rs`'s job; this is
 /// for looking at interference, and past a handful there is nothing to see.
@@ -70,7 +68,7 @@ impl Layout {
 
 /// One character in the scene: a player plus which pack and animation it is on.
 ///
-/// A player holds no GPU resource at all (SPEC §1.2), so the cast is a plain
+/// A player holds no GPU resource at all, so the cast is a plain
 /// `Vec` and the whole of it is lent to the scene once per frame.
 struct Member {
     player: SSPlayer,
@@ -106,21 +104,21 @@ struct AppState {
     /// Depth/stencil view attached to every render pass, resized with the window.
     stencil_view: wgpu::TextureView,
 
-    /// Device-scoped and host-owned (SPEC §1.2): one renderer serves every
+    /// Device-scoped and host-owned: one renderer serves every
     /// player on this device, so putting more characters on screen costs no
     /// extra pipelines or atlas uploads.
     renderer: SSRenderer,
     /// One scene per render target; it owns the frame arena and draws every
-    /// player into a single pass (SPEC §9.2).
+    /// player into a single pass.
     scene: SSScene,
 
     /// Every `.ssab` in the asset directory, parsed once. Members share them by
-    /// `Arc` (SPEC §8.2), so a cast of N on one pack costs one parse and one
+    /// `Arc`, so a cast of N on one pack costs one parse and one
     /// atlas upload between them, not N.
     packs: Vec<SSPack>,
     /// Where each pack was read from. `SSPlayer::load` takes the path, not the
     /// bytes — it is what lets the player find the pack's atlases and the packs
-    /// its instance parts play from (SPEC §8.1, §7.1).
+    /// its instance parts play from.
     pack_paths: Vec<PathBuf>,
     /// Animation names per pack, in `packs` order.
     pack_anims: Vec<Vec<String>>,
@@ -132,7 +130,7 @@ struct AppState {
     /// they always did.
     focus: Option<usize>,
     layout: Layout,
-    /// Draw the cast back to front instead of front to back (SPEC §9.3). Only
+    /// Draw the cast back to front instead of front to back. Only
     /// visible where they overlap, which is what `Layout::Stack` is for.
     reverse_order: bool,
 
@@ -143,7 +141,7 @@ struct AppState {
     /// Wall time of the last `SSScene::update`, in milliseconds.
     last_update_ms: f64,
     /// When the status block was last drawn. It refreshes on a timer as well as
-    /// on keypresses, so the frame counters on it stay live (SPEC §14.2 item 10
+    /// on keypresses, so the frame counters on it stay live ( item 10
     /// — these numbers are the only evidence a change made the frame cheaper).
     last_status: Instant,
 }
@@ -168,10 +166,10 @@ impl AppState {
         if !self.is_paused {
             // The whole cast goes into one `update`, so one `begin_frame` /
             // `end_frame` pair spans it and the draws end up back to back in a
-            // single pass (SPEC §9.2).
+            // single pass.
             let mut players: Vec<&mut SSPlayer> = self.cast.iter_mut().map(|m| &mut m.player).collect();
             // The CPU half of the frame. The scene deliberately does not time
-            // itself (SPEC §14.2 item 10) — `Instant` is not portable to wasm,
+            // itself — `Instant` is not portable to wasm,
             // and a host needs one line to do it.
             let started = Instant::now();
             self.scene.update(&mut self.renderer, &self.device, &self.queue, delta, &mut players);
@@ -200,7 +198,7 @@ impl AppState {
             // One pass for the whole cast. Clearing the stencil here would hide
             // a player failing to unwind its own mask coverage, which is the
             // regression `tests/scene.rs::stencil_unwind_isolates_players`
-            // guards headless — but the eye catches it here first (SPEC §6).
+            // guards headless — but the eye catches it here first.
             let mut rpass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
                 label: Some("Render Pass"),
                 color_attachments: &[Some(wgpu::RenderPassColorAttachment {
@@ -246,7 +244,7 @@ impl AppState {
 
     /// Build a player and put it on screen. It arrives empty: `apply_pack` below
     /// loads what it plays, and that call brings the pack's atlases and the packs
-    /// its instance parts reference with it (SPEC §8.1, §7.1).
+    /// its instance parts reference with it.
     fn spawn_member(&mut self, pack_idx: usize, anim_idx: usize) {
         self.cast.push(Member { player: SSPlayer::new(), pack_idx, anim_idx });
 
@@ -271,10 +269,10 @@ impl AppState {
     ///
     /// **Atlases resolve against the directory the drop came from**, not against
     /// the viewer's asset directory: each pack names its images relative to
-    /// itself (SPEC §8.2), so a pack from anywhere on disk brings its textures
+    /// itself, so a pack from anywhere on disk brings its textures
     /// with it, embedded or not. Drop the folder rather than the file when the
     /// pack has external instance references — those resolve by pack name, so
-    /// every referenced pack has to be registered too (SPEC §7.1).
+    /// every referenced pack has to be registered too.
     ///
     /// Dropped packs join the list Right/Left walks; a pack dropped twice
     /// replaces its own entry rather than growing the list, which is what makes
@@ -301,7 +299,7 @@ impl AppState {
                 }
             };
             // Parsed for the picker only, and never renamed — the name inside the
-            // `.ssab` is what instance references resolve against (SPEC §7.1).
+            // `.ssab` is what instance references resolve against.
             let pack = match SSPack::load(&bytes) {
                 Ok(pack) => pack,
                 Err(e) => {
@@ -352,7 +350,7 @@ impl AppState {
             // One call: the pack, its atlases (either export mode) and the packs
             // its instance parts play from. `load` clears the selection —
             // selecting an animation and starting it are separate calls
-            // (SPEC §9.3) — so `apply_anim` below is not optional. Atlases the
+            // — so `apply_anim` below is not optional. Atlases the
             // renderer already holds are dropped at the flush, so switching packs
             // on a cast of eight does not re-upload anything.
             if let Err(e) = member.player.load(&path) {
@@ -388,7 +386,7 @@ impl AppState {
 
     /// Place the cast and stack it front to back.
     ///
-    /// Placement is per player (SPEC §5.4) — the projection belongs to the
+    /// Placement is per player — the projection belongs to the
     /// scene — so this is only a root matrix per member, and re-running it every
     /// time the window or the cast changes costs nothing.
     fn layout_cast(&mut self) {
@@ -436,24 +434,24 @@ impl AppState {
         // Clear screen using ANSI escape code.
         print!("\x1b[2J\x1b[H");
         println!("====================================================");
-        println!("         SpriteStudio 7 wgpu Player Viewer");
+        println!(" SpriteStudio 7 wgpu Player Viewer");
         println!("====================================================");
 
         let focus = match self.focus {
             Some(i) => format!("#{}", i + 1),
             None => "all".to_string(),
         };
-        println!("  Cast:             {} player(s) in 1 pass, focus {focus}", self.cast.len());
-        println!("  Layout:           {}{}", self.layout.name(), if self.reverse_order { ", draw order reversed" } else { "" });
+        println!(" Cast: {} player(s) in 1 pass, focus {focus}", self.cast.len());
+        println!(" Layout: {}{}", self.layout.name(), if self.reverse_order { ", draw order reversed" } else { "" });
         for (i, member) in self.cast.iter().enumerate() {
             let marker = if self.focus == Some(i) { '>' } else { ' ' };
             let pack = self.packs.get(member.pack_idx).map(SSPack::name).unwrap_or("none");
             let anim = self.pack_anims.get(member.pack_idx).and_then(|names| names.get(member.anim_idx)).map(String::as_str).unwrap_or("none");
-            let hidden = if member.player.is_visible() { "" } else { "  [hidden]" };
-            println!("  {marker} #{}  {pack} / {anim}   order {}  alpha {:.2}  nodes {}{hidden}", i + 1, member.player.order(), member.player.alpha(), member.player.instance_node_count());
+            let hidden = if member.player.is_visible() { "" } else { " [hidden]" };
+            println!(" {marker} #{} {pack} / {anim} order {} alpha {:.2} nodes {}{hidden}", i + 1, member.player.order(), member.player.alpha(), member.player.instance_node_count());
         }
 
-        // SPEC §14.2 item 10: what the frame cost. `prims` vs `draw_calls` is the
+        //what the frame cost. `prims` vs `draw_calls` is the
         // headroom draw-call merging has; `gpu` is absent when the adapter has no
         // timestamp query, and lags a frame or two when it does.
         let stats = self.scene.stats();
@@ -462,20 +460,20 @@ impl AppState {
             None => "n/a (no timestamp query)".to_string(),
         };
         println!("----------------------------------------------------");
-        println!("  Frame:            {} drawn / {} prims / {} draws / {:.1} KiB uploaded", stats.players, stats.prims, stats.draw_calls, stats.uploaded_bytes as f64 / 1024.0);
-        println!("  Draw list:        {} mergeable / {} redundant texture binds", stats.mergeable_draws, stats.redundant_texture_binds);
-        println!("  GPU pass:         {gpu}  (cpu update {:.3} ms)", self.last_update_ms);
-        println!("  Playback:         {}", if self.is_paused { "Paused" } else { "Playing" });
-        println!("  Y-Axis Mode:      {}", if self.y_down { "Y-Down (flipped)" } else { "Y-Up (standard)" });
+        println!(" Frame: {} drawn / {} prims / {} draws / {:.1} KiB uploaded", stats.players, stats.prims, stats.draw_calls, stats.uploaded_bytes as f64 / 1024.0);
+        println!(" Draw list: {} mergeable / {} redundant texture binds", stats.mergeable_draws, stats.redundant_texture_binds);
+        println!(" GPU pass: {gpu} (cpu update {:.3} ms)", self.last_update_ms);
+        println!(" Playback: {}", if self.is_paused { "Paused" } else { "Playing" });
+        println!(" Y-Axis Mode: {}", if self.y_down { "Y-Down (flipped)" } else { "Y-Up (standard)" });
         println!("----------------------------------------------------");
-        println!("  Controls (pack / animation / V / [ ] act on the focus):");
-        println!("    Space       - Pause / Resume        +/-   - Add / Remove player");
-        println!("    Right/Left  - Next / Prev SSAB      Tab   - Cycle focus");
-        println!("    Up/Down     - Next / Prev animation V     - Toggle visibility");
-        println!("    R           - Restart animation     [ / ] - Alpha down / up");
-        println!("    L           - Row / Stack layout    O     - Reverse draw order");
-        println!("    F           - Toggle Y-Axis Flip    Esc   - Exit");
-        println!("    Drop a .ssab or a folder on the window to play it");
+        println!(" Controls (pack / animation / V / [ ] act on the focus):");
+        println!(" Space - Pause / Resume +/- - Add / Remove player");
+        println!(" Right/Left - Next / Prev SSAB Tab - Cycle focus");
+        println!(" Up/Down - Next / Prev animation V - Toggle visibility");
+        println!(" R           - Restart animation [ / ] - Alpha down / up");
+        println!(" L           - Row / Stack layout O     - Reverse draw order");
+        println!(" F           - Toggle Y-Axis Flip Esc - Exit");
+        println!(" Drop a .ssab or a folder on the window to play it");
         println!("====================================================");
     }
 }
@@ -511,7 +509,7 @@ impl ApplicationHandler for App {
         println!("[DIAG] Adapter: {:?}", adapter.get_info().name);
 
         let (device, queue) =
-            // Take GPU timing when the adapter has it (SPEC §14.2 item 10). The
+            // Take GPU timing when the adapter has it. The
             // development viewer is where the numbers behind §14.2's proposals
             // get read, so it asks; a machine without the feature still runs.
             pollster::block_on(adapter.request_device(&wgpu::DeviceDescriptor {
@@ -545,8 +543,7 @@ impl ApplicationHandler for App {
         let scene = SSScene::new(&device, &SceneConfig { color_format: format, stencil_format: Some(STENCIL_FORMAT) });
 
         // Only the catalogue: every player loads what it plays from its path, and
-        // that one call brings the atlases and the referenced packs with it
-        // (SPEC §8.1). There is no separate texture pass here any more.
+        // that one call brings the atlases and the referenced packs with it. There is no separate texture pass here any more.
         let (packs, pack_anims, pack_paths) = load_packs(&self.asset_dir);
 
         // Prefer "Basic" as the initial pack, otherwise the first one.
@@ -743,7 +740,7 @@ impl ApplicationHandler for App {
 ///
 /// One [`SSPack`] per file, shared by the whole cast: cloning a pack is an `Arc`
 /// bump, so N characters on one pack hold one parse and one copy of the bytes
-/// between them (SPEC §8.2).
+/// between them.
 fn load_packs(dir: &Path) -> (Vec<SSPack>, Vec<Vec<String>>, Vec<PathBuf>) {
     let mut paths = Vec::new();
     if let Ok(entries) = std::fs::read_dir(dir) {
@@ -770,7 +767,7 @@ fn load_packs(dir: &Path) -> (Vec<SSPack>, Vec<Vec<String>>, Vec<PathBuf>) {
             }
         };
         // Never renamed: the name inside the `.ssab` is what `ref_anime_pack`
-        // resolves against (SPEC §7.1).
+        // resolves against.
         match SSPack::load(&bytes) {
             Ok(pack) => {
                 println!("Found SSAB: {:?}", path);

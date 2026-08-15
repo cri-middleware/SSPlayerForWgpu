@@ -1,10 +1,8 @@
-//! Layer 2a (SPEC §1.2 / §9.1): the device-scoped half of rendering.
+//! The device-scoped half of rendering.
 //!
-//! Pipelines, bind group layouts, the sampler, the white fallback and the atlas
-//! textures stay valid for any render target on the device that made them, so
-//! the host owns one [`SSRenderer`] and lends it — the same borrow model it
-//! already applies to `Device` and `Queue`. The shader modules and the vertex
-//! format live here too: they are the contract the pipelines are built against.
+//! Pipelines, bind group layouts, the sampler, the white fallback, the shader
+//! modules and the atlas textures are valid for any render target on the device
+//! that made them, so the host owns one [`SSRenderer`] and lends it.
 //!
 //! The per-target, per-frame half is [`crate::SSScene`].
 
@@ -13,7 +11,7 @@ use std::collections::HashMap;
 
 use ssruntime::runtime::framedata::ss::runtime::BlendType;
 
-/// Which vertex stage expands a draw's primitives (SPEC §5.5).
+/// Which vertex stage expands a draw's primitives.
 ///
 /// There is no vertex buffer: the runtime's SoA arrays are copied into the
 /// scene's arena verbatim and the vertex stage reads them, so what used to be a
@@ -66,7 +64,7 @@ pub(crate) enum PipelineKind {
     /// Mask-write geometry: the stencil op it applies, and the class. Colour
     /// output is masked off, so blend does not vary.
     Mask(MaskOp, GeomClass),
-    /// Integration shader (`ss-*`, SPEC §6): shader id x blend index. Never
+    /// Integration shader (`ss-*`): shader id x blend index. Never
     /// stencil-tested — shader parts are not masked in v1 — and always
     /// [`GeomClass::Quad`], because only Normal parts carry a SHDR attribute.
     Shader(u32, usize),
@@ -74,7 +72,7 @@ pub(crate) enum PipelineKind {
 
 impl PipelineKind {
     /// Which vertex stage expands this pipeline's draws — and therefore how a
-    /// primitive index maps to `vertex_index` (SPEC §5.5).
+    /// primitive index maps to `vertex_index`.
     pub(crate) fn geom_class(self) -> GeomClass {
         match self {
             PipelineKind::Content(_, _, class) | PipelineKind::Mask(_, class) => class,
@@ -84,7 +82,7 @@ impl PipelineKind {
     }
 }
 
-/// What distinguishes one render pipeline from another (SPEC §5.2).
+/// What distinguishes one render pipeline from another.
 ///
 /// wgpu bakes blend, depth/stencil state **and the target's formats** into the
 /// pipeline, so every combination a frame uses needs its own object. They are
@@ -94,7 +92,7 @@ impl PipelineKind {
 ///
 /// The formats are part of the key rather than fixed at construction, which is
 /// what lets a single device-scoped [`SSRenderer`] serve render targets that do
-/// not agree on them (SPEC §9.1).
+/// not agree on them.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub(crate) struct PipelineKey {
     pub(crate) kind: PipelineKind,
@@ -111,7 +109,7 @@ struct TextureEntry {
     alpha: AlphaMode,
 }
 
-/// How a texture's colour channels relate to its alpha (SPEC §8.2).
+/// How a texture's colour channels relate to its alpha.
 ///
 /// The whole pipeline composites premultiplied (§5.2), so the fragment stage has
 /// to know which form it is sampling: a premultiplied texel is divided back to
@@ -136,8 +134,8 @@ pub enum AlphaMode {
 ///
 /// Small on purpose: it exists so [`AlphaMode`] does not become a pipeline
 /// dimension. It also carries the texel size, which is the unit the runtime's UVs
-/// arrive in (SPEC §3.2) — that is what lets the vertex stage normalise them
-/// instead of the CPU (SPEC §5.5).
+/// arrive in — that is what lets the vertex stage normalise them
+/// instead of the CPU.
 #[repr(C)]
 #[derive(Copy, Clone, Debug, bytemuck::Pod, bytemuck::Zeroable)]
 struct TexInfo {
@@ -154,7 +152,7 @@ impl TexInfo {
     }
 }
 
-/// Layer 2a (SPEC §1.2 / §9.1): everything whose useful lifetime is the
+/// Layer 2a: everything whose useful lifetime is the
 /// **device**, not one player and not one render target.
 ///
 /// Pipelines, bind group layouts, the sampler, the white fallback and the atlas
@@ -168,7 +166,7 @@ impl TexInfo {
 /// Nothing here is format-specific: the pipeline key carries the target formats,
 /// so targets that disagree share one renderer.
 pub struct SSRenderer {
-    /// Every pipeline used so far, built on first use (SPEC §5.2).
+    /// Every pipeline used so far, built on first use.
     pub(crate) pipelines: HashMap<PipelineKey, wgpu::RenderPipeline>,
     /// Inputs the lazy builder needs: the sprite/mask WGSL module and its layout.
     shader_module: wgpu::ShaderModule,
@@ -181,7 +179,7 @@ pub struct SSRenderer {
 
     /// group(0): the render target's projection **and its frame geometry** — the
     /// SoA arena, the primitive table and the mesh stream the vertex stages read
-    /// in place of a vertex buffer (SPEC §5.5). The layout is shared; every buffer
+    /// in place of a vertex buffer. The layout is shared; every buffer
     /// behind it belongs to the target ([`crate::SSScene`]).
     pub(crate) scene_bind_group_layout: wgpu::BindGroupLayout,
     /// group(1): atlas texture + sampler + its [`TexInfo`].
@@ -190,7 +188,7 @@ pub struct SSRenderer {
     pub(crate) ss_params_bind_group_layout: wgpu::BindGroupLayout,
 
     sampler: wgpu::Sampler,
-    /// 1x1 white texture, bound when a draw's texture hash is missing (SPEC §8)
+    /// 1x1 white texture, bound when a draw's texture hash is missing
     /// — used by Shape content and textureless mask writers. Filled with white on
     /// the first frame (the constructor has no queue to upload with).
     white_texture: wgpu::Texture,
@@ -198,10 +196,10 @@ pub struct SSRenderer {
     white_ready: bool,
 
     /// Atlas textures by fnv1a hash. Shared, so N players showing the same
-    /// character upload it once (SPEC §1.2).
+    /// character upload it once.
     textures: HashMap<u32, TextureEntry>,
     /// Retained pixels for [`Retention::Retain`] uploads, so a device loss can be
-    /// recovered without the host re-supplying them (SPEC §14).
+    /// recovered without the host re-supplying them.
     ///
     /// **Premultiplied**, not straight: these are the very buffer that was written
     /// to the texture, kept instead of copied, and nothing ever needs the straight
@@ -210,14 +208,14 @@ pub struct SSRenderer {
     /// (16 MB at 2048²) to buy a form no caller asks for.
     texture_sources: HashMap<u32, (Vec<u8>, u32, u32)>,
     /// How many times [`SSRenderer::upload_texture`] has actually created a
-    /// texture. A diagnostic (SPEC §13): the point of a device-scoped texture map
+    /// texture. A diagnostic: the point of a device-scoped texture map
     /// is that N players of one pack upload its atlas once between them, and only
     /// a counter — not the map's length — can tell that from N overwrites.
     texture_uploads: usize,
 }
 
 /// Whether [`SSRenderer::upload_texture`] keeps a copy of the pixels for device
-/// loss recovery (SPEC §14).
+/// loss recovery.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Retention {
     /// Keep them. For textures the host supplied and may no longer hold.
@@ -228,7 +226,7 @@ pub enum Retention {
     Reproducible,
 }
 
-/// The 12 `BlendType`s in schema discriminant order (SPEC §4.3). Pipelines are
+/// The 12 `BlendType`s in schema discriminant order. Pipelines are
 /// built in this order; [`blend_index`] maps a `BlendType` to its slot.
 const BLEND_ORDER: [BlendType; 12] =
     [BlendType::Mix, BlendType::Mul, BlendType::Add, BlendType::Sub, BlendType::Mulalpha, BlendType::Screen, BlendType::Exclusion, BlendType::Invert, BlendType::Mul2, BlendType::Div2, BlendType::Screen2, BlendType::Overlay2];
@@ -239,7 +237,7 @@ pub(crate) fn blend_index(blend: BlendType) -> usize {
     (blend.0 as usize).min(BLEND_ORDER.len() - 1)
 }
 
-/// Premultiplied blend state for a `BlendType` (SPEC §5.2, matching the WebGL
+/// Premultiplied blend state for a `BlendType` (matching the WebGL
 /// `applyBlend` table). RGB factors/op per mode; alpha is `One, OneMinusSrcAlpha`
 /// (premultiplied coverage) for every mode. Unverified modes mirror ssplayer-pixi:
 /// Mulalpha/Mul2 -> Mul, Screen2 -> Screen, Div2/Overlay2 -> Mix.
@@ -254,7 +252,7 @@ fn blend_state(blend: BlendType) -> wgpu::BlendState {
         BlendType::Screen | BlendType::Screen2 => (OneMinusDst, One, Add),
         BlendType::Invert => (OneMinusDst, Zero, Add),
         BlendType::Exclusion => (OneMinusDst, OneMinusSrc, Add),
-        // Div2 / Overlay2: no GPU-native equivalent -> Mix fallback (SPEC §4.3).
+        // Div2 / Overlay2: no GPU-native equivalent -> Mix fallback.
         _ => (One, OneMinusSrcAlpha, Add),
     };
     wgpu::BlendState { color: wgpu::BlendComponent { src_factor: src, dst_factor: dst, operation: op }, alpha: wgpu::BlendComponent { src_factor: One, dst_factor: OneMinusSrcAlpha, operation: Add } }
@@ -285,7 +283,7 @@ fn stencil_face(compare: wgpu::CompareFunction, pass_op: wgpu::StencilOperation)
 
 /// Depth/stencil state for a pipeline that only *tests* coverage (content), or
 /// only *writes* it (mask writers, `write_mask` 0xFF). The depth aspect is
-/// inert throughout: never written, always passing (SPEC §6).
+/// inert throughout: never written, always passing.
 fn depth_stencil_state(format: Option<wgpu::TextureFormat>, compare: wgpu::CompareFunction, pass_op: wgpu::StencilOperation, write_mask: u32) -> Option<wgpu::DepthStencilState> {
     format.map(|format| wgpu::DepthStencilState {
         format,
@@ -296,7 +294,7 @@ fn depth_stencil_state(format: Option<wgpu::TextureFormat>, compare: wgpu::Compa
     })
 }
 
-/// Everything both WGSL modules share (SPEC §5.5): the scene's SoA arena and
+/// Everything both WGSL modules share: the scene's SoA arena and
 /// primitive table, the texture bindings, and the four vertex stages that expand
 /// primitives into vertices. Prefixed onto [`WGSL_SHADER`] and [`SS_SHADER_WGSL`],
 /// which add only their fragment stages.
@@ -305,8 +303,7 @@ fn depth_stencil_state(format: Option<wgpu::TextureFormat>, compare: wgpu::Compa
 /// `local_vertices` / `local_uvs` / `mesh_*` / shape arrays are copied into
 /// `f_arena` verbatim, one memcpy per node per frame, and the vertex stage reads
 /// them at the offsets a 80-byte `Prim` record points at. WebGL2 cannot do this —
-/// no storage buffers — and it is the single largest reason this player exists
-/// (SPEC §14.1).
+/// no storage buffers — and it is the single largest reason this player exists.
 ///
 /// The position maths is written out scalar by scalar rather than as matrix
 /// products, so it performs the same operations in the same order as the CPU path
@@ -326,12 +323,12 @@ struct Globals {
 // One drawn primitive. Which fields mean what depends on the vertex stage
 // reading it — the bases are element offsets into `f_arena`:
 //
-//            | aux_base      | pos_base        | uv_base          | count
-//   ---------+---------------+-----------------+------------------+-------
-//   vs_quad  | world matrix  | local vertices  | local UVs (px)   | -
-//   vs_mesh  | mesh Y        | mesh X          | mesh UVs (px)    | -
-//   vs_shape | world matrix  | shape vertices  | shape box coords | vertices
-//   vs_effect| -             | particle XY     | particle UVs     | -
+// | aux_base | pos_base | uv_base | count
+// ---------+---------------+-----------------+------------------+-------
+// vs_quad | world matrix | local vertices | local UVs (px) | -
+// vs_mesh | mesh Y | mesh X | mesh UVs (px) | -
+// vs_shape | world matrix | shape vertices | shape box coords | vertices
+// vs_effect| - | particle XY | particle UVs | -
 //
 // `colors` is packed RGBA8 but only RGB is read: alpha is kept in `alphas` at
 // full precision, because a part without PartColor takes its alpha straight from
@@ -361,7 +358,7 @@ struct Prim {
 @group(1) @binding(0) var t_diffuse: texture_2d<f32>;
 @group(1) @binding(1) var s_diffuse: sampler;
 
-// Per-texture facts that must not become pipeline dimensions (SPEC §8.2):
+// Per-texture facts that must not become pipeline dimensions:
 // `size` = (w, h, 1/w, 1/h) in texels, `flags.x` = 1 when premultiplied.
 struct TexInfo {
     size: vec4<f32>,
@@ -371,7 +368,7 @@ struct TexInfo {
 
 // Straight (un-premultiplied) RGB of a sampled texel. Our own uploads are
 // premultiplied and need the divide; a texture borrowed from an engine's asset
-// system usually is not (SPEC §8.2), and dividing it would blow out the edges.
+// system usually is not, and dividing it would blow out the edges.
 fn ss_straight_rgb(tex: vec4<f32>) -> vec3<f32> {
     return select(tex.rgb, tex.rgb / max(tex.a, 0.0001), tex_info.flags.x > 0.5);
 }
@@ -406,13 +403,13 @@ fn world_point(mat_base: u32, node_base: u32, lx: f32, ly: f32) -> vec3<f32> {
 }
 
 // Clip position. Z is written as a constant: the projection's third column is
-// identity, so the depth the transform produced never reaches x/y (SPEC §5.1).
+// identity, so the depth the transform produced never reaches x/y.
 fn to_clip(p: vec3<f32>) -> vec4<f32> {
     let pos = globals.proj * vec4<f32>(p, 1.0);
     return vec4<f32>(pos.x, pos.y, 0.5, 1.0);
 }
 
-// The runtime's UVs are in texture pixels (SPEC §3.2). A missing texture binds
+// The runtime's UVs are in texture pixels. A missing texture binds
 // the 1x1 white fallback, whose size is 1 — the same no-op the CPU path applied.
 fn normalize_uv(base: u32, k: u32) -> vec2<f32> {
     return vec2<f32>(f_arena[base + k * 2u], f_arena[base + k * 2u + 1u]) / tex_info.size.xy;
@@ -422,7 +419,7 @@ fn corner_rgba(pi: u32, k: u32) -> vec4<f32> {
     return vec4<f32>(unpack4x8unorm(prims[pi].colors[k]).rgb, prims[pi].alphas[k] * prims[pi].alpha);
 }
 
-// `varg` = [rate, isMix, isMul, isAddSub] (SPEC §5.3). Only four PartsColor
+// `varg` = [rate, isMix, isMul, isAddSub]. Only four PartsColor
 // formulas exist, so the mode is two bits on the primitive rather than three
 // floats on every vertex.
 fn varg_of(mode: u32, rate: f32) -> vec4<f32> {
@@ -523,7 +520,7 @@ fn vs_effect(@builtin(vertex_index) vi: u32) -> VertexOutput {
 "#;
 
 const WGSL_SHADER: &str = r#"
-// PartsColor blend (SPEC §5.3, direct port of WebGL PartsColorProgram).
+// PartsColor blend (direct port of WebGL PartsColorProgram).
 // Recover straight RGB, apply the mix/mul/add-sub blend selected by `varg`, then
 // re-premultiply. Blend factors are premul too (see the pipeline blend table),
 // keeping the whole path premultiplied.
@@ -546,7 +543,7 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
 // Mask-write fragment: color output is discarded (ColorWrites::empty()); only
 // the cutout matters. `varg.x` carries the threshold (< 0 = no cutout) — the
 // rate slot rather than a colour channel, because it has to survive at full f32
-// precision and the colours are packed to bytes (SPEC §6).
+// precision and the colours are packed to bytes.
 @fragment
 fn fs_mask(in: VertexOutput) -> @location(0) vec4<f32> {
     let a = textureSample(t_diffuse, s_diffuse, in.uv).a;
@@ -567,7 +564,7 @@ pub(crate) const SHADER_PARAM_STRIDE: usize = 256;
 pub(crate) const SHADER_PARAM_STRIDE_F32: usize = SHADER_PARAM_STRIDE / 4;
 
 /// id_hash (SDK `PartAttributeShader.id_hash()`, `fnv1a_hash_str("ss-*")`) ->
-/// WGSL fragment entry point. The 13 SpriteStudio integration shaders (SPEC §6,
+/// WGSL fragment entry point. The 13 SpriteStudio integration shaders (,
 /// ports of the WebGL `SSShaderLib.ts`). Hashes are the SDK's precomputed values.
 const SS_SHADER_ENTRIES: [(u32, &str); 13] = [
     (0x36629dfc, "fs_ss_sepia"),
@@ -604,9 +601,9 @@ pub(crate) fn ss_shader_entry(id_hash: u32) -> Option<&'static str> {
 /// `cell_rect`=(minU,minV,maxU,maxV) over the quad's corners, `pixel_size`=1/texel.
 const SS_SHADER_WGSL: &str = r#"
 struct SsParams {
-    param_a: vec4<f32>,    // param0..3
-    param_b: vec4<f32>,    // param4..7
-    cell_rect: vec4<f32>,  // minU, minV, maxU, maxV
+    param_a: vec4<f32>, // param0..3
+    param_b: vec4<f32>, // param4..7
+    cell_rect: vec4<f32>, // minU, minV, maxU, maxV
     pixel_size: vec4<f32>, // 1/texW, 1/texH, 0, 0
 }
 @group(2) @binding(0) var<uniform> ss: SsParams;
@@ -874,18 +871,18 @@ fn fs_ss_spot(in: VertexOutput) -> @location(0) vec4<f32> {
 
 impl SSRenderer {
     /// Build the device-scoped resources. Cheap: no pipeline is compiled until a
-    /// frame asks for one (SPEC §5.2), so this is two shader modules, three bind
+    /// frame asks for one, so this is two shader modules, three bind
     /// group layouts, a sampler and a 1x1 texture.
     ///
     /// Takes no target formats — those ride in the pipeline key, which is what
-    /// lets one renderer serve every target on the device (SPEC §9.1).
+    /// lets one renderer serve every target on the device.
     pub fn new(device: &wgpu::Device) -> Self {
         // WGSL source for a module is the shared vertex half plus its own
         // fragment half; naga sees one string either way.
         let sprite_wgsl = format!("const SHAPE_FAN_VERTS: u32 = {SHAPE_FAN_VERTS}u;\n{COMMON_WGSL}{WGSL_SHADER}");
         let shader_module = device.create_shader_module(wgpu::ShaderModuleDescriptor { label: Some("SpriteStudio Shader"), source: wgpu::ShaderSource::Wgsl(sprite_wgsl.into()) });
 
-        // group(0) is the scene (SPEC §9.2): the projection, plus the frame's SoA
+        // group(0) is the scene: the projection, plus the frame's SoA
         // arena, primitive table and mesh stream — everything the vertex stages
         // read instead of a vertex buffer (§5.5). Only the layout is shared; the
         // buffers behind it belong to the render target.
@@ -907,7 +904,7 @@ impl SSRenderer {
 
         // group(1): atlas texture + sampler + the per-texture facts (§8.2).
         // The uniform is visible to the vertex stage too, so UV normalisation can
-        // move there without reshaping the layout (SPEC §5.5).
+        // move there without reshaping the layout.
         let texture_bind_group_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
             label: Some("SpriteStudio Texture Bind Group Layout"),
             entries: &[
@@ -937,7 +934,7 @@ impl SSRenderer {
 
         let pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor { label: Some("SpriteStudio Pipeline Layout"), bind_group_layouts: &[Some(&scene_bind_group_layout), Some(&texture_bind_group_layout)], immediate_size: 0 });
 
-        // Integration-shader (`ss-*`) resources (SPEC §6). The module is compiled
+        // Integration-shader (`ss-*`) resources. The module is compiled
         // now; the pipelines are built lazily per key on first use.
         let ss_wgsl = format!("const SHAPE_FAN_VERTS: u32 = {SHAPE_FAN_VERTS}u;\n{COMMON_WGSL}{SS_SHADER_WGSL}");
         let ss_shader_module = device.create_shader_module(wgpu::ShaderModuleDescriptor { label: Some("SpriteStudio SS Shaders"), source: wgpu::ShaderSource::Wgsl(ss_wgsl.into()) });
@@ -956,7 +953,7 @@ impl SSRenderer {
             immediate_size: 0,
         });
 
-        // 1x1 white fallback texture (SPEC §8): used when a draw's texture hash
+        // 1x1 white fallback texture: used when a draw's texture hash
         // is missing and by textureless mask writers.
         let white_texture = device.create_texture(&wgpu::TextureDescriptor {
             label: Some("SpriteStudio White 1x1"),
@@ -1001,9 +998,8 @@ impl SSRenderer {
         }
     }
 
-    /// How many pipelines have been compiled so far (SPEC §5.2). A diagnostic:
-    /// it counts what the animation actually asked for, against the 39 that
-    /// eager construction used to build before the first frame.
+    /// How many pipelines have been compiled so far — that is, how many distinct
+    /// combinations the animation has actually asked for.
     pub fn pipeline_count(&self) -> usize {
         self.pipelines.len()
     }
@@ -1027,7 +1023,7 @@ impl SSRenderer {
             label: String,
             module: &'a wgpu::ShaderModule,
             layout: &'a wgpu::PipelineLayout,
-            /// Vertex entry: which geometry class expands this draw (SPEC §5.5).
+            /// Vertex entry: which geometry class expands this draw.
             vertex_entry: &'static str,
             entry: &'a str,
             blend: Option<wgpu::BlendState>,
@@ -1083,7 +1079,7 @@ impl SSRenderer {
             label: Some(&recipe.label),
             layout: Some(recipe.layout),
             // No vertex buffers: every attribute is read from the scene's storage
-            // buffers by `vertex_index` arithmetic (SPEC §5.5).
+            // buffers by `vertex_index` arithmetic.
             vertex: wgpu::VertexState { module: recipe.module, entry_point: Some(recipe.vertex_entry), buffers: &[], compilation_options: Default::default() },
             fragment: Some(wgpu::FragmentState {
                 module: recipe.module,
@@ -1106,7 +1102,7 @@ impl SSRenderer {
             cache: None,
         }))
     }
-    /// Register a texture the **supplier** owns (SPEC §8.2): the renderer builds a
+    /// Register a texture the **supplier** owns: the renderer builds a
     /// bind group around `view` and nothing else.
     ///
     /// This is the channel an engine integration uses. Bevy hands over the
@@ -1120,7 +1116,7 @@ impl SSRenderer {
     /// dangle; it does hold the texture alive, so a supplier that has finished
     /// with a hash calls [`SSRenderer::forget_texture`].
     ///
-    /// Device loss (SPEC §14) is the supplier's to repair on this path: the
+    /// Device loss is the supplier's to repair on this path: the
     /// renderer keeps no pixels it could rebuild from, so after
     /// [`SSRenderer::restore_device`] the supplier re-creates its texture and
     /// calls this again. Taking over a hash that was previously uploaded drops the
@@ -1138,7 +1134,7 @@ impl SSRenderer {
     /// The counterpart of [`SSRenderer::set_texture`]: until this is called the
     /// renderer's clone of the view keeps the supplier's texture alive, which for
     /// an engine means an unload that does not actually free anything. Draws that
-    /// still reference `hash` fall back to the 1x1 white texture (SPEC §8).
+    /// still reference `hash` fall back to the 1x1 white texture.
     pub fn forget_texture(&mut self, hash: u32) {
         self.textures.remove(&hash);
         self.texture_sources.remove(&hash);
@@ -1150,13 +1146,13 @@ impl SSRenderer {
         self.textures.get(&hash).map(|t| t.alpha)
     }
 
-    /// Provide a texture the **renderer** creates (SPEC §8). `hash` is the fnv1a
+    /// Provide a texture the **renderer** creates. `hash` is the fnv1a
     /// hash of the cellmap image path. This is the convenience path used by the
     /// viewer, the web host and the C API; an engine integration wants
     /// [`SSRenderer::set_texture`] instead.
     ///
     /// `rgba` is straight-alpha (as decoded from PNG); it is premultiplied here so
-    /// the whole pipeline stays premultiplied (SPEC §5.2, matching WebGL's
+    /// the whole pipeline stays premultiplied (matching WebGL's
     /// `UNPACK_PREMULTIPLY_ALPHA_WEBGL`). The premul shader recovers straight RGB
     /// before applying PartsColor.
     ///
@@ -1181,7 +1177,7 @@ impl SSRenderer {
 
     /// [`SSRenderer::upload_texture_owned`] for pixels that are premultiplied
     /// already — what the loading path hands over, having premultiplied off the
-    /// host's thread while it was decoding (SPEC §8.1).
+    /// host's thread while it was decoding.
     pub(crate) fn register_premultiplied(&mut self, device: &wgpu::Device, queue: &wgpu::Queue, hash: u32, premul: Vec<u8>, (width, height): (u32, u32), retention: Retention) {
         self.write_and_register(device, queue, hash, &premul, (width, height));
         if retention == Retention::Retain {
@@ -1234,7 +1230,7 @@ impl SSRenderer {
         })
     }
     /// Pixel size of a registered atlas, for normalising the runtime's UVs (which
-    /// arrive in texture pixel space, SPEC §3.2).
+    /// arrive in texture pixel space).
     pub fn texture_size(&self, hash: u32) -> Option<(f32, f32)> {
         self.textures.get(&hash).map(|t| t.size)
     }
@@ -1255,7 +1251,7 @@ impl SSRenderer {
     }
 
     /// The bind group for `hash`, or the 1x1 white fallback when it is missing
-    /// (SPEC §8) — Shape content and textureless mask writers rely on this.
+    /// — Shape content and textureless mask writers rely on this.
     pub(crate) fn texture_bind_group(&self, hash: u32) -> &wgpu::BindGroup {
         self.textures.get(&hash).map(|e| &e.bind_group).unwrap_or(&self.white_bind_group)
     }
@@ -1276,7 +1272,7 @@ impl SSRenderer {
         self.white_ready = true;
     }
 
-    /// Drop the retained copies of [`Retention::Retain`] uploads (SPEC §14).
+    /// Drop the retained copies of [`Retention::Retain`] uploads.
     /// Saves the duplicated pixels when the host keeps its own and would rather
     /// re-supply them itself; after this, [`SSRenderer::restore_device`] restores
     /// nothing and every texture must be uploaded again before drawing.
@@ -1285,11 +1281,10 @@ impl SSRenderer {
     }
 
     /// Rebuild every GPU resource against a freshly created `device` after the
-    /// previous one was lost (SPEC §14).
+    /// previous one was lost.
     ///
     /// Because this is device-scoped, **one call covers every scene and player on
-    /// the device** — the old design repeated the whole job, atlas decode
-    /// included, once per player.
+    /// the device**.
     ///
     /// Textures uploaded with [`Retention::Retain`] come back from their retained
     /// pixels. [`Retention::Reproducible`] ones do not: their supplier re-registers
@@ -1317,8 +1312,7 @@ impl SSRenderer {
 ///
 /// The rounding is `(c * a + 127) / 255` and not something cheaper: it is what the
 /// WebGL player's `UNPACK_PREMULTIPLY_ALPHA_WEBGL` produces, and the fixtures that
-/// compare an uploaded atlas against a host-premultiplied one are byte-for-byte
-/// (SPEC §5.2).
+/// compare an uploaded atlas against a host-premultiplied one are byte-for-byte.
 pub(crate) fn premultiply(rgba: &mut [u8]) {
     for px in rgba.chunks_exact_mut(4) {
         let a = px[3] as u32;
@@ -1332,7 +1326,7 @@ pub(crate) fn premultiply(rgba: &mut [u8]) {
 ///
 /// Mapped at creation rather than written through a `Queue`, because
 /// [`SSRenderer::new`] builds the white fallback's copy and the borrow model does
-/// not lend it a queue that early (SPEC §6).
+/// not lend it a queue that early.
 fn tex_info_buffer(device: &wgpu::Device, info: TexInfo) -> wgpu::Buffer {
     let buffer = device.create_buffer(&wgpu::BufferDescriptor { label: Some("SpriteStudio Texture Info"), size: std::mem::size_of::<TexInfo>() as u64, usage: wgpu::BufferUsages::UNIFORM, mapped_at_creation: true });
     buffer.slice(..).get_mapped_range_mut().copy_from_slice(bytemuck::bytes_of(&info));

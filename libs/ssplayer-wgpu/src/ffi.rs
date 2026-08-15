@@ -1,29 +1,28 @@
-//! The "ffi" face (SPEC §11 / §12 P5): the C ABI over the Rust API, for C/C++
+//! The "ffi" face: the C ABI over the Rust API, for C/C++
 //! hosts on DX12 / Vulkan / Metal.
 //!
 //! **This module is a translation layer and nothing else.** Every entry point
 //! does the same three things: validate the C arguments, convert them to Rust
-//! types, and call [`NativeHost`] (the wgpu host, SPEC §9.4) or [`SSPlayer`]
+//! types, and call [`NativeHost`] (the wgpu host) or [`SSPlayer`]
 //! (playback). No rendering or playback logic lives here — when something needs
 //! doing it belongs in `host.rs` or `player.rs`, where the Rust API gets it too.
 //!
-//! Raw window handles cannot cross the ABI as Rust traits (SPEC §14), so the
+//! Raw window handles cannot cross the ABI as Rust traits, so the
 //! caller fills in a flat [`SsWindowHandle`] (HWND / NSView / CAMetalLayer /
 //! Xlib / Wayland) which [`surface_target`] turns into what wgpu wants.
 //!
-//! **Two handles, not one (SPEC §11).** `ss_scene_t` is the window — surface,
-//! device, renderer, scene — and `ss_player_t` is one character drawn into it.
-//! They used to be the same object, which made a second character in one window
-//! structurally impossible: creating one meant creating a second surface on the
-//! same window, and the two cleared and presented over each other.
+//! **Two handles, not one.** `ss_scene_t` is the window — surface, device,
+//! renderer, scene — and `ss_player_t` is one character drawn into it. Fusing
+//! them would make a second character in one window need a second surface, and
+//! the two would clear and present over each other.
 //!
 //! Conventions:
 //! * Status is `int32_t`: `SS_OK` (0), positive = an `ssruntime` error code
-//!   (same numbering as the SDK's C-API), negative = a player/host error.
-//!   [`ss_last_error`] carries the human-readable detail.
+//! (same numbering as the SDK's C-API), negative = a player/host error.
+//! [`ss_last_error`] carries the human-readable detail.
 //! * No entry point unwinds: the workspace builds with `panic = "abort"`.
 //! * Nothing here retains the window; the caller must keep it (and its layer)
-//!   alive until [`ss_scene_destroy`].
+//! alive until [`ss_scene_destroy`].
 
 use crate::events::{SignalValue, SsEvent};
 use crate::host::{NativeHost, NativeHostConfig, PlayerId};
@@ -103,7 +102,7 @@ pub struct SsSceneDesc {
     /// Clear colour, straight RGBA in 0..1. Alpha 0 leaves the window transparent
     /// where nothing is drawn.
     pub clear_color: [f32; 4],
-    /// Allocate a depth/stencil buffer so mask parts rasterise (SPEC §6). With
+    /// Allocate a depth/stencil buffer so mask parts rasterise. With
     /// `false` the scene runs without masking, exactly as if the host attached
     /// no stencil.
     pub enable_mask: bool,
@@ -111,7 +110,7 @@ pub struct SsSceneDesc {
     pub y_down: bool,
 }
 
-/// What the last frame cost (SPEC §14.2 item 10), flattened for the ABI.
+/// What the last frame cost, flattened for the ABI.
 ///
 /// `gpu_pass_time_ns` is 0 when the adapter has no timestamp query, or before
 /// the first measurement has come back — it is read without stalling the
@@ -132,7 +131,7 @@ pub struct SsSceneStats {
     pub gpu_pass_time_ns: u64,
 }
 
-/// One atlas a pack asks for (SPEC §8.1), flattened for the ABI. What
+/// One atlas a pack asks for, flattened for the ABI. What
 /// `ss_player_texture_at` fills in.
 #[repr(C)]
 #[derive(Clone, Copy)]
@@ -151,7 +150,7 @@ pub struct SsTextureRef {
     pub path: *const c_char,
 }
 
-/// Something a load needed and did not get (SPEC §8.1), flattened for the ABI.
+/// Something a load needed and did not get, flattened for the ABI.
 /// What `ss_player_missing_at` fills in.
 #[repr(C)]
 #[derive(Clone, Copy)]
@@ -164,7 +163,7 @@ pub struct SsMissingAsset {
     ///
     /// For a texture this is the path the exporter wrote, **relative to its
     /// pack's directory** — the walk hands the loader bare names and never
-    /// builds a full path, so no full path exists to report (SPEC §8.1). Join it
+    /// builds a full path, so no full path exists to report. Join it
     /// onto the directory of what you passed `ss_player_load` if you want one.
     ///
     /// Owned by the scene and valid until the next `ss_player_missing_at` on it;
@@ -327,8 +326,7 @@ impl CScratch {
 /// Opaque player handle: which scene, and which player within it.
 ///
 /// Not a pointer into the scene's player list. That list moves as it grows, and
-/// slots are reused, so the id carries a generation and every call re-resolves it
-/// (SPEC §11).
+/// slots are reused, so the id carries a generation and every call re-resolves it.
 pub struct SsPlayer {
     scene: *mut SsScene,
     id: PlayerId,
@@ -376,7 +374,7 @@ unsafe fn scene_of<'a>(handle: *mut SsPlayer) -> Option<(&'a mut SsScene, Player
 }
 
 /// Borrow the player behind a caller-supplied handle, or `None` if it has been
-/// destroyed (SPEC §11 — a stale handle resolves, it does not dangle).
+/// destroyed (a stale handle resolves, it does not dangle).
 ///
 /// # Safety
 /// As [`scene_of`].
@@ -531,7 +529,7 @@ pub unsafe extern "C" fn ss_scene_destroy(handle: *mut SsScene) {
 ///
 /// One scene draws any number of players, in ascending `ss_player_set_order`.
 /// They share the window's device, renderer and atlas textures, so the second
-/// character of a pack costs no upload and no extra pipeline (SPEC §1.2).
+/// character of a pack costs no upload and no extra pipeline.
 ///
 /// The handle stays valid until `ss_player_destroy` or `ss_scene_destroy`.
 ///
@@ -573,8 +571,7 @@ pub unsafe extern "C" fn ss_scene_player_count(scene: *mut SsScene) -> u32 {
 
 // --- resources ------------------------------------------------------------
 
-/// Load a `.ssab` from `path` **and everything it depends on**, then select it
-/// (SPEC §8.1, §7.1).
+/// Load a `.ssab` from `path` **and everything it depends on**, then select it.
 ///
 /// The whole of loading in one call: the pack, both of its texture tables in
 /// either export mode, and the sibling packs its instance parts play from,
@@ -610,8 +607,8 @@ pub unsafe extern "C" fn ss_player_load(handle: *mut SsPlayer, path: *const c_ch
 /// Register an `.ssab` pack under `pack_name` without changing what plays.
 ///
 /// Every pack an animation can reference must be registered before
-/// `ss_player_set_animation`, since external instance parts resolve by pack name
-/// (SPEC §7.1). Embedded-mode packs (SPEC §8.1) also carry their atlases; those
+/// `ss_player_set_animation`, since external instance parts resolve by pack
+/// name. Embedded-mode packs also carry their atlases; those
 /// are decoded here and uploaded on the next `ss_scene_update`.
 ///
 /// # Safety
@@ -650,13 +647,13 @@ unsafe fn load_pack(handle: *mut SsPlayer, pack_name: *const c_char, data: *cons
 }
 
 /// Supply a texture for a reference-mode pack, keyed by the fnv1a hash the
-/// runtime reports in `DrawBatch.texture_hash` (SPEC §8.1). `rgba` is
+/// runtime reports in `DrawBatch.texture_hash`. `rgba` is
 /// straight-alpha RGBA8, `width * height * 4` bytes; it is premultiplied on the
 /// way to the GPU.
 ///
 /// Registered on the **scene**, because the texture map is device-scoped: every
-/// player in the window sees it, and a pack shown five times is uploaded once
-/// (SPEC §1.2). Embedded-mode packs need no call — their atlases load with the
+/// player in the window sees it, and a pack shown five times is uploaded once.
+/// Embedded-mode packs need no call — their atlases load with the
 /// pack.
 ///
 /// # Safety
@@ -675,10 +672,10 @@ pub unsafe extern "C" fn ss_scene_add_texture(scene: *mut SsScene, hash: u32, rg
 /// `ss_scene_add_texture` from **encoded** image bytes (PNG) instead of raw RGBA:
 /// the library decodes, premultiplies and uploads.
 ///
-/// It carries a PNG decoder for embedded packs anyway (SPEC §8.1), so a C host
+/// It carries a PNG decoder for embedded packs anyway, so a C host
 /// showing a reference-mode `.ssab` does not have to bring ImageIO / WIC /
 /// libpng along just to hand the pixels over. Reading the file is still the
-/// host's job — nothing here opens one (SPEC §8.2).
+/// host's job — nothing here opens one.
 ///
 /// # Safety
 /// `data` must point at `len` readable bytes. It is not retained.
@@ -694,7 +691,7 @@ pub unsafe extern "C" fn ss_scene_add_texture_png(scene: *mut SsScene, hash: u32
     }
 }
 
-/// How many atlases a registered pack asks for (SPEC §8.1). `pack_name` null
+/// How many atlases a registered pack asks for. `pack_name` null
 /// selects the main pack; 0 means nothing is registered under that name.
 ///
 /// # Safety
@@ -716,7 +713,7 @@ pub unsafe extern "C" fn ss_player_texture_count(handle: *mut SsPlayer, pack_nam
 }
 
 /// Describe the `index`-th atlas of a registered pack, so a reference-mode host
-/// knows *what* to load and *where the exporter put it* (SPEC §8.1).
+/// knows *what* to load and *where the exporter put it*.
 ///
 /// This is the half of texture supply only the `.ssab` can answer, and it is the
 /// same shape the sibling players expose: register the pack, walk this list, and
@@ -754,7 +751,7 @@ pub unsafe extern "C" fn ss_player_texture_at(handle: *mut SsPlayer, pack_name: 
     SS_OK
 }
 
-/// How many things the player's last load could not get (SPEC §8.1).
+/// How many things the player's last load could not get.
 ///
 /// `ss_player_load` reports an error only when the `.ssab` itself is unreadable —
 /// one missing atlas must not cost you the character — so this is how a caller
@@ -762,9 +759,9 @@ pub unsafe extern "C" fn ss_player_texture_at(handle: *mut SsPlayer, pack_name: 
 ///
 /// ```c
 /// if (ss_player_load(player, path) != SS_OK) {
-///     // the .ssab itself
+/// // the .ssab itself
 /// } else if (ss_player_missing_count(player) > 0) {
-///     // it plays, but something is a silhouette or absent
+/// // it plays, but something is a silhouette or absent
 /// }
 /// ```
 ///
@@ -1086,7 +1083,7 @@ pub unsafe extern "C" fn ss_player_skip_frames(handle: *mut SsPlayer) -> bool {
     unsafe { player(handle) }.map(|p| p.skip_frames()).unwrap_or(true)
 }
 
-// --- Per-part overrides (SPEC §9.5) ---
+// --- Per-part overrides ---
 //
 // Indices address the root animation and are stable within one pack, so resolve
 // a name once with `ss_player_find_part_index` and keep the index. Overrides do
@@ -1247,7 +1244,7 @@ pub unsafe extern "C" fn ss_player_part_count(handle: *mut SsPlayer) -> u32 {
     unsafe { player(handle) }.map(|p| p.part_count() as u32).unwrap_or(0)
 }
 
-// --- Events (SPEC §9.5) ---
+// --- Events ---
 //
 // Polled after `ss_scene_update`, which is what advanced the clock. Everything
 // below describes that tick and is replaced by the next one, so a host that
@@ -1496,13 +1493,12 @@ pub unsafe extern "C" fn ss_player_animation_name(handle: *mut SsPlayer, index: 
     scene.name_scratch.as_ptr()
 }
 
-// --- placement (SPEC §9.3) ------------------------------------------------
+// --- placement ------------------------------------------------
 
 /// Place this player in its scene: translation in pixels from the centre, scale,
 /// then rotation in radians.
 ///
-/// Without this every player sits at the origin on top of the others, which is
-/// why the old one-player-per-window API never needed it.
+/// Without this every player sits at the origin, on top of the others.
 ///
 /// # Safety
 /// `handle` must be a live handle or null.
@@ -1585,7 +1581,7 @@ pub unsafe extern "C" fn ss_scene_update(scene: *mut SsScene, delta_seconds: f32
 ///
 /// One pass covers every player, in ascending `ss_player_set_order`.
 ///
-/// A lost/outdated surface is absorbed by reconfiguring (SPEC §14): the call
+/// A lost/outdated surface is absorbed by reconfiguring: the call
 /// returns `SS_OK` having skipped one frame.
 ///
 /// # Safety
@@ -1599,7 +1595,7 @@ pub unsafe extern "C" fn ss_scene_render(scene: *mut SsScene) -> i32 {
     }
 }
 
-/// What the last frame cost (SPEC §14.2 item 10). Writes `out` and returns
+/// What the last frame cost. Writes `out` and returns
 /// `SS_OK`, or leaves it untouched and reports the reason.
 ///
 /// # Safety
@@ -1625,7 +1621,7 @@ pub unsafe extern "C" fn ss_scene_resize(scene: *mut SsScene, width: u32, height
     }
 }
 
-/// Whether the driver has taken the GPU device away (SPEC §14). False for a null
+/// Whether the driver has taken the GPU device away. False for a null
 /// scene. While this is true `ss_scene_update` / `ss_scene_render` do nothing and
 /// `ss_scene_resize` only records the size.
 ///
@@ -1637,7 +1633,7 @@ pub unsafe extern "C" fn ss_scene_is_device_lost(scene: *mut SsScene) -> bool {
 }
 
 /// Rebuild the GPU stack after a device loss and restore every player drawing into
-/// this window, resuming playback where it was interrupted (SPEC §14).
+/// this window, resuming playback where it was interrupted.
 ///
 /// `SS_ERROR_GPU` means the window has to be rebuilt from `ss_scene_create`.
 ///

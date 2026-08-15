@@ -132,8 +132,7 @@
  Opaque player handle: which scene, and which player within it.
 
  Not a pointer into the scene's player list. That list moves as it grows, and
- slots are reused, so the id carries a generation and every call re-resolves it
- (SPEC §11).
+ slots are reused, so the id carries a generation and every call re-resolves it.
  */
 typedef struct ss_player_t ss_player_t;
 
@@ -195,7 +194,7 @@ typedef struct {
      */
     float clear_color[4];
     /*
-     Allocate a depth/stencil buffer so mask parts rasterise (SPEC §6). With
+     Allocate a depth/stencil buffer so mask parts rasterise. With
      `false` the scene runs without masking, exactly as if the host attached
      no stencil.
      */
@@ -207,7 +206,7 @@ typedef struct {
 } ss_scene_desc_t;
 
 /*
- One atlas a pack asks for (SPEC §8.1), flattened for the ABI. What
+ One atlas a pack asks for, flattened for the ABI. What
  `ss_player_texture_at` fills in.
  */
 typedef struct {
@@ -232,7 +231,7 @@ typedef struct {
 } ss_texture_ref_t;
 
 /*
- Something a load needed and did not get (SPEC §8.1), flattened for the ABI.
+ Something a load needed and did not get, flattened for the ABI.
  What `ss_player_missing_at` fills in.
  */
 typedef struct {
@@ -249,7 +248,7 @@ typedef struct {
 
      For a texture this is the path the exporter wrote, **relative to its
      pack's directory** — the walk hands the loader bare names and never
-     builds a full path, so no full path exists to report (SPEC §8.1). Join it
+     builds a full path, so no full path exists to report. Join it
      onto the directory of what you passed `ss_player_load` if you want one.
 
      Owned by the scene and valid until the next `ss_player_missing_at` on it;
@@ -351,7 +350,7 @@ typedef struct {
 } SsSignalParamData;
 
 /*
- What the last frame cost (SPEC §14.2 item 10), flattened for the ABI.
+ What the last frame cost, flattened for the ABI.
 
  `gpu_pass_time_ns` is 0 when the adapter has no timestamp query, or before
  the first measurement has come back — it is read without stalling the
@@ -429,7 +428,7 @@ void ss_scene_destroy(ss_scene_t *handle);
 
  One scene draws any number of players, in ascending `ss_player_set_order`.
  They share the window's device, renderer and atlas textures, so the second
- character of a pack costs no upload and no extra pipeline (SPEC §1.2).
+ character of a pack costs no upload and no extra pipeline.
 
  The handle stays valid until `ss_player_destroy` or `ss_scene_destroy`.
 
@@ -457,8 +456,7 @@ void ss_player_destroy(ss_player_t *handle);
 uint32_t ss_scene_player_count(ss_scene_t *scene);
 
 /*
- Load a `.ssab` from `path` **and everything it depends on**, then select it
- (SPEC §8.1, §7.1).
+ Load a `.ssab` from `path` **and everything it depends on**, then select it.
 
  The whole of loading in one call: the pack, both of its texture tables in
  either export mode, and the sibling packs its instance parts play from,
@@ -488,8 +486,8 @@ int32_t ss_player_load(ss_player_t *handle, const char *path);
  Register an `.ssab` pack under `pack_name` without changing what plays.
 
  Every pack an animation can reference must be registered before
- `ss_player_set_animation`, since external instance parts resolve by pack name
- (SPEC §7.1). Embedded-mode packs (SPEC §8.1) also carry their atlases; those
+ `ss_player_set_animation`, since external instance parts resolve by pack
+ name. Embedded-mode packs also carry their atlases; those
  are decoded here and uploaded on the next `ss_scene_update`.
 
  # Safety
@@ -508,13 +506,13 @@ int32_t ss_player_load_ssab(ss_player_t *handle, const char *pack_name, const ui
 
 /*
  Supply a texture for a reference-mode pack, keyed by the fnv1a hash the
- runtime reports in `DrawBatch.texture_hash` (SPEC §8.1). `rgba` is
+ runtime reports in `DrawBatch.texture_hash`. `rgba` is
  straight-alpha RGBA8, `width * height * 4` bytes; it is premultiplied on the
  way to the GPU.
 
  Registered on the **scene**, because the texture map is device-scoped: every
- player in the window sees it, and a pack shown five times is uploaded once
- (SPEC §1.2). Embedded-mode packs need no call — their atlases load with the
+ player in the window sees it, and a pack shown five times is uploaded once.
+ Embedded-mode packs need no call — their atlases load with the
  pack.
 
  # Safety
@@ -530,10 +528,10 @@ int32_t ss_scene_add_texture(ss_scene_t *scene,
  `ss_scene_add_texture` from **encoded** image bytes (PNG) instead of raw RGBA:
  the library decodes, premultiplies and uploads.
 
- It carries a PNG decoder for embedded packs anyway (SPEC §8.1), so a C host
+ It carries a PNG decoder for embedded packs anyway, so a C host
  showing a reference-mode `.ssab` does not have to bring ImageIO / WIC /
  libpng along just to hand the pixels over. Reading the file is still the
- host's job — nothing here opens one (SPEC §8.2).
+ host's job — nothing here opens one.
 
  # Safety
  `data` must point at `len` readable bytes. It is not retained.
@@ -541,7 +539,7 @@ int32_t ss_scene_add_texture(ss_scene_t *scene,
 int32_t ss_scene_add_texture_png(ss_scene_t *scene, uint32_t hash, const uint8_t *data, size_t len);
 
 /*
- How many atlases a registered pack asks for (SPEC §8.1). `pack_name` null
+ How many atlases a registered pack asks for. `pack_name` null
  selects the main pack; 0 means nothing is registered under that name.
 
  # Safety
@@ -551,7 +549,7 @@ uint32_t ss_player_texture_count(ss_player_t *handle, const char *pack_name);
 
 /*
  Describe the `index`-th atlas of a registered pack, so a reference-mode host
- knows *what* to load and *where the exporter put it* (SPEC §8.1).
+ knows *what* to load and *where the exporter put it*.
 
  This is the half of texture supply only the `.ssab` can answer, and it is the
  same shape the sibling players expose: register the pack, walk this list, and
@@ -572,7 +570,7 @@ int32_t ss_player_texture_at(ss_player_t *handle,
                              ss_texture_ref_t *out);
 
 /*
- How many things the player's last load could not get (SPEC §8.1).
+ How many things the player's last load could not get.
 
  `ss_player_load` reports an error only when the `.ssab` itself is unreadable —
  one missing atlas must not cost you the character — so this is how a caller
@@ -580,9 +578,9 @@ int32_t ss_player_texture_at(ss_player_t *handle,
 
  ```c
  if (ss_player_load(player, path) != SS_OK) {
-     // the .ssab itself
+ // the .ssab itself
  } else if (ss_player_missing_count(player) > 0) {
-     // it plays, but something is a silhouette or absent
+ // it plays, but something is a silhouette or absent
  }
  ```
 
@@ -1050,8 +1048,7 @@ const char *ss_player_animation_name(ss_player_t *handle, uint32_t index);
  Place this player in its scene: translation in pixels from the centre, scale,
  then rotation in radians.
 
- Without this every player sits at the origin on top of the others, which is
- why the old one-player-per-window API never needed it.
+ Without this every player sits at the origin, on top of the others.
 
  # Safety
  `handle` must be a live handle or null.
@@ -1113,7 +1110,7 @@ void ss_scene_update(ss_scene_t *scene, float delta_seconds);
 
  One pass covers every player, in ascending `ss_player_set_order`.
 
- A lost/outdated surface is absorbed by reconfiguring (SPEC §14): the call
+ A lost/outdated surface is absorbed by reconfiguring: the call
  returns `SS_OK` having skipped one frame.
 
  # Safety
@@ -1122,7 +1119,7 @@ void ss_scene_update(ss_scene_t *scene, float delta_seconds);
 int32_t ss_scene_render(ss_scene_t *scene);
 
 /*
- What the last frame cost (SPEC §14.2 item 10). Writes `out` and returns
+ What the last frame cost. Writes `out` and returns
  `SS_OK`, or leaves it untouched and reports the reason.
 
  # Safety
@@ -1140,7 +1137,7 @@ int32_t ss_scene_stats(ss_scene_t *scene, ss_scene_stats_t *out);
 void ss_scene_resize(ss_scene_t *scene, uint32_t width, uint32_t height);
 
 /*
- Whether the driver has taken the GPU device away (SPEC §14). False for a null
+ Whether the driver has taken the GPU device away. False for a null
  scene. While this is true `ss_scene_update` / `ss_scene_render` do nothing and
  `ss_scene_resize` only records the size.
 
@@ -1151,7 +1148,7 @@ bool ss_scene_is_device_lost(ss_scene_t *scene);
 
 /*
  Rebuild the GPU stack after a device loss and restore every player drawing into
- this window, resuming playback where it was interrupted (SPEC §14).
+ this window, resuming playback where it was interrupted.
 
  `SS_ERROR_GPU` means the window has to be rebuilt from `ss_scene_create`.
 

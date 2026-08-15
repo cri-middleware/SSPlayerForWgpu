@@ -1,12 +1,11 @@
-//! Layer 2b (SPEC §1.2 / §9.2): the per-render-target half of rendering.
+//! The per-render-target half of rendering.
 //!
-//! Turns the runtime's FrameData / DrawBatch / SoA buffers into wgpu vertices,
-//! indices and draw commands, and owns what belongs to one render target: the
-//! projection and the frame's accumulation. One `SSScene` draws any number of
-//! players into one pass.
+//! Turns the runtime's FrameData / DrawBatch / SoA buffers into draw commands,
+//! and owns what belongs to one render target: the projection and the frame's
+//! geometry. One `SSScene` draws any number of players into one pass.
 //!
-//! Borrow model: it owns neither the `Device`/`Queue`, the render target, nor
-//! the device-scoped [`SSRenderer`] — all three are lent per frame.
+//! It owns neither the `Device`/`Queue`, the render target, nor the
+//! device-scoped [`SSRenderer`] — all three are lent per frame.
 
 use crate::frame::FrameView;
 use crate::mask::{MaskOp, MaskWriter, StencilTest};
@@ -17,8 +16,7 @@ use ssruntime::runtime::effect_draw_plan::ss::runtime::root_as_effect_draw_plan_
 use ssruntime::runtime::framedata::ss::runtime::{BlendType, DrawBatchKind, PartAttributeShader, root_as_frame_data_unchecked};
 
 /// PartsColor formula selector, matching `varg_of` in the WGSL. Only four exist,
-/// so the shader takes two bits per primitive rather than three floats per vertex
-/// (SPEC §5.3).
+/// so the shader takes two bits per primitive rather than three floats per vertex.
 ///
 /// Deliberately *not* four module-level `pub const`s: cbindgen sweeps those into
 /// the C header (see `cbindgen.toml`), and `#define MIX 0` in a public header is
@@ -52,7 +50,7 @@ pub struct SceneConfig {
     pub color_format: wgpu::TextureFormat,
     /// Depth/stencil format of the host's render target, or `None` to run
     /// without masking. When `Some`, the host must attach a matching
-    /// depth/stencil buffer to every render pass (SPEC §6); this enables the
+    /// depth/stencil buffer to every render pass; this enables the
     /// stencil-test content pipelines and the mask-write pipelines.
     pub stencil_format: Option<wgpu::TextureFormat>,
 }
@@ -68,7 +66,7 @@ pub struct BatchInfo {
     pub kind: DrawBatchKind,
     /// Stencil test to apply (masked content). `None` for ordinary content.
     pub stencil: StencilTest,
-    /// Player-level alpha (SPEC §9.3), folded into every vertex's colour alpha.
+    /// Player-level alpha, folded into every vertex's colour alpha.
     /// The shader's final coverage is `tex.a * color.a` and the blend table is
     /// premultiplied throughout, so a plain multiply here fades the part
     /// correctly under every blend mode (including Add / Mul, which reach `dst`
@@ -82,7 +80,7 @@ struct BatchDrawCall {
     key: PipelineKey,
     texture_hash: u32,
     /// The `vertex_index` range to issue. Which primitives that covers is the
-    /// class's own arithmetic (SPEC §5.5) — 6 per quad or particle, 30 per shape,
+    /// class's own arithmetic — 6 per quad or particle, 30 per shape,
     /// one stream entry per mesh vertex.
     vertices: std::ops::Range<u32>,
     /// Index of this part's block in the shader-params buffer, for
@@ -93,10 +91,9 @@ struct BatchDrawCall {
 /// One drawn primitive: where its geometry sits in the frame arena, and the
 /// handful of per-part values that are not in the runtime's buffers.
 ///
-/// This is the record SPEC §5.5 trades the vertex buffer for. The CPU no longer
-/// transforms corners — it copies the runtime's SoA arrays into the arena and
-/// writes one of these (80 bytes) per part, against 4 x 52 bytes of vertices plus
-/// 24 bytes of indices before.
+/// This is the record that stands in for a vertex buffer: the CPU does not
+/// transform corners, it copies the runtime's SoA arrays into the arena and
+/// writes one of these (80 bytes) per part.
 ///
 /// Field meanings are per geometry class; see the `Prim` comment in the WGSL,
 /// which this must stay in step with.
@@ -130,7 +127,7 @@ struct Prim {
     rates: [f32; 4],
 }
 
-/// Where one node's slice of the frame arena starts (SPEC §5.5).
+/// Where one node's slice of the frame arena starts.
 ///
 /// [`SSScene::begin_node`] copies the runtime's SoA buffers in — once per node
 /// per frame, as a handful of memcpys — and hands back the offsets. Every
@@ -157,8 +154,7 @@ pub struct NodeSlot {
 /// [`SSRenderer`]. It holds the projection (which is a property of the target)
 /// and the frame's vertex/index/draw-call accumulation.
 ///
-/// P7-4 renames this to `SSScene` and gives it the list of players drawing into
-/// it; today it is still one per player.
+/// One of these serves every player drawing into the same target.
 pub struct SSScene {
     /// Whether masking (stencil) is enabled for this target.
     stencil_enabled: bool,
@@ -179,18 +175,18 @@ pub struct SSScene {
     mesh_stream_buffer: Option<wgpu::Buffer>,
 
     /// Every player's chunk concatenated, in `order`. This is what reaches the
-    /// GPU (SPEC §5.5).
+    /// GPU.
     frame: FrameChunk,
     /// Per-player chunks, recycled across frames. One per player, filled
     /// independently — in parallel where the platform has threads (§14.2 item 6).
     pool: Vec<FrameChunk>,
 
-    // --- Integration shaders (`ss-*`, SPEC §6). Only touched when a frame has
+    // --- Integration shaders (`ss-*`). Only touched when a frame has
     // shader parts; shader-free animations never build any of this. ---
     ss_params_buffer: Option<wgpu::Buffer>,
     ss_params_bind_group: Option<wgpu::BindGroup>,
 
-    /// This frame's counts (SPEC §14.2 item 10). Free to keep, and the only way
+    /// This frame's counts. Free to keep, and the only way
     /// to tell whether a change to how work is issued actually issued less.
     stats: SceneStats,
     /// GPU pass timing, present only when the device was created with
@@ -223,7 +219,7 @@ fn quad_uv_bounds(frame: &FrameView, part_idx: usize, tex_size: Option<(f32, f32
     [min_u, min_v, max_u, max_v]
 }
 
-/// PartsColor formula for a `BlendType` (SPEC §5.3). Only Mix/Mul/Add/Sub select
+/// PartsColor formula for a `BlendType`. Only Mix/Mul/Add/Sub select
 /// one; any other `BlendType` clamps to Mix (else no branch matches and the
 /// shader outputs black).
 fn parts_color_mode(blend: BlendType) -> u32 {
@@ -269,7 +265,7 @@ impl SSScene {
         }
     }
 
-    /// What the last frame cost (SPEC §14.2 item 10).
+    /// What the last frame cost.
     ///
     /// Counts are always populated. `gpu_pass_time_ns` needs the device to have
     /// been created with `Features::TIMESTAMP_QUERY`, and the host to attach
@@ -302,7 +298,7 @@ impl SSScene {
     }
 
     /// The config this renderer was built from. Retained so a lost device can be
-    /// replaced by a renderer targeting the same formats (SPEC §14) without the
+    /// replaced by a renderer targeting the same formats without the
     /// caller having to remember them.
     pub fn config(&self) -> SceneConfig {
         SceneConfig { color_format: self.color_format, stencil_format: self.stencil_format }
@@ -316,7 +312,7 @@ impl SSScene {
     }
 
     /// Rebuild this target's GPU state against a freshly created `device` after
-    /// the previous one was lost (SPEC §14). The host calls
+    /// the previous one was lost. The host calls
     /// [`SSRenderer::restore_device`] first — that covers pipelines and textures
     /// for the whole device — then this once per render target, then
     /// [`crate::SSPlayer::restore_textures`] once per player.
@@ -335,7 +331,7 @@ impl SSScene {
         queue.write_buffer(&self.globals_buffer, 0, bytemuck::cast_slice(&matrix));
     }
 
-    /// Advance every player and build this target's frame (SPEC §9.2).
+    /// Advance every player and build this target's frame.
     ///
     /// This is the frame boundary: one `begin_frame` / `end_frame` pair spans
     /// **all** the players sharing the target, so their geometry lands in one
@@ -343,11 +339,11 @@ impl SSScene {
     ///
     /// Players are drawn in ascending [`crate::SSPlayer::order`], ties keeping the
     /// order the caller passed them in (the sort is stable). The scene borrows
-    /// them rather than owning them (SPEC §1.2), so they can live wherever the
+    /// them rather than owning them, so they can live wherever the
     /// host keeps them — a `Vec`, an ECS, an engine's scene graph.
     /// Building each player's geometry is independent — separate `Context`s,
     /// separate runtime buffers, separate chunk — so the walk happens in
-    /// parallel where the platform has threads (SPEC §14.2 item 6). The merge
+    /// parallel where the platform has threads. The merge
     /// afterwards is in `order`, so the result does not depend on how the work
     /// was divided.
     pub fn update(&mut self, renderer: &mut SSRenderer, device: &wgpu::Device, queue: &wgpu::Queue, delta_secs: f32, players: &mut [&mut crate::SSPlayer]) {
@@ -429,13 +425,12 @@ impl SSScene {
         write_slice(queue, self.prim_buffer.as_ref(), &self.frame.prims);
         write_slice(queue, self.mesh_stream_buffer.as_ref(), &self.frame.mesh_stream);
 
-        // Compile whatever this frame draws with and has not drawn with before
-        // (SPEC §5.2). After the first few frames every key is a cache hit, so
+        // Compile whatever this frame draws with and has not drawn with before. After the first few frames every key is a cache hit, so
         // this is a walk over the draw list and nothing more. Indexed rather
         // than iterated because `ensure_pipeline` needs `&mut self`.
         //
         // The same walk counts what draw-call merging and bind-group dedup would
-        // save (SPEC §14.2 item 7). Both are cheap to measure and neither is
+        // save. Both are cheap to measure and neither is
         // cheap to implement, so measure first.
         for i in 0..self.frame.draw_calls.len() {
             let key = self.frame.draw_calls[i].key;
@@ -453,7 +448,7 @@ impl SSScene {
             }
         }
 
-        // Integration shaders (SPEC §6): upload this frame's per-part params.
+        // Integration shaders: upload this frame's per-part params.
         // Nothing here runs for shader-free frames (`ss_params` stays empty).
         if !self.frame.ss_params.is_empty() {
             let bytes: &[u8] = bytemuck::cast_slice(&self.frame.ss_params);
@@ -480,10 +475,9 @@ impl SSScene {
     /// Record draw commands into a RenderPass opened by the host.
     /// Returns the number of draw calls issued.
     ///
-    /// Recorded fresh every frame, on purpose. A render bundle was measured here
-    /// and came out slower (SPEC §14.2 item 5): the draw list changes on most
-    /// frames as parts appear and disappear, so the recording is invalidated more
-    /// often than it is replayed.
+    /// Recorded fresh every frame. The draw list changes on most frames as parts
+    /// appear and disappear, so a recording would be invalidated more often than
+    /// it is replayed.
     pub fn draw<'a>(&'a self, renderer: &'a SSRenderer, rpass: &mut wgpu::RenderPass<'a>) -> usize {
         if self.frame.draw_calls.is_empty() {
             return 0;
@@ -491,7 +485,7 @@ impl SSScene {
 
         let Some(scene_bg) = self.scene_bind_group.as_ref() else { return 0 };
 
-        // No vertex or index buffer: group(0) *is* the geometry (SPEC §5.5).
+        // No vertex or index buffer: group(0) *is* the geometry.
         rpass.set_bind_group(0, scene_bg, &[]);
         if self.stencil_enabled {
             // Stencil ref is always 0; ops/compare are baked into the pipelines.
@@ -500,7 +494,7 @@ impl SSScene {
 
         let mut issued = 0usize;
         for call in &self.frame.draw_calls {
-            // Missing texture -> 1x1 white fallback (SPEC §8).
+            // Missing texture -> 1x1 white fallback.
             let texture = renderer.texture_bind_group(call.texture_hash);
 
             // `end_frame` compiled every key this frame uses, so a miss here means
@@ -508,7 +502,7 @@ impl SSScene {
             let (Some(pipeline), params_bg) = (renderer.pipelines.get(&call.key), self.ss_params_bind_group.as_ref()) else {
                 continue;
             };
-            // Integration-shader part (SPEC §6): group(2) carries the part's
+            // Integration-shader part: group(2) carries the part's
             // params at its dynamic offset.
             let params = match (call.shader_slot, params_bg) {
                 (Some(slot), Some(bg)) => Some((slot, bg)),
@@ -549,19 +543,16 @@ fn write_slice<T: bytemuck::Pod>(queue: &wgpu::Queue, buffer: Option<&wgpu::Buff
 
 /// One player's contribution to a frame, built on its own.
 ///
-/// The scene used to be the only accumulator, which meant players had to be
-/// walked one after another — a shape inherited from the single-threaded JS the
-/// drawing code was ported from, not from anything wgpu requires (SPEC §14.2
-/// item 6). A chunk holds the same arena / primitive / draw-call trio for **one**
-/// player, so N of them can be filled in parallel and concatenated afterwards.
+/// A chunk holds the arena / primitive / draw-call trio for **one** player, so
+/// players are built independently of each other and concatenated afterwards.
 ///
 /// Offsets inside a chunk are chunk-relative; [`SSScene`] rebases them as it
-/// merges, in the players' `order`, which is what keeps the merged frame
-/// identical to the serial one.
+/// merges, in the players' `order`, so the merged frame does not depend on how
+/// the work was divided.
 pub struct FrameChunk {
     /// The target this chunk is being built for — needed for pipeline keys.
     config: SceneConfig,
-    /// Runtime SoA buffers and node transforms, copied verbatim (SPEC §5.5).
+    /// Runtime SoA buffers and node transforms, copied verbatim.
     arena: Vec<f32>,
     prims: Vec<Prim>,
     /// `(primitive, vertex)` pairs, one per mesh vertex.
@@ -597,7 +588,7 @@ impl FrameChunk {
     /// A chunk is built without knowing what precedes it, so all its indices are
     /// chunk-relative: arena offsets inside each `Prim`, primitive indices inside
     /// the mesh stream, and — because each geometry class turns a primitive index
-    /// into a fixed span of `vertex_index` (SPEC §5.5) — the draw calls' vertex
+    /// into a fixed span of `vertex_index` — the draw calls' vertex
     /// ranges too. Rebasing them here is what lets the walk be parallel while the
     /// merged frame stays byte for byte what the serial walk produced.
     fn absorb(&mut self, other: &FrameChunk) {
@@ -631,13 +622,13 @@ impl FrameChunk {
         self.key(PipelineKind::Content(blend_index(blend), stencil, class))
     }
 
-    /// Attach this target's formats to a pipeline kind (SPEC §9.1).
+    /// Attach this target's formats to a pipeline kind.
     fn key(&self, kind: PipelineKind) -> PipelineKey {
         PipelineKey { kind, color_format: self.config.color_format, stencil_format: self.config.stencil_format }
     }
 
     /// Copy one node's runtime buffers into the frame arena and return where they
-    /// landed (SPEC §5.5). Call once per node per frame, before appending any of
+    /// landed. Call once per node per frame, before appending any of
     /// its batches.
     ///
     /// This is the whole CPU side of the vertex path: a handful of
@@ -687,7 +678,7 @@ impl FrameChunk {
     /// Record a draw over the primitives `[first, self.prims.len())`.
     ///
     /// Primitive indices are global to the frame, and each class turns one into a
-    /// fixed span of `vertex_index` values (SPEC §5.5). Primitives of other
+    /// fixed span of `vertex_index` values. Primitives of other
     /// classes in between simply leave gaps in a span nothing draws, which is why
     /// one primitive table serves all four.
     fn push_draw(&mut self, key: PipelineKey, class: GeomClass, texture_hash: u32, first: u32, shader_slot: Option<u32>) {
@@ -730,7 +721,7 @@ impl FrameChunk {
         match kind {
             DrawBatchKind::Normal => {
                 let key = self.content_key(blend_type, stencil, GeomClass::Quad);
-                // Integration-shader dispatch (SPEC §6): when the frame carries
+                // Integration-shader dispatch: when the frame carries
                 // `SHDR` attributes and this non-masked batch has ≥1 shader part,
                 // draw per-part so each shader part gets its own pipeline + params.
                 // Masked parts (stencil != None) use the plain path (shader × mask
@@ -887,7 +878,7 @@ impl FrameChunk {
 
     /// Append one mask writer's geometry, routed to the mask-write pipeline for
     /// `op`. The cutout threshold rides in the primitive's rate slot, which
-    /// `fs_mask` reads as `varg.x` (SPEC §6): it needs the full f32 range,
+    /// `fs_mask` reads as `varg.x`: it needs the full f32 range,
     /// including the -1 that means "no cutout". No-op if masking is disabled.
     pub fn append_mask_writer(&mut self, frame: &FrameView, node: &NodeSlot, writer: &MaskWriter, op: MaskOp) {
         use crate::mask::GeomKind;
@@ -931,7 +922,7 @@ impl FrameChunk {
 
     /// Record one sprite quad for `part_idx`: point `prim` at the part's slice of
     /// this node's arena copy and append it. The corners themselves are expanded
-    /// by `vs_quad` (SPEC §5.5).
+    /// by `vs_quad`.
     fn push_quad_prim(&mut self, frame: &FrameView, node: &NodeSlot, part_idx: usize, prim: Prim) {
         // Bounds are still checked here: the vertex stage indexes the arena
         // unconditionally, so a part the runtime has no geometry for must not
@@ -1068,35 +1059,12 @@ impl FrameChunk {
 /// Fill one chunk per player.
 ///
 /// Each player owns its own `Context`, its own runtime buffers and its own
-/// chunk, so nothing is shared but the immutable [`SSRenderer`]: the walk is
-/// embarrassingly parallel, and for a while it ran on `std::thread::scope` above
-/// a measured cast size. **It is serial again** — the numbers never supported
-/// carrying a second code path (`tests/scale.rs`, 14 cores, release):
+/// chunk, so nothing is shared but the immutable [`SSRenderer`]. The walk is
+/// serial: threading it was measured and did not pay, and `wasm32-unknown-unknown`
+/// has no threads at all.
 ///
-/// | players | serial | threaded |
-/// |---|---|---|
-/// | 8 | 0.045 ms | 0.105 ms |
-/// | 32 | 0.164 ms | 0.184 ms |
-/// | 64 | 0.252 ms | 0.241 ms |
-/// | 128 | 0.507 ms | 0.320 ms |
-/// | 256 | 1.053 ms | 0.580 ms |
-///
-/// Spawning a scope's worth of threads costs more than the walk itself until
-/// around 64 players — the walk got cheap when P7-6 stopped building vertices on
-/// the CPU. Past that the win is real but small next to the scale it buys: 256
-/// characters cost about 1 ms serially, 6% of a 16.6 ms frame, at a cast size a
-/// game is unlikely to reach. A persistent pool (rayon) would move the crossover
-/// down and is the wrong shape twice over — a player that borrows the host's
-/// device has no business spawning its own threads inside a host that already
-/// owns a pool, and `wasm32-unknown-unknown`, the primary distribution face, has
-/// no threads at all, so the threaded path was native-only and no web build ever
-/// compiled it.
-///
-/// `FrameChunk` stays. It decouples the players from each other, costs nothing
-/// serially (`absorb`'s rebase, nothing more) and leaves the door open: if a
-/// future change makes per-player work heavy enough to move these numbers, the
-/// parallel version is a `scope` around this loop. Measure first (SPEC §14.2
-/// item 6).
+/// The chunk split stays, because it costs nothing serially (`absorb`'s rebase,
+/// nothing more) and keeps the players decoupled.
 fn build_chunks(players: &mut [&mut crate::SSPlayer], chunks: &mut [FrameChunk], renderer: &SSRenderer, delta_secs: f32) {
     for (player, chunk) in players.iter_mut().zip(chunks.iter_mut()) {
         player.build_frame(chunk, renderer, delta_secs);

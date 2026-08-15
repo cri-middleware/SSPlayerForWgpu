@@ -51,7 +51,7 @@ pub enum MaskOp {
 }
 
 /// Geometry a part contributes as a mask writer. Text/Nines are not yet
-/// rendered (P6), so they cannot write coverage yet.
+/// rendered, so they cannot write coverage yet.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
 pub enum GeomKind {
     /// Sprite quad (Normal parts and `PartTypeMask` cells).
