@@ -1139,6 +1139,27 @@ int32_t ss_scene_stats(ss_scene_t *scene, ss_scene_stats_t *out);
  */
 void ss_scene_resize(ss_scene_t *scene, uint32_t width, uint32_t height);
 
+/*
+ Whether the driver has taken the GPU device away (SPEC §14). False for a null
+ scene. While this is true `ss_scene_update` / `ss_scene_render` do nothing and
+ `ss_scene_resize` only records the size.
+
+ # Safety
+ `scene` must be a live handle or null.
+ */
+bool ss_scene_is_device_lost(ss_scene_t *scene);
+
+/*
+ Rebuild the GPU stack after a device loss and restore every player drawing into
+ this window, resuming playback where it was interrupted (SPEC §14).
+
+ `SS_ERROR_GPU` means the window has to be rebuilt from `ss_scene_create`.
+
+ # Safety
+ `scene` must be a live handle or null.
+ */
+int32_t ss_scene_restore_device(ss_scene_t *scene);
+
 #ifdef __cplusplus
 }  // extern "C"
 #endif  // __cplusplus

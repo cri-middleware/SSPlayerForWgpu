@@ -19,6 +19,8 @@ use crate::player::SSPlayer;
 use crate::renderer::{Retention, SSRenderer};
 use crate::roster::Roster;
 use crate::scene::{SSScene, SceneConfig};
+use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 
 /// Names one player owned by a [`NativeHost`] (SPEC §11).
 pub use crate::roster::SlotId as PlayerId;
@@ -60,8 +62,33 @@ pub struct NativeHost {
     stencil_view: Option<wgpu::TextureView>,
     clear_color: wgpu::Color,
     y_down: bool,
-    /// Kept last: the instance must outlive the surface it created.
-    _instance: wgpu::Instance,
+    /// Set by wgpu when the device is taken away (SPEC §14).
+    device_lost: Arc<AtomicBool>,
+    /// Kept last: the instance must outlive the surface it created. It survives a
+    /// device loss, which is what lets `restore_device` ask it for a new adapter.
+    instance: wgpu::Instance,
+}
+
+/// Ask `instance` for an adapter able to present to `surface`.
+///
+/// macOS: `compatible_surface` deadlocks against AppKit on the main thread, so ask
+/// without it there and rely on the capability query that follows.
+fn request_adapter(instance: &wgpu::Instance, surface: &wgpu::Surface<'static>) -> Result<wgpu::Adapter, String> {
+    let compatible_surface = if cfg!(target_vendor = "apple") { None } else { Some(surface) };
+    pollster::block_on(instance.request_adapter(&wgpu::RequestAdapterOptions { power_preference: wgpu::PowerPreference::default(), compatible_surface, force_fallback_adapter: false })).map_err(|e| format!("no GPU adapter for the requested backend: {e}"))
+}
+
+/// Build a device+queue, and the flag wgpu raises if it is ever lost.
+///
+/// GPU timing has to be asked for here or never (SPEC §14.2 item 10); an adapter
+/// without it still draws, only `stats()` goes quiet.
+fn request_device(adapter: &wgpu::Adapter) -> Result<(wgpu::Device, wgpu::Queue, Arc<AtomicBool>), String> {
+    let device_desc = wgpu::DeviceDescriptor { required_features: adapter.features() & wgpu::Features::TIMESTAMP_QUERY, ..Default::default() };
+    let (device, queue) = pollster::block_on(adapter.request_device(&device_desc)).map_err(|e| format!("request_device: {e}"))?;
+    let lost = Arc::new(AtomicBool::new(false));
+    let flag = Arc::clone(&lost);
+    device.set_device_lost_callback(move |_reason, _message| flag.store(true, Ordering::Relaxed));
+    Ok((device, queue, lost))
 }
 
 impl NativeHost {
@@ -78,22 +105,8 @@ impl NativeHost {
         // SAFETY: forwarded from this function's contract.
         let surface = unsafe { instance.create_surface_unsafe(target) }.map_err(|e| format!("create_surface: {e}"))?;
 
-        // macOS: requesting an adapter with `compatible_surface` set deadlocks
-        // against AppKit when called from the main thread, so ask without it (the
-        // surface is still queried for capabilities below). Elsewhere, pin the
-        // adapter to the surface so it is guaranteed presentable.
-        #[cfg(target_vendor = "apple")]
-        let compatible_surface = None;
-        #[cfg(not(target_vendor = "apple"))]
-        let compatible_surface = Some(&surface);
-
-        let adapter = pollster::block_on(instance.request_adapter(&wgpu::RequestAdapterOptions { power_preference: wgpu::PowerPreference::default(), compatible_surface, force_fallback_adapter: false }))
-            .map_err(|e| format!("no GPU adapter for the requested backend: {e}"))?;
-        // Ask for GPU timing when the adapter has it (SPEC §14.2 item 10). It has
-        // to be requested here or never; `SSScene` reports nothing without it,
-        // and an adapter that lacks it still works — it just cannot be measured.
-        let device_desc = wgpu::DeviceDescriptor { required_features: adapter.features() & wgpu::Features::TIMESTAMP_QUERY, ..Default::default() };
-        let (device, queue) = pollster::block_on(adapter.request_device(&device_desc)).map_err(|e| format!("request_device: {e}"))?;
+        let adapter = request_adapter(&instance, &surface)?;
+        let (device, queue, device_lost) = request_device(&adapter)?;
 
         let caps = surface.get_capabilities(&adapter);
         let &first = caps.formats.first().ok_or("the adapter cannot present to this surface")?;
@@ -129,7 +142,8 @@ impl NativeHost {
             stencil_view,
             clear_color: wgpu::Color { r: c[0] as f64, g: c[1] as f64, b: c[2] as f64, a: c[3] as f64 },
             y_down: config.y_down,
-            _instance: instance,
+            device_lost,
+            instance,
         };
         host.scene.set_viewport(&host.queue, host.config.width as f32, host.config.height as f32, host.y_down);
         Ok(host)
@@ -188,6 +202,9 @@ impl NativeHost {
     /// Advance every player and build this frame's GPU buffers. Players are drawn
     /// in ascending `order` (SPEC §9.2), whatever order the slots happen to be in.
     pub fn update(&mut self, delta_secs: f32) {
+        if self.is_device_lost() {
+            return;
+        }
         let mut players: Vec<&mut SSPlayer> = self.players.iter_mut().collect();
         self.scene.update(&mut self.renderer, &self.device, &self.queue, delta_secs, &mut players);
     }
@@ -198,6 +215,9 @@ impl NativeHost {
     /// skipping one frame; that is reported as success.
     pub fn render(&mut self) -> Result<(), String> {
         use wgpu::CurrentSurfaceTexture;
+        if self.is_device_lost() {
+            return Ok(());
+        }
         let output = match self.surface.get_current_texture() {
             CurrentSurfaceTexture::Success(t) | CurrentSurfaceTexture::Suboptimal(t) => t,
             // Occluded: nothing to present, and the surface is still valid.
@@ -235,17 +255,63 @@ impl NativeHost {
 
     /// Resize the swapchain, the depth/stencil buffer and the projection to a new
     /// drawable size in pixels. Zero in either dimension is ignored.
+    ///
+    /// While the device is lost only the size is recorded, and `restore_device`
+    /// applies it.
     pub fn resize(&mut self, width: u32, height: u32) {
         if width == 0 || height == 0 {
             return;
         }
         self.config.width = width;
         self.config.height = height;
+        if self.is_device_lost() {
+            return;
+        }
         self.surface.configure(&self.device, &self.config);
         if self.stencil_view.is_some() {
             self.stencil_view = Some(create_stencil_view(&self.device, width, height));
         }
         self.scene.set_viewport(&self.queue, width as f32, height as f32, self.y_down);
+    }
+
+    /// Whether the driver has taken the device away (SPEC §14). While this is true
+    /// `update` / `render` / `resize` keep off the GPU.
+    pub fn is_device_lost(&self) -> bool {
+        self.device_lost.load(Ordering::Relaxed)
+    }
+
+    /// Rebuild the wgpu stack after a device loss and restore everything drawing
+    /// through it, resuming playback where it was interrupted (SPEC §14).
+    ///
+    /// Errors if the GPU is gone for good, or if the replacement adapter cannot
+    /// present this window's format — the scene's pipelines are baked against it
+    /// (SPEC §5.2), so that case is a rebuild from [`NativeHost::new`].
+    pub fn restore_device(&mut self) -> Result<(), String> {
+        let adapter = request_adapter(&self.instance, &self.surface)?;
+        let caps = self.surface.get_capabilities(&adapter);
+        if !caps.formats.contains(&self.config.format) {
+            return Err("the restored adapter cannot present this window's original surface format; rebuild the host".into());
+        }
+        let (device, queue, device_lost) = request_device(&adapter)?;
+
+        self.config.alpha_mode = caps.alpha_modes[0];
+        self.surface.configure(&device, &self.config);
+        if self.stencil_view.is_some() {
+            self.stencil_view = Some(create_stencil_view(&device, self.config.width, self.config.height));
+        }
+        // Widest scope first: a player re-registers its atlases into the renderer.
+        self.renderer.restore_device(&device, &queue);
+        self.scene.restore_device(&device, &queue);
+        for player in self.players.iter_mut() {
+            player.restore_textures(&mut self.renderer, &device, &queue);
+        }
+        // After the scene's own restore, which re-applies the viewport it last saw.
+        self.scene.set_viewport(&queue, self.config.width as f32, self.config.height as f32, self.y_down);
+
+        self.device = device;
+        self.queue = queue;
+        self.device_lost = device_lost;
+        Ok(())
     }
 }
 
