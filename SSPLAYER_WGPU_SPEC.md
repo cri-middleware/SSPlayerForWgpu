@@ -21,7 +21,7 @@
 - **ssab は embedded / reference 両対応**（テクスチャ埋め込み／外部参照）。
 - **進捗**: **P0**（3層リファクタ＋借用モデル）✅ ／ **P4**（インスタンス §7.1・エフェクト §7.2）✅ ／ **P3**（マスク・Shape）✅ ／ **P2**（色パリティ: varg・全12ブレンド・premul 厳密化）✅ ／ **P6**（統合シェーダ ss_shader 全13種）✅ ／ **P1**（ssab embedded/reference 両対応・**WebGPU/js**）✅ ブラウザ実機確認済 ／ **P5**（ネイティブ ffi・C-API ＋ Metal C++ viewer）✅ macOS 実機確認済、DX12 viewer は実装済・実機未検証、Vulkan viewer は未着手 ／ **P7**（シーン再設計：SSRenderer/SSScene 分離・複数プレイヤー・SoA パススルー）✅ **完了**——**7-1〜7-7・7-9 ✅**（1 ターゲットに N プレイヤー／pack 共有・借用テクスチャ／**頂点バッファ撤去**／C-API 2ハンドル化／**web 面 3オブジェクト化・device はページで1つ**）。**7-8 のみ計測により保留**（下記）。対応バッチ = Normal / Mesh / Shape / Instance / Effect / Mask。**wgpu 29**（§2.2）。詳細は §12。
 - **7-8（draw マージ・マスクのランレングス結合）は保留**: 上限は `SSScene::stats()` の `mergeable_draws` が数えており、256体で 2496→1728 draws＝**削れるのは encode 0.09 ms の 31%≒0.03 ms**（予算 16.6 ms の 0.2%）。§14.2 が同じ理由で項目 7 / 4 を見送ったのと同根で、しかも上限はそれらより小さい。**やるならステンシル境界と `shader_slot` を跨がない条件付き実装**になるため、割に合わない（§14.2 結論）。
-- **次の大物**: **表現力側**——§14.2 の **1（マスクの coverage-bitmap 厳密化）と 2（背景読みブレンド `Div2`/`Overlay2`）**。速度側 6 項目（4〜9）は計測の結果「着手する理由が無い」と結論済み（256体で CPU 1.3〜2.3 ms ＋ GPU 0.19 ms）。**項目6（プレイヤー走査のスレッド化）は実装したうえで撤去**——native 専用パスを web が一度もコンパイルしないコストに、256体で 0.53 ms は見合わない（§14.2）。**web だけは未計測**だが、計測器は入った——`surface.stats()`（§10）。
+- **次の大物**: **表現力側**——§14.2 の **1（マスクの coverage-bitmap 厳密化）と 2（オフスクリーン経路）**。**項目2 の一番手は `Div2`/`Overlay2` ではなく group alpha**（式の出所が無いブレンドと違い、参照実装 `SSGroupAlpha.ts` と厳密な検証手段があり、しかも現状 wgpu 版が WebGL 版に劣っている唯一の点）。共通の設計論点は「借用モデルでホストが開く render pass に、どうオフスクリーンを挟むか」。速度側 6 項目（4〜9）は計測の結果「着手する理由が無い」と結論済み（256体で CPU 1.3〜2.3 ms ＋ GPU 0.19 ms）。**項目6（プレイヤー走査のスレッド化）は実装したうえで撤去**——native 専用パスを web が一度もコンパイルしないコストに、256体で 0.53 ms は見合わない（§14.2）。**web だけは未計測**だが、計測器は入った——`surface.stats()`（§10）。
 - **リポジトリ**: SDK monorepo から分離した独立リポ `ssplayer-wgpu`。SDK は git submodule（`SpriteStudio-SDK/`）として取り込み、`ssruntime`/`ssab` を **path 依存**で直リンクする（§2.2）。
 
 ---
@@ -307,7 +307,18 @@ FlatBuffers 側から読む: `draw_order`（`[ushort]` parts インデックス�
 ### 4.3 BlendType（全12値）
 
 `Mix, Mul, Add, Sub, Mulalpha, Screen, Exclusion, Invert, Mul2, Div2, Screen2, Overlay2`。
-**✅ 全12種に対応（P7-3 以降は使ったものだけ遅延生成）**（`renderer.rs` `BLEND_ORDER` / `blend_state`、premul 係数）。GPU ネイティブ等価のない `Div2/Overlay2` は Mix、`Mulalpha/Mul2` は Mul、`Screen2` は Screen へフォールバック（ssplayer-pixi 準拠、要検証分は SS6PlayerForUnity と照合予定）。stencil 有効時は各ブレンド × 3（None/Inside/Outside）。
+**✅ 全12種に対応（P7-3 以降は使ったものだけ遅延生成）**（`renderer.rs` `BLEND_ORDER` / `blend_state`、premul 係数）。GPU ネイティブ等価のない `Div2/Overlay2` は Mix、`Mulalpha/Mul2` は Mul、`Screen2` は Screen へフォールバック（ssplayer-pixi 準拠）。stencil 有効時は各ブレンド × 3（None/Inside/Outside）。
+
+**★「SS6PlayerForUnity と照合する」という当初の計画は成立しない**（2026-08-16 調査）。照合先が先に降りている:
+
+| 参照先 | 状態 |
+|---|---|
+| `ssplayer-webgl` `SSWebGLRenderer.ts:356` | Div2/Overlay2 → Mix。「SS6PlayerForUnity と照合するまで」という同じ待ちコメント |
+| `SSPlayerForUnity` `SpriteStudioMaterial.cs:94` | `Mul2 / Div2 / Screen2 / Overlay2 (8..11) are framebuffer-fetch dependent = out of scope` |
+| `ssplayer-pixi` `SSPlayer.ts:1267-1270` | Mul2→Mul / Screen2→Screen / Div2・Overlay2→Mix |
+| SpriteStudio-Docs `docs/ja/overview/feature-support.md:41` | 「**Division / Overlay は参照実装の Player にも GPU ブレンドの対応がなく、`Mix` へのフォールバックは実装が未完なのではなく意図的な挙動です**」 |
+
+つまり **4種の正しい式はこのリポジトリ群のどこにも無く、公開ドキュメントは横並びのフォールバックを仕様として宣言している**。加えて **フィクスチャが1枚も無い**——SDK の全テストプロジェクト（overall / allAttributeV7 / allPartsV7 / Ringo / ParticleEffect）の `.ssae` を走査して `mul2 / div2 / screen2 / overlay2` は **0 件**（`BlendMode.ssae` すら 8 種のみ）。**式を決めずに実装すると推測がそのまま出荷され、エディタと違って見えたときに Player が疑われる。** 着手するなら (1) 式の出所を確定し (2) フィクスチャを起こし (3) 他 Player とドキュメントの横並びをどうするか決める、の3点が先（§14.2 項目2）。
 
 ---
 
@@ -927,6 +938,8 @@ void         ss_scene_resize(ss_scene_t*, uint32_t w, uint32_t h);  // ★ピク
 int32_t      ss_scene_add_texture(ss_scene_t*, uint32_t hash, const uint8_t* rgba, uint32_t w, uint32_t h);  // reference 用（renderer 共有）
 int32_t      ss_scene_add_texture_png(ss_scene_t*, uint32_t hash, const uint8_t* data, size_t len);  // ★同上・PNG のまま渡す
 uint32_t     ss_scene_player_count(ss_scene_t*);              // 診断
+bool         ss_scene_is_device_lost(ss_scene_t*);            // デバイス喪失（§14）
+int32_t      ss_scene_restore_device(ss_scene_t*);            // 喪失からの復帰。配下の player ごと戻る
 
 ss_player_t* ss_scene_create_player(ss_scene_t*);             // ★1シーンに何体でも
 void         ss_player_destroy(ss_player_t*);                 // シーンから外す（ハンドル自体は scene 破棄まで生存）
@@ -938,8 +951,6 @@ void         ss_player_pause(ss_player_t*);  void ss_player_stop(ss_player_t*);
 void         ss_player_set_speed(ss_player_t*, float speed);  bool ss_player_is_playing(ss_player_t*);
 void         ss_player_set_transform(ss_player_t*, float x, float y, float sx, float sy, float rot);
 void         ss_player_set_order(ss_player_t*, int32_t order);       // 小さいほど先に描く
-bool         ss_scene_is_device_lost(ss_scene_t*);            // デバイス喪失（§14）
-int32_t      ss_scene_restore_device(ss_scene_t*);            // 喪失からの復帰。配下の player ごと戻る
 void         ss_player_set_visible(ss_player_t*, bool visible);
 void         ss_player_set_alpha(ss_player_t*, float alpha);
 uint32_t     ss_player_animation_count(ss_player_t*);
@@ -1099,6 +1110,18 @@ const char*  ss_last_error(void);                             // スレッドロ
   - **精度指定は非該当**: WGSL は f32 既定で `mediump/highp` の概念が無いため、WebGL 版の fragment highp 検出はポート不要。
   - **プレゼンテーション設定**: web は `context.configure({ alphaMode:'premultiplied', … })` ＋ `requestAdapter({ powerPreference:'low-power' })` が WebGL の `premultipliedAlpha` / `low-power` 相当。`desynchronized` / `failIfMajorPerformanceCaveat` に WebGPU 直接等価は無い。
 
+#### 14.0 未着手の宿題（クレート全体の読み合わせで出たもの）
+
+§14.2 の棚卸しが「WebGL 由来の設計」を対象にしているのに対し、こちらは**クレートを SPEC と突き合わせて読んで出た穴**。§14.2 とは出自が違うので混ぜない。
+
+| # | 内容 | 状態 |
+|---|---|---|
+| A | `NativeHost` からデバイス喪失復帰に手が届かない | ✅ **解消**（上記 native(§11)）。`restore_device()` / `is_device_lost()` ＋ C 面2本 |
+| B | `fs_main` が透明テクセルで `discard` ではなく `vec4(0)` を返す。`Invert`（dst 係数が `Zero` の唯一のブレンド）では下地が黒くなる | ✅ **調査完了・変更しない**。WebGL 版 `programs/PartsColorProgram.ts:35-37` が `gl_FragColor = vec4(0.0); return;` と**全く同じことをしている**ので、これはパリティであって不具合ではない。直すなら両者同時、かつ `golden_corpus` の取り直しを伴う |
+| C | **pack / テクスチャの追い出しが無い**。`SSPlayer` は pack を溜める一方で `remove_pack` が無く、`SSRenderer` は `forget_texture(hash)` を持つが**保持中の hash を列挙できない**（`texture_count()` だけ）。キャラを差し替えるホスト（viewer の D&D、キャラ選択画面）は `.ssab` と VRAM を GC できずに増やし続ける | ◻ 未着手。**設計判断**——退役規則ごと決める必要がある。上記「パックの resource 寿命」の不変条件（`Context` が pack の resource を生ポインタで束ねる）に、どんな remove API も答えなければならない |
+| D | **C 面の scene ハンドルだけ世代検査が無い**。`SsPlayer` は `*mut SsScene` を生で持つので、**scene を先に破棄したことを検出できない**（player 側は `roster.rs` で安全）。§11 が「そこだけは use-after-free」と明記している既知の非対称 | ◻ 未着手。塞ぐなら scene も世代付きハンドルにする ABI 変更になる |
+| E | `SceneStats` が**取りこぼしたマスクライタを数えていない**。`mask.rs` は `MAX_MASK_WRITERS = 24` で黙って打ち切る（`break 'batches`）ので、「マスクが効かなくなった」に手がかりが無い | ◻ 保留。計測配線は既にあるので実装は1カウンタだが、**Player のセーフティは最小限**という方針（診断を足して失敗を和らげない）と正面から当たる。24 という上限自体が §14.2 項目1（coverage bitmap）で消える見込みなのも、今やらない理由 |
+
 ### 14.1 WebGPU を選ぶ理由と、ssplayer-webgl を残す理由
 
 **両者は置き換え関係ではない。** 棲み分けを明文化しておく（「WebGL 版はいずれ畳む」という前提を持たないこと）。
@@ -1171,7 +1194,16 @@ P7-6 で頂点生成経路（§5.5）を WebGPU 本来の形へ移したが、**
 | # | 現状（WebGL 由来） | 該当 | WebGPU での本来形 | 備考 |
 |---|---|---|---|---|
 | 1 | **マスクはステンシル一択**。INCR と INVERT が混ざる重なりマスクは単一ステンシル値で**近似**、8bit なので入れ子の上限も浅い | §6 / `mask.rs` | compute ＋ storage texture の **coverage bitmap**。両方の制約が消える | §6 が「厳密解は coverage-bitmap 方式」と書いたまま止まっている箇所。ライタ数の上限（`MAX_MASK_WRITERS = 24`）の根拠も無くなる |
-| 2 | **背景を読むブレンドが Mix フォールバック**。`Div2` / `Overlay2` に「GPU ネイティブ等価が無い」として潰している | §4.3 / `renderer.rs` `blend_state` | 正確には*固定機能ブレンドに*等価が無いだけ。**オフスクリーンへ描いて下地をサンプル**すれば実装できる | group alpha の厳密実装も同じ経路。§14.1 が「安いオフスクリーン＋リードバック」を WebGPU の強みに挙げている当人 |
+| 2 | **背景を読むブレンドが Mix フォールバック**。`Div2` / `Overlay2` に「GPU ネイティブ等価が無い」として潰している | §4.3 / `renderer.rs` `blend_state` | 正確には*固定機能ブレンドに*等価が無いだけ。**オフスクリーンへ描いて下地をサンプル**すれば実装できる | ★**技術的にはできるが、式が決まっていない**（§4.3 の調査表）。着手前に式の出所・フィクスチャ・他 Player との横並びを決めること。group alpha の厳密実装も同じ経路で、**そちらは参照実装も検証手段もある**（下記） |
+
+**★項目2 の経路には、もう一人の消費者がいる（group alpha）**
+
+「オフスクリーンへ描いて1回で合成する」という同じ土台を、**プレイヤー単位の group alpha** が要求する（§14.1 の能力表が「安いオフスクリーン＋リードバック」の用途に挙げているもの）。
+
+- **今の `set_alpha` はパーツ単位の近似**: `Prim.alpha` に畳んで各パーツを個別にその α で合成するので、**重なったところでカバレッジが積み上がる**——半身ずつ重なる2パーツを 0.5 にすると重なりは 0.75 になる。合成が順序依存である以上シェーダでは取り消せない。作者の意図は「まるごと不透明で描いてから1回透かす」で、それがこの経路。
+- **参照実装がある**: `ssplayer-webgl` `src/SSGroupAlpha.ts`（`alpha < 1` の player だけが通り、不透明なら無コスト）。**この1点だけ wgpu 版は WebGL 版に劣っている。**
+- **検証できる**: 「重なる2パーツを α 0.5 で描いて重なりが 0.75 にならない」をヘッドレス readback で厳密に assert できる。Div2/Overlay2 側にはこれが無い（フィクスチャすら無い）。
+- **共通の設計論点は1つ**: 借用モデルでは **render pass を開くのはホスト**。オフスクリーンを挟むにはシーンが自前の pass を持つのか、ホストが `&mut RenderPass` 以外を貸すのか——**`draw(&renderer, &mut rpass)` の契約をどう変えるかが本体**で、両者ともその上に載るだけ。**先に決めるべきはここ。**
 | 3 | **エフェクトのパーティクル展開が CPU**。runtime がパーティクル1個につき `cosf`/`sinf` を回して4頂点へ展開し、Player はそれを memcpy する | `ssruntime` `lib.rs` の `EffectDrawPlan` 生成 | パーティクル状態（x, y, rotation, scale, color）だけ渡して**頂点ステージで展開**。転送量 1/4、CPU の三角関数ゼロ | **`EffectDrawPlan` の形を変える話なので SDK 側**。このリポジトリでは決められない——SDK への PR ＋ submodule bump（AGENTS.md の「Never commit inside the submodule」） |
 
 #### スループット（できるが WebGL と同じ天井にいる）
@@ -1294,7 +1326,7 @@ draw リストが前フレームと同一なら bundle を再生、変われば�
 - 10（計測）✅ → 6（並列化）❌ 64体未満で損・64体超の 0.5 ms のために native 専用パスは持たない、撤去 → 5（render bundle）❌ 全域で損、revert → **7 / 4 は当たりを取った結果、上限が小さすぎて見送り**。**速度側で残ったのは `FrameChunk` 分解だけ**（項目6 の副産物、直列でもコスト0）。
 - 数字がすべてを説明する: **256体で CPU 1.3〜2.3 ms ＋ GPU 0.19 ms**（直列に戻した後の実測レンジ。測定機で振れる）。60fps の予算 16.6 ms に対して合計 15% 以下。**P7-6 が CPU 側の仕事を実際に消した**ため、その先に積む最適化は削る対象を失っている。
 - 8（Shape 固定30頂点）・9（CPU premul）も同じ理由で優先度は低い。9 は web でのアップロード一時コピー 16 MB の話なので、**サイズ/メモリの観点**なら別途価値がある。
-- **残る価値は速度ではなく表現力**——1（マスクの厳密化）と 2（背景読みブレンド）は「今できないことができるようになる」項目で、計測とは無関係に効く。**次に着手するならこちら。**
+- **残る価値は速度ではなく表現力**——1（マスクの厳密化）と 2（オフスクリーン経路）は「今できないことができるようになる」項目で、計測とは無関係に効く。**次に着手するならこちら。ただし項目2 は2つに割れる**: **group alpha は参照実装（`SSGroupAlpha.ts`）も検証手段もあって即着手できる**が、**`Div2`/`Overlay2` は式の出所が無い**（§4.3 の調査表）。同じ土台の上なので、**group alpha から入れて土台を確定させ、ブレンドは式が決まってから乗せる**のが順当。
 - **web だけは未計測**。1コマンド＝1 JS 呼び出しなので 5 / 7 の比率は変わりうる。**`surface.stats()` は P7-9 で JS へ出したので、あとはブラウザで読むだけ**（`examples/web/index.html` の②が表示する）。1 / 2 は表現力なので必要になってから。3 は SDK 側の合意が要る。
 - **7-8（draw マージ・マスクのランレングス結合）もここに合流して保留**。`mergeable_draws` が数えている 31% が上限で、削れるのは encode 0.09 ms のその 31%。項目 7 / 4 と同じ結論になる（§12.1）。
 
