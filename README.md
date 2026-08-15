@@ -14,6 +14,11 @@ macroquad, Bevy — without locking you into an engine.
 
 The canonical design document is [`SSPLAYER_WGPU_SPEC.md`](SSPLAYER_WGPU_SPEC.md).
 
+## Documentation
+
+- 📖 **[Japanese Documentation (ドキュメント日本語)](docs/ja/index.md)**
+- 🔄 **[Migration from SS6Player for CPP (SS6Player for CPP からのマイグレーション)](docs/ja/migration_from_cpp.md)**
+
 How this player relates to the SDK and the other official players is documented in
 [SpriteStudio Docs](https://cri-middleware.github.io/SpriteStudio-Docs/), the portal for
 the whole ecosystem (it goes live with the first release).

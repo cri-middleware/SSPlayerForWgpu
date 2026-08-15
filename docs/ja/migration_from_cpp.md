@@ -1,252 +1,401 @@
-# SS6Player for CPP からのマイグレーション
+# 🔄 SS6Player for CPP からのマイグレーション
 
-旧プレイヤ **[SS6Player for CPP](https://github.com/SpriteStudio/SS6PlayerForCpp)** から本プレイヤへ移行する場合は、以下の大きな変更点にご注意ください。本プレイヤは実装言語（C++ → Rust）、描画バックエンド（OpenGL 固定 → wgpu）、アセットフォーマット（`.ssfb2` → `.ssab`）のいずれも一新されています。単純な差し替えではなく、**アセットの再コンバートとホストコードの書き換え**が必要になります。
+[← ドキュメント目次へ戻る](./index.md)
 
-C / C++ のまま利用を続ける場合は、`ffi` フィーチャで生成される C API（`include/ssplayer_wgpu.h`）を使用してください。本書の対応表には Rust API と C API の両方を併記しています。
+旧プレイヤ **[SS6Player for CPP](https://github.com/SpriteStudio/SS6PlayerForCpp)** から本プレイヤ（**SSPlayer for wgpu**）へ移行する場合の要点をまとめます。
 
-## 1. アセットフォーマットの変更（ssfb2 → ssab）
+本プレイヤは、実装言語（C++ → Rust コア）、描画バックエンド（OpenGL 固定 → wgpu / WebGPU / DirectX 12 / Metal / Vulkan）、アセットフォーマット（`.ssfb2` → `.ssab`）のいずれも一新されています。単純なライブラリ差し替えではなく、**アセットの再コンバートとホストコード（C++ または Rust）の書き換え**が必要です。
+
+> **C / C++ で利用を継続する場合**  
+> `ffi` 機能で提供される C API（[`include/ssplayer_wgpu.h`](../../libs/ssplayer-wgpu/include/ssplayer_wgpu.h)）を使用することで、既存の C++ アプリケーション（DirectX 12 / Metal / Vulkan 等）からシームレスに利用できます。本書では **Rust API** と **C API (C++)** の両方を併記しています。
+
+---
+
+## 1. アセットフォーマットとコンバートの変更
 
 | 項目 | SS6Player for CPP | 本バージョン |
 |---|---|---|
-| ファイル形式 | **`.ssfb2`**（ssbp2 / FlatBuffers） | **`.ssab`**（SpriteStudio Anime Binary）＋ シーケンスは `.ssqb` |
-| ファイル単位 | 1 プロジェクト = 1 ファイル | **アニメーションパックごとに 1 ファイル**。各 `.ssab` は自己完結し、そのパックが参照する ss*e だけを内包します |
-| 名前引き | 文字列比較 | **uint32 ハッシュ**ベース |
-| テクスチャ | 常に外部 PNG | **外部参照 / 埋め込み**の 2 形態に対応 |
-| 変換ツール | SS6Converter | **`ssconverter-cli`**（SpriteStudio-SDK に同梱） |
+| **ファイル形式** | **`.ssfb2`**（FlatBuffers） | **`.ssab`**（SpriteStudio Anime Binary） |
+| **ファイル単位** | 1 プロジェクト = 1 ファイル（大容量） | **アニメーションパック（ssee / ssce を含む）ごとに 1 ファイル** |
+| **テクスチャ形式** | 常に外部 PNG | **外部参照（Reference）** または **埋め込み（Embedded）** |
+| **コンバータ** | SS6Converter（GUI / CLI） | **`ssconverter-cli`**（SpriteStudio-SDK 同梱） |
+| **名前引き** | 文字列比較 | **uint32 ハッシュ**ベース（高速） |
 
-**`.ssfb2` は本バージョンでは読み込めません。`.sspj` から改めて変換し直してください。**
+> ⚠️ **`.ssfb2` は本バージョンでは読み込めません。`.sspj` から改めて `.ssab` へコンバートしてください。**
+
+### コンバート手順
+
+SpriteStudio-SDK の `ssconverter-cli` を使用して `.sspj` をコンバートします。
 
 ```bash
-# SpriteStudio-SDK 側でコンバータをビルド
+# 1. コンバータのビルド（初回のみ）
+git submodule update --init
 cargo build -p ssconverter-cli --release
 
-# .sspj → .ssab（＋参照テクスチャ）
-ssconverter-cli --out-dir <出力先> path/to/Project.sspj
+# 2. 外部テクスチャ参照モード（標準: .ssab + PNG 出力）
+./target/release/ssconverter-cli --out-dir <出力先ディレクトリ> path/to/Project.sspj
 
-# テクスチャを .ssab に埋め込む場合
-ssconverter-cli --embedded --out-dir <出力先> path/to/Project.sspj
+# 3. テクスチャ埋め込みモード（アトラス画像を .ssab 内にパック）
+./target/release/ssconverter-cli --embedded --out-dir <出力先ディレクトリ> path/to/Project.sspj
 ```
 
-この作業は本リポジトリの [`scripts/deploy-examples.sh`](../../scripts/deploy-examples.sh) が実例です。
+---
 
-## 2. 統合の形の変更（グローバルシステム → 借用モデル）
+## 2. アーキテクチャとライフサイクルの変更（グローバルシステム → 借用モデル）
 
-- **SS6Player for CPP**: `SpriteStudio6::SystemBootUp(settingSystem)` で始まるグローバルなシステム層を持ち、毎フレーム `SystemProcessMainPre()` / `SystemProcessMainPost()` / `SystemProcessRenderPost()` を呼ぶ必要がありました。OpenGL の状態はプレイヤ側が管理します。
-- **本バージョン**: **グローバルな初期化も終了処理もありません**。wgpu の `Device` / `Queue` / `Surface` は**ホストが所有**し、フレームごとにプレイヤへ貸し出します（**借用モデル**）。プレイヤがそれらを保持することは設計上ありません。
+- **SS6Player for CPP**:
+  - `SpriteStudio6::SystemBootUp()` で始まるグローバルなシステム層を持ち、毎フレーム `SystemProcessMainPre()` / `MainPost()` / `RenderPost()` を呼ぶ必要がありました。OpenGL のステートやバッファ、テクスチャをプレイヤ内部で専有・管理していました。
+- **本バージョン**:
+  - **グローバルな初期化・終了処理はありません**。
+  - wgpu の `Device` / `Queue` / `Surface` は**ホストアプリケーションが所有**し、フレーム描画時にプレイヤへ貸し出します（**借用モデル / Borrow Model**）。プレイヤがこれらを保持・専有しないため、任意のゲームエンジンや描画フレームワーク（自作エンジン、DirectX 12/Metal ホスト、Bevy、Slint 等）へロックインなしで相乗りできます。
 
-| 役割 | SS6Player for CPP | 本バージョン |
-|---|---|---|
-| システム初期化 | `SystemBootUp` / `SystemShutDown` | （不要） |
-| 毎フレームの前後処理 | `SystemProcessMainPre` / `MainPost` / `RenderPost` | （不要） |
-| データ（プロジェクト） | `Project` | `SSPlayer` が内包（`load`） |
-| キャラクター 1 体 | `Entity` | **`SSPlayer`** |
-| デバイス単位の描画資源 | （内部・暗黙） | **`SSRenderer`** — ホストが 1 つだけ持つ |
-| 描画先（ウィンドウ / RT） | （区別なし） | **`SSScene`** |
-| シーケンス再生 | `Sequencer` | （未対応 — [§8](#8-未対応の機能仕様差分)） |
+### クラス・概念の対応表
 
-**1 つの `SSScene` に複数の `SSPlayer` を入れられます。** `Entity` ごとに `Draw()` を呼んでいた ForCPP と異なり、シーンにプレイヤを登録して 1 回のレンダーパスでまとめて描画します。描画順は `SSPlayer::set_order` で指定します。
+| 役割 | SS6Player for CPP | 本バージョン（Rust） | 本バージョン（C API） | 備考 |
+|---|---|---|---|---|
+| システム初期化 / 終了 | `SystemBootUp` / `SystemShutDown` | （不要） | （不要） | ホスト側で wgpu/Device を用意 |
+| デバイス単位の描画資源 | （内部・暗黙） | **`SSRenderer`** | （`ss_scene_t` 内包） | パイプライン・サンプラー・テクスチャ（Device ごとに 1 つ） |
+| 描画ターゲット（画面 / RT） | （区別なし） | **`SSScene`** | **`ss_scene_t`** | 投影行列・頂点アリーナ・ステンシル管理 |
+| キャラクター 1 体 | `Entity` | **`SSPlayer`** | **`ss_player_t`** | 再生木・トランスフォーム（**GPU 資源非所有**） |
+| アセット保持 | `Project` | `SSPlayer`（内部で `SSPack` を保持） | `ss_player_t` | `load` で自動ロード |
 
-### 2-1. 毎フレームの流れ（Rust）
+### 1 つのシーンに複数のキャラクターを乗せる（N 体まとめ描画）
+
+ForCPP では `Entity::Draw()` を個別に呼んでいましたが、本バージョンでは **`SSScene` に複数の `SSPlayer` を登録し、1 つのレンダーパスでまとめて描画** します。
+
+```
+[SS6Player for CPP]
+Entity A -> Draw() -> (個別バッファ転送・ドロー)
+Entity B -> Draw() -> (個別バッファ転送・ドロー)
+
+[本バージョン]
+SSScene -> update(&renderer, &device, &queue, dt, &[playerA, playerB])
+        -> draw(&renderer, &mut render_pass)  // 1 レンダーパス・共有頂点アリーナで描画
+```
+
+---
+
+## 3. アセットロードとテクスチャ供給
+
+- **SS6Player for CPP**: `.ssfb2` を読み込んで `Project.BootUp()` した後、`Project.CountGetTexture()` の数だけ画像ファイルを**ホスト側で 1 枚ずつ読み込み**、`Project.TextureSet()` で登録する必要がありました。
+- **本バージョン**: **`load(path)` の 1 呼び出し** で、パック本体・アトラス画像（外部/埋め込み）・テクスチャチェンジ（TCHG）対象画像・インスタンスパーツが参照する兄弟 `.ssab` まで自動的に再帰解決します。
 
 ```rust
-use ssplayer_wgpu::{SSRenderer, SSScene, SSPlayer, SceneConfig};
-
-// 初期化（Device はホストが用意する）
-let mut renderer = SSRenderer::new(&device);                 // デバイス単位に 1 つ
-let mut scene = SSScene::new(&device, &SceneConfig {         // 描画先ごとに 1 つ
-    color_format: surface_format,
-    stencil_format: Some(wgpu::TextureFormat::Depth24PlusStencil8),
-});
-let mut player = SSPlayer::new();
-player.load("assets/overall/overall.ssab")?;
-player.set_animation("Action01_Body")?;
-player.play();
-
-// 毎フレーム
-scene.set_viewport(&queue, width as f32, height as f32, /* y_down */ true);
-scene.update(&mut renderer, &device, &queue, delta_secs, &mut [&mut player]);
-
-let mut rpass = encoder.begin_render_pass(&desc);   // レンダーパスはホストが張る
-scene.draw(&renderer, &mut rpass);
+// Rust:
+player.load("assets/character/character.ssab")?;
 ```
-
-`SSScene::update` が ForCPP の `Entity::Update` に、`SSScene::draw` が `Entity::Draw` に相当します。**投影行列は `SSScene` が持つ**ため、`Draw(commandList, matrixProjection, matrixView, matrixWorld)` のように毎回渡す必要はありません。プレイヤ個別の位置・拡縮・回転は `SSPlayer::set_transform` で指定します。
-
-### 2-2. 毎フレームの流れ（C API）
-
-C 面ではシーンがサーフェスを持つため、レンダーパスの構築もシーン側で行います。
 
 ```c
-ss_scene_t*  scene  = ss_scene_create(&desc);
-ss_player_t* player = ss_scene_create_player(scene);
-ss_player_load(player, "assets/overall/overall.ssab");
-ss_player_set_animation(player, "Action01_Body");
-ss_player_play(player);
-
-/* 毎フレーム */
-ss_scene_update(scene, delta_seconds);
-ss_scene_render(scene);
-
-/* 終了時 */
-ss_player_destroy(player);   /* 二重呼び出しは安全な no-op */
-ss_scene_destroy(scene);
+/* C API (C++): */
+ss_player_load(player, "assets/character/character.ssab");
 ```
 
-失敗した呼び出しの理由は `ss_last_error()` で取得します。
+> [!NOTE]
+> - `load` 呼び出し時点では `Device` や `Queue` を渡しません。読み込まれた画像データは最初の `update` 実行時に GPU テクスチャへ自動転送されます。
+> - ロードできなかった画像や兄弟パックの有無は **`missing_assets()`**（C: `ss_player_missing_count` / `ss_player_missing_at`）で確認できます。
 
-## 3. データのロードとテクスチャ供給
-
-- **SS6Player for CPP**: `.ssfb2` を自前で読み込んで `Project.BootUp(Data)`、続いて `Project.CountGetTexture()` の数だけ `texture/<名前>.png` を**アプリケーション側でロード**し、`Project.TextureSet(i, ...)` で 1 枚ずつ登録する必要がありました。
-- **本バージョン**: **`SSPlayer::load(path)` の 1 呼び出し**で完結します。アトラス（外部参照・埋め込みの両モード）、TextureChange の差し替え先テクスチャ、インスタンスパーツが参照する兄弟 `.ssab` まで、パックが依存するものを再帰的に解決します。
-
-```rust
-player.load("assets/overall/overall.ssab")?;    // テクスチャの列挙・ロードは不要
-```
-
-移行時の注意点：
-
-- **`load` は `Device` / `Queue` / `SSRenderer` を受け取りません。** 読み込んだ画像は最初の `SSScene::update` で GPU に上がるため、**`load` 直後はまだ GPU テクスチャが存在しません**（埋め込みアトラスと同じ経路です）。
-- **読めなかったアセットは `Err` になりません。** `.ssab` 本体が読めなかったときだけ `Err` を返し、それ以外の取りこぼしは **`missing_assets()`**（C: `ss_player_missing_count` / `ss_player_missing_at`）に列挙されます。プログラムから分岐するのはこちらです。
-- ファイルシステムを前提にできない環境（アーカイブ、パックファイル、wasm）では **`AssetLoader` を実装して `load_with`** を使ってください。`std::fs` を直接呼ぶ実装は wasm でビルドは通っても実行時に失敗します。
-- 独自のアセット管理を使う場合は、ForCPP と同じく手動供給する経路も残っています（`add_ssab` / `SSRenderer::set_texture`、C: `ss_player_load_ssab` / `ss_scene_add_texture_png`）。
+---
 
 ## 4. 再生制御 API の変更
 
-**トラック番号（`indexTrack`）の概念はありません。** 1 つの `SSPlayer` が 1 つのアニメーションを再生します。
+### 4-1. トラック（Track）概念の廃止とアニメーション名直接指定
 
-また、ForCPP の `AnimationPlay()` が 1 回の呼び出しで担っていた「アニメーション選択・再生開始・ループ回数・速度・再生区間・FPS」は、**それぞれ独立したメソッドに分離**されました。
+- **SS6Player for CPP**: `IndexGetAnimation("walk")` でインデックスを取得し、`AnimationPlay(indexTrack, indexAnimation, ...)` に渡していました。
+- **本バージョン**: トラックの概念はありません。`set_animation("walk")` で**アニメーション名を直接指定**し、`play()` で再生します。
 
 ```c
 /* SS6Player for CPP */
 int idx = entity.IndexGetAnimation("walk");
-entity.AnimationPlay(0, idx, 0);        /* track 0, 無限ループ */
+entity.AnimationPlay(0, idx, 0); // track 0, 無限ループ
 ```
 
 ```rust
-// 本バージョン
-player.set_animation("walk")?;          // 名前で直接指定（インデックス取得は不要）
-player.set_loop_count(-1);              // 無限ループ
+// 本バージョン (Rust)
+player.set_animation("walk")?;   // 名前で直接指定
+player.set_loop_count(-1);       // -1 = 無限ループ
 player.play();
 ```
 
-### 4-1. メソッド対応表
+```c
+/* 本バージョン (C API) */
+ss_player_set_animation(player, "walk");
+ss_player_set_loop_count(player, -1);
+ss_player_play(player);
+```
+
+### 4-2. メソッド・プロパティ対応表
 
 | SS6Player for CPP | 本バージョン（Rust） | C API | 備考 |
 |---|---|---|---|
-| `IndexGetAnimation(name)` + `AnimationPlay(track, index, …)` | `set_animation(name)` + `play()` | `ss_player_set_animation` / `ss_player_play` | **選択と再生開始を分離** |
-| `AnimationStop(track)` | `stop()` | `ss_player_stop` | |
-| `AnimationPause(track, true/false)` | `pause()` / `play()` | `ss_player_pause` / `ss_player_play` | `play()` が一時停止からの再開も兼ねます |
-| `AnimationPlay(…, timesPlay)` | `set_loop_count(n)` | `ss_player_set_loop_count` | **値の対応は下記参照** |
-| `AnimationPlay(…, rateTime)` / `RateTimeSet(track, rate)` | `set_speed(f32)` | `ss_player_set_speed` | |
-| `rateTime` に負値を与えて逆再生 | `set_playback_direction(Backward, style)` | `ss_player_set_playback_direction` | **速度と方向が分離されました** |
-| `KindStylePlay::PINGPONG` | `set_playback_direction(dir, PlaybackStyle::PingPong)` | 同上 | 方向とスタイルは対で指定します |
-| `AnimationPlay(…, frameOffset)` / `CursorSet(track, cursor)` | `seek(f32)` | `ss_player_seek` | 小数フレーム可 |
-| `CursorGet(track)` | `frame_no()` | `ss_player_frame_no` | |
-| `labelRangeStart` / `labelRangeEnd` | `set_animation_section(start, end)` | `ss_player_set_animation_section` | **フレーム指定のみ。ラベル指定は未対応** |
-| `AnimationPlay(…, framePerSecond)` | `set_frame_rate(fps)` | `ss_player_set_frame_rate` | |
-| `StatusGetPlay(track)` | `is_playing()` | `ss_player_is_playing` | 一時停止中も `true` |
-| `StatusGetPause(track)` | `is_paused()` | `ss_player_is_paused` | |
-| `CountGetAnimation()` / `NameGetAnimation()` | `animation_names()` | `ss_player_animation_count` / `_name` | |
-| `Entity::PackSet(index)` | `set_pack()` / `load()` が兼ねる | `ss_player_load` | |
-| `Entity::RateSetOpacity(rate)` | `set_alpha(f32)` | `ss_player_set_alpha` | |
-| `Entity::RateSetScaleLocal(x, y)` / `Draw` の `matrixWorld` | `set_transform(x, y, sx, sy, rot)` | `ss_player_set_transform` | |
-| （描画順は呼び出し順） | `set_order(i32)` | `ss_player_set_order` | 1 シーンに複数プレイヤを置くため |
-| （なし） | `set_visible(bool)` | `ss_player_set_visible` | |
-| （なし） | `canvas_size()` / `part_transform(part)` | `ss_player_canvas_size` / `ss_player_part_transform` | |
+| `IndexGetAnimation(name)` + `AnimationPlay(track, index, …)` | `set_animation(name)` + `play()` | `ss_player_set_animation` / `ss_player_play` | **アニメーション選択と再生開始を分離** |
+| `AnimationStop(track)` | `stop()` | `ss_player_stop` | 停止（先頭フレームへ巻き戻し） |
+| `AnimationPause(track, true/false)` | `pause()` / `play()` | `ss_player_pause` / `ss_player_play` | `play()` で一時停止から再開 |
+| `AnimationPlay(…, timesPlay)` | `set_loop_count(n)` | `ss_player_set_loop_count` | `-1` / `0` = 無限, `n` = n回 |
+| `RateTimeSet(track, rate)` | `set_speed(f32)` | `ss_player_set_speed` | 正の再生速度倍率（1.0 = 標準） |
+| `rateTime` に負値を与えて逆再生 | `set_playback_direction(Backward, style)` | `ss_player_set_playback_direction` | **速度と再生方向を分離** |
+| `KindStylePlay::PINGPONG` | `set_playback_direction(dir, PlaybackStyle::PingPong)` | 同上 | 往復再生 |
+| `AnimationPlay(…, frameOffset)` / `CursorSet(track, cursor)` | `seek(f32)` | `ss_player_seek` | フレーム位置指定（小数可） |
+| `CursorGet(track)` | `frame_no()` | `ss_player_frame_no` | 現在フレーム番号 |
+| `labelRangeStart` / `labelRangeEnd` | `set_animation_section(start, end)` | `ss_player_set_animation_section` | **フレーム番号で指定** |
+| `AnimationPlay(…, framePerSecond)` | `set_frame_rate(fps)` | `ss_player_set_frame_rate` | fps 指定 |
+| `StatusGetPlay(track)` | `is_playing()` | `ss_player_is_playing` | 再生中か（一時停止中も `true`） |
+| `StatusGetPause(track)` | `is_paused()` | `ss_player_is_paused` | 一時停止中か |
+| `CountGetAnimation()` / `NameGetAnimation(i)` | `animation_names()` | `ss_player_animation_count` / `_name` | アニメーション名一覧 |
+| `Entity::RateSetOpacity(rate)` | `set_alpha(f32)` | `ss_player_set_alpha` | プレイヤ全体の不透明度 (0.0〜1.0) |
+| `Entity::RateSetScaleLocal()` / `Draw` の `matrixWorld` | `set_transform(x, y, sx, sy, rot)` | `ss_player_set_transform` | 位置・拡大縮小・回転（ラジアン） |
+| （描画順は呼び出し順） | `set_order(i32)` | `ss_player_set_order` | 同一シーン内での前後描画順 |
+| （なし） | `set_visible(bool)` | `ss_player_set_visible` | 非表示設定（非表示時は更新スキップ） |
+| `CanvasGet()` | `canvas_size()` | `ss_player_canvas_size` | 基準キャンバスサイズ (w, h) |
 
-### 4-2. ループ回数の値の違い
+### 4-3. ループ回数の設定値
 
-| 意味 | ForCPP `timesPlay` | 本バージョン `set_loop_count` |
+| 意味 | SS6Player `timesPlay` | 本バージョン `set_loop_count` |
 |---|---|---|
-| 無限ループ | `0` | `-1`（推奨）または `0` |
+| 無限ループ | `0` | **`-1`（推奨）** または `0` |
 | 1 回だけ再生 | `1` | `1` |
 | n 回再生 | `n` | `n` |
-| 前回指定と同じ | `-1` | （相当なし。毎回明示してください） |
 
-### 4-3. `set_animation` は再生設定をリセットします
+> [!IMPORTANT]
+> **`set_animation()` は再生設定を初期化します**  
+> `set_animation()` を呼ぶと、再生ツリーが再構築され、ループ回数・速度・再生方向・区間はデータ既定値に戻ります。`set_loop_count` や `set_speed` は **`set_animation()` の後に設定** してください。
 
-`set_animation()` は再生ツリーを作り直すため、**ループ回数・速度・再生方向・再生区間はパックの既定値に戻ります。** ForCPP の `AnimationPlay` が「省略時は前回指定と同じ」という挙動だったのに対し、こちらは**毎回明示的に指定し直す**必要があります。
-
-```rust
-player.set_animation("walk")?;      // ← 先に呼ぶ
-player.set_loop_count(-1);          // ← その後に設定する
-player.set_speed(2.0);
-player.set_playback_direction(PlaybackDirection::Backward, PlaybackStyle::Normal);
-player.play();
-```
+---
 
 ## 5. イベント / コールバックの変更
 
-- **SS6Player for CPP**: `Entity` の `CallBackUserData` / `CallBackSignal` / `CallBackPlayEnd` に**関数ポインタと `void*` を登録**する方式でした。コールバックは `Entity::Update` の内側から呼ばれ、`(entity, pointer, nameParts, idParts, indexAnimation, frameDecode, frameKeyData, userData, flagWayBack)` のように多数の引数を取ります。
-- **本バージョン**: コールバックではなく、**更新後にポーリングする**方式です。借用モデルではプレイヤの更新中にホスト側のコードへ制御が戻ると、貸し出した `Device` / `Queue` の扱いが不定になるためです。
+- **SS6Player for CPP**: `Entity` の `CallBackUserData` / `CallBackSignal` / `CallBackPlayEnd` に関数ポインタとユーザーポインタ（`void*`）を登録し、`Entity::Update` の実行中にコールバックされていました。
+- **本バージョン**: **更新後にポーリング（取得）する方式** に変更されました。借用モデルでは、プレイヤ更新中にホストへ制御を戻すと貸出中のリソースが競合するリスクがあるためです。
 
-| SS6Player for CPP | 本バージョン（Rust） | C API |
-|---|---|---|
-| `CallBackUserData` | `events()` の `SsEvent::UserData` | `ss_player_event_count` / `ss_player_event_at` |
-| `CallBackSignal` | `events()` の `SsEvent::Signal` | 同上（＋ `ss_player_event_signal_param_count` / `_at`） |
-| `CallBackPlayEnd` | `finished_last_update()` | `ss_player_finished_last_update` |
-| （なし・新規） | `looped_last_update()` | `ss_player_looped_last_update` |
-| （なし・新規） | `events()` の `SsEvent::Audio` | `ss_player_event_at` |
+### イベント対応表
+
+| SS6Player for CPP | 本バージョン（Rust） | C API | ペイロード |
+|---|---|---|---|
+| `CallBackUserData` | `events()` の `SsEvent::UserData` | `ss_player_event_at` | パーツ名/ID、int/float/string/rect/point |
+| `CallBackSignal` | `events()` の `SsEvent::Signal` | 同上（＋ `ss_player_event_signal_param_at`） | コマンドID、パラメータ配列 |
+| `CallBackPlayEnd` | `finished_last_update()` | `ss_player_finished_last_update` | 再生終了判定（無限ループ時は `false`） |
+| （なし・新規） | `looped_last_update()` | `ss_player_looped_last_update` | ループ境界通過判定 |
+| （なし・新規） | `events()` の `SsEvent::Audio` | `ss_player_event_at` | サウンドアセット名等 |
+
+### イベント取得例
 
 ```rust
-scene.update(&mut renderer, &device, &queue, delta, &mut [&mut player]);
+// Rust:
+scene.update(&mut renderer, &device, &queue, dt, &mut [&mut player]);
 
+// 1. フレーム内イベントの走査
 for event in player.events() {
     match event {
-        SsEvent::UserData(e) => { /* e.part_index, 各値 */ }
-        SsEvent::Signal(e)   => { /* e.params */ }
-        SsEvent::Audio(e)    => { /* 効果音の再生など */ }
+        SsEvent::UserData(e) => {
+            println!("UserData: part={}, frame={}", e.part_name, e.frame_no);
+            if let Some(val) = e.value_int { /* ... */ }
+            if let Some(txt) = &e.value_string { /* ... */ }
+        }
+        SsEvent::Signal(e) => {
+            println!("Signal: command={}", e.command);
+        }
+        SsEvent::Audio(e) => {
+            println!("Audio: sound={}", e.name);
+        }
     }
 }
-if player.finished_last_update() { /* 再生終了 */ }
+
+// 2. ループ・終了判定
+if player.looped_last_update() {
+    println!("アニメーションが1ループしました");
+}
+if player.finished_last_update() {
+    println!("全ループ再生が終了しました");
+}
 ```
 
-- `events()` は**その `update` で発生した分だけ**を保持し、次の `update` の先頭でクリアされます。毎フレーム読んでください。
-- **飛ばされたフレームのイベントも取りこぼしません。** 処理落ちで複数フレーム進んだ場合も、通過したフレームのイベントがすべて列挙されます。
-- `set_visible(false)` のプレイヤは更新自体が進まないため、イベントも発生しません。
-- ForCPP の `TypeFunctionPlayEnd` にあった「エンティティの自動破棄」に相当する仕組みはありません。破棄が必要な場合は明示的に行ってください。
-- **オーディオイベントは本バージョンの新機能**です（ForCPP には相当機能がありません）。
+```c
+/* C API (C++): */
+ss_scene_update(scene, dt);
 
-## 6. パーツ単位の操作
+/* イベントの取得 */
+uint32_t count = ss_player_event_count(player);
+for (uint32_t i = 0; i < count; ++i) {
+    ss_event_t event;
+    if (ss_player_event_at(player, i, &event) == SS_OK) {
+        if (event.kind == SS_EVENT_USER_DATA) {
+            /* event.part_name, event.value_int 等を参照 */
+        }
+    }
+}
 
-パーツは ForCPP の `idParts`（`IDGetParts(name)` で取得）に代わり、**`find_part_index(name)`** で得たインデックスで指定します。
+if (ss_player_finished_last_update(player)) {
+    /* 再生終了処理 */
+}
+```
+
+> [!NOTE]
+> - `events()` は直前の `update` で発生した分だけを保持し、次の `update` で自動クリアされます。
+> - 処理落ち（可変デルタタイム）で複数フレーム進んだ場合でも、通過したフレームのイベントは**取りこぼさずすべて列挙**されます。
+
+---
+
+## 6. パーツ単位の操作（パーツオーバーライド）
+
+パーツの特定は、従来の `idParts`（`IDGetParts(name)`）から **`find_part_index(name)`** に変更されました。パーツの表示非表示やセル差し替え、カラー上書きはオーバーライド API を使用します。
 
 | SS6Player for CPP | 本バージョン（Rust） | C API |
 |---|---|---|
 | `IDGetParts(name)` | `find_part_index(name)` | `ss_player_find_part_index` |
 | `CountGetParts()` | `part_count()` | `ss_player_part_count` |
-| `HideSet(idParts, flag, involveChildren)` | `set_part_visibility_override(part, hide, cascade)` | `ss_player_set_part_visibility_override` |
-| `CellChangeParts(idParts, indexCellMap, indexCell, …)` | `set_part_cell_override(part, cellmap_name, cell_name, priority)` | `ss_player_set_part_cell_override` |
+| `HideSet(idParts, flag, cascade)` | `set_part_visibility_override(part, hide, cascade)` | `ss_player_set_part_visibility_override` |
+| `CellChangeParts(id, map, cell, …)` | `set_part_cell_override(part, cellmap_name, cell_name, priority)` | `ss_player_set_part_cell_override` |
 | （相当機能なし） | `set_part_color_override(part, blend_op, rgba, priority)` | `ss_player_set_part_color_override` |
 | （相当機能なし） | `clear_all_part_overrides()` | `ss_player_clear_all_part_overrides` |
-| `FlipSetParts(...)` | **相当機能なし**（[§8](#8-未対応の機能仕様差分)） | — |
+| `PartGetTransform(id, ...)` | `part_transform(part)` | `ss_player_part_transform` |
 
-ForCPP がセルマップ・セルを**インデックス**で指定していたのに対し、本バージョンは**名前**で指定します。また、上書きの有効期間を `OverridePriority` で選べます（次のキーフレームまで / 現在のアニメーション中 / 同じパックの再生中ずっと）。
+> ForCPP ではセルマップやセルをインデックス番号で指定していましたが、本バージョンでは**セルマップ名・セル名の文字列**で直感的に指定できます。また、上書きの有効期間（キーフレームまで / アニメーション中 / パック中恒久）を `OverridePriority` で制御できます。
 
-## 7. 描画・プラットフォーム層
+---
 
-ForCPP の `src/Platform/OpenGL/` に相当する層は**存在しません**。wgpu が Vulkan / DX12 / Metal / GL / WebGPU を吸収するため、移植先ごとのプラットフォーム実装は不要です。
+## 7. 実践コード対比（Before / After）
 
-- ForCPP の `TypeDrawCommandList` を引き回す設計は無くなりました。Rust 面ではホストが張ったレンダーパスに `SSScene::draw` で描き込み、C 面では `ss_scene_render` がパスの構築まで行います。
-- テクスチャは**プレイヤが所有しません**。`SSRenderer::set_texture` は供給側が所有する `TextureView` からバインドグループを作るだけなので、エンジン側のアセット管理と競合しません。
-- パフォーマンス計測は `SSScene::stats()`（C: `ss_scene_stats`）で取得できます。
+### C++: SS6Player for CPP（Before）
+
+```cpp
+#include <ss6player_platform.h>
+#include <Entity/ss6player_entity.h>
+#include <Project/ss6player_project.h>
+
+// 初期化
+SpriteStudio6::SettingSystem setting;
+SpriteStudio6::SystemBootUp(setting);
+
+SpriteStudio6::Project project;
+project.BootUp(ssfb2Data);
+// テクスチャの手動読み込み・登録
+for (int i = 0; i < project.CountGetTexture(); ++i) {
+    project.TextureSet(i, LoadTexture(project.NameGetTexture(i)));
+}
+
+SpriteStudio6::Entity entity;
+entity.BootUp();
+entity.ProjectSet(&project);
+entity.PackSet(0);
+
+int animIdx = entity.IndexGetAnimation("Attack");
+entity.AnimationPlay(0, animIdx, 1); // 1回再生
+entity.RateSetScaleLocal(1.5f, 1.5f);
+
+// 毎フレーム
+SpriteStudio6::SystemProcessMainPre();
+entity.Update(deltaTime);
+SpriteStudio6::SystemProcessMainPost();
+
+entity.Draw(commandList, matProj, matView, matWorld);
+SpriteStudio6::SystemProcessRenderPost();
+
+// 破棄
+entity.ShutDown();
+project.ShutDown();
+SpriteStudio6::SystemShutDown();
+```
+
+### C++: SSPlayer for wgpu（After / C API 経由）
+
+```cpp
+#include <ssplayer_wgpu.h>
+
+// 初期化（DX12 / Metal / Vulkan のネイティブウィンドウからシーンを作成）
+ss_scene_desc_t desc = {};
+desc.metal_layer     = metalLayer;  // macOSの場合（Windowsは hwnd / hinstance）
+desc.width           = 1280;
+desc.height          = 720;
+desc.clear_color[0]  = 0.1f;
+desc.clear_color[1]  = 0.1f;
+desc.clear_color[2]  = 0.1f;
+desc.clear_color[3]  = 1.0f;
+
+ss_scene_t* scene = ss_scene_create(&desc);
+ss_player_t* player = ss_scene_create_player(scene);
+
+// ロード（テクスチャや依存ファイルも自動解決）
+ss_player_load(player, "assets/character/character.ssab");
+ss_player_set_animation(player, "Attack");
+ss_player_set_loop_count(player, 1);
+ss_player_set_transform(player, 640.0f, 360.0f, 1.5f, 1.5f, 0.0f);
+ss_player_play(player);
+
+// 毎フレーム
+ss_scene_update(scene, deltaTime);
+ss_scene_render(scene);
+
+// イベント確認
+if (ss_player_finished_last_update(player)) {
+    // 攻撃アニメーション完了
+}
+
+// 破棄
+ss_player_destroy(player);
+ss_scene_destroy(scene);
+```
+
+### Rust: SSPlayer for wgpu（After / Rust ネイティブ）
+
+```rust
+use ssplayer_wgpu::{SSRenderer, SSScene, SSPlayer, SceneConfig};
+
+// 初期化（Device / Queue / SurfaceFormat はホストが用意）
+let mut renderer = SSRenderer::new(&device);
+let mut scene = SSScene::new(&device, &SceneConfig {
+    color_format: surface_format,
+    stencil_format: Some(wgpu::TextureFormat::Depth24PlusStencil8),
+});
+
+let mut player = SSPlayer::new();
+player.load("assets/character/character.ssab")?;
+player.set_animation("Attack")?;
+player.set_loop_count(1);
+player.set_transform(640.0, 360.0, 1.5, 1.5, 0.0);
+player.play();
+
+// 毎フレーム
+scene.set_viewport(&queue, 1280.0, 720.0, true);
+scene.update(&mut renderer, &device, &queue, delta_time, &mut [&mut player]);
+
+let mut rpass = encoder.begin_render_pass(&render_pass_desc);
+scene.draw(&renderer, &mut rpass);
+drop(rpass);
+
+// イベント確認
+if player.finished_last_update() {
+    // 攻撃アニメーション完了
+}
+```
+
+---
 
 ## 8. 未対応の機能・仕様差分
 
-移行にあたって、ForCPP にあって本バージョンに無い機能は以下です。
+移行にあたり、ForCPP に存在し本バージョンで仕様が異なる機能は以下の通りです。
 
-- **マルチトラック / クロスフェード**: ForCPP の複数トラック再生と `Control::Animation::Track::Transition()`（TRS アニメーションのブレンド）に相当する API はありません。基盤となるブレンド機能は `libssruntime` 側に実装済みですが、本プレイヤからはまだ公開していません。レイヤー表現が必要な場合は、当面**複数の `SSPlayer` を併用**してください。
-- **シーケンス再生（`.ssqb`）**: ForCPP の `Sequencer` クラスに相当する機能はありません。`.ssqb` 自体は SDK が変換まで対応しているため、`is_finished()` を監視して次のアニメーションを `set_animation()` する形で、ホスト側にステートマシンを組んで代替してください（SDK ROADMAP Phase 3 で `libssruntime` 側への内包を予定）。
-- **エフェクトの乱数シード指定**: ForCPP の `Entity::SeedOffsetSet(seed)` に相当する API はありません。シードはスロット単位で固定されます。
-- **パーツ単位の反転指定**: ForCPP の `FlipSetParts()` に相当する上書き API はありません。反転はアニメーションデータの指定に従います。
-- **再生区間のラベル指定**: `labelRangeStart` / `labelRangeEnd` に相当する指定はなく、`set_animation_section()` は**フレーム番号のみ**を受け取ります。
-- **Text / 9-slice パーツ**: ジオメトリが未実装です。
-- **`.ssfb2` の読み込み**: 対応しません（[§1](#1-アセットフォーマットの変更ssfb2--ssab)）。
+1. **マルチトラック / アニメーションブレンド**:
+   ForCPP の複数トラック同時再生および `Transition()`（TRS アニメーションのブレンド）は、コア計算層（`ssruntime`）で実装中ですが、プレイヤ API としては未公開です。当面は**複数の `SSPlayer` を作成して描画順（`set_order`）で重ねる**ことで代用してください。
+2. **シーケンサー（`.ssqb`）**:
+   ForCPP の `Sequencer` クラス（複数アニメーションの連続再生）は、現在 `finished_last_update()` を検知して次のアニメーションを `set_animation()` するホスト側コードで代用してください。
+3. **パーツ単位の反転（Flip）**:
+   ForCPP の `FlipSetParts()` のような個別パーツ反転オーバーライドはありません。反転はデータ側のキーフレーム設定に従います。
+4. **エフェクトのシード値指定**:
+   ForCPP の `SeedOffsetSet()` に相当する API はありません。エフェクトのシードは再生スロットごとに自動決定されます。
+5. **再生区間のラベル指定**:
+   `labelRangeStart` / `labelRangeEnd` などのラベル文字列指定は未対応です。フレーム番号による `set_animation_section(start, end)` を使用してください。
 
-## 9. 対応環境
+---
 
-- Rust 1.97 以降
-- **wgpu 29** 系がサポートするバックエンド（Vulkan / DX12 / Metal / GL / WebGPU）
-- C / C++ から使う場合は `ffi` フィーチャ。ヘッダは `libs/ssplayer-wgpu/include/ssplayer_wgpu.h` に自動生成されます
+## 9. まとめとリンク
 
-詳細は [README](../../README.md) および設計正典 [`SSPLAYER_WGPU_SPEC.md`](../../SSPLAYER_WGPU_SPEC.md) を参照してください。
+SSPlayer for wgpu への移行により、以下のメリットが得られます：
+- **マルチ GPU バックエンド対応**: WebGPU / Vulkan / DirectX 12 / Metal を単一コードベースで高速描画
+- **CPU 負荷の激減**: Programmable Vertex Pulling により頂点生成コストを大幅削減
+- **シンプルなライフサイクル**: 借用モデルによるクリーンなエンジン統合と自動アセット解決
+
+### 関連リンク
+- [README](../../README.md)
+- [設計正典 `SSPLAYER_WGPU_SPEC.md`](../../SSPLAYER_WGPU_SPEC.md)
+- [C API サンプル: Metal C++ Viewer](../../examples/viewer-metal-cpp/README.md)
+- [C API サンプル: DX12 C++ Viewer](../../examples/viewer-dx12-cpp/README.md)
+- [WebGPU / JS ガイド](../../examples/web/README.md)
