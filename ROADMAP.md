@@ -88,6 +88,20 @@ respect are in [`AGENTS.md`](./AGENTS.md) under *Hard constraints*.
       Metal viewer is never built there. Two faces need one: web (npm, from
       `pkg/`) and desktop FFI. Cross-compilation is unsupported, so each platform
       needs its own runner.
+- [ ] **The npm package is not yet the shape it will ship in.** `scripts/build.sh
+      platform=web` produces a valid package directory — ES module, `.d.ts`,
+      `main` / `types` / `files` all set — but three things are still wrong for a
+      published one:
+      - The name is bare `ssplayer-wgpu`; the sibling Web packages are all under
+        the `@spritestudio` scope.
+      - `<ss-player-webgpu>` and the shared-context helper are plain JavaScript in
+        `examples/web` and are not part of the package, so installing it gets the
+        `SsContextWeb` / `SsSurfaceWeb` / `SsPlayerWeb` API and nothing else.
+        `ssplayer-webgl` ships its custom element as an entry point of the package;
+        this should too, and stay optional so a page that does not want it pays
+        nothing.
+      - wasm-pack copies the crate's README into the package, and that README is
+        written for Rust callers. The npm page needs its own.
 - [ ] **macOS signing and notarization** for the cdylib. Portable from the sibling
       players, using the existing organisation secrets.
 - [ ] **Version stamping.** Versions are hand-written, and the SDK is a submodule

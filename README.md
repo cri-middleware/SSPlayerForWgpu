@@ -7,6 +7,11 @@ animations (`.ssab`), built on [wgpu](https://wgpu.rs/). Animate the sprite art 
 (PNG / WebP) in a dedicated editor, then play it back through **one** rendering code path that covers
 WebGPU, Vulkan, DX12, Metal and GL — no video files, no re-authoring, no engine lock-in.
 
+The player never owns the wgpu `Device` / `Queue` / `Surface`: the host owns them and lends them per
+frame. That is what lets one library serve a standalone window, a browser canvas and a C++ host without
+any of them being a special case, and what lets it ride along inside an engine that already has a device
+of its own.
+
 ## 📚 Documentation
 
 - [**Japanese documentation (日本語ドキュメント)**](./docs/ja/index.md)
@@ -15,79 +20,127 @@ WebGPU, Vulkan, DX12, Metal and GL — no video files, no re-authoring, no engin
 - [**SpriteStudio Docs (portal)**](https://cri-middleware.github.io/SpriteStudio-Docs/) — the SDK and every
   official player in one place (live with the first release)
 
-### Where to read, by goal
+## 📦 Installation
 
-You only need to read as far as your goal requires — each row builds one layer more than the row above:
+> **While the `SpriteStudio-SDK` repository is private, every route below needs access to it.** The
+> player links `ssruntime` and `ssab` as Rust crates rather than through a released C-API, so the SDK
+> comes in as a git submodule.
 
-| You are… | You build… | Where to read |
-|---|---|---|
-| **A library user** | nothing — you consume the library as a dependency or a prebuilt artifact | [Track A](#a-use-the-library) → the example for your environment under [Samples](#-samples) |
-| **A customizing user** | the library itself, to change or extend it | Above + [Track B](#b-build-the-library) + [`libs/ssplayer-wgpu`](./libs/ssplayer-wgpu) (the API) |
-| **A player developer** | everything — SDK submodule, sample assets, every example, the tests | Above + [Track C](#c-build-everything) → [Overview](#-overview) → [AGENTS.md](./AGENTS.md) |
+### Rust
 
-## 🎯 Which environment am I in?
-
-Each example is a complete host for one environment, and its README is the usage guide for that
-environment — how the window is created, how the device is lent, how assets get in.
-
-| Your environment | Start from | What it shows |
-|---|---|---|
-| **A Rust app** (your own wgpu app, egui, macroquad, Bevy) | [`examples/viewer`](./examples/viewer) | winit + wgpu owning the device and lending it per frame |
-| **A browser** (WebGPU) | [`examples/web`](./examples/web) | the `<ss-player-webgpu>` element, and N characters on one canvas |
-| **macOS / Metal, from C++** | [`examples/viewer-metal-cpp`](./examples/viewer-metal-cpp) | Cocoa `CAMetalLayer` → the C API |
-| **Windows / DX12, from C++** | [`examples/viewer-dx12-cpp`](./examples/viewer-dx12-cpp) | Win32 `HWND` → the C API |
-| **Building your own integration** | [`libs/ssplayer-wgpu`](./libs/ssplayer-wgpu) | the crate itself: `SSRenderer` / `SSScene` / `SSPlayer` |
-| **Converting `.sspj` → `.ssab`** | [SSConverterGUI](https://github.com/cri-middleware/SSConverterGUI/releases) | or `scripts/deploy-examples.sh` for this repo's sample data |
-
-## 🚀 Quick Start
-
-Three tracks, each one layer deeper than the last. Stop at the one that matches your goal.
-
-### A. Use the library
-
-Nothing to build here. In Rust, add it as a git dependency — cargo checks out the `SpriteStudio-SDK`
-submodule for you:
+Add the crate as a git dependency. Cargo checks out the submodule for you, and no other tooling is
+needed:
 
 ```toml
 [dependencies]
 ssplayer-wgpu = { git = "https://github.com/cri-middleware/SSPlayerForWgpu" }
 ```
 
-Then create one `SSRenderer` per device, one `SSScene` per render target, and any number of `SSPlayer`s —
-the [crate README](./libs/ssplayer-wgpu#usage) has the whole call sequence, and
-[`examples/viewer`](./examples/viewer) is a complete host you can read top to bottom.
+> 🚧 **Not on crates.io yet.** `cargo publish` refuses a crate whose dependencies have no version
+> requirement, so this waits on the SDK crates being published first — see [ROADMAP](./ROADMAP.md).
 
-> 🚧 **Prebuilt artifacts are not published yet** — no crates.io release, no npm package, no binary
-> downloads for the C/C++ face. Until then, the git dependency above is the ready-made route for Rust,
-> and everyone else takes Track B. Progress is tracked in the [ROADMAP](./ROADMAP.md).
->
-> Building against this crate needs access to the `SpriteStudio-SDK` repository, because it is consumed
-> as a submodule rather than as a released package.
+### C and C++
 
-### B. Build the library
-
-For changing or extending the player, and the current route to the C/C++ and web faces.
-
-**Prerequisites:** [Rust](https://rustup.rs/) 1.97+, a GPU backend supported by wgpu 29, and access to
-the SDK repository. For the web face also `wasm-pack` and `rustup target add wasm32-unknown-unknown`.
+The C face is a cdylib / staticlib plus a generated header. Build it from this repository:
 
 ```bash
 git clone --recursive https://github.com/cri-middleware/SSPlayerForWgpu.git
 cd SSPlayerForWgpu
-git submodule update --init            # if you cloned without --recursive
-
-./scripts/build.sh                     # the Rust library + the C face → bin/
-./scripts/build.sh platform=web        # the wasm/js face → pkg/
+./scripts/build.sh          # scripts\build.ps1 on Windows
 ```
 
-`build.sh` builds **only the library**; it never converts a `.ssab`. What it produces lands in a fixed
-layout, so a packaging step never has to know where each toolchain drops its files:
+That collects everything a C or C++ project needs into `bin/`:
 
 ```
 bin/include/ssplayer_wgpu.h                              # the C header (cbindgen)
 bin/LICENSE.md
 bin/libs/<platform>/<arch>/libssplayer_wgpu.{a,dylib}    # .lib/.dll on Windows
-pkg/                                                     # platform=web: the wasm-pack package
+```
+
+Point your build at those two directories. The C++ viewers under [`examples/`](#-samples) do exactly
+that through CMake and are the shortest working reference — one drives Metal on macOS, the other DX12 on
+Windows, and each is self-contained enough to copy out whole.
+
+> 🚧 **No prebuilt downloads yet.** The intended route is a per-platform archive of that same `bin/`
+> tree on [GitHub Releases](https://github.com/cri-middleware/SSPlayerForWgpu/releases), matching how
+> the SDK and the other players ship. The layout above is already what a release would package;
+> what is missing is the release workflow, a macOS signing and notarization step, and the checksums —
+> see [ROADMAP](./ROADMAP.md).
+
+### Browser (WebGPU)
+
+Build the wasm package from this repository:
+
+```bash
+./scripts/build.sh platform=web     # → pkg/, a wasm-pack package (ES module + .d.ts)
+```
+
+`pkg/` is a normal npm package directory, so a bundler can take it as a file dependency
+(`"ssplayer-wgpu": "file:../SSPlayerForWgpu/pkg"`) or you can import the ES module directly. The same
+build is staged into [`examples/web`](./examples/web), which is the working reference for both APIs:
+`SsContextWeb` / `SsSurfaceWeb` / `SsPlayerWeb` for full control, and a `<ss-player-webgpu>` custom
+element for one character in one canvas.
+
+The element and the shared-context helper are plain JavaScript in that directory
+(`ss-player-webgpu.js`, `ss-context.js`) rather than part of the wasm, so they are meant to be copied
+and adapted. The wasm side is `libs/ssplayer-wgpu/src/web.rs`, behind the `web` feature.
+
+> 🚧 **Not on npm yet**, and the package is not yet the shape it will ship in: the name is unscoped
+> where the sibling Web packages use `@spritestudio`, the custom element is not part of it, and it
+> carries no JavaScript-facing README. See [ROADMAP](./ROADMAP.md).
+
+## ⚡ Usage
+
+One `SSRenderer` per device, one `SSScene` per render target, and any number of `SSPlayer`s drawn into
+it in one pass:
+
+```rust
+let mut renderer = SSRenderer::new(&device);
+let mut scene = SSScene::new(&device, &SceneConfig { color_format, stencil_format });
+
+let mut player = SSPlayer::new();
+player.load("assets/overall/Basic.ssab")?;   // pack, atlases and sibling packs, in one call
+player.set_animation("Basic")?;
+player.play();
+
+scene.update(&mut renderer, &device, &queue, delta_secs, &mut [&mut player]);
+scene.draw(&renderer, &mut rpass);           // into a pass the host opened
+```
+
+The full API — the three scopes, loading, transport, per-part overrides, events, device-loss recovery —
+is in the [crate README](./libs/ssplayer-wgpu). The C and JavaScript faces are the same shape under
+different names, and each sample below documents its own.
+
+## 🎬 Samples
+
+One host per environment, each self-contained. Every one has a README that doubles as the usage guide
+for that environment: how the window is created, how the device is lent, and how assets get in.
+
+| Sample | Environment | Run it |
+|---|---|---|
+| [`examples/viewer`](./examples/viewer) | Rust, winit | `cargo run -p ssplayer-wgpu-viewer` |
+| [`examples/web`](./examples/web) | WebGPU in a browser | `./scripts/build.sh platform=web`, then `cd examples/web && python3 -m http.server` |
+| [`examples/viewer-metal-cpp`](./examples/viewer-metal-cpp) | C++ on Metal, macOS | `cmake -B build && cmake --build build && ./build/ssviewer-metal` |
+| [`examples/viewer-dx12-cpp`](./examples/viewer-dx12-cpp) | C++ on DX12, Windows | `cmake -B build; cmake --build build --config Release; .\build\Release\ssviewer-dx12.exe` |
+
+They play generated animation data, so run this once first:
+
+```bash
+./scripts/deploy-examples.sh    # builds ssconverter-cli from the SDK, converts the test projects → assets/
+```
+
+The C++ viewers drive the library through CMake, which runs cargo itself, so they need no separate build
+step.
+
+## 🔨 Building from source
+
+`scripts/build.sh` (`build.ps1` on Windows) builds the **library** and nothing else — it never converts
+a `.ssab`, and it does not need the SDK for anything but the checkout cargo already did.
+
+```bash
+./scripts/build.sh                            # = platform=host build=release
+./scripts/build.sh platform=web build=debug   # wasm/js face, deployed into examples/web
+./scripts/build.sh --help                     # every option
 ```
 
 | Option | Values | What it does |
@@ -97,49 +150,17 @@ pkg/                                                     # platform=web: the was
 | `ffi` | `yes` (default), `no` | `host` only: also build `--features ffi`, which regenerates `libs/ssplayer-wgpu/include/ssplayer_wgpu.h` with cbindgen |
 | `deploy` | `yes` (default), `no` | `web` only: copy the wasm package into `examples/web/wasm` |
 
-`./scripts/build.sh --help` lists them all. On Windows use `scripts\build.ps1` with the same arguments.
+Cargo works directly too — `cargo build -p ssplayer-wgpu --features ffi` is the same thing without the
+collect step. Requirements are Rust 1.97+, a GPU backend supported by wgpu 29, and for the web face
+`wasm-pack` plus `rustup target add wasm32-unknown-unknown`.
 
-### C. Build everything
+**`scripts/deploy-examples.sh`** is the other half, and owns the playback data end to end: it builds
+`ssconverter-cli` from the SDK submodule and converts the test projects into `assets/` in **both** export
+modes, deploying them to `examples/web` as `assets/` (reference, plus its sibling `.png`) and
+`assets_emb/` (embedded, atlas baked in). The tests read `assets/`, so it is a prerequisite for
+`cargo test`, not an optional step.
 
-For working on this repository: the sample data, every example, and the tests.
-
-```bash
-./scripts/deploy-examples.sh           # build ssconverter-cli, convert the SDK's test projects → assets/
-cargo run -p ssplayer-wgpu-viewer      # the native winit viewer
-cargo test --workspace                 # includes headless GPU readback tests
-```
-
-`deploy-examples.sh` owns the playback data end to end — it converts the test projects in **both**
-export modes and deploys them to `examples/web`: `assets/` (reference, plus its sibling `.png`) and
-`assets_emb/` (embedded, atlas baked in), because the demo page has a selector for the two. The tests
-read `assets/`, so this is a prerequisite rather than an optional step.
-
-The viewer plays `assets/overall`. Right/Left switches `.ssab` packs, Up/Down switches animations, Space
-pauses, `F` flips the Y axis, `+`/`-` changes how many characters share the pass, and `Tab` moves focus
-between them. Dropping a `.ssab` file or a folder onto the window plays your own assets — see its
-[README](./examples/viewer) for the rest.
-
-## 🎬 Samples
-
-One host per environment, each self-contained — copy a directory out and it builds. Every one has a
-README that doubles as the usage guide for that environment; all of them need Track C's
-`deploy-examples.sh` first, since they play the generated `assets/`.
-
-| Sample | Run it |
-|---|---|
-| [`examples/viewer`](./examples/viewer) — Rust, winit | `cargo run -p ssplayer-wgpu-viewer` |
-| [`examples/web`](./examples/web) — WebGPU in a browser | `./scripts/build.sh platform=web` then `cd examples/web && python3 -m http.server` → http://localhost:8000 |
-| [`examples/viewer-metal-cpp`](./examples/viewer-metal-cpp) — C++ on Metal | `cd examples/viewer-metal-cpp && cmake -B build && cmake --build build && ./build/ssviewer-metal` |
-| [`examples/viewer-dx12-cpp`](./examples/viewer-dx12-cpp) — C++ on DX12 | `cd examples\viewer-dx12-cpp; cmake -B build; cmake --build build --config Release; .\build\Release\ssviewer-dx12.exe` |
-
-The C/C++ viewers drive the same `ffi` library through CMake, which runs cargo itself — no separate
-library build step is needed for them.
-
-## 💡 Overview
-
-Everything below is for working *on* this repository rather than with it.
-
-### Repository structure
+## 🧭 Repository layout
 
 A single Cargo workspace. The library is one crate carrying all three faces; everything else is a host
 that drives it.
@@ -171,11 +192,8 @@ flowchart TD
 | Path | What |
 |---|---|
 | [`libs/ssplayer-wgpu/`](./libs/ssplayer-wgpu) | crate `ssplayer-wgpu` — the player. `rlib` + `cdylib` + `staticlib`, with the `web` and `ffi` faces behind features |
-| [`examples/viewer/`](./examples/viewer) | crate `ssplayer-wgpu-viewer` — native winit viewer used for development |
-| [`examples/web/`](./examples/web) | `<ss-player-webgpu>` custom element + WebGPU demo page |
-| [`examples/viewer-metal-cpp/`](./examples/viewer-metal-cpp) | Cocoa/Objective-C++ viewer driving the C API on Metal |
-| [`examples/viewer-dx12-cpp/`](./examples/viewer-dx12-cpp) | Win32/C++ viewer driving the C API on DX12 |
-| `scripts/build.sh` / `.ps1` | builds the library for one platform (`platform=host\|web`), collecting it into `bin/` |
+| [`examples/`](./examples) | one host per environment; see [Samples](#-samples) |
+| `scripts/build.sh` / `.ps1` | builds the library for one platform, collecting it into `bin/` |
 | `scripts/deploy-examples.sh` / `.ps1` | converts the SDK's test projects into `assets/` and deploys both export modes to `examples/web` |
 | `bin/` | collected library artifacts. Gitignored |
 | `SpriteStudio-SDK/` | the SDK, as a git submodule — `ssruntime` and `ssab` are path dependencies into it |
@@ -183,12 +201,21 @@ flowchart TD
 The two crates are versioned independently: the library and the development viewer are different
 products.
 
-### The load-bearing design decision
+## 🤝 Contributing
 
-The player never owns the wgpu `Device` / `Queue` / `Surface` — the host owns them and lends them per
-frame. That is what lets one library serve a standalone window, a browser canvas and a C++ host without
-any of them being a special case, and what lets it ride along inside an engine that already has its own
-device. See [`libs/ssplayer-wgpu/README.md`](./libs/ssplayer-wgpu/README.md).
+[AGENTS.md](./AGENTS.md) records the invariants every change has to respect and how to verify one;
+[ROADMAP.md](./ROADMAP.md) is what is planned and what was deliberately declined. A full check is:
+
+```bash
+cargo fmt --all -- --check
+cargo clippy --workspace --all-targets -- -D warnings
+cargo test --workspace                                                  # needs deploy-examples.sh first
+cargo build -p ssplayer-wgpu --target wasm32-unknown-unknown --no-default-features --features web
+cargo build -p ssplayer-wgpu --features ffi                             # also regenerates the C header
+```
+
+The SDK is a submodule, so a change that needs `ssruntime` or `ssab` is a pull request there followed by
+a submodule bump here.
 
 ## 🔗 Related Repositories
 
@@ -202,6 +229,3 @@ device. See [`libs/ssplayer-wgpu/README.md`](./libs/ssplayer-wgpu/README.md).
 ## 📄 License
 
 BSD-3-Clause. See [LICENSE.md](./LICENSE.md).
-
-Need help? Open an issue. Contributors should start with [AGENTS.md](./AGENTS.md), which records the
-invariants every change has to respect, and [ROADMAP.md](./ROADMAP.md) for what is planned.
