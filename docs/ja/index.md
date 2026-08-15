@@ -1,0 +1,37 @@
+# SSPlayer for wgpu ドキュメント
+
+**SSPlayer for wgpu** は、SpriteStudio 7 アニメーションを **WebGPU / Vulkan / DirectX 12 / Metal / OpenGL** で高速描画するための公式レンダラー・プレイヤーライブラリです。
+
+---
+
+## 🎯 特徴
+
+1. **モダン GPU ネイティブ (wgpu)**
+   - 単一の Rust / WGSL 実装で WebGPU, Vulkan, DirectX 12, Metal, OpenGL のすべてを網羅。
+   - Programmable Vertex Pulling（頂点バッファレス描画）による圧倒的な低 CPU 負荷。
+2. **借用モデル (Borrow Model)**
+   - プレイヤーは GPU デバイスやコンテキストを専有・所有せず、ホストから借りて描画。
+   - 任意のゲームエンジン（Bevy / Slint / egui / 自作エンジン / ネイティブ C++ アプリ）へロックインなしで相乗り可能。
+3. **1 シーンに複数プレイヤー (N 体まとめ描画)**
+   - 1 つの描画ターゲットに任意の数のプレイヤーを配置し、1 つのレンダーパスで一括描画。
+4. **3 面提供（Rust / C++ / Web）**
+   - **Rust API**: 第一級市民としてのクリーンなイディオマティック Rust API。
+   - **C / C++ API (`ffi`)**: DirectX 12 / Metal などの C++ ホストから呼び出せるヘッダ付き C-API。
+   - **WebGPU / JS (`web`)**: WebAssembly による `<ss-player-webgpu>` Web Component および JavaScript API。
+
+---
+
+## 📚 ドキュメント目次
+
+### 導入・マイグレーション
+- 🔄 **[SS6Player for CPP からのマイグレーション](./migration_from_cpp.md)** — 旧 C++ プレイヤーからの移行ガイド・API 対応表・実践コード比較
+
+### 開発・設計仕様
+- 📐 **[設計正典 (SSPLAYER_WGPU_SPEC.md)](../../SSPLAYER_WGPU_SPEC.md)** — レンダリングパイプライン、メモリ設計、フェーズ仕様
+- 🤖 **[AI エージェント / 開発ガイド (AGENTS.md)](../../AGENTS.md)** — ビルド手順、テスト方法、検証ルール
+
+### サンプル
+- 🖥️ **[Native Viewer](../../examples/viewer/)** — winit ベースの Rust ネイティブビューア
+- 🌐 **[WebGPU Demo](../../examples/web/README.md)** — ブラウザ上で動作する WebGPU デモ
+- 🍏 **[Metal C++ Viewer](../../examples/viewer-metal-cpp/README.md)** — macOS / Cocoa (Objective-C++) ホストサンプル
+- 🪟 **[DX12 C++ Viewer](../../examples/viewer-dx12-cpp/README.md)** — Windows / Win32 (C++) ホストサンプル
