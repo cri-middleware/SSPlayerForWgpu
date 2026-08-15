@@ -395,7 +395,8 @@ SSPlayer for wgpu への移行により、以下のメリットが得られま�
 
 ### 関連リンク
 - [README](../../README.md)
-- [設計正典 `SSPLAYER_WGPU_SPEC.md`](../../SSPLAYER_WGPU_SPEC.md)
+- [クレート README (`libs/ssplayer-wgpu`)](../../libs/ssplayer-wgpu/README.md)
+- [ROADMAP](../../ROADMAP.md)
 - [C API サンプル: Metal C++ Viewer](../../examples/viewer-metal-cpp/README.md)
 - [C API サンプル: DX12 C++ Viewer](../../examples/viewer-dx12-cpp/README.md)
 - [WebGPU / JS ガイド](../../examples/web/README.md)

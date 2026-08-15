@@ -26,9 +26,12 @@
 ### 導入・マイグレーション
 - 🔄 **[SS6Player for CPP からのマイグレーション](./migration_from_cpp.md)** — 旧 C++ プレイヤーからの移行ガイド・API 対応表・実践コード比較
 
+### ライブラリ API
+- 📦 **[クレート README (`libs/ssplayer-wgpu`)](../../libs/ssplayer-wgpu/README.md)** — 借用モデル、3 つの型、feature、使い方
+
 ### 開発・設計仕様
-- 📐 **[設計正典 (SSPLAYER_WGPU_SPEC.md)](../../SSPLAYER_WGPU_SPEC.md)** — レンダリングパイプライン、メモリ設計、フェーズ仕様
-- 🤖 **[AI エージェント / 開発ガイド (AGENTS.md)](../../AGENTS.md)** — ビルド手順、テスト方法、検証ルール
+- 🗺️ **[ROADMAP](../../ROADMAP.md)** — 実装済み・未実装・意図的に採用しなかったもの
+- 🤖 **[AI エージェント / 開発ガイド (AGENTS.md)](../../AGENTS.md)** — 不変条件、ビルド手順、テスト方法、検証ルール
 
 ### サンプル
 - 🖥️ **[Native Viewer](../../examples/viewer/)** — winit ベースの Rust ネイティブビューア
