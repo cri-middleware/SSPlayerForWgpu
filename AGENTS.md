@@ -24,6 +24,7 @@ A wgpu renderer for SpriteStudio 7 animations, split out of the SpriteStudio-SDK
 | `examples/web/` | `ss-context.js` (the page's single `SsContextWeb`), the `<ss-player-webgpu>` convenience element and the demo page. It carries no build script — `scripts/build.sh platform=web` builds the wasm and stages it here. | [README](./examples/web/README.md) |
 | `examples/viewer-metal-cpp/` | Cocoa/Objective-C++ host that drives the C API on Metal. CMake builds the library through cargo. | [README](./examples/viewer-metal-cpp/README.md) |
 | `examples/viewer-dx12-cpp/` | Win32/C++ host that drives the C API on DX12 — the Windows twin of the Metal one, deliberately duplicated rather than shared. Run on Windows hardware and working; what the first run covered beyond "it draws" is not recorded yet. | [README](./examples/viewer-dx12-cpp/README.md) |
+| `examples/viewer-vulkan-cpp/` | Linux/C++ host that drives the C API on Vulkan, carrying **both** window paths in one binary — raw Xlib and `wayland-client` + xdg-shell — because Xwayland means an X11 window never reaches the `SS_WINDOW_WAYLAND` arm. Written on macOS and never yet built or run; the first Linux run is the check it exists for. | [README](./examples/viewer-vulkan-cpp/README.md) |
 | `scripts/build.sh` / `.ps1` | Builds the **library** and collects it: `platform=host\|web`, `build=release\|debug`, plus `ffi` / `deploy`. Same `key=value` shape and collect-phase as the sibling players' `build-runtime.*`. | — |
 | `scripts/deploy-examples.sh` / `.ps1` | Builds `ssconverter-cli` from the submodule, converts the SDK's test projects into `assets/`, and deploys **both** export modes to `examples/web` (`assets/` reference + atlases, `assets_emb/` embedded). | — |
 | `bin/` | Where `build.sh platform=host` collects what it built: `include/ssplayer_wgpu.h`, `LICENSE.md`, `libs/<platform>/<arch>/`. Gitignored. `platform=web` writes `pkg/` instead — wasm-pack's own name, and that output is already a package. | — |
@@ -65,6 +66,7 @@ A wgpu renderer for SpriteStudio 7 animations, split out of the SpriteStudio-SDK
 | Native viewer | `cargo run -p ssplayer-wgpu-viewer` |
 | Metal C++ viewer (macOS) | `cd examples/viewer-metal-cpp && cmake -B build && cmake --build build && ./build/ssviewer-metal` |
 | DX12 C++ viewer (Windows) | `cd examples\viewer-dx12-cpp; cmake -B build; cmake --build build --config Release; .\build\Release\ssviewer-dx12.exe` |
+| Vulkan C++ viewer (Linux) | `cd examples/viewer-vulkan-cpp && cmake -B build && cmake --build build && ./build/ssviewer-vulkan` — add `--x11` / `--wayland` to pick the window path |
 | Web demo | `./scripts/build.sh platform=web && (cd examples/web && python3 -m http.server)` |
 
 The tests read `assets/`, so `deploy-examples.sh` is a prerequisite, not an optional step.

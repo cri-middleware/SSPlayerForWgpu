@@ -399,4 +399,5 @@ SSPlayer for wgpu への移行により、以下のメリットが得られま�
 - [ROADMAP](../../ROADMAP.md)
 - [C API サンプル: Metal C++ Viewer](../../examples/viewer-metal-cpp/README.md)
 - [C API サンプル: DX12 C++ Viewer](../../examples/viewer-dx12-cpp/README.md)
+- [C API サンプル: Vulkan C++ Viewer](../../examples/viewer-vulkan-cpp/README.md)
 - [WebGPU / JS ガイド](../../examples/web/README.md)
