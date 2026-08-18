@@ -17,7 +17,7 @@ use crate::scene::{BatchInfo, FrameChunk, NodeSlot};
 use ssab::ssab::ss::format::{PartType, root_as_ss_anime_binary_unchecked};
 use ssruntime::error::SSRuntimeError;
 use ssruntime::runtime::framedata::ss::runtime::{DrawBatchKind, root_as_frame_data_unchecked};
-use ssruntime::{Context, EffectSlot, InstanceSlot};
+use ssruntime::{Context, EffectSlot, InstanceSlot, TrackBlend};
 use std::collections::{HashMap, HashSet};
 
 /// Column-major 4x4 identity.
@@ -972,6 +972,102 @@ impl SSPlayer {
         if let Some(root) = &mut self.root {
             root.context.set_animation_section(start, end);
         }
+    }
+
+    // --- Tracks ------------------------------------------------------------
+    //
+    // Pass-throughs to the runtime's track stack, on the ROOT context. Tracks
+    // fold onto the setup pose in ascending order; track 0 is what
+    // [`SSPlayer::set_animation`] establishes and carries the structure. A
+    // track's `alpha` is its strength; a source's `weight` only sets
+    // proportions among several animations sharing one track.
+    //
+    // Instance children are not layered: they run their own contexts, driven by
+    // their slots from the root's frame.
+
+    /// Put `anim_name` on `track`, replacing what it was playing. Track 0 is
+    /// better set with [`SSPlayer::set_animation`], which rebuilds the instance
+    /// tree; this is for the overlay tracks above it.
+    pub fn set_track_animation(&mut self, track: u32, anim_name: &str) -> Result<(), SSRuntimeError> {
+        let root = self.root.as_mut().ok_or(SSRuntimeError::NotLoaded)?;
+        root.context.set_track_animation(track, anim_name)
+    }
+
+    /// How much of `track` survives onto the pose the tracks below it produced.
+    pub fn set_track_alpha(&mut self, track: u32, alpha: f32) -> Result<(), SSRuntimeError> {
+        let root = self.root.as_mut().ok_or(SSRuntimeError::NotLoaded)?;
+        root.context.set_track_alpha(track, alpha)
+    }
+
+    pub fn track_alpha(&self, track: u32) -> Option<f32> {
+        self.root.as_ref()?.context.track_alpha(track)
+    }
+
+    /// [`TrackBlend::Mix`] lerps toward the track's pose; [`TrackBlend::Additive`]
+    /// adds its offset from the setup pose, leaving what is below showing through.
+    pub fn set_track_blend(&mut self, track: u32, blend: TrackBlend) -> Result<(), SSRuntimeError> {
+        let root = self.root.as_mut().ok_or(SSRuntimeError::NotLoaded)?;
+        root.context.set_track_blend(track, blend)
+    }
+
+    pub fn track_blend(&self, track: u32) -> Option<TrackBlend> {
+        self.root.as_ref()?.context.track_blend(track)
+    }
+
+    pub fn track_count(&self) -> u32 {
+        self.root.as_ref().map(|r| r.context.track_count()).unwrap_or(0)
+    }
+
+    /// Silence a track. Track 0 is refused — fade it to alpha 0 instead.
+    pub fn clear_track(&mut self, track: u32) -> Result<(), SSRuntimeError> {
+        let root = self.root.as_mut().ok_or(SSRuntimeError::NotLoaded)?;
+        root.context.clear_track(track)
+    }
+
+    /// Fade `track` to `anim_name` over `duration_ms`, starting from whatever it
+    /// is playing. Advanced by [`SSScene::update`].
+    ///
+    /// On track 0 this does **not** rebuild the instance tree the way
+    /// [`SSPlayer::set_animation`] does, so cross-fading to an animation whose
+    /// instance parts differ is out of scope — the tree stays as the current
+    /// animation built it.
+    ///
+    /// [`SSScene::update`]: crate::SSScene::update
+    pub fn crossfade(&mut self, track: u32, anim_name: &str, duration_ms: f32) -> Result<(), SSRuntimeError> {
+        let root = self.root.as_mut().ok_or(SSRuntimeError::NotLoaded)?;
+        root.context.crossfade(track, anim_name, duration_ms)
+    }
+
+    /// Drive `track`'s alpha to `target` over `duration_ms`. Fading track 0 to 0
+    /// settles the pose onto the setup pose.
+    pub fn fade_track(&mut self, track: u32, target: f32, duration_ms: f32) -> Result<(), SSRuntimeError> {
+        let root = self.root.as_mut().ok_or(SSRuntimeError::NotLoaded)?;
+        root.context.fade_track(track, target, duration_ms)
+    }
+
+    pub fn track_fade_progress(&self, track: u32) -> Option<f32> {
+        self.root.as_ref()?.context.track_fade_progress(track)
+    }
+
+    pub fn cancel_track_fade(&mut self, track: u32) -> Result<(), SSRuntimeError> {
+        let root = self.root.as_mut().ok_or(SSRuntimeError::NotLoaded)?;
+        root.context.cancel_track_fade(track)
+    }
+
+    /// Seek a track's animation — how a continuous-control axis is driven:
+    /// author it as an animation and scrub it with the tracked value.
+    pub fn set_track_frame(&mut self, track: u32, frame: f32) -> Result<(), SSRuntimeError> {
+        let root = self.root.as_mut().ok_or(SSRuntimeError::NotLoaded)?;
+        root.context.set_track_frame(track, frame)
+    }
+
+    pub fn track_frame(&self, track: u32) -> Option<f32> {
+        self.root.as_ref()?.context.track_frame(track)
+    }
+
+    pub fn set_track_speed(&mut self, track: u32, speed: f32) -> Result<(), SSRuntimeError> {
+        let root = self.root.as_mut().ok_or(SSRuntimeError::NotLoaded)?;
+        root.context.set_track_speed(track, speed)
     }
 
     /// Which way the playhead walks, and what it does at the far end. Taken
