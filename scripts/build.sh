@@ -36,6 +36,7 @@ HOST_ARCH="$(uname -m)"
 
 # --- options --------------------------------------------------------------
 PLATFORM="host"
+ARCH="host"
 BUILD="release"
 FFI="yes"
 DEPLOY="yes"
@@ -45,6 +46,8 @@ usage () {
   echo "$APP options:"
   echo "  platform=<host|web>     Target platform (default: host)"
   echo "                          host = Rust library (+ the C face); web = wasm/js face"
+  echo "  arch=<host|universal>   macOS only: universal lipos the arm64 and x86_64"
+  echo "                          slices into one library (default: $ARCH)"
   echo "  build=<release|debug>   Build profile (default: $BUILD)"
   echo "  ffi=<yes|no>            host only: also build --features ffi, which regenerates"
   echo "                          libs/ssplayer-wgpu-ffi/include/ssplayer_wgpu.h (default: $FFI)"
@@ -55,6 +58,10 @@ usage () {
   echo "host artifacts are collected under bin/, the web package into pkg/. This is"
   echo "$HOST_OS/$HOST_ARCH and the script does not cross-compile; macos/windows/linux"
   echo "are accepted as aliases for platform=host when they name the host itself."
+  echo ""
+  echo "arch=universal is the one exception, and only on macOS: both Apple targets"
+  echo "come from the same toolchain, so the release ships one library per platform"
+  echo "rather than one per Mac."
   echo ""
   echo "Playback data (.ssab) is scripts/deploy-examples.sh, not this script."
 }
@@ -73,6 +80,7 @@ while [ $# -gt 0 ]; do
       value="$(printf '%s' "${item#*=}" | tr '[:upper:]' '[:lower:]')"
       case "$key" in
         platform) PLATFORM="$value" ;;
+        arch)     ARCH="$value" ;;
         build)    BUILD="$value" ;;
         ffi)      FFI="$value" ;;
         deploy)   DEPLOY="$value" ;;
@@ -105,6 +113,24 @@ case "$PLATFORM" in
     ;;
   *)
     echo "$APP: platform must be host or web (got '$PLATFORM')" >&2
+    exit 2
+    ;;
+esac
+
+case "$ARCH" in
+  host) ;;
+  universal)
+    if [ "$PLATFORM" != "host" ]; then
+      echo "$APP: arch=universal is for the native library, not platform=$PLATFORM" >&2
+      exit 2
+    fi
+    if [ "$HOST_OS" != "macos" ]; then
+      echo "$APP: arch=universal is macOS only (this is $HOST_OS)" >&2
+      exit 2
+    fi
+    ;;
+  *)
+    echo "$APP: arch must be host or universal (got '$ARCH')" >&2
     exit 2
     ;;
 esac
@@ -153,6 +179,36 @@ collect_license () {
 if [ "$PLATFORM" = "host" ]; then
   PROFILE_FLAG=""
   [ "$BUILD" = "release" ] && PROFILE_FLAG="--release"
+
+  if [ "$ARCH" = "universal" ]; then
+    # Both Apple targets, then lipo. Cargo cannot emit a fat library itself, and
+    # a release that shipped one library per Mac would be the same source twice.
+    for t in aarch64-apple-darwin x86_64-apple-darwin; do
+      echo ">> cargo build -p ssplayer-wgpu-ffi --target $t ($BUILD)"
+      # shellcheck disable=SC2086
+      ( cd "$ROOT_DIR" && cargo build -p ssplayer-wgpu-ffi --target "$t" $PROFILE_FLAG )
+    done
+
+    LIB_OUT_DIR="$BIN_DIR/libs/macos/universal"
+    echo ">> lipo -> bin/libs/macos/universal"
+    rm -rf "$LIB_OUT_DIR"; mkdir -p "$LIB_OUT_DIR"
+    for lib in libssplayer_wgpu.a libssplayer_wgpu.dylib; do
+      a="$ROOT_DIR/target/aarch64-apple-darwin/$BUILD/$lib"
+      x="$ROOT_DIR/target/x86_64-apple-darwin/$BUILD/$lib"
+      if [ -f "$a" ] && [ -f "$x" ]; then
+        lipo -create "$a" "$x" -output "$LIB_OUT_DIR/$lib"
+      fi
+    done
+
+    mkdir -p "$BIN_DIR/include"
+    cp "$ROOT_DIR/libs/ssplayer-wgpu-ffi/include/ssplayer_wgpu.h" "$BIN_DIR/include/"
+    collect_license
+
+    echo ""
+    echo "$APP: done -> bin/libs/macos/universal/ ($(ls -1 "$LIB_OUT_DIR" | wc -l | tr -d ' ') file(s)), bin/LICENSE.md"
+    echo "$APP:      -> bin/include/ssplayer_wgpu.h"
+    exit 0
+  fi
 
   echo ">> cargo build -p ssplayer-wgpu-ffi ($BUILD)"
   # Unquoted on purpose: PROFILE_FLAG is one token or nothing.

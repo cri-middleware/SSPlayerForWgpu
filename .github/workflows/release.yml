@@ -1,0 +1,182 @@
+name: Release
+# workflow_dispatch only. The default (upload_release=false) builds every
+# platform and stops, which is the QA run off a branch. A Release is created
+# only by an explicit dispatch from a v* tag ref with upload_release=true.
+on:
+  workflow_dispatch:
+    inputs:
+      upload_release:
+        description: 'Upload to GitHub Release (only effective on a v* tag ref)'
+        required: false
+        default: false
+        type: boolean
+
+env:
+  CARGO_TERM_COLOR: always
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  build:
+    name: ${{ matrix.name }}
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 45
+    permissions:
+      contents: read
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: 🐧 Linux (x86_64)
+            artifact: linux-x86_64
+            os: ubuntu-latest
+          - name: 🐧 Linux (aarch64)
+            artifact: linux-aarch64
+            os: ubuntu-24.04-arm
+          - name: 🪟 Windows (x86_64)
+            artifact: windows-x86_64
+            os: windows-latest
+          - name: 🍎 macOS (universal)
+            artifact: macos-universal
+            os: macos-latest
+          - name: 🌐 Web (wasm32)
+            artifact: web-wasm32
+            os: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+        with:
+          # SpriteStudio-SDK is a private submodule in a different repository, so
+          # the job-scoped GITHUB_TOKEN cannot fetch it. Supply a fine-grained PAT
+          # (or GitHub App token) with read access to it as SDK_SUBMODULE_TOKEN.
+          # Once the SDK is public, drop this line and the secret.
+          token: ${{ secrets.SDK_SUBMODULE_TOKEN || github.token }}
+          submodules: recursive
+
+      - name: Setup Rust toolchain
+        uses: dtolnay/rust-toolchain@4360b52568e2003a75bf9bc1d59f33a8e3fc893c # stable
+        with:
+          # Pinned by SHA, so the channel must be named explicitly here.
+          toolchain: stable
+
+      - name: Setup Rust cache
+        uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+
+      # Both Apple targets, so build.sh arch=universal has something to lipo.
+      # macos-latest is arm64; the x86_64 slice is a cross-build from the same
+      # toolchain, which is the one cross-build Apple makes routine.
+      - name: Install the macOS targets
+        if: matrix.artifact == 'macos-universal'
+        run: |
+          rustup target add aarch64-apple-darwin
+          rustup target add x86_64-apple-darwin
+
+      - name: Install the wasm target
+        if: matrix.artifact == 'web-wasm32'
+        run: rustup target add wasm32-unknown-unknown
+
+      - name: Install wasm-pack
+        if: matrix.artifact == 'web-wasm32'
+        uses: taiki-e/install-action@07b4745e0c39a41822af610387492e3e53aa222b # v2
+        with:
+          tool: wasm-pack
+
+      # scripts/build.sh IS the platform build: the same command a maintainer
+      # runs locally, so a release cannot differ from what was tested by hand.
+      # It builds ssplayer-wgpu-ffi, regenerates the C header through cbindgen,
+      # and collects the library, the header and the licence into bin/.
+      - name: Build (Linux / macOS)
+        if: matrix.os != 'windows-latest' && matrix.artifact != 'web-wasm32'
+        run: ./scripts/build.sh build=release ${{ matrix.artifact == 'macos-universal' && 'arch=universal' || '' }}
+
+      - name: Build (Windows)
+        if: matrix.os == 'windows-latest'
+        run: ./scripts/build.ps1 build=release
+        shell: pwsh
+
+      # deploy=no keeps the package out of examples/web: the release ships the
+      # package itself, and the demo is built by pages.yml from its own run.
+      - name: Build (Web)
+        if: matrix.artifact == 'web-wasm32'
+        run: ./scripts/build.sh platform=web build=release deploy=no
+
+      # bin/ for the native platforms, pkg/ for the web one. The artifact name
+      # is what build-release.sh looks for, and `gh run download -D artifacts`
+      # recreates exactly this layout for a local run.
+      - name: Upload ${{ matrix.artifact }}
+        uses: actions/upload-artifact@v7
+        with:
+          name: ${{ matrix.artifact }}
+          path: ${{ matrix.artifact == 'web-wasm32' && 'pkg' || 'bin' }}
+          if-no-files-found: error
+          retention-days: 7
+
+  package:
+    name: 📦 Package
+    needs: build
+    runs-on: ubuntu-latest
+    # Needs write access to publish the GitHub Release (softprops/action-gh-release).
+    permissions:
+      contents: write
+
+    steps:
+      # No submodule here: this job assembles what the matrix already built, so
+      # it never touches the SDK and needs no token for it.
+      - uses: actions/checkout@v7
+
+      - name: Download all artifacts
+        uses: actions/download-artifact@v8
+        with:
+          path: artifacts
+
+      # scripts/build-release.sh IS the release package: one zip per platform
+      # holding include/, lib/ and the licence, the wasm-pack package as its own,
+      # and SHA256SUMS over all of them. Every option is spelled out so a release
+      # cannot change because a default did, and so this is the command a human
+      # runs locally — after `gh run download <this run> -D artifacts` — to
+      # reproduce these exact archives without rebuilding four platforms.
+      #
+      # Its checks are the ones nothing else does: that every platform is present
+      # rather than three of four, that the cbindgen header is byte-identical
+      # across them (it is not, if one job built an older commit), and that each
+      # finished zip actually holds the library it is named for.
+      - name: Build the release
+        run: ./scripts/build-release.sh in=artifacts out=release-dist verify=yes clean=yes
+
+      - name: Upload final release package
+        uses: actions/upload-artifact@v7
+        with:
+          name: ssplayer-wgpu-release-dist
+          path: release-dist
+          if-no-files-found: error
+          # A week, not the 90-day default. What is meant to last is attached to
+          # the GitHub Release, which never expires; this is a copy for a run
+          # that uploaded nothing.
+          retention-days: 7
+
+      # A release is a tag that was pushed first and dispatched from second, so
+      # asking to upload from anything else is an operator error, not a mode.
+      # Failing beats a silent skip: a dispatch meant to cut a release should not
+      # report success and quietly produce no Release. Leave upload_release=false
+      # to build off a branch.
+      - name: Refuse to release from a non-tag ref
+        if: inputs.upload_release && !startsWith(github.ref, 'refs/tags/v')
+        run: |
+          echo "::error::upload_release=true needs a v* tag. Push the tag first, then dispatch this workflow from it (Use workflow from → the tag)."
+          exit 1
+
+      - name: Create GitHub Release
+        if: inputs.upload_release
+        uses: softprops/action-gh-release@3d0d9888cb7fd7b750713d6e236d1fcb99157228 # v3
+        with:
+          files: |
+            release-dist/*.zip
+            release-dist/SHA256SUMS
+          tag_name: ${{ github.ref_name }}
+          generate_release_notes: true
+          # Always a draft: a human checks the assets and the generated notes
+          # before publishing, and picks "pre-release" / "latest" in the UI then.
+          draft: true
