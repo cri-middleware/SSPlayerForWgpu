@@ -58,8 +58,8 @@ bin/libs/<platform>/<arch>/libssplayer_wgpu.{a,dylib}    # .lib/.dll on Windows
 ```
 
 Point your build at those two directories. The C++ viewers under [`examples/`](#-samples) do exactly
-that through CMake and are the shortest working reference — one drives Metal on macOS, the other DX12 on
-Windows, and each is self-contained enough to copy out whole.
+that through CMake and are the shortest working reference — one drives Metal on macOS, one DX12 on
+Windows, one Vulkan on Linux, and each is self-contained enough to copy out whole.
 
 > 🚧 **No prebuilt downloads yet.** The intended route is a per-platform archive of that same `bin/`
 > tree on [GitHub Releases](https://github.com/cri-middleware/SSPlayerForWgpu/releases), matching how
@@ -122,6 +122,7 @@ for that environment: how the window is created, how the device is lent, and how
 | [`examples/web`](./examples/web) | WebGPU in a browser | `./scripts/build.sh platform=web`, then `cd examples/web && python3 -m http.server` |
 | [`examples/viewer-metal-cpp`](./examples/viewer-metal-cpp) | C++ on Metal, macOS | `cmake -B build && cmake --build build && ./build/ssviewer-metal` |
 | [`examples/viewer-dx12-cpp`](./examples/viewer-dx12-cpp) | C++ on DX12, Windows | `cmake -B build; cmake --build build --config Release; .\build\Release\ssviewer-dx12.exe` |
+| [`examples/viewer-vulkan-cpp`](./examples/viewer-vulkan-cpp) | C++ on Vulkan, Linux — X11 and Wayland in one binary | `cmake -B build && cmake --build build && ./build/ssviewer-vulkan` |
 
 They play generated animation data, so run this once first:
 
@@ -181,12 +182,14 @@ flowchart TD
         web["web<br/>WebGPU, &lt;ss-player-webgpu&gt;"]
         metal["viewer-metal-cpp<br/>C++, Metal"]
         dx12["viewer-dx12-cpp<br/>C++, DX12"]
+        vulkan["viewer-vulkan-cpp<br/>C++, Vulkan"]
     end
 
     crate -->|rs| viewer
     crate -->|js: wasm-bindgen| web
     crate -->|ffi: cbindgen| metal
     crate -->|ffi: cbindgen| dx12
+    crate -->|ffi: cbindgen| vulkan
 ```
 
 | Path | What |

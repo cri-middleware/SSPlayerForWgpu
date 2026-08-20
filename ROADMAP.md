@@ -65,8 +65,12 @@ respect are in [`AGENTS.md`](./AGENTS.md) under *Hard constraints*.
 - [x] WebGPU / js — one device per page, any number of canvases and players.
 - [x] C / C++ — verified on macOS (Metal) and Windows (DX12).
 - [x] Device-loss recovery on every face.
-- [ ] **Vulkan C++ viewer** (Linux). Its absence is also why the Xlib and Wayland
-      window-handle paths are unverified.
+- [ ] **Vulkan C++ viewer** (Linux) — `examples/viewer-vulkan-cpp`. Written, and
+      never built or run: it was written on macOS, where neither the X11 nor the
+      Wayland code compiles. It carries both window paths in one binary because
+      Xwayland means an X11 window never reaches the `SS_WINDOW_WAYLAND` arm, so
+      closing this needs one run per path on a Linux desktop. Until then the Xlib
+      and Wayland arms of `surface_target` stay unverified.
 - [ ] **Bevy adapter** (`libs/ssplayer-wgpu-bevy`). Unblocked by the `set_texture`
       borrow channel. A separate crate, so the core never depends on Bevy and the
       adapter can follow its own wgpu major.

@@ -38,3 +38,4 @@
 - 🌐 **[WebGPU Demo](../../examples/web/README.md)** — ブラウザ上で動作する WebGPU デモ
 - 🍏 **[Metal C++ Viewer](../../examples/viewer-metal-cpp/README.md)** — macOS / Cocoa (Objective-C++) ホストサンプル
 - 🪟 **[DX12 C++ Viewer](../../examples/viewer-dx12-cpp/README.md)** — Windows / Win32 (C++) ホストサンプル
+- 🐧 **[Vulkan C++ Viewer](../../examples/viewer-vulkan-cpp/README.md)** — Linux / X11 (Xlib) と Wayland を 1 バイナリに収めた C++ ホストサンプル（未実行）
