@@ -8,27 +8,9 @@ repository.workspace = true
 homepage.workspace = true
 description.workspace = true
 
-# cdylib for the WebGPU/WASM target (wasm-bindgen) and for C hosts that link the
-# shared library; rlib for the viewer/tests; staticlib for C hosts that link it
-# in (SPEC §11). crate-type cannot be feature-gated, so all three are always built.
 [lib]
-crate-type = ["cdylib", "rlib", "staticlib"]
+crate-type = ["rlib"]
 
-# Enable exactly the wasm features rustc emits (`+simd128` from `.cargo/config.toml`
-# plus its wasm32 defaults) so release `wasm-opt` validation passes. Do NOT use
-# `--all-features`: on newer wasm-opt it enables experimental *output* proposals
-# that browsers reject at instantiation. Mirrors libs/ssruntime/Cargo.toml.
-[package.metadata.wasm-pack.profile.release]
-wasm-opt = [
-    "-Oz",
-    "--enable-simd",
-    "--enable-bulk-memory",
-    "--enable-mutable-globals",
-    "--enable-sign-ext",
-    "--enable-nontrapping-float-to-int",
-    "--enable-multivalue",
-    "--enable-reference-types",
-]
 
 [features]
 default = ["embedded"]
@@ -45,16 +27,16 @@ embedded = ["dep:image"]
 # ssplayer-core/ssplayer-webgl use. Bundling `image` on top of that cost 59 KB
 # brotli (201 KB -> 142 KB, -29%) to duplicate a decoder that was already there.
 # Add `embedded` back for a page that would rather not write that glue.
-# `ssruntime/std` makes the runtime use std on wasm so the standard allocator +
-# panic handler satisfy its cdylib/staticlib artifacts (cargo builds every
-# crate-type of a dep). core already uses std for wgpu, so there is no conflict —
-# unlike `ssruntime/panic-handler`, which would duplicate std's `panic_impl`.
+# `ssruntime/std` gives the runtime the standard allocator and panic handler on
+# wasm32, where this crate's own cdylib needs them. core already uses std for
+# wgpu, so there is no conflict — unlike `ssruntime/panic-handler`, which would
+# duplicate std's `panic_impl`.
 web = ["dep:wasm-bindgen", "dep:wasm-bindgen-futures", "dep:js-sys", "dep:web-sys", "dep:console_error_panic_hook", "wasm-bindgen/std", "ssruntime/std"]
 # C/C++ bindings (SPEC §12 P5, the "ffi" face): `ss_player_*` entry points plus a
 # self-contained host that builds wgpu from a raw window handle. `build.rs` runs
 # cbindgen over `src/ffi.rs` to emit `include/ssplayer_wgpu.h`. Pulls `embedded`
 # so a single self-contained .ssab renders with no host texture supply.
-ffi = ["dep:pollster", "dep:cbindgen", "embedded"]
+ffi = ["dep:pollster", "embedded"]
 
 [dependencies]
 wgpu = { workspace = true }
@@ -73,9 +55,6 @@ console_error_panic_hook = { workspace = true, optional = true }
 # executor to hand us.
 pollster = { version = "1.0.1", optional = true }
 
-# Only pulled in by the `ffi` feature; build.rs is a no-op without it.
-[build-dependencies]
-cbindgen = { version = "0.29.4", optional = true, default-features = false }
 
 [dev-dependencies]
 pollster = "1.0.1"

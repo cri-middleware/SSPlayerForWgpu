@@ -1,11 +1,11 @@
 //! Generates the C header for the `ffi` face (SPEC §11).
 //!
-//! With the `ffi` feature on, cbindgen reads `src/ffi.rs` and writes
-//! `include/ssplayer_wgpu.h` next to the crate — the path CMake consumers point
+//! With the `ffi` feature on, cbindgen reads `ssplayer-wgpu`'s `src/ffi.rs` and writes
+//! `include/ssplayer_wgpu.h` next to this crate — the path CMake consumers point
 //! at. Without the feature this build script does nothing.
 
 fn main() {
-    println!("cargo:rerun-if-changed=src");
+    println!("cargo:rerun-if-changed=../ssplayer-wgpu/src");
     println!("cargo:rerun-if-changed=cbindgen.toml");
     generate_header();
 }
@@ -19,7 +19,7 @@ fn generate_header() {
     std::fs::create_dir_all(header.parent().expect("include dir")).expect("create include/");
 
     let config = cbindgen::Config::from_file(crate_dir.join("cbindgen.toml")).expect("read cbindgen.toml");
-    match cbindgen::Builder::new().with_crate(&crate_dir).with_config(config).generate() {
+    match cbindgen::Builder::new().with_crate(crate_dir.join("..").join("ssplayer-wgpu")).with_config(config).generate() {
         // `write_to_file` leaves the file untouched when the contents match, so a
         // rebuild does not churn its mtime.
         Ok(bindings) => {
