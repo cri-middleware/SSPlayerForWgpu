@@ -3,12 +3,18 @@
 Renders a SpriteStudio 7 `.ssab` to an HTML `<canvas>` via **WebGPU**, using the
 wasm-bindgen bindings from the player's `web` feature. This is
 not a separate crate — the WebGPU player lives in `libs/ssplayer-wgpu` behind
-`--features web`; this directory is just the static page + build glue.
+`--features web`; this directory is just the static page.
+
+It drives the **published package as it ships**: `build.sh platform=web` stages
+[`packages/ssplayer-wgpu`](../../packages/ssplayer-wgpu) (`@spritestudio/ssplayer-wgpu`)
+into `./ssplayer-wgpu`, so the element and the shared-context helper the demo uses
+are the ones an `npm i` gets, not a second copy that can drift.
 
 ## Prerequisites
 
 - `rustup target add wasm32-unknown-unknown`
 - [`wasm-pack`](https://rustwasm.github.io/wasm-pack/)
+- `pnpm` (`corepack enable`) — the package's js layer is TypeScript, built by tsdown
 - A WebGPU-capable browser (Chrome / Edge 113+, or Safari Technology Preview)
 
 ## Build & run
@@ -23,10 +29,12 @@ python3 -m http.server                 # serve THIS directory
 # open http://localhost:8000
 ```
 
-1. `build.sh platform=web` runs `wasm-pack build` on `libs/ssplayer-wgpu` with
-   `--features web` → `pkg/` (wasm + JS bindings), then copies it to
-   `./wasm`. `deploy=no` stops at the package, for a release script that wants the
-   artifact and not the demo.
+1. `build.sh platform=web` runs `wasm-pack build` on `libs/ssplayer-wgpu-ffi` with
+   `--features web` → `packages/ssplayer-wgpu/wasm` (wasm + JS bindings), builds the
+   TypeScript layer with tsdown → `packages/ssplayer-wgpu/dist`, then copies the
+   package to `./ssplayer-wgpu`. `deploy=no` stops at the package, for a release
+   script that wants the artifact and not the demo. It needs `pnpm` as well as
+   `wasm-pack`.
 2. `deploy-examples.sh` deploys the demo data in **both export modes**:
    reference-mode `.ssab` plus its sibling PNGs → `./assets`, and embedded-mode
    `.ssab` (`ssconverter-cli --embedded`, atlas PNG baked in) → `./assets_emb`.
@@ -35,7 +43,7 @@ python3 -m http.server                 # serve THIS directory
    wasm; the `_emb` suffix is the same one the repository's `assets/overall` vs
    `assets/overall_emb` uses.
 
-`wasm/`, `assets/` and `assets_emb/` are all generated (git-ignored).
+`ssplayer-wgpu/`, `assets/` and `assets_emb/` are all generated (git-ignored).
 
 `build=debug` passes `--dev` to wasm-pack, which skips `wasm-opt` — the result is
 several times larger, so never quote its size.
@@ -45,7 +53,10 @@ several times larger, so never quote its size.
 ### Single character — the `<ss-player-webgpu>` element
 
 ```html
-<script type="module" src="ss-player-webgpu.js"></script>
+<script type="module">
+  import { defineSsPlayerWebGPUElement } from './ssplayer-wgpu/dist/element.js';
+  defineSsPlayerWebGPUElement();   // opt-in: registering is not an import side effect
+</script>
 <ss-player-webgpu src="assets/Basic.ssab" style="width:360px;height:360px"></ss-player-webgpu>
 ```
 
@@ -73,7 +84,7 @@ three objects, one per resource scope:
 | `SsPlayerWeb` | any number | one playback tree — **no GPU resource at all** |
 
 ```js
-import { sharedContext } from './ss-context.js';
+import { sharedContext } from './ssplayer-wgpu/dist/index.js';
 
 const ctx     = await sharedContext();        // once for the page
 const surface = ctx.createSurface(canvas);    // once per canvas
@@ -157,7 +168,8 @@ redesigned `ssplayer-webgl`; the old single `play(name)` is not carried over.
   pipeline/buffer/atlas on the page against the replacement — playback resumes on
   the frame it was interrupted on, with no re-fetch of any `.ssab` and none of any
   atlas. The loss is the device's, so recovery is **one call for the whole page**;
-  `ss-context.js` collapses the concurrent calls from N canvases into one.
+  the package's `restoreSharedDevice()` collapses the concurrent calls from N
+  canvases into one.
 - **`surface.stats()`** returns the frame counters (players / prims / drawCalls /
   mergeableDraws / redundantTextureBinds / uploadedBytes, plus `gpuPassTimeNs`
   when the browser grants `timestamp-query`). The throughput trade-offs in

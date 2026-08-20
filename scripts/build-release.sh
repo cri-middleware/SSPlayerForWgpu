@@ -73,7 +73,7 @@ usage () {
   echo ""
   echo "Output, in <out>:"
   echo "  ssplayer-wgpu-<platform>-<arch>.zip   include/, lib/, LICENSE.md"
-  echo "  ssplayer-wgpu-web-wasm32.zip          the wasm-pack package"
+  echo "  ssplayer-wgpu-web-wasm32.zip          the npm package (dist/, wasm/, package.json)"
   echo "  SHA256SUMS                            covers every zip above"
   echo ""
   echo "Every platform the matrix builds must be present: a partial release is not a"
@@ -195,7 +195,8 @@ done
 if [ ! -d "$IN/$WEB" ]; then
   fail "$WEB/ is missing"
 else
-  [ -f "$IN/$WEB/ssplayer_wgpu_bg.wasm" ] || fail "$WEB/ssplayer_wgpu_bg.wasm is missing (the wasm-pack package)"
+  [ -f "$IN/$WEB/wasm/ssplayer_wgpu_bg.wasm" ] || fail "$WEB/wasm/ssplayer_wgpu_bg.wasm is missing (the wasm-pack output)"
+  [ -f "$IN/$WEB/dist/index.js" ] || fail "$WEB/dist/index.js is missing (the js layer was not built)"
   [ -f "$IN/$WEB/package.json" ] || fail "$WEB/package.json is missing"
 fi
 
@@ -257,15 +258,18 @@ for p in $NATIVE; do
   echo "   $zipname ($lib)"
 done
 
-# The web face is a package, not a library file: wasm-pack already produced the
-# wasm, the JS bindings, the .d.ts and its own LICENSE, so it ships as it is.
+# The web face is a package, not a library file: build.sh already assembled
+# packages/ssplayer-wgpu -- the wasm-pack runtime under wasm/, the tsdown output
+# under dist/, the manifest and the READMEs beside them -- so it ships as it is.
+# The zip is therefore installable on its own (`npm i ./ssplayer-wgpu-web-wasm32`),
+# which is what makes it useful to someone who cannot reach the registry.
 stage="$WORK/$WEB"
 mkdir -p "$stage"
 cp -R "$IN/$WEB/." "$stage/"
 zipname="ssplayer-wgpu-$WEB.zip"
 ( cd "$stage" && zip -qry "$OUT/$zipname" . )
 ZIPS="$ZIPS $zipname"
-echo "   $zipname (wasm-pack package)"
+echo "   $zipname (npm package)"
 
 # Canonical checksum manifest so a consumer can verify what they downloaded
 # (`sha256sum -c SHA256SUMS --ignore-missing`).
@@ -293,7 +297,8 @@ if [ "$VERIFY" = "yes" ]; then
   done
 
   names="$(unzip -Z1 "$OUT/ssplayer-wgpu-$WEB.zip")"
-  for want in "ssplayer_wgpu_bg.wasm" "ssplayer_wgpu.js" "ssplayer_wgpu.d.ts" "package.json"; do
+  for want in "wasm/ssplayer_wgpu_bg.wasm" "wasm/ssplayer_wgpu.js" "wasm/ssplayer_wgpu.d.ts" \
+              "dist/index.js" "dist/index.d.ts" "dist/element.js" "package.json"; do
     printf '%s\n' "$names" | grep -qx "$want" || fail "ssplayer-wgpu-$WEB.zip does not contain $want"
   done
 

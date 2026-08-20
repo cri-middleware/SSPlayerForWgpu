@@ -69,25 +69,32 @@ Windows, one Vulkan on Linux, and each is self-contained enough to copy out whol
 
 ### Browser (WebGPU)
 
-Build the wasm package from this repository:
+The browser face is an npm package, [`@spritestudio/ssplayer-wgpu`](./packages/ssplayer-wgpu) — the
+wasm plus a small TypeScript layer over it:
 
-```bash
-./scripts/build.sh platform=web     # → pkg/, a wasm-pack package (ES module + .d.ts)
+```js
+import { sharedContext } from '@spritestudio/ssplayer-wgpu';           // the page's device
+import { defineSsPlayerWebGPUElement } from '@spritestudio/ssplayer-wgpu/element';  // <ss-player-webgpu>
 ```
 
-`pkg/` is a normal npm package directory, so a bundler can take it as a file dependency
-(`"ssplayer-wgpu": "file:../SSPlayerForWgpu/pkg"`) or you can import the ES module directly. The same
-build is staged into [`examples/web`](./examples/web), which is the working reference for both APIs:
-`SsContextWeb` / `SsSurfaceWeb` / `SsPlayerWeb` for full control, and a `<ss-player-webgpu>` custom
-element for one character in one canvas.
+`SsContextWeb` / `SsSurfaceWeb` / `SsPlayerWeb` are the full API — one device per page, one surface
+per canvas, any number of characters in one pass — and the custom element is the one-character
+convenience wrapper over them, in its own entry point so a bundle that does not use it does not carry
+it. The package's own [README](./packages/ssplayer-wgpu/README.md) is the JavaScript-facing one.
 
-The element and the shared-context helper are plain JavaScript in that directory
-(`ss-player-webgpu.js`, `ss-context.js`) rather than part of the wasm, so they are meant to be copied
-and adapted. The wasm side is `libs/ssplayer-wgpu/src/web.rs`, behind the `web` feature.
+Build it from this repository with:
 
-> 🚧 **Not on npm yet**, and the package is not yet the shape it will ship in: the name is unscoped
-> where the sibling Web packages use `@spritestudio`, the custom element is not part of it, and it
-> carries no JavaScript-facing README. See [ROADMAP](./ROADMAP.md).
+```bash
+./scripts/build.sh platform=web     # wasm-pack → packages/ssplayer-wgpu/wasm, tsdown → dist
+```
+
+That needs `pnpm` (`corepack enable`) as well as `wasm-pack`, and it publishes from that directory as
+it stands. The same build is staged into [`examples/web`](./examples/web), so the demo drives exactly
+what an `npm i` gets. The wasm side is `libs/ssplayer-wgpu/src/web.rs`, behind the `web` feature.
+
+> 🚧 **Not on npm yet.** The package now has its shipping shape (scoped name, the element as an entry
+> point, its own README), but nothing publishes it: the version bump and the `npm publish` step are
+> still to come. See [ROADMAP](./ROADMAP.md).
 
 ## ⚡ Usage
 
@@ -140,7 +147,7 @@ a `.ssab`, and it does not need the SDK for anything but the checkout cargo alre
 
 ```bash
 ./scripts/build.sh                            # = platform=host build=release
-./scripts/build.sh platform=web build=debug   # wasm/js face, deployed into examples/web
+./scripts/build.sh platform=web build=debug   # wasm + npm package, deployed into examples/web
 ./scripts/build.sh --help                     # every option
 ```
 
@@ -149,11 +156,11 @@ a `.ssab`, and it does not need the SDK for anything but the checkout cargo alre
 | `platform` | `host` (default), `web` | `host` builds the Rust library and the C face; `web` builds the wasm/js face with wasm-pack. It does not cross-compile, so `macos`/`windows`/`linux` are accepted only when they name the host |
 | `build` | `release` (default), `debug` | Cargo profile; `debug` also means `wasm-pack --dev`, which skips `wasm-opt` — never quote its size |
 | `ffi` | `yes` (default), `no` | `host` only: also build `--features ffi`, which regenerates `libs/ssplayer-wgpu/include/ssplayer_wgpu.h` with cbindgen |
-| `deploy` | `yes` (default), `no` | `web` only: copy the wasm package into `examples/web/wasm` |
+| `deploy` | `yes` (default), `no` | `web` only: copy the built npm package into `examples/web/ssplayer-wgpu` |
 
 Cargo works directly too — `cargo build -p ssplayer-wgpu --features ffi` is the same thing without the
 collect step. Requirements are Rust 1.97+, a GPU backend supported by wgpu 29, and for the web face
-`wasm-pack` plus `rustup target add wasm32-unknown-unknown`.
+`wasm-pack`, `pnpm` and `rustup target add wasm32-unknown-unknown`.
 
 **`scripts/deploy-examples.sh`** is the other half, and owns the playback data end to end: it builds
 `ssconverter-cli` from the SDK submodule and converts the test projects into `assets/` in **both** export
@@ -177,6 +184,10 @@ flowchart TD
         crate -.-> bevy
     end
 
+    subgraph npm ["packages/"]
+        pkg["@spritestudio/ssplayer-wgpu<br/>wasm + ts layer"]
+    end
+
     subgraph hosts ["examples/ — hosts that own the device and lend it"]
         viewer["viewer<br/>Rust, winit"]
         web["web<br/>WebGPU, &lt;ss-player-webgpu&gt;"]
@@ -186,7 +197,8 @@ flowchart TD
     end
 
     crate -->|rs| viewer
-    crate -->|js: wasm-bindgen| web
+    crate -->|js: wasm-bindgen| pkg
+    pkg --> web
     crate -->|ffi: cbindgen| metal
     crate -->|ffi: cbindgen| dx12
     crate -->|ffi: cbindgen| vulkan
@@ -195,6 +207,7 @@ flowchart TD
 | Path | What |
 |---|---|
 | [`libs/ssplayer-wgpu/`](./libs/ssplayer-wgpu) | crate `ssplayer-wgpu` — the player. `rlib` + `cdylib` + `staticlib`, with the `web` and `ffi` faces behind features |
+| [`packages/ssplayer-wgpu/`](./packages/ssplayer-wgpu) | npm package `@spritestudio/ssplayer-wgpu` — the wasm plus the TypeScript layer over it (`.` and `./element`). Published from where it sits; `wasm/` and `dist/` are gitignored build outputs |
 | [`examples/`](./examples) | one host per environment; see [Samples](#-samples) |
 | `scripts/build.sh` / `.ps1` | builds the library for one platform, collecting it into `bin/` |
 | `scripts/deploy-examples.sh` / `.ps1` | converts the SDK's test projects into `assets/` and deploys both export modes to `examples/web` |
