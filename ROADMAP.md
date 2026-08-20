@@ -88,24 +88,25 @@ respect are in [`AGENTS.md`](./AGENTS.md) under *Hard constraints*.
 
 ## Distribution & verification
 
-- [ ] **Release automation.** No `release.yml`, and CI has no macOS job — so the
-      Metal viewer is never built there. Two faces need one: web (npm, from
-      `pkg/`) and desktop FFI. Cross-compilation is unsupported, so each platform
-      needs its own runner.
-- [ ] **The npm package is not yet the shape it will ship in.** `scripts/build.sh
-      platform=web` produces a valid package directory — ES module, `.d.ts`,
-      `main` / `types` / `files` all set — but three things are still wrong for a
-      published one:
-      - The name is bare `ssplayer-wgpu`; the sibling Web packages are all under
-        the `@spritestudio` scope.
-      - `<ss-player-webgpu>` and the shared-context helper are plain JavaScript in
-        `examples/web` and are not part of the package, so installing it gets the
-        `SsContextWeb` / `SsSurfaceWeb` / `SsPlayerWeb` API and nothing else.
-        `ssplayer-webgl` ships its custom element as an entry point of the package;
-        this should too, and stay optional so a page that does not want it pays
-        nothing.
-      - wasm-pack copies the crate's README into the package, and that README is
-        written for Rust callers. The npm page needs its own.
+- [ ] **Release automation.** `release.yml` builds every platform and
+      `build-release.sh` assembles the zips, but CI has no macOS job — so the
+      Metal viewer is never built there. Cross-compilation is unsupported, so each
+      platform needs its own runner.
+- [ ] **Nothing publishes the npm package yet.** `packages/ssplayer-wgpu` is
+      `@spritestudio/ssplayer-wgpu` in its shipping shape — scoped name, the
+      custom element as its own `./element` entry point, its own JavaScript-facing
+      README, `prepack` refusing a package whose `dist/` or `wasm/` is missing —
+      and `scripts/build.sh platform=web` fills it. What is missing is the channel:
+      - A `publish_npm` input on `release.yml` and an `npm publish` step, with an
+        npm automation token as a repository secret. The version is
+        `7.0.0-beta.1` and `publishConfig.tag` is `beta`, so a publish cannot take
+        over `latest` by accident.
+      - **npm provenance stays off** until this repository is public — npm rejects
+        the publish outright rather than degrading, which is the same reason
+        `SSPlayerForWeb` has it off.
+      - Version bumps are hand-written here (no changesets, one package), so the
+        publish step has to be the thing that refuses to re-publish a version that
+        is already on the registry.
 - [ ] **macOS signing and notarization** for the cdylib. Portable from the sibling
       players, using the existing organisation secrets.
 - [ ] **Version stamping.** Versions are hand-written, and the SDK is a submodule

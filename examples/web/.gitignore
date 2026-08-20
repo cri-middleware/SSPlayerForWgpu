@@ -1,5 +1,5 @@
-# wasm package, deployed here by scripts/build.sh platform=web
-/wasm/
+# the npm package, deployed here by scripts/build.sh platform=web
+/ssplayer-wgpu/
 # playback data, deployed here by scripts/deploy-examples.sh (both export modes)
 /assets/
 /assets_emb/

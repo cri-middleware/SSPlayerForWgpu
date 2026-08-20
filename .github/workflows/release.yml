@@ -84,6 +84,21 @@ jobs:
         with:
           tool: wasm-pack
 
+      # The npm package's `.` / `./element` entry points are TypeScript, built by
+      # tsdown, so the web job needs node as well as cargo. The pnpm version comes
+      # from the package's `packageManager` field, not from here.
+      - name: Setup pnpm
+        if: matrix.artifact == 'web-wasm32'
+        uses: pnpm/action-setup@0977fd99725f1db4007ccb2928dbb4e90d06cc86 # v6.0.10
+
+      - name: Setup Node
+        if: matrix.artifact == 'web-wasm32'
+        uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: pnpm
+          cache-dependency-path: packages/ssplayer-wgpu/pnpm-lock.yaml
+
       # scripts/build.sh IS the platform build: the same command a maintainer
       # runs locally, so a release cannot differ from what was tested by hand.
       # It builds ssplayer-wgpu-ffi, regenerates the C header through cbindgen,
@@ -103,14 +118,33 @@ jobs:
         if: matrix.artifact == 'web-wasm32'
         run: ./scripts/build.sh platform=web build=release deploy=no
 
-      # bin/ for the native platforms, pkg/ for the web one. The artifact name
-      # is what build-release.sh looks for, and `gh run download -D artifacts`
-      # recreates exactly this layout for a local run.
+      # bin/ for the native platforms; for the web one, the npm package directory
+      # minus node_modules -- listed file by file rather than as a directory,
+      # because upload-artifact has no exclude and the least common ancestor of
+      # these paths is packages/ssplayer-wgpu, so the artifact root comes out the
+      # same either way. The artifact name is what build-release.sh looks for, and
+      # `gh run download -D artifacts` recreates exactly this layout for a local run.
       - name: Upload ${{ matrix.artifact }}
+        if: matrix.artifact != 'web-wasm32'
         uses: actions/upload-artifact@v7
         with:
           name: ${{ matrix.artifact }}
-          path: ${{ matrix.artifact == 'web-wasm32' && 'pkg' || 'bin' }}
+          path: bin
+          if-no-files-found: error
+          retention-days: 7
+
+      - name: Upload ${{ matrix.artifact }}
+        if: matrix.artifact == 'web-wasm32'
+        uses: actions/upload-artifact@v7
+        with:
+          name: ${{ matrix.artifact }}
+          path: |
+            packages/ssplayer-wgpu/dist
+            packages/ssplayer-wgpu/wasm
+            packages/ssplayer-wgpu/package.json
+            packages/ssplayer-wgpu/README.md
+            packages/ssplayer-wgpu/README.ja.md
+            packages/ssplayer-wgpu/LICENSE.md
           if-no-files-found: error
           retention-days: 7
 
@@ -133,8 +167,8 @@ jobs:
           path: artifacts
 
       # scripts/build-release.sh IS the release package: one zip per platform
-      # holding include/, lib/ and the licence, the wasm-pack package as its own,
-      # and SHA256SUMS over all of them. Every option is spelled out so a release
+      # holding include/, lib/ and the licence, the npm package as its own, and
+      # SHA256SUMS over all of them. Every option is spelled out so a release
       # cannot change because a default did, and so this is the command a human
       # runs locally — after `gh run download <this run> -D artifacts` — to
       # reproduce these exact archives without rebuilding four platforms.

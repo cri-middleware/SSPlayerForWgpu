@@ -637,3 +637,13 @@ CLAUDE.md
 /artifacts/
 /release-dist/
 /build/
+
+# --- repository-specific exceptions (keep last) ---------------------------
+# The npm package (@spritestudio/ssplayer-wgpu) is source, not a build output.
+# The VisualStudio template above ignores `**/[Pp]ackages/*` wholesale -- that
+# rule is about NuGet's restore folder, and the last matching pattern wins, so
+# this exception has to sit at the end of the file. Without it git skips the
+# entire package silently: `git status` does not even list it as untracked.
+# The package's own build outputs (dist/, wasm/, node_modules/) stay ignored by
+# packages/ssplayer-wgpu/.gitignore.
+!/packages/ssplayer-wgpu/

@@ -1,0 +1,5 @@
+# tsdown output
+/dist/
+# the wasm-pack package, staged here by scripts/build.sh platform=web
+/wasm/
+node_modules/
