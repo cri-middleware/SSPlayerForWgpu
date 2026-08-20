@@ -27,11 +27,7 @@ embedded = ["dep:image"]
 # ssplayer-core/ssplayer-webgl use. Bundling `image` on top of that cost 59 KB
 # brotli (201 KB -> 142 KB, -29%) to duplicate a decoder that was already there.
 # Add `embedded` back for a page that would rather not write that glue.
-# `ssruntime/std` gives the runtime the standard allocator and panic handler on
-# wasm32, where this crate's own cdylib needs them. core already uses std for
-# wgpu, so there is no conflict — unlike `ssruntime/panic-handler`, which would
-# duplicate std's `panic_impl`.
-web = ["dep:wasm-bindgen", "dep:wasm-bindgen-futures", "dep:js-sys", "dep:web-sys", "dep:console_error_panic_hook", "wasm-bindgen/std", "ssruntime/std"]
+web = ["dep:wasm-bindgen", "dep:wasm-bindgen-futures", "dep:js-sys", "dep:web-sys", "dep:console_error_panic_hook", "wasm-bindgen/std"]
 # C/C++ bindings (SPEC §12 P5, the "ffi" face): `ss_player_*` entry points plus a
 # self-contained host that builds wgpu from a raw window handle. `build.rs` runs
 # cbindgen over `src/ffi.rs` to emit `include/ssplayer_wgpu.h`. Pulls `embedded`
