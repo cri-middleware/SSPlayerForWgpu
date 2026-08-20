@@ -1,5 +1,5 @@
 # cbindgen config for the `ffi` face (SPEC §11). Driven by build.rs when the
-# `ffi` feature is on; the output is libs/ssplayer-wgpu/include/ssplayer_wgpu.h.
+# `ffi` feature is on; the output is libs/ssplayer-wgpu-ffi/include/ssplayer_wgpu.h.
 
 language = "C"
 header = "/* SPDX-License-Identifier: BSD-3-Clause */\n/* ssplayer-wgpu — C API for the wgpu SpriteStudio 7 player. */"
@@ -18,7 +18,7 @@ no_includes = true
 sys_includes = ["stdbool.h", "stddef.h", "stdint.h"]
 
 [parse]
-# The C API is defined entirely in this crate; nothing is re-exported from wgpu
+# The C API is defined entirely in ssplayer-wgpu; nothing is re-exported from wgpu
 # or the SDK, so there is no reason to walk dependencies.
 parse_deps = false
 

@@ -4,7 +4,7 @@
 #   .\build\Release\ssviewer-dx12.exe
 #
 # The player is built by cargo (feature `ffi`), which also regenerates
-# libs/ssplayer-wgpu/include/ssplayer_wgpu.h through cbindgen. This project is
+# libs/ssplayer-wgpu-ffi/include/ssplayer_wgpu.h through cbindgen. This project is
 # outside the Cargo workspace on purpose: it consumes the built library and the
 # generated header, nothing else.
 
@@ -38,15 +38,15 @@ set(SS_LIB_DIR "${REPO_ROOT}/target/$<IF:$<CONFIG:Debug>,debug,release>")
 # wgpu pulls in has to be named here by hand.
 set(SS_IMPORT_LIB "${SS_LIB_DIR}/ssplayer_wgpu.dll.lib")
 set(SS_DLL "${SS_LIB_DIR}/ssplayer_wgpu.dll")
-set(SS_INCLUDE_DIR "${REPO_ROOT}/libs/ssplayer-wgpu/include")
+set(SS_INCLUDE_DIR "${REPO_ROOT}/libs/ssplayer-wgpu-ffi/include")
 
 # Always run: cargo is the authority on whether anything needs rebuilding, and
 # it regenerates the header in the same pass.
 add_custom_target(ssplayer_wgpu_ffi ALL
-    COMMAND cargo build ${CARGO_ARGS} -p ssplayer-wgpu --features ffi
+    COMMAND cargo build ${CARGO_ARGS} -p ssplayer-wgpu-ffi
     WORKING_DIRECTORY "${REPO_ROOT}"
     BYPRODUCTS "${SS_IMPORT_LIB}" "${SS_DLL}" "${SS_INCLUDE_DIR}/ssplayer_wgpu.h"
-    COMMENT "cargo build -p ssplayer-wgpu --features ffi"
+    COMMENT "cargo build -p ssplayer-wgpu-ffi"
     VERBATIM)
 
 add_executable(ssviewer-dx12 src/main.cpp)

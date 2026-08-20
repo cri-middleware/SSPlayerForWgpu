@@ -47,7 +47,7 @@ usage () {
   echo "                          host = Rust library (+ the C face); web = wasm/js face"
   echo "  build=<release|debug>   Build profile (default: $BUILD)"
   echo "  ffi=<yes|no>            host only: also build --features ffi, which regenerates"
-  echo "                          libs/ssplayer-wgpu/include/ssplayer_wgpu.h (default: $FFI)"
+  echo "                          libs/ssplayer-wgpu-ffi/include/ssplayer_wgpu.h (default: $FFI)"
   echo "  deploy=<yes|no>         web only: copy the wasm package into examples/web"
   echo "                          (default: $DEPLOY)"
   echo "  -h | --help             Show this help"
@@ -154,18 +154,18 @@ if [ "$PLATFORM" = "host" ]; then
   PROFILE_FLAG=""
   [ "$BUILD" = "release" ] && PROFILE_FLAG="--release"
 
-  echo ">> cargo build -p ssplayer-wgpu ($BUILD)"
+  echo ">> cargo build -p ssplayer-wgpu-ffi ($BUILD)"
   # Unquoted on purpose: PROFILE_FLAG is one token or nothing.
   # shellcheck disable=SC2086
-  ( cd "$ROOT_DIR" && cargo build -p ssplayer-wgpu $PROFILE_FLAG )
+  ( cd "$ROOT_DIR" && cargo build -p ssplayer-wgpu-ffi --no-default-features --features embedded $PROFILE_FLAG )
 
   if [ "$FFI" = "yes" ]; then
     # No default command compiles src/ffi.rs or src/host.rs, so the C face rots
     # silently unless it is built explicitly. build.rs runs cbindgen in the same
     # pass, which is what keeps include/ssplayer_wgpu.h in step with the API.
-    echo ">> cargo build -p ssplayer-wgpu --features ffi ($BUILD) — regenerates include/ssplayer_wgpu.h"
+    echo ">> cargo build -p ssplayer-wgpu-ffi ($BUILD) — regenerates include/ssplayer_wgpu.h"
     # shellcheck disable=SC2086
-    ( cd "$ROOT_DIR" && cargo build -p ssplayer-wgpu --features ffi $PROFILE_FLAG )
+    ( cd "$ROOT_DIR" && cargo build -p ssplayer-wgpu-ffi $PROFILE_FLAG )
   fi
 
   # --- collect ------------------------------------------------------------
@@ -207,7 +207,7 @@ if [ "$PLATFORM" = "host" ]; then
   # The header only exists once cbindgen has run, i.e. after an ffi build.
   if [ "$FFI" = "yes" ]; then
     mkdir -p "$BIN_DIR/include"
-    cp "$ROOT_DIR/libs/ssplayer-wgpu/include/ssplayer_wgpu.h" "$BIN_DIR/include/"
+    cp "$ROOT_DIR/libs/ssplayer-wgpu-ffi/include/ssplayer_wgpu.h" "$BIN_DIR/include/"
   fi
   collect_license
 
@@ -245,9 +245,9 @@ fi
 # wasm-pack writes the finished package — wasm, JS bindings, .d.ts, LICENSE — so
 # its out-dir *is* the collected artifact for this platform; there is nothing for
 # collect_license to add.
-echo ">> wasm-pack build (ssplayer-wgpu, --no-default-features --features web, $BUILD) -> pkg"
+echo ">> wasm-pack build (ssplayer-wgpu-ffi, --no-default-features --features web, $BUILD) -> pkg"
 rm -rf "$PKG_DIR"
-wasm-pack build "$ROOT_DIR/libs/ssplayer-wgpu" \
+wasm-pack build "$ROOT_DIR/libs/ssplayer-wgpu-ffi" \
   --target web "$WASM_PROFILE" \
   --out-name ssplayer_wgpu \
   --out-dir "$PKG_DIR" \

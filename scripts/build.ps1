@@ -55,7 +55,7 @@ function Show-Usage {
     Write-Host "                          host = Rust library (+ the C face); web = wasm/js face"
     Write-Host "  build=<release|debug>   Build profile (default: release)"
     Write-Host "  ffi=<yes|no>            host only: also build --features ffi, which regenerates"
-    Write-Host "                          libs/ssplayer-wgpu/include/ssplayer_wgpu.h (default: yes)"
+    Write-Host "                          libs/ssplayer-wgpu-ffi/include/ssplayer_wgpu.h (default: yes)"
     Write-Host "  deploy=<yes|no>         web only: copy the wasm package into examples/web"
     Write-Host "                          (default: yes)"
     Write-Host "  -h | --help             Show this help"
@@ -140,18 +140,18 @@ if ($opts.platform -eq "host") {
     $profileArgs = @()
     if ($opts.build -eq "release") { $profileArgs += "--release" }
 
-    Write-Host ">> cargo build -p ssplayer-wgpu ($($opts.build))"
+    Write-Host ">> cargo build -p ssplayer-wgpu-ffi ($($opts.build))"
     Push-Location $ROOT_DIR
     try {
-        Invoke-Checked "cargo build" { & cargo build -p ssplayer-wgpu @profileArgs }
+        Invoke-Checked "cargo build" { & cargo build -p ssplayer-wgpu-ffi --no-default-features --features embedded @profileArgs }
 
         if ($opts.ffi -eq "yes") {
             # No default command compiles src/ffi.rs or src/host.rs, so the C face
             # rots silently unless it is built explicitly. build.rs runs cbindgen in
             # the same pass, which is what keeps include/ssplayer_wgpu.h in step
             # with the API.
-            Write-Host ">> cargo build -p ssplayer-wgpu --features ffi ($($opts.build)) - regenerates include/ssplayer_wgpu.h"
-            Invoke-Checked "cargo build --features ffi" { & cargo build -p ssplayer-wgpu --features ffi @profileArgs }
+            Write-Host ">> cargo build -p ssplayer-wgpu-ffi ($($opts.build)) - regenerates include/ssplayer_wgpu.h"
+            Invoke-Checked "cargo build -p ssplayer-wgpu-ffi" { & cargo build -p ssplayer-wgpu-ffi @profileArgs }
         }
     } finally {
         Pop-Location
@@ -185,7 +185,7 @@ if ($opts.platform -eq "host") {
     if ($opts.ffi -eq "yes") {
         $incDir = Join-Path $BIN_DIR "include"
         New-Item -ItemType Directory -Force -Path $incDir > $null
-        Copy-Item -Force (Join-Path $ROOT_DIR "libs/ssplayer-wgpu/include/ssplayer_wgpu.h") $incDir
+        Copy-Item -Force (Join-Path $ROOT_DIR "libs/ssplayer-wgpu-ffi/include/ssplayer_wgpu.h") $incDir
     }
     Copy-License
 
@@ -218,10 +218,10 @@ $wasmProfile = if ($opts.build -eq "debug") { "--dev" } else { "--release" }
 # wasm-pack writes the finished package - wasm, JS bindings, .d.ts, LICENSE - so
 # its out-dir *is* the collected artifact for this platform; there is nothing for
 # Copy-License to add.
-Write-Host ">> wasm-pack build (ssplayer-wgpu, --no-default-features --features web, $($opts.build)) -> pkg"
+Write-Host ">> wasm-pack build (ssplayer-wgpu-ffi, --no-default-features --features web, $($opts.build)) -> pkg"
 if (Test-Path $PKG_DIR) { Remove-Item -Recurse -Force $PKG_DIR }
 Invoke-Checked "wasm-pack build" {
-    & wasm-pack build (Join-Path $ROOT_DIR "libs/ssplayer-wgpu") `
+    & wasm-pack build (Join-Path $ROOT_DIR "libs/ssplayer-wgpu-ffi") `
         --target web $wasmProfile `
         --out-name ssplayer_wgpu `
         --out-dir $PKG_DIR `

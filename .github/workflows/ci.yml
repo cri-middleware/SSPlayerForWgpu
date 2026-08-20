@@ -88,8 +88,10 @@ jobs:
 
       - name: Build the ffi face
         # No native default command compiles src/ffi.rs or src/host.rs, so build
-        # the feature explicitly. This also regenerates the cbindgen header.
-        run: cargo clippy -p ssplayer-wgpu --features ffi --all-targets -- -D warnings
+        # the feature explicitly, then build the ffi crate that regenerates the header.
+        run: |
+          cargo clippy -p ssplayer-wgpu --features ffi --all-targets -- -D warnings
+          cargo build -p ssplayer-wgpu-ffi
 
       - name: Test the ffi face
         # The `cargo test --workspace` above runs with default features, which do
@@ -101,7 +103,7 @@ jobs:
         run: cargo test -p ssplayer-wgpu --features ffi --lib
 
       - name: Check the generated header is up to date
-        run: git diff --exit-code -- libs/ssplayer-wgpu/include/ssplayer_wgpu.h
+        run: git diff --exit-code -- libs/ssplayer-wgpu-ffi/include/ssplayer_wgpu.h
 
   windows:
     name: 🪟 DX12 viewer (Windows)
@@ -131,7 +133,7 @@ jobs:
       # this is a compile check and nothing more — DX12 itself still has to be
       # exercised by running the viewer on real hardware (SPEC §14).
       - name: Build the ffi face (MSVC)
-        run: cargo build -p ssplayer-wgpu --features ffi --release
+        run: cargo build -p ssplayer-wgpu-ffi --release
 
       - name: Build the DX12 C++ viewer
         run: |
