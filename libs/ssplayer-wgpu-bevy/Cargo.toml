@@ -39,7 +39,9 @@ bevy = { workspace = true, features = [
 # draws nothing). Kept out of the library's own features so the dependency stays
 # honest about what the adapter itself needs.
 [dev-dependencies]
-bevy = { workspace = true, features = ["bevy_sprite", "bevy_sprite_render"] }
+# `bevy_sprite*` for the composited sprite; `bevy_audio` + the `mp3`/`wav`
+# decoders so the example can actually play the sounds the player only cues.
+bevy = { workspace = true, features = ["bevy_sprite", "bevy_sprite_render", "bevy_audio", "mp3", "wav"] }
 ssplayer-wgpu = { workspace = true }
 wgpu = { workspace = true }
 pollster = "1.0.1"
