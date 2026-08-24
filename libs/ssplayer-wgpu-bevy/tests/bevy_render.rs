@@ -282,6 +282,75 @@ fn playback_state_crosses_back_to_the_main_world() {
     assert!(state.frame_no > 0.0, "playback state did not cross back: frame_no is still {} after {FRAMES} frames — the render->main feedback never arrived", state.frame_no);
 }
 
+/// A multisampled view is skipped, not a hard crash.
+///
+/// The player's pipelines are single-sampled, so drawing into a multisampled
+/// target is a wgpu validation panic — and Bevy's default camera has MSAA on.
+/// The adapter has to notice and skip. Without that guard this test panics
+/// instead of asserting; with it, the character is simply absent.
+#[test]
+fn a_multisampled_view_is_skipped_not_a_panic() {
+    if !fixtures_present() {
+        eprintln!("assets not generated, skipping");
+        return;
+    }
+    let Some((mut app, handle, captured)) = headless_app() else {
+        eprintln!("no GPU adapter available, skipping");
+        return;
+    };
+
+    // Msaa::Sample4 rather than the usual Msaa::Off: this is the misconfiguration.
+    app.world_mut().spawn((Camera2d, Camera { clear_color: ClearColorConfig::Custom(Color::BLACK), ..default() }, RenderTarget::Image(handle.into()), Msaa::Sample4));
+    app.world_mut().spawn((SsPlayer { src: fixture(MASK_PACK), animation: MASK_ANIM.into() }, SsTransform { scale_x: 0.5, scale_y: 0.5, ..default() }, SsPlayback::default()));
+
+    app.finish();
+    app.cleanup();
+    for _ in 0..FRAMES {
+        app.update();
+    }
+    let pixels = captured.0.lock().unwrap().clone().expect("the readback never arrived — a multisampled view likely panicked instead of being skipped");
+    assert_eq!(drawn_pixels(&pixels), 0, "a multisampled view drew the character; it should have been skipped");
+}
+
+/// Drawing survives the bound camera being replaced.
+///
+/// The scene binds to one view; that binding must not latch across frames, or an
+/// app that despawns its camera and spawns another (a scene transition) leaves
+/// every later frame refused as a "second view" and nothing draws again. Asserted
+/// on drawn pixels rather than `frame_no` so it does not depend on wall-clock
+/// deltas — under the bug the character is simply absent after the swap.
+#[test]
+fn drawing_survives_the_bound_camera_being_replaced() {
+    if !fixtures_present() {
+        eprintln!("assets not generated, skipping");
+        return;
+    }
+    let Some((mut app, handle, captured)) = headless_app() else {
+        eprintln!("no GPU adapter available, skipping");
+        return;
+    };
+
+    let camera_a = app.world_mut().spawn((Camera2d, Camera { clear_color: ClearColorConfig::Custom(Color::BLACK), ..default() }, RenderTarget::Image(handle.clone().into()), Msaa::Off)).id();
+    app.world_mut().spawn((SsPlayer { src: fixture(MASK_PACK), animation: MASK_ANIM.into() }, SsTransform { scale_x: 0.5, scale_y: 0.5, ..default() }, SsPlayback::default()));
+
+    app.finish();
+    app.cleanup();
+    for _ in 0..FRAMES {
+        app.update();
+    }
+
+    // Swap the camera: despawn the bound one, spawn another onto the same target.
+    app.world_mut().entity_mut(camera_a).despawn();
+    app.world_mut().spawn((Camera2d, Camera { clear_color: ClearColorConfig::Custom(Color::BLACK), ..default() }, RenderTarget::Image(handle.into()), Msaa::Off));
+    for _ in 0..FRAMES {
+        app.update();
+    }
+
+    let pixels = captured.0.lock().unwrap().clone().expect("the readback never arrived after the camera swap");
+    dump("05-after-camera-swap", &pixels);
+    assert!(drawn_pixels(&pixels) > 0, "the character stopped drawing after the bound camera was replaced — the view binding latched to the despawned camera");
+}
+
 /// The player crate rendering the same thing, for the comparisons above.
 mod reference {
     use ssplayer_wgpu::{MaskBackend, Retention, SSPlayer, SSRenderer, SSScene, SceneConfig};

@@ -46,7 +46,9 @@ impl Default for SsTransform {
 /// Transport and compositing state — everything that costs nothing to change.
 #[derive(Component, Clone, Copy, Debug)]
 pub struct SsPlayback {
-    /// Whether the timeline advances.
+    /// Whether the timeline advances. Toggling it pauses and resumes in place; it
+    /// never rewinds, so it cannot replay a finished animation — that is
+    /// [`SsPlayback::restart`]'s job.
     pub playing: bool,
     pub speed: f32,
     /// Draw order within the render target; lower draws first. Ties keep the
@@ -56,11 +58,16 @@ pub struct SsPlayback {
     pub alpha: f32,
     /// False skips the timeline advance as well as the draw.
     pub visible: bool,
+    /// Bump this (any change in value) to replay the animation from its head,
+    /// re-arming the loop count. A generation counter rather than a flag so a host
+    /// can re-trigger a one-shot at will without having to clear anything, and so
+    /// two restarts in a row are two restarts.
+    pub restart: u32,
 }
 
 impl Default for SsPlayback {
     fn default() -> Self {
-        Self { playing: true, speed: 1.0, order: 0, alpha: 1.0, visible: true }
+        Self { playing: true, speed: 1.0, order: 0, alpha: 1.0, visible: true, restart: 0 }
     }
 }
 

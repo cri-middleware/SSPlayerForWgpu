@@ -72,11 +72,16 @@ finds itself drawing into an sRGB target without it.
 |---|---|---|
 | `SsPlayer` | `src`, `animation` | Rebuilds the playback tree — this is the allocating one |
 | `SsTransform` | `x`, `y`, `scale_x`, `scale_y`, `rotation` | Free |
-| `SsPlayback` | `playing`, `speed`, `order`, `alpha`, `visible` | Free |
+| `SsPlayback` | `playing`, `speed`, `order`, `alpha`, `visible`, `restart` | Free |
 
 Deliberately not Bevy's `Transform`: that is a 3D affine whose decomposition into
 the player's five scalars is lossy. An app that wants the two linked can write
 the one system that copies across, and keeps the choice of which is authoritative.
+
+`SsPlayback::playing` pauses and resumes without rewinding, so it cannot replay a
+finished animation. To restart one from its head, **bump `SsPlayback::restart`**
+(any change of value) — it is a generation counter, so a host re-triggers a
+one-shot by incrementing it, with nothing to clear afterwards.
 
 ## Example
 
@@ -167,7 +172,9 @@ crate deliberately does not do.
   build, so drawing a second view would advance every animation twice per frame.
   Later views are skipped, with a warning. Lifting this needs the advance split
   off from the build in `ssplayer-wgpu` itself.
-* **MSAA must be off.**
+* **MSAA must be off** — the player's pipelines are single-sampled. Bevy's
+  default camera has MSAA on, so give it `Msaa::Off`; the adapter warns once and
+  skips (rather than crashing) if it finds a multisampled target.
 * **Loading is synchronous** and reads the filesystem directly rather than going
   through Bevy's `AssetServer`, so it does not get hot reload, packed assets or
   shared atlases.

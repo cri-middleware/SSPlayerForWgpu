@@ -21,11 +21,13 @@ use crate::feedback::{FeedbackChannel, PlaybackFeedback};
 /// `src` and `animation` are kept so a change to either can be told from the
 /// frame-to-frame traffic: rebuilding the tree allocates, the rest does not.
 ///
-/// `started` / `playing` track transport, because the player's `play()` rewinds
-/// (it is a start, not a resume) and `is_playing()` stays true through a pause —
-/// so neither can be used to tell "carry on" from "restart". `started` is whether
-/// this tree has been `play()`ed at all; `playing` is the last `SsPlayback::playing`
-/// applied, for edge-detecting pause vs resume. Both reset when the tree rebuilds.
+/// `started` / `playing` / `restart` track transport, because the player's
+/// `play()` rewinds (it is a start, not a resume) and `is_playing()` stays true
+/// through a pause — so neither can be used to tell "carry on" from "restart".
+/// `started` is whether this tree has been `play()`ed at all; `playing` is the
+/// last `SsPlayback::playing` applied, for edge-detecting pause vs resume;
+/// `restart` is the last `SsPlayback::restart` counter seen, for detecting an
+/// explicit replay. `started`/`playing` reset when the tree rebuilds.
 struct PlayerSlot {
     entity: MainEntity,
     player: SSPlayer,
@@ -33,6 +35,7 @@ struct PlayerSlot {
     animation: String,
     started: bool,
     playing: bool,
+    restart: u32,
 }
 
 /// Everything the render world owns on this crate's behalf.
@@ -56,6 +59,7 @@ pub(crate) struct SsRenderState {
     bound_view: Option<Entity>,
     warned_second_view: bool,
     warned_srgb: bool,
+    warned_msaa: bool,
 }
 
 /// Build the render-world state on the device Bevy just acquired.
@@ -69,7 +73,7 @@ pub(crate) struct SsRenderState {
 /// on device loss rather than recovering. Do not move this to a run-once startup:
 /// that is what would break recovery.
 pub(crate) fn init_state(mut commands: Commands, device: Res<RenderDevice>) {
-    commands.insert_resource(SsRenderState { renderer: SSRenderer::new(device.wgpu_device()), scene: None, scene_format: None, slots: Vec::new(), bound_view: None, warned_second_view: false, warned_srgb: false });
+    commands.insert_resource(SsRenderState { renderer: SSRenderer::new(device.wgpu_device()), scene: None, scene_format: None, slots: Vec::new(), bound_view: None, warned_second_view: false, warned_srgb: false, warned_msaa: false });
 }
 
 /// Apply this frame's extracted state to the playback trees.
@@ -82,6 +86,11 @@ pub(crate) fn sync_players(mut state: Option<ResMut<SsRenderState>>, extracted: 
         return;
     };
 
+    // Bind the view afresh each frame. The second-view guard only needs to hold
+    // within a frame, and latching it across frames would freeze playback forever
+    // if the bound camera is ever despawned and replaced (a scene transition).
+    state.bound_view = None;
+
     // Drop the trees whose entities went away. The extracted list is this
     // frame's whole truth, so anything absent from it is gone.
     state.slots.retain(|slot| extracted.players.iter().any(|player| player.entity == slot.entity));
@@ -91,7 +100,7 @@ pub(crate) fn sync_players(mut state: Option<ResMut<SsRenderState>>, extracted: 
         let index = match position {
             Some(index) => index,
             None => {
-                state.slots.push(PlayerSlot { entity: extracted_player.entity, player: SSPlayer::new(), src: String::new(), animation: String::new(), started: false, playing: false });
+                state.slots.push(PlayerSlot { entity: extracted_player.entity, player: SSPlayer::new(), src: String::new(), animation: String::new(), started: false, playing: false, restart: 0 });
                 state.slots.len() - 1
             }
         };
@@ -134,6 +143,16 @@ pub(crate) fn sync_players(mut state: Option<ResMut<SsRenderState>>, extracted: 
         slot.player.set_order(playback.order);
         slot.player.set_alpha(playback.alpha);
         slot.player.set_visible(playback.visible);
+        // An explicit replay: `play()` rewinds but is otherwise only the initial
+        // start, and the `playing` toggle only pauses/resumes — so a bumped
+        // restart counter is the one way to re-trigger a finished animation.
+        if slot.restart != playback.restart {
+            slot.restart = playback.restart;
+            slot.player.play();
+            slot.started = true;
+            slot.playing = true;
+        }
+
         // Transport under the player's split play/resume semantics: `play()`
         // rewinds and re-arms, so it is only the initial start; `pause()` holds
         // and `resume()` lifts, neither rewinding. `is_playing()` stays true
@@ -184,6 +203,20 @@ pub(crate) fn draw_players(
 
     let view_entity = view.entity();
     let (camera, target) = view.into_inner();
+
+    // The player's pipelines are single-sampled; a multisampled target is a wgpu
+    // validation panic, not a soft failure. Bevy's default MSAA is on (Sample4),
+    // so warn once and skip rather than crash — the fix is the camera's `Msaa::Off`.
+    if target.sampled_main_texture_view().is_some() {
+        if !state.warned_msaa {
+            state.warned_msaa = true;
+            warn!(
+                "ssplayer-wgpu-bevy: the view is multisampled (MSAA on); the player's pipelines \
+                 are single-sampled, so nothing is drawn. Add `Msaa::Off` to the camera."
+            );
+        }
+        return;
+    }
 
     match state.bound_view {
         Some(bound) if bound != view_entity => {
