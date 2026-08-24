@@ -1044,17 +1044,24 @@ impl SsPlayerWeb {
         with_player!(self, |p| p.set_animation(name).map_err(js_err)?)
     }
 
-    /// Start playing, or resume after [`SsPlayerWeb::pause`].
+    /// Start from the head of the section, re-arming the loop count. Not a
+    /// resume: it rewinds. Use [`SsPlayerWeb::resume`] to lift a hold.
     pub fn play(&self) -> Result<(), JsValue> {
         with_player!(self, |p| p.play())
     }
 
-    /// Hold the current frame. [`SsPlayerWeb::play`] resumes from it.
+    /// Hold the current frame. Idempotent, and ignored while nothing is playing.
     pub fn pause(&self) -> Result<(), JsValue> {
         with_player!(self, |p| p.pause())
     }
 
-    /// Stop and rewind to the first frame.
+    /// Lift a [`SsPlayerWeb::pause`], carrying on from the same frame.
+    /// Idempotent, and a no-op on a stopped animation.
+    pub fn resume(&self) -> Result<(), JsValue> {
+        with_player!(self, |p| p.resume())
+    }
+
+    /// Stop playback. The playhead stays where it stands; nothing rewinds.
     pub fn stop(&self) -> Result<(), JsValue> {
         with_player!(self, |p| p.stop())
     }

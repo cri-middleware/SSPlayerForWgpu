@@ -189,3 +189,46 @@ fn backward_playback_retreats() {
 
     assert!(player.frame_no() < from, "the playhead should retreat: {from} -> {}", player.frame_no());
 }
+
+/// The four transport verbs, as the SDK's Player Porting Guide specifies them.
+/// `pause` holds and nothing else; `resume` is what lifts the hold; `play`
+/// heads out and so cannot serve as a resume; `stop` leaves the playhead alone.
+#[test]
+fn pause_holds_and_only_resume_lifts_it() {
+    let mut player = loaded();
+
+    // Nothing is playing yet: neither flag is set, and pause is ignored.
+    assert!(!player.is_playing());
+    assert!(!player.is_paused());
+    player.pause();
+    assert!(!player.is_paused(), "pausing a never-played animation does nothing");
+
+    player.play();
+    assert!(player.is_playing());
+    assert!(!player.is_paused());
+
+    player.pause();
+    assert!(player.is_paused());
+    assert!(player.is_playing(), "a hold is not a stop");
+
+    player.pause();
+    assert!(player.is_paused(), "pause is idempotent — it never resumes");
+
+    player.resume();
+    assert!(!player.is_paused());
+    player.resume();
+    assert!(!player.is_paused(), "resume is idempotent too");
+
+    // play() clears a hold, but by heading out rather than carrying on.
+    player.pause();
+    player.play();
+    assert!(!player.is_paused());
+
+    // stop() clears it as well, and resume does not restart from there.
+    player.pause();
+    player.stop();
+    assert!(!player.is_playing());
+    assert!(!player.is_paused(), "stopped is not held");
+    player.resume();
+    assert!(!player.is_playing(), "resume lifts a hold; it does not start playback");
+}
