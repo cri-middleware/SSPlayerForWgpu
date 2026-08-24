@@ -16,13 +16,14 @@
 // Up/Down previous / next animation V toggle visibility
 // R           restart animation [ / ] alpha down / up
 // L           layout: Row / Stack O       reverse draw order
-// F           toggle Y-axis flip Escape quit
+// F           toggle Y-axis flip K       mask backend (stencil / coverage)
+// Escape      quit
 // drop play a dropped .ssab, or every .ssab in a dropped folder
 //
 // The pack, animation, visibility and alpha keys act on the **focused** member;
 // focus starts at "all", so they drive the whole cast until you press Tab.
 
-use ssplayer_wgpu::{SSPack, SSPlayer, SSRenderer, SSScene, SceneConfig};
+use ssplayer_wgpu::{MaskBackend, SSPack, SSPlayer, SSRenderer, SSScene, SceneConfig};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
@@ -193,6 +194,12 @@ impl AppState {
         // Match the projection to the current window size.
         let size = self.window.inner_size();
         self.scene.set_viewport(&self.queue, size.width as f32, size.height as f32, self.y_down);
+
+        // Bake the mask bitmaps before the pass below opens, on this same
+        // encoder. A no-op under the stencil backend, which is the default here —
+        // this window has a stencil to lend, so the coverage path is only ever a
+        // deliberate comparison (press K).
+        self.scene.encode_mask_coverage(&mut self.renderer, &self.device, &mut encoder);
 
         {
             // One pass for the whole cast. Clearing the stencil here would hide
@@ -423,6 +430,23 @@ impl AppState {
         }
     }
 
+    /// Swap between the two mask backends, for comparing them by eye.
+    ///
+    /// The scene is rebuilt rather than reconfigured: a backend decides which
+    /// pipelines the frame draws with, and those are baked against the scene's
+    /// formats when it is built. Cheap enough — this is a keypress, not a frame.
+    fn toggle_mask_backend(&mut self) {
+        let config = self.scene.config();
+        let mask = match config.mask {
+            MaskBackend::Coverage => MaskBackend::Stencil,
+            _ => MaskBackend::Coverage,
+        };
+        self.scene = SSScene::new(&self.device, &SceneConfig { mask, ..config });
+        // The projection lives in the scene, so it goes with it.
+        let size = self.window.inner_size();
+        self.scene.set_viewport(&self.queue, size.width as f32, size.height as f32, self.y_down);
+    }
+
     // --- status ----------------------------------------------------------
 
     fn refresh_status(&mut self) {
@@ -465,9 +489,11 @@ impl AppState {
         println!(" GPU pass: {gpu} (cpu update {:.3} ms)", self.last_update_ms);
         println!(" Playback: {}", if self.is_paused { "Paused" } else { "Playing" });
         println!(" Y-Axis Mode: {}", if self.y_down { "Y-Down (flipped)" } else { "Y-Up (standard)" });
+        println!(" Mask backend: {:?} ({} coverage bitmaps last frame)", self.scene.config().mask, stats.coverage_layers);
         println!("----------------------------------------------------");
         println!(" Controls (pack / animation / V / [ ] act on the focus):");
         println!(" Space - Pause / Resume +/- - Add / Remove player");
+        println!(" K - Mask backend (stencil / coverage)");
         println!(" Right/Left - Next / Prev SSAB Tab - Cycle focus");
         println!(" Up/Down - Next / Prev animation V - Toggle visibility");
         println!(" R           - Restart animation [ / ] - Alpha down / up");
@@ -540,7 +566,7 @@ impl ApplicationHandler for App {
         let stencil_view = create_stencil_view(&device, config.width, config.height);
 
         let renderer = SSRenderer::new(&device);
-        let scene = SSScene::new(&device, &SceneConfig { color_format: format, stencil_format: Some(STENCIL_FORMAT) });
+        let scene = SSScene::new(&device, &SceneConfig { color_format: format, stencil_format: Some(STENCIL_FORMAT), mask: MaskBackend::Stencil });
 
         // Only the catalogue: every player loads what it plays from its path, and
         // that one call brings the atlases and the referenced packs with it. There is no separate texture pass here any more.
@@ -721,6 +747,10 @@ impl ApplicationHandler for App {
                 }
                 winit::keyboard::Key::Character(ref c) if c.eq_ignore_ascii_case("f") => {
                     state.y_down = !state.y_down;
+                    state.refresh_status();
+                }
+                winit::keyboard::Key::Character(ref c) if c.eq_ignore_ascii_case("k") => {
+                    state.toggle_mask_backend();
                     state.refresh_status();
                 }
                 _ => {}

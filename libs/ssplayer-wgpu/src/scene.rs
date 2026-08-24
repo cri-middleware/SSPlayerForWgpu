@@ -8,9 +8,9 @@
 //! device-scoped [`SSRenderer`] — all three are lent per frame.
 
 use crate::frame::FrameView;
-use crate::mask::{MaskOp, MaskWriter, StencilTest};
+use crate::mask::{MaskOp, MaskWriter, MaskWriters, StencilTest};
 use crate::metrics::{GpuTimer, SceneStats};
-use crate::renderer::{GeomClass, PipelineKey, PipelineKind, SHADER_PARAM_STRIDE, SHADER_PARAM_STRIDE_F32, SHAPE_FAN_VERTS, SSRenderer, blend_index, ss_shader_entry};
+use crate::renderer::{COVERAGE_FORMAT, GeomClass, PipelineKey, PipelineKind, SHADER_PARAM_STRIDE, SHADER_PARAM_STRIDE_F32, SHAPE_FAN_VERTS, SSRenderer, blend_index, ss_shader_entry};
 
 use ssruntime::runtime::effect_draw_plan::ss::runtime::root_as_effect_draw_plan_unchecked;
 use ssruntime::runtime::framedata::ss::runtime::{BlendType, DrawBatchKind, PartAttributeShader, root_as_frame_data_unchecked};
@@ -43,16 +43,50 @@ fn pack_rgb(r: f32, g: f32, b: f32) -> u32 {
     q(r) | (q(g) << 8) | (q(b) << 16)
 }
 
+/// How a scene rasterises mask coverage.
+///
+/// The two working backends implement the same semantics from opposite ends of
+/// the mask doc: [`MaskBackend::Stencil`] is §3-1 (the hardware stencil), and
+/// [`MaskBackend::Coverage`] is §3-2, written for engines that never lend one.
+/// Which is available is a property of the *host's render pass*, not of the
+/// animation — the same `.ssab` must look the same either way.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
+pub enum MaskBackend {
+    /// No masking. Pure masks draw nothing and masked targets draw unclipped.
+    #[default]
+    None,
+    /// The host's stencil buffer (mask doc §3-1). Needs
+    /// [`SceneConfig::stencil_format`] and a matching attachment on every pass.
+    Stencil,
+    /// A coverage bitmap the player rasterises for itself (mask doc §3-2).
+    ///
+    /// Needs no stencil from the host, and so is the backend for a pass that has
+    /// none to give — Bevy's 2d depth is `Depth32Float`, and a WebGPU engine that
+    /// composes its own passes may expose no depth at all. The cost is one extra
+    /// pass per masking player per frame, which is why it is not the default.
+    ///
+    /// **The host must call [`SSScene::encode_mask_coverage`]** between `update`
+    /// and `draw`: the bitmap is rasterised into its own render pass, and under
+    /// the borrow model only the host has an encoder to open one with.
+    Coverage,
+}
+
 /// Construction config for SSScene, matched to the host's render target.
 #[derive(Clone, Copy, Debug)]
 pub struct SceneConfig {
     /// Target color format. Pipelines are baked against this.
     pub color_format: wgpu::TextureFormat,
-    /// Depth/stencil format of the host's render target, or `None` to run
-    /// without masking. When `Some`, the host must attach a matching
-    /// depth/stencil buffer to every render pass; this enables the
-    /// stencil-test content pipelines and the mask-write pipelines.
+    /// Depth/stencil format of the host's render target, or `None` when it
+    /// attaches neither. When `Some`, the host must attach a matching
+    /// depth/stencil buffer to every render pass.
+    ///
+    /// Independent of [`SceneConfig::mask`]: this describes the *attachment*,
+    /// which a host may have for its own reasons whatever it masks with. The one
+    /// combination that cannot work is [`MaskBackend::Stencil`] without a format,
+    /// which [`SSScene::new`] refuses by falling back to [`MaskBackend::None`].
     pub stencil_format: Option<wgpu::TextureFormat>,
+    /// How this scene draws masks.
+    pub mask: MaskBackend,
 }
 
 /// The fields of one `DrawBatch` the renderer needs, extracted by the caller so
@@ -86,6 +120,10 @@ struct BatchDrawCall {
     /// Index of this part's block in the shader-params buffer, for
     /// [`PipelineKey::Shader`] draws — the dynamic offset for bind group(2).
     shader_slot: Option<u32>,
+    /// Which layer of the frame's coverage array this call rasterises into
+    /// (writer draws) or samples from (masked content). `None` when the call has
+    /// nothing to do with coverage.
+    cov_layer: Option<u32>,
 }
 
 /// One drawn primitive: where its geometry sits in the frame arena, and the
@@ -125,6 +163,52 @@ struct Prim {
     /// Per-corner PartsColor rate — or, for a mask writer, the cutout threshold
     /// (`fs_mask` reads `varg.x`), which needs the full range including -1.
     rates: [f32; 4],
+    /// Arena offset of the owning node's coverage block, meaningful only when
+    /// `mask_info` says this primitive takes part in coverage masking. Zero is a
+    /// real arena offset, so the flag is what gates it, never this value.
+    cov_base: u32,
+    /// Coverage masking, packed (mask doc §3-2). Zero — the `Default` — is "no
+    /// coverage masking", which is every primitive under the stencil backend.
+    ///
+    /// | bits | meaning |
+    /// |---|---|
+    /// | 0 | set when this primitive takes part in coverage masking |
+    /// | 1 | 1 = writer (baking a bit), 0 = masked target (replaying) |
+    /// | 2 | target polarity: 1 = visible inside the coverage (§2-4) |
+    /// | 8..16 | writer: which bit of the bitmap it writes (0..23) |
+    /// | 16..32 | target: its own `draw_order` rank, for the scope test (§2-1) |
+    mask_info: u32,
+}
+
+/// Which backend a mask writer is being appended for, and the one value each
+/// needs: the stencil op to apply, or the coverage bit to set.
+#[derive(Clone, Copy, Debug)]
+enum MaskWriterDest {
+    Stencil(MaskOp),
+    Coverage(usize),
+}
+
+/// Set on [`Prim::mask_info`] when the primitive takes part in coverage masking.
+const MASK_INFO_ACTIVE: u32 = 1 << 0;
+/// Set when the primitive is a coverage *writer* rather than a masked target.
+const MASK_INFO_WRITER: u32 = 1 << 1;
+/// Set when a masked target draws *inside* the coverage (mask doc §2-4).
+const MASK_INFO_INSIDE: u32 = 1 << 2;
+
+/// Pack a writer's [`Prim::mask_info`].
+fn writer_mask_info(bit: usize) -> u32 {
+    MASK_INFO_ACTIVE | MASK_INFO_WRITER | ((bit as u32 & 0xFF) << 8)
+}
+
+/// Pack a masked target's [`Prim::mask_info`].
+///
+/// Ranks past 65535 would alias, which no real `draw_order` reaches — a pack that
+/// large would have exhausted other limits long before. Clamped rather than
+/// wrapped so the failure, if it ever happened, is a mask that stops scoping
+/// rather than one that scopes backwards.
+fn target_mask_info(rank: usize, inside: bool) -> u32 {
+    let polarity = if inside { MASK_INFO_INSIDE } else { 0 };
+    MASK_INFO_ACTIVE | polarity | ((rank.min(0xFFFF) as u32) << 16)
 }
 
 /// Where one node's slice of the frame arena starts.
@@ -133,7 +217,7 @@ struct Prim {
 /// per frame, as a handful of memcpys — and hands back the offsets. Every
 /// primitive that node contributes then refers to the arena rather than carrying
 /// its own expanded geometry.
-#[derive(Clone, Copy, Debug, Default)]
+#[derive(Clone, Copy, Debug)]
 pub struct NodeSlot {
     /// The node's placement matrix (16 floats).
     transform: u32,
@@ -145,7 +229,93 @@ pub struct NodeSlot {
     mesh_uvs: u32,
     shape_vertices: u32,
     shape_box_coords: u32,
+    /// Arena offset of this node's coverage block, or [`NO_COVERAGE`].
+    ///
+    /// Written by [`FrameChunk::set_node_coverage`] *after* the writers are
+    /// planned, which is why it cannot be filled in by `begin_node`: the block
+    /// describes the writer group, and the group is not known until the walk has
+    /// looked at the frame.
+    coverage: u32,
+    /// Which layer of the frame's coverage array this node's bitmap occupies.
+    /// Meaningless while `coverage` is [`NO_COVERAGE`].
+    coverage_layer: u32,
 }
+
+/// One node's claim on the frame's coverage array.
+///
+/// The layer index is this entry's position in [`FrameChunk::coverage_nodes`],
+/// which is why merging chunks has to renumber: two players built side by side
+/// both start counting from zero.
+#[derive(Clone, Copy, Debug)]
+struct CoverageNode {
+    /// Arena offset of the node's coverage block, so [`FrameChunk::absorb`] can
+    /// reach in and rewrite the layer the block advertises.
+    block_base: u32,
+    /// Player-local width and height of the writer group, which is what decides
+    /// the bitmap's size class — a mask twice as wide wants twice the texels.
+    extent: (f32, f32),
+}
+
+/// [`NodeSlot::coverage`] for a node that writes no coverage this frame.
+const NO_COVERAGE: u32 = u32::MAX;
+
+// Written out rather than derived: every other field defaults to arena offset 0,
+// which is a real offset, but `coverage` has to default to "none" — and a derived
+// `Default` would quietly make every slot claim the first node's coverage block.
+impl Default for NodeSlot {
+    fn default() -> Self {
+        Self { transform: 0, world_matrices: 0, local_vertices: 0, local_uvs: 0, mesh_x: 0, mesh_y: 0, mesh_uvs: 0, shape_vertices: 0, shape_box_coords: 0, coverage: NO_COVERAGE, coverage_layer: 0 }
+    }
+}
+
+/// Floats before the writer records in a node's coverage block: the six of the
+/// player-local -> coverage-UV affine, the array layer the bitmap lives in, the
+/// writer count, and the rank override.
+pub(crate) const COVERAGE_HEADER_F32: usize = 9;
+
+/// Offset of the layer index inside a coverage block header.
+const COVERAGE_LAYER_F32: usize = 6;
+
+/// Rank override in a block header: the scope test uses this rank for every part
+/// of the node instead of the part's own.
+///
+/// A sub-animation clipped by its parent's mask sits at the parent's instance
+/// part in the parent's draw order, and that is the rank the scope has to be
+/// judged against (mask doc §3-2-2) — the child's internal ranks belong to a
+/// different order entirely and mean nothing to the parent's writers.
+/// [`NO_RANK_OVERRIDE`] means "use the part's own rank", which is every root
+/// scope.
+pub(crate) const COVERAGE_RANK_F32: usize = 8;
+/// A block header's [`COVERAGE_RANK_F32`] when the node uses its own ranks.
+const NO_RANK_OVERRIDE: f32 = -1.0;
+
+/// Smallest coverage bitmap edge. Below this the quantisation costs more in
+/// reallocation than the texels are worth.
+const COVERAGE_MIN_SIZE: u32 = 128;
+/// Largest coverage bitmap edge — the mask doc's worked example (§3-2), and
+/// 4 MiB a layer at RGBA8.
+const COVERAGE_MAX_SIZE: u32 = 1024;
+/// How far below a size class the footprint must fall before the smaller class is
+/// taken (mask doc §3-2-3, 対策 2). The reference Player's value.
+const COVERAGE_SHRINK_DEADBAND: f32 = 0.15;
+
+/// The frame's coverage bitmaps: one array texture, one layer per masking node.
+///
+/// An array rather than a texture apiece so the replay binds once for the whole
+/// pass — the layer a primitive reads travels in its coverage block, not in the
+/// binding.
+struct CoverageTargets {
+    /// Held only to keep the views alive; every access goes through one of them.
+    _texture: wgpu::Texture,
+    /// One single-layer view per layer, for the bake passes to attach to.
+    layer_views: Vec<wgpu::TextureView>,
+    /// The whole array, as the masked content samples it.
+    bind_group: wgpu::BindGroup,
+    size: u32,
+    layers: u32,
+}
+/// Floats per writer record in a coverage block: rank, bit, op_invert, is_clipping.
+pub(crate) const COVERAGE_WRITER_F32: usize = 4;
 
 /// Layer 2b: the per-target, per-frame half — what one render target's worth of
 /// geometry looks like this frame.
@@ -156,8 +326,15 @@ pub struct NodeSlot {
 ///
 /// One of these serves every player drawing into the same target.
 pub struct SSScene {
-    /// Whether masking (stencil) is enabled for this target.
+    /// This frame's coverage bitmaps, kept across frames so a mask that holds its
+    /// size class does not reallocate.
+    coverage: Option<CoverageTargets>,
+    /// Whether the hardware stencil is in use — `mask == MaskBackend::Stencil`,
+    /// kept as its own flag because it is also what decides whether `draw` sets a
+    /// stencil reference and whether pipelines carry a depth-stencil state.
     stencil_enabled: bool,
+    /// How this target draws masks.
+    mask: MaskBackend,
     /// The target's formats. Part of every [`PipelineKey`] this builds.
     color_format: wgpu::TextureFormat,
     stencil_format: Option<wgpu::TextureFormat>,
@@ -244,8 +421,18 @@ impl SSScene {
             mapped_at_creation: false,
         });
 
+        // Stencil masking without an attachment to write into cannot work, and
+        // silently drawing every mask target unclipped is worse than saying so.
+        let mask = match config.mask {
+            MaskBackend::Stencil if config.stencil_format.is_none() => MaskBackend::None,
+            other => other,
+        };
+        debug_assert!(mask == config.mask, "MaskBackend::Stencil needs SceneConfig::stencil_format; masking is off for this scene");
+
         Self {
-            stencil_enabled: config.stencil_format.is_some(),
+            stencil_enabled: mask == MaskBackend::Stencil,
+            coverage: None,
+            mask,
             color_format: config.color_format,
             stencil_format: config.stencil_format,
             globals_buffer,
@@ -292,16 +479,121 @@ impl SSScene {
         }
     }
 
-    /// Whether masking (stencil) is enabled for this renderer.
+    /// Rasterise this frame's coverage bitmaps (mask doc §3-2).
+    ///
+    /// Call between [`SSScene::update`] and [`SSScene::draw`], on **the same
+    /// encoder** the host will open its own pass with. Passes recorded into one
+    /// encoder execute in order, so what this bakes is what the very next pass
+    /// samples — which is why this player has none of the one-frame lag that
+    /// engines whose offscreen targets are only readable next frame have to work
+    /// around (§3-2-3). Do not split the two across encoders or frames.
+    ///
+    /// A no-op under any backend but [`MaskBackend::Coverage`], and on frames
+    /// where nothing masks.
+    pub fn encode_mask_coverage(&mut self, renderer: &mut SSRenderer, device: &wgpu::Device, encoder: &mut wgpu::CommandEncoder) {
+        if self.mask != MaskBackend::Coverage || self.frame.coverage_nodes.is_empty() {
+            return;
+        }
+        if self.scene_bind_group.is_none() {
+            return;
+        }
+
+        let layers = self.frame.coverage_nodes.len() as u32;
+        let size = self.coverage_size(&self.frame.coverage_nodes);
+        self.ensure_coverage(renderer, device, size, layers);
+        // Re-borrowed after `ensure_coverage`, which may have replaced the array.
+        let (Some(scene_bg), Some(targets)) = (self.scene_bind_group.as_ref(), self.coverage.as_ref()) else { return };
+
+        for layer in 0..layers {
+            // Cleared per layer: a bitmap is only ever read in the frame it was
+            // written, so there is nothing to preserve, and a stale bit left
+            // behind would clip content that no writer covers.
+            let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+                label: Some("SpriteStudio Mask Coverage"),
+                color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                    view: &targets.layer_views[layer as usize],
+                    depth_slice: None,
+                    resolve_target: None,
+                    ops: wgpu::Operations { load: wgpu::LoadOp::Clear(wgpu::Color::TRANSPARENT), store: wgpu::StoreOp::Store },
+                })],
+                depth_stencil_attachment: None,
+                timestamp_writes: None,
+                occlusion_query_set: None,
+                multiview_mask: None,
+            });
+            pass.set_bind_group(0, scene_bg, &[]);
+            for call in self.frame.coverage_calls.iter().filter(|call| call.cov_layer == Some(layer)) {
+                let Some(pipeline) = renderer.pipelines.get(&call.key) else { continue };
+                pass.set_pipeline(pipeline);
+                pass.set_bind_group(1, renderer.texture_bind_group(call.texture_hash), &[]);
+                pass.draw(call.vertices.clone(), 0..1);
+            }
+        }
+        self.stats.coverage_layers = layers;
+    }
+
+    /// The edge length every coverage layer gets this frame.
+    ///
+    /// Quantised to a power of two so a mask that scales smoothly keeps the same
+    /// texture instead of reallocating every frame, and shared across layers
+    /// because each node's bbox is normalised onto its whole layer — a small mask
+    /// does not waste resolution by sharing a size with a large one, it just
+    /// spends more texels on itself than it needs.
+    fn coverage_size(&self, nodes: &[CoverageNode]) -> u32 {
+        let longest = nodes.iter().fold(0.0f32, |acc, node| acc.max(node.extent.0).max(node.extent.1));
+        let wanted = (longest.max(1.0).ceil() as u32).next_power_of_two().clamp(COVERAGE_MIN_SIZE, COVERAGE_MAX_SIZE);
+
+        // Shrinking waits for the footprint to fall well inside the smaller class
+        // (§3-2-3, 対策 2); growing is immediate. The asymmetry is deliberate:
+        // holding a size too long costs VRAM nobody sees, while growing late
+        // costs visibly ragged mask edges.
+        match self.coverage.as_ref().map(|targets| targets.size) {
+            Some(current) if wanted < current && longest > (current as f32 / 2.0) * (1.0 - COVERAGE_SHRINK_DEADBAND) => current,
+            _ => wanted,
+        }
+    }
+
+    /// Build or rebuild the coverage array when the frame needs a shape the
+    /// current one cannot serve. Layers only ever grow within a frame's life, so
+    /// a frame with fewer masking players reuses the larger array.
+    fn ensure_coverage(&mut self, renderer: &mut SSRenderer, device: &wgpu::Device, size: u32, layers: u32) {
+        if self.coverage.as_ref().is_some_and(|targets| targets.size == size && targets.layers >= layers) {
+            return;
+        }
+        let layers = layers.max(self.coverage.as_ref().map_or(0, |targets| targets.layers));
+        let texture = device.create_texture(&wgpu::TextureDescriptor {
+            label: Some("SpriteStudio Mask Coverage"),
+            size: wgpu::Extent3d { width: size, height: size, depth_or_array_layers: layers },
+            mip_level_count: 1,
+            sample_count: 1,
+            dimension: wgpu::TextureDimension::D2,
+            format: COVERAGE_FORMAT,
+            usage: wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::TEXTURE_BINDING,
+            view_formats: &[],
+        });
+        let layer_views = (0..layers)
+            .map(|layer| texture.create_view(&wgpu::TextureViewDescriptor { label: Some("SpriteStudio Mask Coverage Layer"), dimension: Some(wgpu::TextureViewDimension::D2), base_array_layer: layer, array_layer_count: Some(1), ..Default::default() }))
+            .collect();
+        let array_view = texture.create_view(&wgpu::TextureViewDescriptor { label: Some("SpriteStudio Mask Coverage Array"), dimension: Some(wgpu::TextureViewDimension::D2Array), ..Default::default() });
+        let bind_group = renderer.coverage_bind_group(device, &array_view);
+        self.coverage = Some(CoverageTargets { _texture: texture, layer_views, bind_group, size, layers });
+    }
+
+    /// Whether the hardware stencil is in use for this target.
     pub fn stencil_enabled(&self) -> bool {
         self.stencil_enabled
+    }
+
+    /// How this target draws masks.
+    pub fn mask_backend(&self) -> MaskBackend {
+        self.mask
     }
 
     /// The config this renderer was built from. Retained so a lost device can be
     /// replaced by a renderer targeting the same formats without the
     /// caller having to remember them.
     pub fn config(&self) -> SceneConfig {
-        SceneConfig { color_format: self.color_format, stencil_format: self.stencil_format }
+        SceneConfig { color_format: self.color_format, stencil_format: self.stencil_format, mask: self.mask }
     }
 
     /// Set the projection to the render target's pixel dimensions. Remembered, so
@@ -318,7 +610,7 @@ impl SSScene {
     /// [`crate::SSPlayer::restore_textures`] once per player.
     pub fn restore_device(&mut self, device: &wgpu::Device, queue: &wgpu::Queue) {
         let viewport = self.viewport;
-        *self = Self::new(device, &SceneConfig { color_format: self.color_format, stencil_format: self.stencil_format });
+        *self = Self::new(device, &SceneConfig { color_format: self.color_format, stencil_format: self.stencil_format, mask: self.mask });
         if let Some((width, height, y_down)) = viewport {
             self.set_viewport(queue, width, height, y_down);
         }
@@ -432,6 +724,16 @@ impl SSScene {
         // The same walk counts what draw-call merging and bind-group dedup would
         // save. Both are cheap to measure and neither is
         // cheap to implement, so measure first.
+        // The bake list is compiled here too. It is drawn from a different pass,
+        // by which point there is no `&mut SSRenderer` to build a pipeline with —
+        // a writer whose pipeline was missing would simply not rasterise, and an
+        // empty bitmap reads as "no coverage", which draws masked content
+        // unclipped rather than failing.
+        for i in 0..self.frame.coverage_calls.len() {
+            let key = self.frame.coverage_calls[i].key;
+            renderer.ensure_pipeline(device, key);
+        }
+
         for i in 0..self.frame.draw_calls.len() {
             let key = self.frame.draw_calls[i].key;
             renderer.ensure_pipeline(device, key);
@@ -515,6 +817,13 @@ impl SSScene {
             if let Some((slot, bg)) = params {
                 rpass.set_bind_group(2, bg, &[slot * SHADER_PARAM_STRIDE as u32]);
             }
+            // Set per draw rather than once: group(2) is the coverage array under
+            // one pipeline layout and the shader params under another, so a shader
+            // part drawn in between invalidates whichever was there.
+            if matches!(call.key.kind, PipelineKind::ContentCoverage(..)) {
+                let Some(coverage) = self.coverage.as_ref() else { continue };
+                rpass.set_bind_group(2, &coverage.bind_group, &[]);
+            }
             rpass.draw(call.vertices.clone(), 0..1);
             issued += 1;
         }
@@ -558,13 +867,20 @@ pub struct FrameChunk {
     /// `(primitive, vertex)` pairs, one per mesh vertex.
     mesh_stream: Vec<u32>,
     draw_calls: Vec<BatchDrawCall>,
+    /// Writer draws for the coverage bitmap, kept apart from `draw_calls` because
+    /// they are replayed into a different render pass — the one
+    /// [`SSScene::encode_mask_coverage`] opens before the host opens its own.
+    /// Empty under every backend but [`MaskBackend::Coverage`].
+    coverage_calls: Vec<BatchDrawCall>,
+    /// One entry per node that writes coverage this frame, in layer order.
+    coverage_nodes: Vec<CoverageNode>,
     /// Per-part integration-shader params, one `SHADER_PARAM_STRIDE_F32` slot each.
     ss_params: Vec<f32>,
 }
 
 impl FrameChunk {
     fn new(config: SceneConfig) -> Self {
-        Self { config, arena: Vec::new(), prims: Vec::new(), mesh_stream: Vec::new(), draw_calls: Vec::new(), ss_params: Vec::new() }
+        Self { config, arena: Vec::new(), prims: Vec::new(), mesh_stream: Vec::new(), draw_calls: Vec::new(), coverage_calls: Vec::new(), coverage_nodes: Vec::new(), ss_params: Vec::new() }
     }
 
     /// Empty it for reuse, keeping the allocations — a chunk is recycled every
@@ -575,12 +891,24 @@ impl FrameChunk {
         self.prims.clear();
         self.mesh_stream.clear();
         self.draw_calls.clear();
+        self.coverage_calls.clear();
+        self.coverage_nodes.clear();
         self.ss_params.clear();
     }
 
-    /// Whether masking (stencil) is enabled for the target this is built for.
+    /// Whether the hardware stencil is in use for the target this is built for.
     pub fn stencil_enabled(&self) -> bool {
-        self.config.stencil_format.is_some()
+        self.config.mask == MaskBackend::Stencil && self.config.stencil_format.is_some()
+    }
+
+    /// How the target this is built for draws masks.
+    ///
+    /// [`crate::SSPlayer`]'s walk reads this rather than [`Self::stencil_enabled`]:
+    /// planning writers, skipping a pure mask's colour and testing a masked
+    /// target are the same work for both backends, and only what the batch is
+    /// *appended as* differs.
+    pub fn mask_backend(&self) -> MaskBackend {
+        if self.config.mask == MaskBackend::Stencil && self.config.stencil_format.is_none() { MaskBackend::None } else { self.config.mask }
     }
 
     /// Append `other` to this chunk, rebasing every offset it carries.
@@ -599,11 +927,14 @@ impl FrameChunk {
 
         self.arena.extend_from_slice(&other.arena);
         self.ss_params.extend_from_slice(&other.ss_params);
-        self.prims.extend(other.prims.iter().map(|p| Prim { aux_base: p.aux_base + arena_base, pos_base: p.pos_base + arena_base, uv_base: p.uv_base + arena_base, node_base: p.node_base + arena_base, ..*p }));
+        // `cov_base` moves with the rest: it is an arena offset like the others,
+        // and rebasing it unconditionally costs nothing — a primitive that is not
+        // coverage-masked never reads it.
+        self.prims.extend(other.prims.iter().map(|p| Prim { aux_base: p.aux_base + arena_base, pos_base: p.pos_base + arena_base, uv_base: p.uv_base + arena_base, node_base: p.node_base + arena_base, cov_base: p.cov_base + arena_base, ..*p }));
         // Pairs of (primitive, vertex); only the primitive moves.
         self.mesh_stream.extend(other.mesh_stream.chunks_exact(2).flat_map(|pair| [pair[0] + prim_base, pair[1]]));
 
-        self.draw_calls.extend(other.draw_calls.iter().map(|call| {
+        let rebase = |call: &BatchDrawCall| {
             let shift = match call.key.kind.geom_class() {
                 GeomClass::Quad | GeomClass::Effect => prim_base * 6,
                 GeomClass::Shape => prim_base * SHAPE_FAN_VERTS,
@@ -611,15 +942,33 @@ impl FrameChunk {
                 GeomClass::Mesh => stream_base,
             };
             BatchDrawCall { vertices: call.vertices.start + shift..call.vertices.end + shift, shader_slot: call.shader_slot.map(|slot| slot + param_base), ..call.clone() }
-        }));
+        };
+        self.draw_calls.extend(other.draw_calls.iter().map(&rebase));
+
+        // Every chunk numbers its coverage layers from zero, so merging has to
+        // renumber — in the arena block each node advertises *and* on the draw
+        // calls that pick a layer to rasterise into. Miss either and two players
+        // masking in the same frame share one bitmap.
+        let layer_base = self.coverage_nodes.len() as u32;
+        for node in &other.coverage_nodes {
+            let block_base = node.block_base + arena_base;
+            self.arena[block_base as usize + COVERAGE_LAYER_F32] += layer_base as f32;
+            self.coverage_nodes.push(CoverageNode { block_base, ..*node });
+        }
+        self.coverage_calls.extend(other.coverage_calls.iter().map(|call| BatchDrawCall { cov_layer: call.cov_layer.map(|layer| layer + layer_base), ..rebase(call) }));
     }
 
     /// Cache key for a content draw. Without a stencil buffer every draw uses the
     /// untested variant, so the test is normalised away rather than filling the
     /// cache with three identical pipelines.
     fn content_key(&self, blend: BlendType, stencil: StencilTest, class: GeomClass) -> PipelineKey {
-        let stencil = if self.config.stencil_format.is_some() { stencil } else { StencilTest::None };
-        self.key(PipelineKind::Content(blend_index(blend), stencil, class))
+        match self.mask_backend() {
+            // The replay reads the polarity off the primitive, so a coverage-masked
+            // part needs the coverage pipeline whichever way round it clips.
+            MaskBackend::Coverage if stencil != StencilTest::None => self.key(PipelineKind::ContentCoverage(blend_index(blend), stencil, class)),
+            MaskBackend::Stencil if self.config.stencil_format.is_some() => self.key(PipelineKind::Content(blend_index(blend), stencil, class)),
+            _ => self.key(PipelineKind::Content(blend_index(blend), StencilTest::None, class)),
+        }
     }
 
     /// Attach this target's formats to a pipeline kind.
@@ -654,7 +1003,61 @@ impl FrameChunk {
             mesh_uvs: push(frame.mesh_uvs),
             shape_vertices: push(frame.shape_vertices),
             shape_box_coords: push(frame.shape_vertex_box_coords),
+            // Filled in by `set_node_coverage`, once the walk knows the writers.
+            coverage: NO_COVERAGE,
+            coverage_layer: 0,
         }
+    }
+
+    /// Attach this node's coverage block, once its writers are planned.
+    ///
+    /// `uv` is the affine that takes a **player-local** point to coverage UV
+    /// `[0,1]` — the bbox normalisation of mask doc §3-2-2, as
+    /// `[a, b, c, d, tx, ty]` for `u = a*x + c*y + tx`, `v = b*x + d*y + ty`.
+    /// Both the bake (which turns UV into clip space) and the replay (which
+    /// samples with it) read this one transform, so the two cannot disagree about
+    /// where the bitmap is — the mismatch that costs Godot's implementation a
+    /// frame of lag cannot be represented here.
+    pub fn set_node_coverage(&mut self, node: &mut NodeSlot, uv: &[f32; 6], extent: (f32, f32), writers: &MaskWriters) {
+        let layer = self.coverage_nodes.len() as u32;
+        let base = self.push_coverage_block(uv, layer, NO_RANK_OVERRIDE, writers);
+        self.coverage_nodes.push(CoverageNode { block_base: base, extent });
+        node.coverage = base;
+        node.coverage_layer = layer;
+    }
+
+    /// Point a sub-animation at its parent's bitmap (mask doc §3-2-2).
+    ///
+    /// No new layer and no new writers: the child reads the same bitmap the
+    /// parent baked. What differs is the affine — composed with the instance
+    /// part's placement, so the child's own local coordinates land in the parent's
+    /// coverage — and the rank, which is the instance part's, because that is
+    /// where the sub-animation sits in the parent's draw order.
+    pub fn inherit_node_coverage(&mut self, node: &mut NodeSlot, uv: &[f32; 6], layer: u32, rank: usize, writers: &MaskWriters) {
+        node.coverage = self.push_coverage_block(uv, layer, rank as f32, writers);
+        node.coverage_layer = layer;
+    }
+
+    /// Which layer a node's coverage went to, for handing down to its instance
+    /// children.
+    pub fn node_coverage_layer(&self, node: &NodeSlot) -> u32 {
+        node.coverage_layer
+    }
+
+    /// Append a coverage block and return where it landed.
+    fn push_coverage_block(&mut self, uv: &[f32; 6], layer: u32, rank_override: f32, writers: &MaskWriters) -> u32 {
+        let base = self.arena.len() as u32;
+        self.arena.extend_from_slice(uv);
+        self.arena.push(layer as f32);
+        self.arena.push(writers.len() as f32);
+        self.arena.push(rank_override);
+        for (bit, w) in writers.iter().enumerate() {
+            self.arena.push(w.rank as f32);
+            self.arena.push(bit as f32);
+            self.arena.push(if w.op_invert { 1.0 } else { 0.0 });
+            self.arena.push(if w.is_clipping { 1.0 } else { 0.0 });
+        }
+        base
     }
 
     /// Copy a standalone placement matrix into the arena.
@@ -692,7 +1095,7 @@ impl FrameChunk {
             // Mesh draws are driven by the stream, not by primitive arithmetic.
             GeomClass::Mesh => return,
         };
-        self.draw_calls.push(BatchDrawCall { key, texture_hash, vertices: first * stride..last * stride, shader_slot });
+        self.draw_calls.push(BatchDrawCall { key, texture_hash, vertices: first * stride..last * stride, shader_slot, cov_layer: None });
     }
 
     /// Append one Normal/Mesh DrawBatch's geometry into the frame accumulation,
@@ -715,6 +1118,19 @@ impl FrameChunk {
         if frame.world_matrices.is_empty() || frame.local_vertices.is_empty() || frame.local_uvs.is_empty() {
             return;
         }
+
+        // Under the coverage backend a masked target carries its own scope test:
+        // which bitmap to read, its rank, and its polarity. The stencil backend
+        // leaves this zero because the pipeline state does the testing for it.
+        //
+        // `start_rank` is the part's own rank here — the walk splits masked
+        // batches to one part each precisely so this is true.
+        let (cov_base, mask_info) = match stencil {
+            _ if self.mask_backend() != MaskBackend::Coverage || node.coverage == NO_COVERAGE => (0, 0),
+            StencilTest::Inside => (node.coverage, target_mask_info(start_rank, true)),
+            StencilTest::Outside => (node.coverage, target_mask_info(start_rank, false)),
+            StencilTest::None => (0, 0),
+        };
 
         let first_prim = self.prims.len() as u32;
 
@@ -762,7 +1178,7 @@ impl FrameChunk {
                         .unwrap_or(([WHITE; 4], [part.alpha(); 4], [1.0; 4], mode::MUL));
 
                     let call_start = self.prims.len() as u32;
-                    self.push_quad_prim(frame, node, part_idx, Prim { mode, alpha, colors, alphas, rates, ..Default::default() });
+                    self.push_quad_prim(frame, node, part_idx, Prim { mode, alpha, colors, alphas, rates, cov_base, mask_info, ..Default::default() });
                     if !shader_dispatch {
                         continue;
                     }
@@ -804,11 +1220,11 @@ impl FrameChunk {
                         })
                         .unwrap_or((WHITE, part.alpha(), 1.0, mode::MUL));
 
-                    self.push_mesh_prim(frame, node, part_idx, Prim { mode, alpha, z: part.position_z(), colors: [color; 4], alphas: [part_alpha; 4], rates: [rate; 4], ..Default::default() });
+                    self.push_mesh_prim(frame, node, part_idx, Prim { mode, alpha, z: part.position_z(), colors: [color; 4], alphas: [part_alpha; 4], rates: [rate; 4], cov_base, mask_info, ..Default::default() });
                 }
                 let stream_end = (self.mesh_stream.len() / 2) as u32;
                 if stream_end > stream_start {
-                    self.draw_calls.push(BatchDrawCall { key, texture_hash, vertices: stream_start..stream_end, shader_slot: None });
+                    self.draw_calls.push(BatchDrawCall { key, texture_hash, vertices: stream_start..stream_end, shader_slot: None, cov_layer: None });
                 }
             }
             DrawBatchKind::Shape => {
@@ -840,7 +1256,7 @@ impl FrameChunk {
                         })
                         .unwrap_or(([WHITE; 4], [part.alpha(); 4]));
 
-                    self.push_shape_prim(frame, node, part_idx, Prim { mode: mode::MIX, alpha, colors, alphas, rates: [if has_pc { 1.0 } else { 0.0 }; 4], ..Default::default() });
+                    self.push_shape_prim(frame, node, part_idx, Prim { mode: mode::MIX, alpha, colors, alphas, rates: [if has_pc { 1.0 } else { 0.0 }; 4], cov_base, mask_info, ..Default::default() });
                 }
                 self.push_draw(key, GeomClass::Shape, texture_hash, first_prim, None);
             }
@@ -881,16 +1297,47 @@ impl FrameChunk {
     /// `fs_mask` reads as `varg.x`: it needs the full f32 range,
     /// including the -1 that means "no cutout". No-op if masking is disabled.
     pub fn append_mask_writer(&mut self, frame: &FrameView, node: &NodeSlot, writer: &MaskWriter, op: MaskOp) {
+        self.append_writer(frame, node, writer, MaskWriterDest::Stencil(op));
+    }
+
+    /// Rasterise one writer's shape into the coverage bitmap, setting `bit`.
+    ///
+    /// Called once per writer per frame — there is no add/remove interleave here,
+    /// because the coverage backend does not carry a running state through the
+    /// draw walk. What the stencil path spends passes replaying, the replay
+    /// shader recomputes per fragment from the writer's rank (mask doc §3-2).
+    pub fn append_coverage_writer(&mut self, frame: &FrameView, node: &NodeSlot, writer: &MaskWriter, bit: usize) {
+        self.append_writer(frame, node, writer, MaskWriterDest::Coverage(bit));
+    }
+
+    /// The geometry half both writer paths share. Only the primitive's coverage
+    /// word and which list the draw call lands in differ.
+    fn append_writer(&mut self, frame: &FrameView, node: &NodeSlot, writer: &MaskWriter, dest: MaskWriterDest) {
         use crate::mask::GeomKind;
-        if self.config.stencil_format.is_none() || frame.frame_data.is_empty() {
+        if self.mask_backend() == MaskBackend::None || frame.frame_data.is_empty() {
             return;
         }
         if frame.world_matrices.is_empty() {
             return;
         }
-        // Colour output is masked off for these pipelines, so only the threshold
-        // in `rates` matters.
-        let prim = Prim { rates: [writer.threshold; 4], alpha: 1.0, ..Default::default() };
+        // Colour output is masked off for the stencil pipelines and carries the
+        // writer's bit for the coverage ones, so only the threshold in `rates`
+        // matters to both.
+        let mut prim = Prim { rates: [writer.threshold; 4], alpha: 1.0, ..Default::default() };
+        let kind_of = |class| match dest {
+            MaskWriterDest::Stencil(op) => PipelineKind::Mask(op, class),
+            MaskWriterDest::Coverage(_) => PipelineKind::Coverage(class),
+        };
+        if let MaskWriterDest::Coverage(bit) = dest {
+            if node.coverage == NO_COVERAGE {
+                return;
+            }
+            prim.cov_base = node.coverage;
+            prim.mask_info = writer_mask_info(bit);
+        }
+        // Only a bake call picks a layer; masked content reads the layer its
+        // primitive's coverage block names, so one bind group serves them all.
+        let cov_layer = matches!(dest, MaskWriterDest::Coverage(_)).then_some(node.coverage_layer);
         let first_prim = self.prims.len() as u32;
 
         let class = match writer.geom {
@@ -906,7 +1353,8 @@ impl FrameChunk {
                 self.push_mesh_prim(frame, node, writer.part_idx, prim);
                 let stream_end = (self.mesh_stream.len() / 2) as u32;
                 if stream_end > stream_start {
-                    self.draw_calls.push(BatchDrawCall { key: self.key(PipelineKind::Mask(op, GeomClass::Mesh)), texture_hash: writer.texture_hash, vertices: stream_start..stream_end, shader_slot: None });
+                    let call = BatchDrawCall { key: self.key(kind_of(GeomClass::Mesh)), texture_hash: writer.texture_hash, vertices: stream_start..stream_end, shader_slot: None, cov_layer };
+                    self.writer_calls(dest).push(call);
                 }
                 return;
             }
@@ -917,7 +1365,31 @@ impl FrameChunk {
             GeomKind::Unsupported => return,
         };
 
-        self.push_draw(self.key(PipelineKind::Mask(op, class)), class, writer.texture_hash, first_prim, None);
+        self.push_writer_draw(self.key(kind_of(class)), class, writer.texture_hash, first_prim, dest, cov_layer);
+    }
+
+    /// Which list a writer's draw call belongs in.
+    fn writer_calls(&mut self, dest: MaskWriterDest) -> &mut Vec<BatchDrawCall> {
+        match dest {
+            MaskWriterDest::Stencil(_) => &mut self.draw_calls,
+            MaskWriterDest::Coverage(_) => &mut self.coverage_calls,
+        }
+    }
+
+    /// [`FrameChunk::push_draw`] against whichever list `dest` names.
+    fn push_writer_draw(&mut self, key: PipelineKey, class: GeomClass, texture_hash: u32, first: u32, dest: MaskWriterDest, cov_layer: Option<u32>) {
+        let last = self.prims.len() as u32;
+        if last == first {
+            return;
+        }
+        let stride = match class {
+            GeomClass::Quad | GeomClass::Effect => 6,
+            GeomClass::Shape => SHAPE_FAN_VERTS,
+            // Mesh draws are driven by the stream, not by primitive arithmetic.
+            GeomClass::Mesh => return,
+        };
+        let call = BatchDrawCall { key, texture_hash, vertices: first * stride..last * stride, shader_slot: None, cov_layer };
+        self.writer_calls(dest).push(call);
     }
 
     /// Record one sprite quad for `part_idx`: point `prim` at the part's slice of
@@ -967,8 +1439,7 @@ impl FrameChunk {
     /// Record one Shape part, drawn as a fan from vertex 0 by `vs_shape`.
     /// No-op if the part is not a shape or has fewer than 3 live vertices.
     fn push_shape_prim(&mut self, frame: &FrameView, node: &NodeSlot, part_idx: usize, prim: Prim) {
-        // Layout: `shape_vertices[part_idx * SHAPE_STRIDE + 2*v]` = local xy.
-        const SHAPE_STRIDE: usize = 24;
+        // Layout: `shape_vertices[part_idx * SHAPE_VERTICES_STRIDE + 2*v]` = local xy.
         let counts = &frame.shape_vertex_counts;
         if part_idx >= counts.len() || (part_idx + 1) * 16 > frame.world_matrices.len() {
             return;
@@ -979,7 +1450,7 @@ impl FrameChunk {
         if count < 3 || count > (SHAPE_FAN_VERTS as usize / 3) + 2 {
             return;
         }
-        let base = part_idx * SHAPE_STRIDE;
+        let base = part_idx * crate::frame::SHAPE_VERTICES_STRIDE;
         if base + count * 2 > frame.shape_vertices.len() || base + count * 2 > frame.shape_vertex_box_coords.len() {
             return;
         }

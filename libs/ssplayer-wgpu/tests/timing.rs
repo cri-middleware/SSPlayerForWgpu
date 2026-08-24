@@ -8,7 +8,7 @@
 //! zero-length frame; but a test that shares a binary with ten other GPU tests
 //! would fail on it perhaps half the time.
 
-use ssplayer_wgpu::{Retention, SSPlayer, SSRenderer, SSScene, SceneConfig};
+use ssplayer_wgpu::{MaskBackend, Retention, SSPlayer, SSRenderer, SSScene, SceneConfig};
 use std::path::Path;
 
 const W: u32 = 256;
@@ -35,7 +35,7 @@ fn load_textures(renderer: &mut SSRenderer, device: &wgpu::Device, queue: &wgpu:
 }
 
 fn make_scene(device: &wgpu::Device, queue: &wgpu::Queue, stencil: bool) -> SSScene {
-    let mut scene = SSScene::new(device, &SceneConfig { color_format: COLOR_FORMAT, stencil_format: stencil.then_some(STENCIL_FORMAT) });
+    let mut scene = SSScene::new(device, &SceneConfig { color_format: COLOR_FORMAT, stencil_format: stencil.then_some(STENCIL_FORMAT), mask: if stencil { MaskBackend::Stencil } else { MaskBackend::None } });
     scene.set_viewport(queue, W as f32, H as f32, false);
     scene
 }

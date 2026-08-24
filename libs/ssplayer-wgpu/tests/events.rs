@@ -18,7 +18,7 @@
 //! Advancing needs a device (stepping the tree is `SSScene::update`'s job), so
 //! these skip when no adapter is available, as the other GPU tests do.
 
-use ssplayer_wgpu::{SSPlayer, SSRenderer, SSScene, SceneConfig, SsEvent};
+use ssplayer_wgpu::{MaskBackend, SSPlayer, SSRenderer, SSScene, SceneConfig, SsEvent};
 
 /// Packs authored with timeline events, one per kind.
 const EVENT_PACKS: [&str; 3] = ["overall/UserData.ssab", "overall/Signal.ssab", "overall/Sound.ssab"];
@@ -36,7 +36,7 @@ fn gpu() -> Option<(wgpu::Device, wgpu::Queue)> {
 
 /// A scene to drive players through. `update` is what advances the clock.
 fn scene(device: &wgpu::Device, queue: &wgpu::Queue) -> SSScene {
-    let mut scene = SSScene::new(device, &SceneConfig { color_format: wgpu::TextureFormat::Rgba8Unorm, stencil_format: None });
+    let mut scene = SSScene::new(device, &SceneConfig { color_format: wgpu::TextureFormat::Rgba8Unorm, stencil_format: None, mask: MaskBackend::None });
     scene.set_viewport(queue, 256.0, 256.0, false);
     scene
 }

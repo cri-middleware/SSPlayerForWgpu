@@ -1,0 +1,47 @@
+[package]
+name = "ssplayer-wgpu-bevy"
+# Independent of the player's version: the adapter tracks Bevy's release line,
+# the player tracks the SDK's.
+version = "0.1.0-alpha.1"
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+description = "Bevy adapter for the wgpu SpriteStudio player"
+# Not on crates.io while the API is still moving.
+publish = false
+
+[dependencies]
+ssplayer-wgpu = { workspace = true }
+wgpu = { workspace = true }
+# Only what an adapter needs: the render app, the 2d core pipeline (for the
+# `Core2d` schedule this draws in), assets and a window. Deliberately *not*
+# `bevy_sprite_render` — this crate draws with the player's own pipelines and
+# never touches Bevy's 2d renderer, so an app that wants no `bevy_sprite` still
+# gets characters. No audio, glTF, PBR or UI either; those are the host's.
+bevy = { workspace = true, features = [
+    "std",
+    "multi_threaded",
+    "bevy_log",
+    "bevy_asset",
+    "bevy_render",
+    "bevy_core_pipeline",
+    "bevy_window",
+    "bevy_winit",
+    "png",
+] }
+
+# The example composites a Bevy sprite under the characters to show the two
+# renderers sharing a target, and that needs Bevy's 2d renderer — which is
+# `bevy_sprite_render`, a separate feature from `bevy_sprite` (that one is the
+# component API alone, and a `Sprite` spawned without the renderer silently
+# draws nothing). Kept out of the library's own features so the dependency stays
+# honest about what the adapter itself needs.
+[dev-dependencies]
+bevy = { workspace = true, features = ["bevy_sprite", "bevy_sprite_render"] }
+ssplayer-wgpu = { workspace = true }
+wgpu = { workspace = true }
+pollster = "1.0.1"
+image = { version = "0.25.10", default-features = false, features = ["png"] }
+ssruntime = { workspace = true }

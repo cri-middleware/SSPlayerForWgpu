@@ -27,7 +27,7 @@
 //! updates replays a recording that never goes stale. That is exactly how the
 //! render bundle looked like a 300x win before it was measured properly.
 
-use ssplayer_wgpu::{Retention, SSPlayer, SSRenderer, SSScene, SceneConfig};
+use ssplayer_wgpu::{MaskBackend, Retention, SSPlayer, SSRenderer, SSScene, SceneConfig};
 use std::path::Path;
 use std::time::{Duration, Instant};
 
@@ -102,7 +102,7 @@ fn frame_cost_by_player_count() {
     for count in [1usize, 8, 32, 64, 128, 256] {
         let mut renderer = SSRenderer::new(&device);
         load_textures(&mut renderer, &device, &queue);
-        let mut scene = SSScene::new(&device, &SceneConfig { color_format: COLOR_FORMAT, stencil_format: Some(STENCIL_FORMAT) });
+        let mut scene = SSScene::new(&device, &SceneConfig { color_format: COLOR_FORMAT, stencil_format: Some(STENCIL_FORMAT), mask: MaskBackend::Stencil });
         scene.set_viewport(&queue, W as f32, H as f32, false);
 
         // A mixed cast: part counts differ per pack, so the per-player cost is

@@ -14,7 +14,7 @@
 use crate::player::SSPlayer;
 use crate::renderer::{Retention, SSRenderer};
 use crate::roster::Roster;
-use crate::scene::{SSScene, SceneConfig};
+use crate::scene::{MaskBackend, SSScene, SceneConfig};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 
@@ -124,7 +124,7 @@ impl NativeHost {
 
         let stencil_view = config.enable_mask.then(|| create_stencil_view(&device, surface_config.width, surface_config.height));
         let renderer = SSRenderer::new(&device);
-        let scene = SSScene::new(&device, &SceneConfig { color_format: format, stencil_format: config.enable_mask.then_some(STENCIL_FORMAT) });
+        let scene = SSScene::new(&device, &SceneConfig { color_format: format, stencil_format: config.enable_mask.then_some(STENCIL_FORMAT), mask: if config.enable_mask { MaskBackend::Stencil } else { MaskBackend::None } });
 
         let c = config.clear_color;
         let mut host = Self {

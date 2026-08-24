@@ -15,6 +15,9 @@ respect are in [`AGENTS.md`](./AGENTS.md) under *Hard constraints*.
 - [x] Draw kinds — Normal, Mesh, Shape, Instance, Effect, Mask.
 - [x] All 12 blend modes and part colours, premultiplied throughout.
 - [x] Stencil masking, including clipping writers and per-player unwind.
+- [x] Coverage-bitmap masking (mask doc §3-2), for hosts whose pass lends no
+      stencil. Same semantics, no one-frame lag, one extra pass per masking
+      player. `MaskBackend` picks between the two.
 - [x] The 13 `ss_shader` integration shaders (the `SHDR` part attribute).
 - [x] Playback control — play / pause / stop, seek, section, reverse, ping-pong,
       speed, frame rate, loop counts.
@@ -36,10 +39,22 @@ respect are in [`AGENTS.md`](./AGENTS.md) under *Hard constraints*.
 
 ## Expressiveness
 
-- [ ] **Exact masks via a coverage bitmap.** Masking is stencil-only, so mixed
-      INCR / INVERT overlapping masks are approximated and nesting is limited by
-      8 bits. A compute pass into a storage texture removes both limits, and with
-      them the 24-writer cap the planner enforces by dropping writers past it.
+- [ ] **Retire one of the two mask backends.** Coverage (mask doc §3-2) now
+      exists beside the stencil, which is a migration state rather than a
+      destination: the same `.ssab` rendering differently depending on what the
+      host's pass could lend is a poor thing to keep forever. The decision wants
+      numbers, not opinion — run the golden corpus through both and count where
+      they part, then measure what the extra pass costs. Retiring the stencil
+      would also drop `SceneConfig::stencil_format` from the host contract and a
+      whole invariant (`unwind_masks`); keeping both means every future mask
+      feature lands twice.
+- [ ] **Exact masks, past what the stencil can express.** Mixed INCR / INVERT
+      overlaps are approximated and nesting is limited by 8 bits. The coverage
+      backend already lifts the nesting limit — its accumulators are shader
+      variables, not stencil bits — but both backends still stop at the planner's
+      24 writers, which is the coverage encoding's own budget (RGBA8, one bit
+      each). Going past 24 means a wider encoding, and doing it here alone would
+      fork a limit the other Players share.
 - [ ] **An offscreen path, for group alpha first.** `set_alpha` composites each
       part at that alpha in turn, so coverage accumulates where parts overlap —
       two halves of a character at 0.5 leave the overlap at 0.75. Drawing the

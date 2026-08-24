@@ -44,7 +44,47 @@ impl GeomClass {
             GeomClass::Effect => "vs_effect",
         }
     }
+
+    /// The vertex entry that expands this class **into coverage space**: the same
+    /// geometry, projected by the node's bbox affine instead of the target's
+    /// projection, and stopping short of the player's placement — the bitmap is
+    /// pinned to player-local coordinates so it does not move when the player does
+    /// (mask doc §3-2-2).
+    fn coverage_entry(self) -> &'static str {
+        match self {
+            GeomClass::Quad => "vs_cov_quad",
+            GeomClass::Mesh => "vs_cov_mesh",
+            GeomClass::Shape => "vs_cov_shape",
+            // Effects never write coverage: the planner only ever hands back
+            // Quad / Mesh / Shape writers.
+            GeomClass::Effect => "vs_cov_quad",
+        }
+    }
 }
+
+/// The `const` prelude both shader modules are assembled on top of.
+///
+/// Layout facts the WGSL has to agree with the Rust on live here rather than as
+/// literals in the shader text, so a change to one cannot silently leave the
+/// other behind.
+fn wgsl_consts() -> String {
+    format!(
+        "const SHAPE_FAN_VERTS: u32 = {SHAPE_FAN_VERTS}u;\n\
+         const COVERAGE_HEADER: u32 = {}u;\n\
+         const COVERAGE_STRIDE: u32 = {}u;\n\
+         const COVERAGE_RANK: u32 = {}u;\n\
+         const MAX_MASK_WRITERS: u32 = {}u;\n",
+        crate::scene::COVERAGE_HEADER_F32,
+        crate::scene::COVERAGE_WRITER_F32,
+        crate::scene::COVERAGE_RANK_F32,
+        crate::mask::MAX_MASK_WRITERS,
+    )
+}
+
+/// The coverage bitmap's format. RGBA8 with one writer per bit gives the 24 the
+/// mask doc budgets for (§3-2), and matches what the reference implementation
+/// rasterises, so the two players encode coverage identically.
+pub(crate) const COVERAGE_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Rgba8Unorm;
 
 /// Vertices a Shape primitive always occupies, whatever its live vertex count.
 ///
@@ -64,6 +104,18 @@ pub(crate) enum PipelineKind {
     /// Mask-write geometry: the stencil op it applies, and the class. Colour
     /// output is masked off, so blend does not vary.
     Mask(MaskOp, GeomClass),
+    /// Content clipped by a coverage bitmap rather than by the stencil: the same
+    /// blend and class, plus the polarity the replay compares against. It needs
+    /// its own kind because it draws from a different pipeline layout — the one
+    /// with the coverage array bound at group(2).
+    ContentCoverage(usize, StencilTest, GeomClass),
+    /// Coverage-write geometry (mask doc §3-2): the same shapes as
+    /// [`PipelineKind::Mask`], rasterised into the coverage bitmap instead of the
+    /// stencil. One pipeline per class — the writer's bit travels on the `Prim`,
+    /// not in the pipeline, so 24 writers still compile three pipelines between
+    /// them. Always targets [`COVERAGE_FORMAT`] and never has a depth-stencil,
+    /// so the target's own formats drop out of the key's meaning here.
+    Coverage(GeomClass),
     /// Integration shader (`ss-*`): shader id x blend index. Never
     /// stencil-tested — shader parts are not masked in v1 — and always
     /// [`GeomClass::Quad`], because only Normal parts carry a SHDR attribute.
@@ -75,7 +127,7 @@ impl PipelineKind {
     /// primitive index maps to `vertex_index`.
     pub(crate) fn geom_class(self) -> GeomClass {
         match self {
-            PipelineKind::Content(_, _, class) | PipelineKind::Mask(_, class) => class,
+            PipelineKind::Content(_, _, class) | PipelineKind::ContentCoverage(_, _, class) | PipelineKind::Mask(_, class) | PipelineKind::Coverage(class) => class,
             // SHDR is a Normal-part attribute, so shader draws are quads.
             PipelineKind::Shader(..) => GeomClass::Quad,
         }
@@ -176,6 +228,11 @@ pub struct SSRenderer {
     ss_shader_module: wgpu::ShaderModule,
     /// Pipeline layout for shader pipelines: [scene, texture, ss-params].
     ss_pipeline_layout: wgpu::PipelineLayout,
+    /// Pipeline layout for coverage-masked content: [scene, texture, coverage].
+    coverage_pipeline_layout: wgpu::PipelineLayout,
+    /// Layout of the coverage group, kept so a scene can build a bind group for
+    /// whatever array it allocated this frame.
+    coverage_bind_group_layout: wgpu::BindGroupLayout,
 
     /// group(0): the render target's projection **and its frame geometry** — the
     /// SoA arena, the primitive table and the mesh stream the vertex stages read
@@ -314,6 +371,14 @@ struct VertexOutput {
     @location(0) uv: vec2<f32>,
     @location(1) color: vec4<f32>,
     @location(2) varg: vec4<f32>,
+    // Where this fragment lands in the owning node's coverage bitmap. Written by
+    // every stage but read only by the coverage replay; the stencil path leaves
+    // it at the zero a `var` starts from.
+    @location(3) cov_uv: vec2<f32>,
+    // The primitive's coverage word and block, carried flat because the fragment
+    // stage has no primitive index of its own to look them up with.
+    @location(4) @interpolate(flat) mask_info: u32,
+    @location(5) @interpolate(flat) cov_base: u32,
 }
 
 struct Globals {
@@ -346,7 +411,18 @@ struct Prim {
     colors: array<u32, 4>,
     alphas: array<f32, 4>,
     rates: array<f32, 4>,
+    // Coverage masking (mask doc §3-2). `cov_base` is the arena offset of the
+    // owning node's coverage block; `mask_info` says whether this primitive is a
+    // writer baking a bit or a target replaying them, and is zero — meaning "not
+    // coverage-masked" — for every primitive under the stencil backend.
+    cov_base: u32,
+    mask_info: u32,
 }
+
+// `mask_info` bits. Kept in step with the Rust constants of the same names.
+const MASK_INFO_ACTIVE: u32 = 1u;
+const MASK_INFO_WRITER: u32 = 2u;
+const MASK_INFO_INSIDE: u32 = 4u;
 
 @group(0) @binding(0) var<uniform> globals: Globals;
 // The frame's SoA arena: runtime buffers and node transforms, copied verbatim.
@@ -371,6 +447,58 @@ struct TexInfo {
 // system usually is not, and dividing it would blow out the edges.
 fn ss_straight_rgb(tex: vec4<f32>) -> vec3<f32> {
     return select(tex.rgb, tex.rgb / max(tex.a, 0.0001), tex_info.flags.x > 0.5);
+}
+
+@group(2) @binding(0) var t_coverage: texture_2d_array<f32>;
+
+// --- coverage masking (mask doc §3-2) -------------------------------------
+
+// A part-local point in the space the coverage bitmap is pinned to: through the
+// part's own world matrix, but *not* through the player's placement, so the
+// bitmap does not slide when the player moves.
+//
+// Deliberately a copy of the first two lines of `world_point` rather than a
+// shared helper it calls: the clip path's arithmetic is compared pixel for pixel
+// against a golden run, and factoring it out invites the compiler to contract
+// the multiply-adds differently there.
+fn local_xy(mat_base: u32, lx: f32, ly: f32) -> vec2<f32> {
+    return vec2<f32>(
+        f_arena[mat_base] * lx + f_arena[mat_base + 4u] * ly + f_arena[mat_base + 12u],
+        f_arena[mat_base + 1u] * lx + f_arena[mat_base + 5u] * ly + f_arena[mat_base + 13u],
+    );
+}
+
+// Player-local -> coverage UV, through the node's bbox affine. Zero for a
+// primitive that is not coverage-masked, which never reads the result.
+fn cov_uv_of(pi: u32, p: vec2<f32>) -> vec2<f32> {
+    if ((prims[pi].mask_info & MASK_INFO_ACTIVE) == 0u) {
+        return vec2<f32>(0.0, 0.0);
+    }
+    let b = prims[pi].cov_base;
+    return vec2<f32>(
+        f_arena[b] * p.x + f_arena[b + 2u] * p.y + f_arena[b + 4u],
+        f_arena[b + 1u] * p.x + f_arena[b + 3u] * p.y + f_arena[b + 5u],
+    );
+}
+
+// Coverage UV -> clip space, for the bake stages. The bitmap's V runs top-down
+// like a texture, so it flips against clip Y.
+fn cov_clip(uv: vec2<f32>) -> vec4<f32> {
+    return vec4<f32>(uv.x * 2.0 - 1.0, 1.0 - uv.y * 2.0, 0.5, 1.0);
+}
+
+// The colour one writer contributes: its own bit, in its own channel, and
+// nothing else. Alpha is 1 because the bake blends additively and a zero alpha
+// would scale the bit away on backends that premultiply first.
+fn bit_color(info: u32) -> vec4<f32> {
+    let bit = (info >> 8u) & 0xFFu;
+    let value = f32(1u << (bit % 8u)) / 255.0;
+    let channel = bit / 8u;
+    var c = vec4<f32>(0.0, 0.0, 0.0, 1.0);
+    if (channel == 0u) { c.r = value; }
+    else if (channel == 1u) { c.g = value; }
+    else { c.b = value; }
+    return c;
 }
 
 // --- vertex stages --------------------------------------------------------
@@ -444,6 +572,9 @@ fn vs_quad(@builtin(vertex_index) vi: u32) -> VertexOutput {
     out.uv = normalize_uv((*p).uv_base, k);
     out.color = corner_rgba(pi, k);
     out.varg = varg_of((*p).mode, (*p).rates[k]);
+    out.cov_uv = cov_uv_of(pi, local_xy((*p).aux_base, lx, ly));
+    out.mask_info = prims[pi].mask_info;
+    out.cov_base = prims[pi].cov_base;
     return out;
 }
 
@@ -462,6 +593,9 @@ fn vs_mesh(@builtin(vertex_index) vi: u32) -> VertexOutput {
     out.uv = normalize_uv((*p).uv_base, k);
     out.color = corner_rgba(pi, 0u);
     out.varg = varg_of((*p).mode, (*p).rates[0]);
+    out.cov_uv = cov_uv_of(pi, vec2<f32>(mx, my));
+    out.mask_info = prims[pi].mask_info;
+    out.cov_base = prims[pi].cov_base;
     return out;
 }
 
@@ -496,6 +630,9 @@ fn vs_shape(@builtin(vertex_index) vi: u32) -> VertexOutput {
     out.uv = vec2<f32>(0.5, 0.5);
     out.color = top * (1.0 - fy) + bot * fy;
     out.varg = varg_of((*p).mode, (*p).rates[0]);
+    out.cov_uv = cov_uv_of(pi, local_xy((*p).aux_base, lx, ly));
+    out.mask_info = prims[pi].mask_info;
+    out.cov_base = prims[pi].cov_base;
     return out;
 }
 
@@ -519,6 +656,157 @@ fn vs_effect(@builtin(vertex_index) vi: u32) -> VertexOutput {
 }
 "#;
 
+/// The coverage half of the sprite module: the three bake vertex stages, the
+/// bit-writing fragment, and the replay every masked part runs.
+///
+/// Split out only for reading; it is concatenated onto [`COMMON_WGSL`] with
+/// [`WGSL_SHADER`] and naga sees one module.
+const COVERAGE_WGSL: &str = r#"
+// --- bake: rasterise one writer's shape into its bit ----------------------
+
+@vertex
+fn vs_cov_quad(@builtin(vertex_index) vi: u32) -> VertexOutput {
+    let pi = vi / 6u;
+    let k = quad_corner(vi % 6u);
+    let p = &prims[pi];
+    let lx = f_arena[(*p).pos_base + k * 2u];
+    let ly = f_arena[(*p).pos_base + k * 2u + 1u];
+
+    var out: VertexOutput;
+    out.cov_uv = cov_uv_of(pi, local_xy((*p).aux_base, lx, ly));
+    out.mask_info = prims[pi].mask_info;
+    out.cov_base = prims[pi].cov_base;
+    out.clip_position = cov_clip(out.cov_uv);
+    out.uv = normalize_uv((*p).uv_base, k);
+    out.color = bit_color((*p).mask_info);
+    out.varg = vec4<f32>((*p).rates[k], 0.0, 0.0, 0.0);
+    return out;
+}
+
+@vertex
+fn vs_cov_mesh(@builtin(vertex_index) vi: u32) -> VertexOutput {
+    let pi = mesh_stream[vi * 2u];
+    let k = mesh_stream[vi * 2u + 1u];
+    let p = &prims[pi];
+    let mx = f_arena[(*p).pos_base + k];
+    let my = f_arena[(*p).aux_base + k];
+
+    var out: VertexOutput;
+    out.cov_uv = cov_uv_of(pi, vec2<f32>(mx, my));
+    out.mask_info = prims[pi].mask_info;
+    out.cov_base = prims[pi].cov_base;
+    out.clip_position = cov_clip(out.cov_uv);
+    out.uv = normalize_uv((*p).uv_base, k);
+    out.color = bit_color((*p).mask_info);
+    out.varg = vec4<f32>((*p).rates[0], 0.0, 0.0, 0.0);
+    return out;
+}
+
+@vertex
+fn vs_cov_shape(@builtin(vertex_index) vi: u32) -> VertexOutput {
+    let pi = vi / SHAPE_FAN_VERTS;
+    let r = vi % SHAPE_FAN_VERTS;
+    let tri = r / 3u;
+    let p = &prims[pi];
+
+    var v = 0u;
+    if (tri + 2u < (*p).count) {
+        let c = r % 3u;
+        if (c == 1u) { v = tri + 1u; }
+        if (c == 2u) { v = tri + 2u; }
+    }
+    let lx = f_arena[(*p).pos_base + v * 2u];
+    let ly = f_arena[(*p).pos_base + v * 2u + 1u];
+
+    var out: VertexOutput;
+    out.cov_uv = cov_uv_of(pi, local_xy((*p).aux_base, lx, ly));
+    out.mask_info = prims[pi].mask_info;
+    out.cov_base = prims[pi].cov_base;
+    out.clip_position = cov_clip(out.cov_uv);
+    // Shapes are textureless, so any constant UV samples the white fallback.
+    out.uv = vec2<f32>(0.5, 0.5);
+    out.color = bit_color((*p).mask_info);
+    out.varg = vec4<f32>((*p).rates[0], 0.0, 0.0, 0.0);
+    return out;
+}
+
+// Writes the writer's bit wherever its cutout says it covers (mask doc §2-5).
+// `varg.x` carries the threshold; below zero means "no cutout", which is what a
+// textureless pure mask uses to cover its whole shape.
+@fragment
+fn fs_coverage(in: VertexOutput) -> @location(0) vec4<f32> {
+    let a = textureSample(t_diffuse, s_diffuse, in.uv).a;
+    let threshold = in.varg.x;
+    if (threshold >= 0.0 && a <= threshold) {
+        discard;
+    }
+    return in.color;
+}
+
+// --- replay: reconstruct the mask state for one masked fragment -----------
+
+// Re-runs the writers that are in scope for this part, in draw order, and says
+// whether the fragment survives. This is the stencil's job done per fragment:
+// the bitmap holds every writer's shape at once, and the scope test picks which
+// of them were "applied" by the time this part drew (mask doc §3-2-1).
+fn mask_passes(in: VertexOutput, info: u32, cov_base: u32) -> bool {
+    let layer = i32(f_arena[cov_base + 6u]);
+    let count = u32(f_arena[cov_base + 7u]);
+    let rank_override = f_arena[cov_base + COVERAGE_RANK];
+    if (count == 0u) {
+        return true;
+    }
+    let inside = (info & MASK_INFO_INSIDE) != 0u;
+
+    // Outside the bbox there is no writer to be inside of. Answering from the
+    // polarity alone keeps the sampler's edge clamp from reading the border
+    // texel and masking content that is nowhere near the mask.
+    let uv = in.cov_uv;
+    if (uv.x < 0.0 || uv.x > 1.0 || uv.y < 0.0 || uv.y > 1.0) {
+        return !inside;
+    }
+
+    let dims = vec2<f32>(textureDimensions(t_coverage).xy);
+    // `textureLoad`, not a sampler: a filtered read would blend one writer's bit
+    // into the next and decode as coverage nobody wrote.
+    let texel = vec2<i32>(clamp(uv * dims, vec2<f32>(0.0), dims - 1.0));
+    let cov = textureLoad(t_coverage, texel, layer, 0);
+
+    // A sub-animation is scoped by the rank of the instance part it hangs off,
+    // not by its own internal ranks (mask doc §3-2-2).
+    let this_rank = select(f32(info >> 16u), rank_override, rank_override >= 0.0);
+    // Two accumulators, never one: increment and invert are each self-inverse but
+    // do not commute, so mixing them makes coverage depend on the order the
+    // writers happened to be drawn in (mask doc §3-1-4).
+    var parity = 0u;
+    var counter = 0u;
+    for (var i = 0u; i < count; i = i + 1u) {
+        let rec = cov_base + COVERAGE_HEADER + i * COVERAGE_STRIDE;
+        let rank = f_arena[rec];
+        let is_clipping = f_arena[rec + 3u] > 0.5;
+        // Scope (§2-1): a clipping writer covers what draws after it, a pure mask
+        // what draws before.
+        let in_scope = select(this_rank < rank, (this_rank > rank), is_clipping);
+        if (!in_scope) {
+            continue;
+        }
+        let bit = u32(f_arena[rec + 1u]);
+        let byte = u32(cov[bit / 8u] * 255.0 + 0.5);
+        if (((byte >> (bit % 8u)) & 1u) == 0u) {
+            continue;
+        }
+        if (f_arena[rec + 2u] > 0.5) {
+            parity = parity ^ 1u;
+        } else {
+            counter = counter + 1u;
+        }
+    }
+
+    let masked = (parity != 0u) || (counter != 0u);
+    return masked == inside;
+}
+"#;
+
 const WGSL_SHADER: &str = r#"
 // PartsColor blend (direct port of WebGL PartsColorProgram).
 // Recover straight RGB, apply the mix/mul/add-sub blend selected by `varg`, then
@@ -527,6 +815,31 @@ const WGSL_SHADER: &str = r#"
 @fragment
 fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
     let tex = textureSample(t_diffuse, s_diffuse, in.uv);
+    if (tex.a == 0.0) {
+        return vec4<f32>(0.0);
+    }
+    let rate = in.varg.x;
+    let straight = ss_straight_rgb(tex);
+    let mixC = mix(straight, in.color.rgb, rate);
+    let mulC = straight * mix(vec3<f32>(1.0), in.color.rgb, rate);
+    let addC = straight + in.color.rgb * rate * sign(in.varg.w);
+    let rgb = mixC * in.varg.y + mulC * in.varg.z + addC * abs(in.varg.w);
+    let a = tex.a * in.color.a;
+    return vec4<f32>(rgb * a, a);
+}
+
+// The same composite as `fs_main`, clipped by the coverage bitmap.
+//
+// The texture is sampled *before* the clip decides: `textureSample` needs
+// implicit derivatives, and WGSL forbids those once control flow has stopped
+// being uniform — which a `discard` above it would make it.
+@fragment
+fn fs_main_coverage(in: VertexOutput) -> @location(0) vec4<f32> {
+    let tex = textureSample(t_diffuse, s_diffuse, in.uv);
+    let info = in.mask_info;
+    if ((info & MASK_INFO_ACTIVE) != 0u && !mask_passes(in, info, in.cov_base)) {
+        discard;
+    }
     if (tex.a == 0.0) {
         return vec4<f32>(0.0);
     }
@@ -879,7 +1192,7 @@ impl SSRenderer {
     pub fn new(device: &wgpu::Device) -> Self {
         // WGSL source for a module is the shared vertex half plus its own
         // fragment half; naga sees one string either way.
-        let sprite_wgsl = format!("const SHAPE_FAN_VERTS: u32 = {SHAPE_FAN_VERTS}u;\n{COMMON_WGSL}{WGSL_SHADER}");
+        let sprite_wgsl = format!("{}{COMMON_WGSL}{COVERAGE_WGSL}{WGSL_SHADER}", wgsl_consts());
         let shader_module = device.create_shader_module(wgpu::ShaderModuleDescriptor { label: Some("SpriteStudio Shader"), source: wgpu::ShaderSource::Wgsl(sprite_wgsl.into()) });
 
         // group(0) is the scene: the projection, plus the frame's SoA
@@ -888,7 +1201,9 @@ impl SSRenderer {
         // buffers behind it belong to the render target.
         let storage = |binding: u32| wgpu::BindGroupLayoutEntry {
             binding,
-            visibility: wgpu::ShaderStages::VERTEX,
+            // The fragment stage reads the arena too: the coverage replay walks
+            // the node's writer records there, per fragment (mask doc §3-2-1).
+            visibility: wgpu::ShaderStages::VERTEX_FRAGMENT,
             ty: wgpu::BindingType::Buffer { ty: wgpu::BufferBindingType::Storage { read_only: true }, has_dynamic_offset: false, min_binding_size: None },
             count: None,
         };
@@ -934,9 +1249,28 @@ impl SSRenderer {
 
         let pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor { label: Some("SpriteStudio Pipeline Layout"), bind_group_layouts: &[Some(&scene_bind_group_layout), Some(&texture_bind_group_layout)], immediate_size: 0 });
 
+        // Coverage masking adds a third group holding the frame's bitmap array.
+        // No sampler: the replay reads exact texels with `textureLoad`, because a
+        // filtered read would blend neighbouring writers' bits into each other and
+        // decode as coverage that nobody wrote (mask doc §3-2-1).
+        let coverage_bind_group_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+            label: Some("SpriteStudio Coverage Layout"),
+            entries: &[wgpu::BindGroupLayoutEntry {
+                binding: 0,
+                visibility: wgpu::ShaderStages::FRAGMENT,
+                ty: wgpu::BindingType::Texture { sample_type: wgpu::TextureSampleType::Float { filterable: false }, view_dimension: wgpu::TextureViewDimension::D2Array, multisampled: false },
+                count: None,
+            }],
+        });
+        let coverage_pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+            label: Some("SpriteStudio Coverage Pipeline Layout"),
+            bind_group_layouts: &[Some(&scene_bind_group_layout), Some(&texture_bind_group_layout), Some(&coverage_bind_group_layout)],
+            immediate_size: 0,
+        });
+
         // Integration-shader (`ss-*`) resources. The module is compiled
         // now; the pipelines are built lazily per key on first use.
-        let ss_wgsl = format!("const SHAPE_FAN_VERTS: u32 = {SHAPE_FAN_VERTS}u;\n{COMMON_WGSL}{SS_SHADER_WGSL}");
+        let ss_wgsl = format!("{}{COMMON_WGSL}{SS_SHADER_WGSL}", wgsl_consts());
         let ss_shader_module = device.create_shader_module(wgpu::ShaderModuleDescriptor { label: Some("SpriteStudio SS Shaders"), source: wgpu::ShaderSource::Wgsl(ss_wgsl.into()) });
         let ss_params_bind_group_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
             label: Some("SpriteStudio SS Params Layout"),
@@ -985,6 +1319,8 @@ impl SSRenderer {
             pipeline_layout,
             ss_shader_module,
             ss_pipeline_layout,
+            coverage_pipeline_layout,
+            coverage_bind_group_layout,
             scene_bind_group_layout,
             texture_bind_group_layout,
             ss_params_bind_group_layout,
@@ -1029,6 +1365,9 @@ impl SSRenderer {
             blend: Option<wgpu::BlendState>,
             write_mask: wgpu::ColorWrites,
             depth_stencil: Option<wgpu::DepthStencilState>,
+            /// Usually the target's own format; the coverage bitmap is its own
+            /// target and so brings its own.
+            color_format: wgpu::TextureFormat,
         }
         let blend_of = |idx: usize| BLEND_ORDER[idx.min(BLEND_ORDER.len() - 1)];
 
@@ -1045,6 +1384,7 @@ impl SSRenderer {
                     write_mask: wgpu::ColorWrites::ALL,
                     // Content tests coverage; it never writes it.
                     depth_stencil: depth_stencil_state(key.stencil_format, stencil_compare(stencil), wgpu::StencilOperation::Keep, 0x00),
+                    color_format: key.color_format,
                 }
             }
             PipelineKind::Mask(op, class) => Recipe {
@@ -1057,6 +1397,41 @@ impl SSRenderer {
                 // Coverage only — the fragment's colour is thrown away.
                 write_mask: wgpu::ColorWrites::empty(),
                 depth_stencil: depth_stencil_state(key.stencil_format, wgpu::CompareFunction::Always, stencil_write_op(op), 0xFF),
+                color_format: key.color_format,
+            },
+            PipelineKind::ContentCoverage(blend_idx, stencil, class) => {
+                let blend = blend_of(blend_idx);
+                Recipe {
+                    label: format!("Content Coverage {} {stencil:?} {class:?}", blend.variant_name().unwrap_or("Blend")),
+                    module: &self.shader_module,
+                    layout: &self.coverage_pipeline_layout,
+                    vertex_entry: class.entry(),
+                    entry: "fs_main_coverage",
+                    blend: Some(blend_state(blend)),
+                    write_mask: wgpu::ColorWrites::ALL,
+                    // The clip happens in the fragment stage, so the stencil is
+                    // inert even where the host happens to have attached one.
+                    depth_stencil: depth_stencil_state(key.stencil_format, wgpu::CompareFunction::Always, wgpu::StencilOperation::Keep, 0x00),
+                    color_format: key.color_format,
+                }
+            }
+            PipelineKind::Coverage(class) => Recipe {
+                label: format!("Coverage Write {class:?}"),
+                module: &self.shader_module,
+                layout: &self.pipeline_layout,
+                vertex_entry: class.coverage_entry(),
+                entry: "fs_coverage",
+                // Additive, so writers whose bits are disjoint OR together into
+                // one bitmap however they overlap (mask doc §3-2-1).
+                blend: Some(wgpu::BlendState {
+                    color: wgpu::BlendComponent { src_factor: wgpu::BlendFactor::One, dst_factor: wgpu::BlendFactor::One, operation: wgpu::BlendOperation::Add },
+                    alpha: wgpu::BlendComponent { src_factor: wgpu::BlendFactor::One, dst_factor: wgpu::BlendFactor::One, operation: wgpu::BlendOperation::Add },
+                }),
+                write_mask: wgpu::ColorWrites::ALL,
+                // The bitmap has no depth-stencil of its own; the whole point of
+                // this backend is not needing one.
+                depth_stencil: None,
+                color_format: COVERAGE_FORMAT,
             },
             PipelineKind::Shader(id_hash, blend_idx) => {
                 let entry = ss_shader_entry(id_hash)?;
@@ -1071,6 +1446,7 @@ impl SSRenderer {
                     write_mask: wgpu::ColorWrites::ALL,
                     // Shader parts are never masked in v1, so the stencil is inert.
                     depth_stencil: depth_stencil_state(key.stencil_format, wgpu::CompareFunction::Always, wgpu::StencilOperation::Keep, 0x00),
+                    color_format: key.color_format,
                 }
             }
         };
@@ -1084,7 +1460,7 @@ impl SSRenderer {
             fragment: Some(wgpu::FragmentState {
                 module: recipe.module,
                 entry_point: Some(recipe.entry),
-                targets: &[Some(wgpu::ColorTargetState { format: key.color_format, blend: recipe.blend, write_mask: recipe.write_mask })],
+                targets: &[Some(wgpu::ColorTargetState { format: recipe.color_format, blend: recipe.blend, write_mask: recipe.write_mask })],
                 compilation_options: Default::default(),
             }),
             primitive: wgpu::PrimitiveState {
@@ -1102,6 +1478,19 @@ impl SSRenderer {
             cache: None,
         }))
     }
+    /// A bind group over one frame's coverage array.
+    ///
+    /// The layout is the renderer's (device-scoped, like every other layout); the
+    /// array itself belongs to the scene that allocated it, which is why this
+    /// builds a group rather than storing one.
+    pub(crate) fn coverage_bind_group(&self, device: &wgpu::Device, array_view: &wgpu::TextureView) -> wgpu::BindGroup {
+        device.create_bind_group(&wgpu::BindGroupDescriptor {
+            label: Some("SpriteStudio Coverage Bind Group"),
+            layout: &self.coverage_bind_group_layout,
+            entries: &[wgpu::BindGroupEntry { binding: 0, resource: wgpu::BindingResource::TextureView(array_view) }],
+        })
+    }
+
     /// Register a texture the **supplier** owns: the renderer builds a
     /// bind group around `view` and nothing else.
     ///

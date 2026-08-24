@@ -38,7 +38,7 @@ use crate::pack::SSPack;
 use crate::player::{AssetLoader, BlendOp, MissingKind, OverridePriority, PlaybackDirection, PlaybackStyle, SSPlayer};
 use crate::renderer::{AlphaMode, Retention, SSRenderer};
 use crate::roster::{Roster, SlotId};
-use crate::scene::{SSScene, SceneConfig};
+use crate::scene::{MaskBackend, SSScene, SceneConfig};
 use std::cell::RefCell;
 use std::collections::HashMap;
 use std::rc::Rc;
@@ -307,7 +307,7 @@ impl WebContext {
 
         // The scene is format-specific; the renderer is not, which is
         // what lets canvases with different formats share one of it.
-        let mut scene = SSScene::new(&self.device, &SceneConfig { color_format: format, stencil_format: Some(STENCIL_FORMAT) });
+        let mut scene = SSScene::new(&self.device, &SceneConfig { color_format: format, stencil_format: Some(STENCIL_FORMAT), mask: MaskBackend::Stencil });
         scene.set_viewport(&self.queue, width as f32, height as f32, false);
         let stencil_view = create_stencil_view(&self.device, width, height);
 

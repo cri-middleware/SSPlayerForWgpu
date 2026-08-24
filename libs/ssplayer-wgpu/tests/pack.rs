@@ -14,7 +14,7 @@
 //!
 //! Every test skips cleanly when no GPU adapter is available.
 
-use ssplayer_wgpu::{AlphaMode, Retention, SSPack, SSPlayer, SSRenderer, SSScene, SceneConfig};
+use ssplayer_wgpu::{AlphaMode, MaskBackend, Retention, SSPack, SSPlayer, SSRenderer, SSScene, SceneConfig};
 
 const W: u32 = 256;
 const H: u32 = 256;
@@ -182,7 +182,7 @@ fn mean_abs_diff(a: &[u8], b: &[u8]) -> f64 {
 }
 
 fn scene_for(device: &wgpu::Device, queue: &wgpu::Queue) -> SSScene {
-    let mut scene = SSScene::new(device, &SceneConfig { color_format: COLOR_FORMAT, stencil_format: None });
+    let mut scene = SSScene::new(device, &SceneConfig { color_format: COLOR_FORMAT, stencil_format: None, mask: MaskBackend::None });
     scene.set_viewport(queue, W as f32, H as f32, false);
     scene
 }
@@ -452,7 +452,7 @@ fn scenes_share_one_renderer() {
     assert!(after_one > 0, "the first canvas compiled nothing — the comparison below would be vacuous");
 
     // A second canvas, in a different colour format, on the same renderer.
-    let mut second_canvas = SSScene::new(&device, &SceneConfig { color_format: SECOND_FORMAT, stencil_format: None });
+    let mut second_canvas = SSScene::new(&device, &SceneConfig { color_format: SECOND_FORMAT, stencil_format: None, mask: MaskBackend::None });
     second_canvas.set_viewport(&queue, W as f32, H as f32, false);
     let mut second = play(&pack);
     let two = render_to(&device, &queue, &mut renderer, &mut second_canvas, &mut [&mut second], 10, SECOND_FORMAT);

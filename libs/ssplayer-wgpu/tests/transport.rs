@@ -12,7 +12,7 @@
 //! runtime's enum would have put `-1` on the `ffi` and `js` faces and silently
 //! disagreed with all of them.
 
-use ssplayer_wgpu::{PlaybackDirection, PlaybackStyle, SSPlayer, SSRenderer, SSScene, SceneConfig};
+use ssplayer_wgpu::{MaskBackend, PlaybackDirection, PlaybackStyle, SSPlayer, SSRenderer, SSScene, SceneConfig};
 
 fn asset_root() -> &'static str {
     concat!(env!("CARGO_MANIFEST_DIR"), "/../../assets")
@@ -175,7 +175,7 @@ fn backward_playback_retreats() {
         return;
     };
     let mut renderer = SSRenderer::new(&device);
-    let mut scene = SSScene::new(&device, &SceneConfig { color_format: wgpu::TextureFormat::Rgba8Unorm, stencil_format: None });
+    let mut scene = SSScene::new(&device, &SceneConfig { color_format: wgpu::TextureFormat::Rgba8Unorm, stencil_format: None, mask: MaskBackend::None });
     scene.set_viewport(&queue, 256.0, 256.0, false);
 
     let mut player = loaded();

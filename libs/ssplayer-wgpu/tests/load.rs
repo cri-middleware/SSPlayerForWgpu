@@ -17,7 +17,7 @@
 //! sibling file named after the pack. Getting any of them wrong is silent — a
 //! white silhouette, or a part that simply does not appear.
 
-use ssplayer_wgpu::{SSPlayer, SSRenderer, SSScene, SceneConfig};
+use ssplayer_wgpu::{MaskBackend, SSPlayer, SSRenderer, SSScene, SceneConfig};
 
 fn asset_root() -> &'static str {
     concat!(env!("CARGO_MANIFEST_DIR"), "/../../assets")
@@ -25,7 +25,7 @@ fn asset_root() -> &'static str {
 
 /// Run one frame, which is what moves a load's atlases onto the GPU.
 fn flush(renderer: &mut SSRenderer, device: &wgpu::Device, queue: &wgpu::Queue, players: &mut [&mut SSPlayer]) {
-    let mut scene = SSScene::new(device, &SceneConfig { color_format: wgpu::TextureFormat::Rgba8Unorm, stencil_format: None });
+    let mut scene = SSScene::new(device, &SceneConfig { color_format: wgpu::TextureFormat::Rgba8Unorm, stencil_format: None, mask: MaskBackend::None });
     scene.set_viewport(queue, 256.0, 256.0, false);
     scene.update(renderer, device, queue, 1.0 / 60.0, players);
 }

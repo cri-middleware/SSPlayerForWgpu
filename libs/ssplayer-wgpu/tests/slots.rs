@@ -24,7 +24,7 @@
 //! Skips cleanly when no GPU adapter is available: stepping happens inside
 //! `SSScene::update`, which borrows a device.
 
-use ssplayer_wgpu::{SSPlayer, SSRenderer, SSScene, SceneConfig};
+use ssplayer_wgpu::{MaskBackend, SSPlayer, SSRenderer, SSScene, SceneConfig};
 
 const W: u32 = 256;
 const H: u32 = 256;
@@ -71,7 +71,7 @@ fn child_frame(player: &SSPlayer, part_idx: usize) -> f32 {
 fn sample_child_frames(player: &mut SSPlayer, part_idx: usize, ticks: usize) -> Option<Vec<f32>> {
     let (device, queue) = gpu()?;
     let mut renderer = SSRenderer::new(&device);
-    let mut scene = SSScene::new(&device, &SceneConfig { color_format: wgpu::TextureFormat::Rgba8Unorm, stencil_format: None });
+    let mut scene = SSScene::new(&device, &SceneConfig { color_format: wgpu::TextureFormat::Rgba8Unorm, stencil_format: None, mask: MaskBackend::None });
     scene.set_viewport(&queue, W as f32, H as f32, false);
 
     let mut frames = Vec::with_capacity(ticks);

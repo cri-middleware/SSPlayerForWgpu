@@ -50,6 +50,6 @@ pub use metrics::SceneStats;
 pub use pack::{EmbeddedImage, EmbeddedTexture, SSPack, TextureRef};
 pub use player::{AssetLoader, BlendOp, MissingAsset, MissingKind, OverridePriority, PlaybackDirection, PlaybackStyle, SSPlayer};
 pub use renderer::{AlphaMode, Retention, SSRenderer};
-pub use scene::{BatchInfo, FrameChunk, IDENTITY_TRANSFORM, NodeSlot, SSScene, SceneConfig};
+pub use scene::{BatchInfo, FrameChunk, IDENTITY_TRANSFORM, MaskBackend, NodeSlot, SSScene, SceneConfig};
 #[cfg(feature = "web")]
 pub use web::{SsContextWeb, SsPlayerWeb, SsSurfaceWeb};
