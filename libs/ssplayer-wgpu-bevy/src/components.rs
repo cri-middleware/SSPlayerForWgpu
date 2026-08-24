@@ -12,7 +12,7 @@ use bevy::prelude::*;
 /// everything else is allocation-free transport, which is why placement and
 /// playback sit in their own components.
 #[derive(Component, Clone, Debug, Default)]
-#[require(SsTransform, SsPlayback)]
+#[require(SsTransform, SsPlayback, SsPlaybackState)]
 pub struct SsPlayer {
     /// Path to the `.ssab` this character plays from, as
     /// [`ssplayer_wgpu::SSPlayer::load`] takes it.
@@ -62,4 +62,18 @@ impl Default for SsPlayback {
     fn default() -> Self {
         Self { playing: true, speed: 1.0, order: 0, alpha: 1.0, visible: true }
     }
+}
+
+/// Playback state read back from the render world, refreshed every frame.
+///
+/// This is the pollable half of the round-trip; the reactive half is the
+/// messages in [`crate::feedback`]. Both are **one frame behind** — what you
+/// read this frame is what playback produced last frame — because playback runs
+/// in the render world. Required by [`SsPlayer`], so it is always present.
+#[derive(Component, Clone, Copy, Debug, Default)]
+pub struct SsPlaybackState {
+    /// The frame the timeline last landed on.
+    pub frame_no: f32,
+    /// Whether the animation has reached its end.
+    pub finished: bool,
 }

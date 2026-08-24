@@ -25,7 +25,7 @@ use bevy::render::render_resource::{Extent3d, TextureDimension, TextureFormat, T
 use bevy::render::view::Msaa;
 use bevy::sprite::Sprite;
 use bevy::window::WindowPlugin;
-use ssplayer_wgpu_bevy::{SsPlayback, SsPlayer, SsPlayerPlugin, SsTransform};
+use ssplayer_wgpu_bevy::{SsPlayback, SsPlaybackState, SsPlayer, SsPlayerPlugin, SsTransform};
 use std::path::Path;
 use std::sync::{Arc, Mutex};
 
@@ -215,6 +215,38 @@ fn characters_draw_over_bevy_sprites() {
     let total = (SIZE * SIZE) as usize;
     assert!(pure_green > 0, "the Bevy sprite did not draw at all — this test would pass vacuously");
     assert!(pure_green < total - total / 50, "the sprite covers the whole target: the character drew under it, so the ordering against main_transparent_pass_2d is not holding");
+}
+
+/// Playback state makes the round trip from the render world back to the main
+/// world.
+///
+/// The timeline advances in the render world; its result reaches gameplay only
+/// through the shared feedback buffer and the `PreUpdate` system that drains it.
+/// If any link in that chain is missing, `SsPlaybackState::frame_no` never moves
+/// off its default of zero however long the app runs. Pumping frames and finding
+/// it advanced is the proof the whole path is connected.
+#[test]
+fn playback_state_crosses_back_to_the_main_world() {
+    if !fixtures_present() {
+        eprintln!("assets not generated, skipping");
+        return;
+    }
+    let Some((mut app, handle, _captured)) = headless_app() else {
+        eprintln!("no GPU adapter available, skipping");
+        return;
+    };
+
+    app.world_mut().spawn((Camera2d, Camera { clear_color: ClearColorConfig::Custom(Color::BLACK), ..default() }, RenderTarget::Image(handle.into()), Msaa::Off));
+    let player = app.world_mut().spawn((SsPlayer { src: fixture(MASK_PACK), animation: MASK_ANIM.into() }, SsTransform { scale_x: 0.5, scale_y: 0.5, ..default() }, SsPlayback::default())).id();
+
+    app.finish();
+    app.cleanup();
+    for _ in 0..FRAMES {
+        app.update();
+    }
+
+    let state = app.world().entity(player).get::<SsPlaybackState>().expect("SsPlaybackState is a required component of SsPlayer and must be present");
+    assert!(state.frame_no > 0.0, "playback state did not cross back: frame_no is still {} after {FRAMES} frames — the render->main feedback never arrived", state.frame_no);
 }
 
 /// The player crate rendering the same thing, for the comparisons above.

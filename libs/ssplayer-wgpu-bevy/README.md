@@ -106,6 +106,34 @@ in the hands of whatever ran first.
 
 The cost is one extra render pass per masking character per frame.
 
+## Reacting to playback
+
+Playback runs in the render world, so what it produces comes back to gameplay
+through two surfaces:
+
+| Surface | Kind | Use it for |
+|---|---|---|
+| `SsPlaybackState` component | Polled | The current `frame_no`, and whether the animation has `finished` |
+| `SsEventMessage` | `MessageReader` | Timeline events — match on `SsEvent` for the user-data marker, the signal, or the audio cue |
+| `SsFinished` / `SsLooped` | `MessageReader` | The one-shot completion and loop edges |
+
+```rust
+fn play_sounds(mut events: MessageReader<SsEventMessage>) {
+    for message in events.read() {
+        if let SsEvent::Audio(audio) = &message.event {
+            // The player produces no sound itself; feed your own audio stack.
+            info!("play {:?} x{}", audio.sound_name, audio.loop_num);
+        }
+    }
+}
+```
+
+Both surfaces are **one frame behind**: what you read this frame is what playback
+produced last frame, because it ran in the render world after last frame's
+`Update`. For a sound cue or a state change that is imperceptible; a host that
+cannot tolerate it would need playback moved into the main world, which this
+crate deliberately does not do.
+
 ## What this version does not do yet
 
 * **One view.** `SSScene::update` fuses the timeline advance with the geometry
@@ -116,5 +144,3 @@ The cost is one extra render pass per masking character per frame.
 * **Loading is synchronous** and reads the filesystem directly rather than going
   through Bevy's `AssetServer`, so it does not get hot reload, packed assets or
   shared atlases.
-* **Nothing crosses back.** Timeline events and the completion edge stay in the
-  render world, so gameplay cannot yet react to them.

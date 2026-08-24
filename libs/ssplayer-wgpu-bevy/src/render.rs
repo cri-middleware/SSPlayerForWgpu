@@ -14,6 +14,7 @@ use bevy::render::view::ViewTarget;
 use ssplayer_wgpu::{MaskBackend, SSPlayer, SSRenderer, SSScene, SceneConfig};
 
 use crate::extract::ExtractedPlayers;
+use crate::feedback::{FeedbackChannel, PlaybackFeedback};
 
 /// One character's playback tree, plus what it was last built from.
 ///
@@ -125,11 +126,22 @@ pub(crate) fn sync_players(mut state: Option<ResMut<SsRenderState>>, extracted: 
 /// `Core2dSystems::MainPass`: two systems that each take a [`RenderContext`] get
 /// their own command encoder, and only an explicit edge decides which of the two
 /// buffers reaches the queue first.
-pub(crate) fn draw_players(mut state: Option<ResMut<SsRenderState>>, extracted: Res<ExtractedPlayers>, device: Res<RenderDevice>, queue: Res<RenderQueue>, view: ViewQuery<(&ExtractedCamera, &ViewTarget)>, mut ctx: RenderContext) {
+pub(crate) fn draw_players(
+    mut state: Option<ResMut<SsRenderState>>,
+    extracted: Res<ExtractedPlayers>,
+    device: Res<RenderDevice>,
+    queue: Res<RenderQueue>,
+    channel: Res<FeedbackChannel>,
+    view: ViewQuery<(&ExtractedCamera, &ViewTarget)>,
+    mut ctx: RenderContext,
+) {
     let Some(state) = state.as_deref_mut() else {
         return;
     };
     if state.slots.is_empty() {
+        // Clear last frame's feedback so the main world stops answering for
+        // characters that are all gone.
+        channel.store(Vec::new());
         return;
     }
 
@@ -179,6 +191,20 @@ pub(crate) fn draw_players(mut state: Option<ResMut<SsRenderState>>, extracted: 
 
     let mut players: Vec<&mut SSPlayer> = slots.iter_mut().map(|slot| &mut slot.player).collect();
     scene.update(renderer, device, queue, extracted.delta_secs, &mut players);
+
+    // Read back what the advance produced, before drawing, and hand it to the
+    // main world. `update` cleared the events of any culled player, so an
+    // invisible character reports nothing — reading every slot is still correct.
+    drop(players);
+    channel.store(
+        slots
+            .iter()
+            .map(|slot| {
+                let player = &slot.player;
+                PlaybackFeedback { entity: slot.entity.id(), frame_no: player.frame_no(), is_finished: player.is_finished(), finished_edge: player.finished_last_update(), looped: player.looped_last_update(), events: player.events().to_vec() }
+            })
+            .collect(),
+    );
 
     // Bake the mask bitmaps into the same encoder the pass below is opened on.
     // Passes in one encoder run in order, so this frame's coverage is what this

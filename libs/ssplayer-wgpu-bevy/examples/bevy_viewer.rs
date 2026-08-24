@@ -19,7 +19,7 @@
 
 use bevy::prelude::*;
 use bevy::render::view::Msaa;
-use ssplayer_wgpu_bevy::{SsPlayback, SsPlayer, SsPlayerPlugin, SsTransform};
+use ssplayer_wgpu_bevy::{SsEvent, SsEventMessage, SsFinished, SsLooped, SsPlayback, SsPlayer, SsPlayerPlugin, SsTransform};
 
 /// Selectable masking fixtures: `(key, pack, animation)`. The animation names are
 /// what the packs actually declare (`SSPlayer::animation_names`), not the file
@@ -34,7 +34,12 @@ fn selected_mask() -> (&'static str, &'static str) {
 }
 
 fn main() {
-    App::new().add_plugins(DefaultPlugins.set(WindowPlugin { primary_window: Some(Window { title: "SpriteStudio in Bevy — mask check".into(), ..default() }), ..default() })).add_plugins(SsPlayerPlugin).add_systems(Startup, setup).run();
+    App::new()
+        .add_plugins(DefaultPlugins.set(WindowPlugin { primary_window: Some(Window { title: "SpriteStudio in Bevy — mask check".into(), ..default() }), ..default() }))
+        .add_plugins(SsPlayerPlugin)
+        .add_systems(Startup, setup)
+        .add_systems(Update, log_playback)
+        .run();
 }
 
 fn setup(mut commands: Commands) {
@@ -48,4 +53,23 @@ fn setup(mut commands: Commands) {
     let (src, animation) = selected_mask();
     info!("ssplayer-wgpu-bevy example: mask pack {src} / animation {animation}");
     commands.spawn((SsPlayer { src: src.into(), animation: animation.into() }, SsTransform { scale_x: 0.5, scale_y: 0.5, ..default() }, SsPlayback { order: 1, ..default() }));
+}
+
+/// The other half of the round-trip: playback runs in the render world and its
+/// events come back as messages. This just logs them — an audio cue is where a
+/// real host would feed its own sound stack, since the player plays none itself.
+fn log_playback(mut events: MessageReader<SsEventMessage>, mut finished: MessageReader<SsFinished>, mut looped: MessageReader<SsLooped>) {
+    for message in events.read() {
+        match &message.event {
+            SsEvent::Audio(audio) => info!("audio cue: {:?} x{}", audio.sound_name, audio.loop_num),
+            SsEvent::UserData(data) => info!("user data on part {}", data.part_index),
+            SsEvent::Signal(signal) => info!("signal {:?} on part {}", signal.command_id, signal.part_index),
+        }
+    }
+    for _ in finished.read() {
+        info!("animation finished");
+    }
+    for _ in looped.read() {
+        info!("animation looped");
+    }
 }

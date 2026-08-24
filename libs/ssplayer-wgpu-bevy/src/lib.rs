@@ -10,9 +10,10 @@
 //! * **Render world** — the playback trees, one device-scoped `SSRenderer` and
 //!   one target-scoped `SSScene`. Nothing here is reachable from gameplay code.
 //!
-//! State crosses in one direction, through `ExtractSchedule`. Playback state
-//! that gameplay wants back (timeline events, the completion edge) does not
-//! cross yet.
+//! Authoring state crosses to the render world through `ExtractSchedule`;
+//! playback state crosses back through a shared buffer (see [`feedback`]) — the
+//! timeline events, the loop and completion edges, and the frame landed on. The
+//! return trip is one frame late, because playback runs in the render world.
 //!
 //! The player never owns Bevy's `Device` / `Queue` / render target; the draw
 //! system lends them for the frame, which is the same contract the winit viewer
@@ -47,11 +48,16 @@
 
 mod components;
 mod extract;
+mod feedback;
 mod render;
 
-pub use components::{SsPlayback, SsPlayer, SsTransform};
+pub use components::{SsPlayback, SsPlaybackState, SsPlayer, SsTransform};
+pub use feedback::{SsEventMessage, SsFinished, SsLooped};
+// The event payloads a host matches on, re-exported so it need not also depend
+// on `ssplayer-wgpu` just to name them.
+pub use ssplayer_wgpu::{AudioEvent, SignalEvent, SignalParam, SignalValue, SsEvent, UserDataEvent};
 
-use bevy::app::{App, Plugin};
+use bevy::app::{App, Plugin, PreUpdate};
 use bevy::core_pipeline::core_2d::main_transparent_pass_2d;
 use bevy::core_pipeline::{Core2d, Core2dSystems};
 use bevy::log::error;
@@ -65,6 +71,18 @@ pub struct SsPlayerPlugin;
 
 impl Plugin for SsPlayerPlugin {
     fn build(&self, app: &mut App) {
+        // The buffer playback feedback crosses on. Both worlds hold a clone of
+        // the one `Arc`, so what the render world writes the main world reads.
+        let channel = feedback::FeedbackChannel::default();
+
+        app.add_message::<SsEventMessage>()
+            .add_message::<SsFinished>()
+            .add_message::<SsLooped>()
+            .insert_resource(channel.clone())
+            // In `PreUpdate` so a gameplay system reading these in `Update` sees
+            // the same frame's batch.
+            .add_systems(PreUpdate, feedback::dispatch_feedback);
+
         let Some(render_app) = app.get_sub_app_mut(RenderApp) else {
             error!("ssplayer-wgpu-bevy: no render app — add this plugin after DefaultPlugins");
             return;
@@ -72,6 +90,7 @@ impl Plugin for SsPlayerPlugin {
 
         render_app
             .init_resource::<extract::ExtractedPlayers>()
+            .insert_resource(channel)
             .add_systems(RenderStartup, render::init_state)
             .add_systems(ExtractSchedule, extract::extract_players)
             .add_systems(Render, render::sync_players.in_set(RenderSystems::Prepare))
