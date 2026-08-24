@@ -20,6 +20,7 @@
 
 use bevy::asset::AssetPlugin;
 use bevy::audio::{AudioPlayer, PlaybackSettings};
+use bevy::camera::CompositingSpace;
 use bevy::prelude::*;
 use bevy::render::view::Msaa;
 use ssplayer_wgpu_bevy::{SsEvent, SsEventMessage, SsFinished, SsLooped, SsPlayback, SsPlayer, SsPlayerPlugin, SsTransform};
@@ -63,7 +64,13 @@ fn main() {
 fn setup(mut commands: Commands) {
     // Msaa::Off is required: the player's pipelines are single-sampled, and a
     // multisampled target would not match them.
-    commands.spawn((Camera2d, Msaa::Off));
+    //
+    // CompositingSpace::Srgb is required for correct colour: SpriteStudio art is
+    // authored in sRGB and the player writes those bytes verbatim. Without this,
+    // Bevy's default 2d target is sRGB and encodes them a second time on write, so
+    // everything comes out too bright. This mode gives a non-sRGB target and
+    // sRGB-space compositing, matching the player (and the WebGL reference).
+    commands.spawn((Camera2d, Msaa::Off, CompositingSpace::Srgb));
 
     // A Bevy sprite, to show what the player composites over.
     commands.spawn(Sprite { color: Color::srgb(0.15, 0.18, 0.28), custom_size: Some(Vec2::new(520.0, 520.0)), ..default() });

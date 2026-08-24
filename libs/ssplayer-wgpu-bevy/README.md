@@ -23,6 +23,7 @@ no such thing, so the range is stated here and the workspace resolving a single
 
 ```rust
 use bevy::prelude::*;
+use bevy::camera::CompositingSpace;
 use bevy::render::view::Msaa;
 use ssplayer_wgpu_bevy::{SsPlayback, SsPlayer, SsPlayerPlugin, SsTransform};
 
@@ -36,7 +37,8 @@ fn main() {
 
 fn setup(mut commands: Commands) {
     // MSAA has to be off: the player's pipelines are single-sampled.
-    commands.spawn((Camera2d, Msaa::Off));
+    // CompositingSpace::Srgb is needed for correct colour (see below).
+    commands.spawn((Camera2d, Msaa::Off, CompositingSpace::Srgb));
 
     commands.spawn((
         SsPlayer { src: "assets/Ringo/Ringo.ssab".into(), animation: "wait1".into() },
@@ -48,6 +50,23 @@ fn setup(mut commands: Commands) {
 
 `SsTransform` and `SsPlayback` are required components, so spawning `SsPlayer`
 alone gives you both at their defaults.
+
+## Colour: give the camera `CompositingSpace::Srgb`
+
+SpriteStudio atlases are authored in sRGB, and the player writes those bytes
+verbatim into whatever target it is given — it does no colour management, the
+same as the native and C++ hosts. Bevy's **default** 2d camera renders into an
+**sRGB** target, which encodes those bytes a *second* time on write, so every
+character comes out visibly too bright.
+
+Adding `CompositingSpace::Srgb` to the camera makes Bevy pick a non-sRGB
+(`Rgba8Unorm`) target and composite in sRGB space — which is exactly the player's
+(and the WebGL reference's) model, so colours match. The adapter warns once if it
+finds itself drawing into an sRGB target without it.
+
+> HDR is a separate case still: an `Hdr` camera renders at `Rgba16Float` (linear
+> light) and the player's sRGB-space output is not tone-mapping-correct there.
+> For faithful colour, use an SDR camera with `CompositingSpace::Srgb`.
 
 | Component | What it carries | Cost of changing it |
 |---|---|---|

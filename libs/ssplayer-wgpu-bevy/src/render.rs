@@ -47,6 +47,7 @@ pub(crate) struct SsRenderState {
     /// The view `scene` belongs to; anything else is refused.
     bound_view: Option<Entity>,
     warned_second_view: bool,
+    warned_srgb: bool,
 }
 
 /// Build the render-world state on the device Bevy just acquired.
@@ -60,7 +61,7 @@ pub(crate) struct SsRenderState {
 /// on device loss rather than recovering. Do not move this to a run-once startup:
 /// that is what would break recovery.
 pub(crate) fn init_state(mut commands: Commands, device: Res<RenderDevice>) {
-    commands.insert_resource(SsRenderState { renderer: SSRenderer::new(device.wgpu_device()), scene: None, scene_format: None, slots: Vec::new(), bound_view: None, warned_second_view: false });
+    commands.insert_resource(SsRenderState { renderer: SSRenderer::new(device.wgpu_device()), scene: None, scene_format: None, slots: Vec::new(), bound_view: None, warned_second_view: false, warned_srgb: false });
 }
 
 /// Apply this frame's extracted state to the playback trees.
@@ -179,6 +180,22 @@ pub(crate) fn draw_players(
     // The format is a property of the view, so it is only knowable here — and a
     // view that changed it has invalidated every pipeline baked into the scene.
     let format = target.main_texture_format();
+
+    // SpriteStudio atlases are authored in sRGB and the player writes those bytes
+    // verbatim, expecting a non-sRGB target (as the native and C++ hosts give it).
+    // An sRGB target encodes them a second time on write, so everything comes out
+    // too bright. The camera decides this: `CompositingSpace::Srgb` makes Bevy pick
+    // a non-sRGB (`Rgba8Unorm`) target and composite in sRGB space, which matches
+    // the player. Warn once rather than silently miscolour.
+    if format.is_srgb() && !state.warned_srgb {
+        state.warned_srgb = true;
+        warn!(
+            "ssplayer-wgpu-bevy: rendering into an sRGB target ({format:?}); SpriteStudio art \
+             is authored in sRGB and will look too bright. Add `CompositingSpace::Srgb` to the \
+             camera to composite in sRGB (a non-sRGB target)."
+        );
+    }
+
     if state.scene_format != Some(format) {
         // Coverage, not stencil: Bevy's 2d depth texture is `Depth32Float`, which
         // carries no stencil to lend, and this crate draws into Bevy's own pass
