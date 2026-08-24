@@ -24,11 +24,7 @@ use ssplayer_wgpu_bevy::{SsPlayback, SsPlayer, SsPlayerPlugin, SsTransform};
 /// Selectable masking fixtures: `(key, pack, animation)`. The animation names are
 /// what the packs actually declare (`SSPlayer::animation_names`), not the file
 /// stems — `True_Light.ssab` plays `True_light`, note the case.
-const MASK_PACKS: &[(&str, &str, &str)] = &[
-    ("true_light", "assets/Mask/True_Light.ssab", "True_light"),
-    ("walk_gate", "assets/Mask/Walk_Gate.ssab", "Walk_gate"),
-    ("mask", "assets/overall/Mask.ssab", "anime_1"),
-];
+const MASK_PACKS: &[(&str, &str, &str)] = &[("true_light", "assets/Mask/True_Light.ssab", "True_light"), ("walk_gate", "assets/Mask/Walk_Gate.ssab", "Walk_gate"), ("mask", "assets/overall/Mask.ssab", "anime_1")];
 
 /// The pack named on the command line, defaulting to the first entry.
 fn selected_mask() -> (&'static str, &'static str) {

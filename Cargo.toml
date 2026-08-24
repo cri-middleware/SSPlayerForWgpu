@@ -2,6 +2,7 @@
 resolver = "3"
 members = [
     "libs/ssplayer-wgpu",
+    "libs/ssplayer-wgpu-ffi",
     "libs/ssplayer-wgpu-bevy",
     "examples/viewer",
 ]
@@ -25,15 +26,15 @@ description = "wgpu renderer for OPTPiX SpriteStudio 7 animations"
 # The SDK is a git submodule rather than a released crate: this player links the
 # runtime's Rust API directly (not the C-API the other Players use), so it has to
 # track unreleased .ssab schema changes. `git submodule update --init` first.
-# `std` is not optional here. ssruntime is `no_std` and its default feature set
-# picks no allocator, while its `[lib]` declares staticlib/cdylib — and cargo
-# builds every crate-type of a dependency, so those artifacts need a
-# `#[global_allocator]` and a `#[panic_handler]` on *every* target, not just
-# wasm32. The `web` feature already asks for `ssruntime/std` for that reason
-# (SPEC §12 P1); a native build needs it just the same. This player uses std
-# anyway (wgpu does), so there is no conflict — unlike `ssruntime/panic-handler`,
-# which would duplicate std's `panic_impl`.
-ssruntime = { path = "SpriteStudio-SDK/libs/ssruntime", features = ["std"] }
+# No `std`, deliberately: the feature swaps ssruntime's float maths from the
+# `libm` crate to the platform's, and every other Player ships the no_std build.
+# Leaving it on would make this the one Player whose playback arithmetic can
+# differ. It used to be forced — ssruntime's `[lib]` declared staticlib/cdylib,
+# cargo builds every crate-type of a dependency, and those artifacts wanted an
+# allocator and a panic handler on every target — but the SDK moved them to
+# ssruntime-ffi, so what arrives here is a plain rlib and the allocator comes
+# from this player's own std-linked binary.
+ssruntime = { path = "SpriteStudio-SDK/libs/ssruntime" }
 ssab = { path = "SpriteStudio-SDK/libs/ssab", default-features = false }
 ssplayer-wgpu = { path = "libs/ssplayer-wgpu" }
 

@@ -20,10 +20,22 @@
 // Escape      quit
 // drop play a dropped .ssab, or every .ssab in a dropped folder
 //
+// Tracks — the stack the runtime folds onto the setup pose. These are here
+// because the eye is the only judge of some of it: whether a crossfade reads as
+// a transition rather than a cut, whether an additive overlay displaces the
+// performance underneath instead of replacing it, and whether track 0 at alpha 0
+// really settles onto the rest pose.
+//
+// C           crossfade track 0 to the next animation (400ms)
+// S           cycle which animation sits on track 1, or take it off
+// 1 / 2       track 1 alpha down / up        A  track 1 mix / additive
+// 0           fade track 0 to the rest pose and back
+// , / .       scrub track 1's frame — how a tracking-driven axis is driven
+//
 // The pack, animation, visibility and alpha keys act on the **focused** member;
 // focus starts at "all", so they drive the whole cast until you press Tab.
 
-use ssplayer_wgpu::{MaskBackend, SSPack, SSPlayer, SSRenderer, SSScene, SceneConfig};
+use ssplayer_wgpu::{MaskBackend, SSPack, SSPlayer, SSRenderer, SSScene, SceneConfig, TrackBlend};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
@@ -77,6 +89,12 @@ struct Member {
     pack_idx: usize,
     /// Index into [`AppState::pack_anims`]`[pack_idx]`.
     anim_idx: usize,
+    /// Which animation is laid on track 1, if any. Track 0 is `anim_idx`; this
+    /// is the overlay the S / A / 1 / 2 keys drive.
+    overlay_idx: Option<usize>,
+    /// Where the overlay's playhead is parked when it is being scrubbed rather
+    /// than played — the shape a tracking-driven axis has.
+    overlay_frame: Option<f32>,
 }
 
 /// (Re)create the depth/stencil render target at the given size.
@@ -253,7 +271,7 @@ impl AppState {
     /// loads what it plays, and that call brings the pack's atlases and the packs
     /// its instance parts reference with it.
     fn spawn_member(&mut self, pack_idx: usize, anim_idx: usize) {
-        self.cast.push(Member { player: SSPlayer::new(), pack_idx, anim_idx });
+        self.cast.push(Member { player: SSPlayer::new(), pack_idx, anim_idx, overlay_idx: None, overlay_frame: None });
 
         let idx = self.cast.len() - 1;
         self.apply_pack(idx, pack_idx);
@@ -388,7 +406,106 @@ impl AppState {
             eprintln!("Failed to select animation {name:?}: {e:?}");
             return;
         }
+        // Setting track 0 rebuilds the stack, so any overlay went with it.
+        member.overlay_idx = None;
+        member.overlay_frame = None;
         member.player.play();
+    }
+
+    // --- tracks ------------------------------------------------------------
+    //
+    // The keys below drive the runtime's track stack so its behaviour can be
+    // watched rather than inferred: `alpha` as a strength that does not care
+    // what is under it, additive as an offset rather than a replacement, a
+    // crossfade that starts from whatever is playing, and track 0 at alpha 0
+    // settling onto the setup pose.
+
+    /// Lay the next animation of the pack on track 1, or take it off again.
+    fn cycle_overlay(&mut self, idx: usize) {
+        let pack_idx = self.cast[idx].pack_idx;
+        let names = self.pack_anims.get(pack_idx).map(Vec::as_slice).unwrap_or(&[]);
+        if names.is_empty() {
+            return;
+        }
+        let next = match self.cast[idx].overlay_idx {
+            // Walk the list, then come back round to "no overlay".
+            Some(i) if (i + 1) % names.len() == self.cast[idx].anim_idx => None,
+            Some(i) => Some((i + 1) % names.len()),
+            None => Some((self.cast[idx].anim_idx + 1) % names.len()),
+        };
+        let member = &mut self.cast[idx];
+        match next {
+            Some(i) => {
+                let name = names[i].clone();
+                if let Err(e) = member.player.set_track_animation(1, &name) {
+                    eprintln!("Failed to put {name:?} on track 1: {e:?}");
+                    return;
+                }
+                // Start at half strength: the point is to see partial blending.
+                let _ = member.player.set_track_alpha(1, 0.5);
+                member.overlay_idx = Some(i);
+            }
+            None => {
+                let _ = member.player.clear_track(1);
+                member.overlay_idx = None;
+                member.overlay_frame = None;
+            }
+        }
+    }
+
+    fn nudge_track_alpha(&mut self, idx: usize, delta: f32) {
+        let member = &mut self.cast[idx];
+        let Some(current) = member.player.track_alpha(1) else { return };
+        // Not clamped at the top on purpose — over 1 extrapolates, which is
+        // occasionally what an overlay wants and worth being able to see.
+        let _ = member.player.set_track_alpha(1, (current + delta).max(0.0));
+    }
+
+    fn toggle_track_blend(&mut self, idx: usize) {
+        let member = &mut self.cast[idx];
+        let next = match member.player.track_blend(1) {
+            Some(TrackBlend::Additive) => TrackBlend::Mix,
+            _ => TrackBlend::Additive,
+        };
+        let _ = member.player.set_track_blend(1, next);
+    }
+
+    /// Scrub the overlay instead of playing it — how a continuous axis is driven.
+    fn scrub_overlay(&mut self, idx: usize, delta: f32) {
+        let member = &mut self.cast[idx];
+        if member.overlay_idx.is_none() {
+            return;
+        }
+        let current = member.overlay_frame.or_else(|| member.player.track_frame(1)).unwrap_or(0.0);
+        let next = (current + delta).max(0.0);
+        if member.player.set_track_frame(1, next).is_ok() {
+            member.overlay_frame = Some(next);
+            let _ = member.player.set_track_speed(1, 0.0);
+        }
+    }
+
+    /// Fade track 0 out to the setup pose, or back in.
+    fn toggle_rest_pose(&mut self, idx: usize) {
+        let member = &mut self.cast[idx];
+        let target = if member.player.track_alpha(0).unwrap_or(1.0) > 0.5 { 0.0 } else { 1.0 };
+        let _ = member.player.fade_track(0, target, 500.0);
+    }
+
+    /// Crossfade track 0 to the next animation, without rebuilding the tree.
+    fn crossfade_next(&mut self, idx: usize) {
+        let pack_idx = self.cast[idx].pack_idx;
+        let names = self.pack_anims.get(pack_idx).map(Vec::as_slice).unwrap_or(&[]);
+        if names.is_empty() {
+            return;
+        }
+        let next = (self.cast[idx].anim_idx + 1) % names.len();
+        let name = names[next].clone();
+        let member = &mut self.cast[idx];
+        if let Err(e) = member.player.crossfade(0, &name, 400.0) {
+            eprintln!("Failed to crossfade to {name:?}: {e:?}");
+            return;
+        }
+        member.anim_idx = next;
     }
 
     /// Place the cast and stack it front to back.
@@ -473,6 +590,23 @@ impl AppState {
             let anim = self.pack_anims.get(member.pack_idx).and_then(|names| names.get(member.anim_idx)).map(String::as_str).unwrap_or("none");
             let hidden = if member.player.is_visible() { "" } else { " [hidden]" };
             println!(" {marker} #{} {pack} / {anim} order {} alpha {:.2} nodes {}{hidden}", i + 1, member.player.order(), member.player.alpha(), member.player.instance_node_count());
+
+            // The track stack, when there is one to show.
+            let track0 = member.player.track_alpha(0).unwrap_or(1.0);
+            let fading = member.player.track_fade_progress(0).map(|p| format!(", fading {:.0}%", p * 100.0)).unwrap_or_default();
+            if track0 < 0.999 || !fading.is_empty() {
+                println!("      track 0 alpha {track0:.2}{fading}");
+            }
+            if let Some(oi) = member.overlay_idx {
+                let name = self.pack_anims.get(member.pack_idx).and_then(|n| n.get(oi)).map(String::as_str).unwrap_or("?");
+                let a = member.player.track_alpha(1).unwrap_or(0.0);
+                let blend = match member.player.track_blend(1) {
+                    Some(TrackBlend::Additive) => "additive",
+                    _ => "mix",
+                };
+                let scrub = member.overlay_frame.map(|f| format!(", scrubbed to frame {f:.0}")).unwrap_or_default();
+                println!("      track 1 {name} alpha {a:.2} {blend}{scrub}");
+            }
         }
 
         //what the frame cost. `prims` vs `draw_calls` is the
@@ -499,6 +633,10 @@ impl AppState {
         println!(" R           - Restart animation [ / ] - Alpha down / up");
         println!(" L           - Row / Stack layout O     - Reverse draw order");
         println!(" F           - Toggle Y-Axis Flip Esc - Exit");
+        println!(" -- tracks --");
+        println!(" C  - Crossfade to next anim S     - Cycle track 1 overlay");
+        println!(" 1/2 - Track 1 alpha down / up A     - Track 1 mix / additive");
+        println!(" 0  - Fade track 0 to rest pose , /. - Scrub track 1 frame");
         println!(" Drop a .ssab or a folder on the window to play it");
         println!("====================================================");
     }
@@ -742,6 +880,45 @@ impl ApplicationHandler for App {
                         let member = &mut state.cast[idx];
                         let alpha = member.player.alpha();
                         member.player.set_alpha(alpha + step);
+                    }
+                    state.refresh_status();
+                }
+                // --- tracks ---
+                winit::keyboard::Key::Character(ref c) if c.eq_ignore_ascii_case("c") => {
+                    for idx in state.targets() {
+                        state.crossfade_next(idx);
+                    }
+                    state.refresh_status();
+                }
+                winit::keyboard::Key::Character(ref c) if c.eq_ignore_ascii_case("s") => {
+                    for idx in state.targets() {
+                        state.cycle_overlay(idx);
+                    }
+                    state.refresh_status();
+                }
+                winit::keyboard::Key::Character(ref c) if c.eq_ignore_ascii_case("a") => {
+                    for idx in state.targets() {
+                        state.toggle_track_blend(idx);
+                    }
+                    state.refresh_status();
+                }
+                winit::keyboard::Key::Character(ref c) if c == "1" || c == "2" => {
+                    let delta = if c == "2" { 0.1 } else { -0.1 };
+                    for idx in state.targets() {
+                        state.nudge_track_alpha(idx, delta);
+                    }
+                    state.refresh_status();
+                }
+                winit::keyboard::Key::Character(ref c) if c == "0" => {
+                    for idx in state.targets() {
+                        state.toggle_rest_pose(idx);
+                    }
+                    state.refresh_status();
+                }
+                winit::keyboard::Key::Character(ref c) if c == "," || c == "." => {
+                    let delta = if c == "." { 1.0 } else { -1.0 };
+                    for idx in state.targets() {
+                        state.scrub_overlay(idx, delta);
                     }
                     state.refresh_status();
                 }

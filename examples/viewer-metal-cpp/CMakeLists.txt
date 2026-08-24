@@ -3,7 +3,7 @@
 #   cmake -B build && cmake --build build && ./build/ssviewer-metal
 #
 # The player is built by cargo (feature `ffi`), which also regenerates
-# libs/ssplayer-wgpu/include/ssplayer_wgpu.h through cbindgen. This project is
+# libs/ssplayer-wgpu-ffi/include/ssplayer_wgpu.h through cbindgen. This project is
 # outside the Cargo workspace on purpose: it consumes the built library and the
 # generated header, nothing else.
 
@@ -34,15 +34,15 @@ endif()
 
 set(SS_LIB_DIR "${REPO_ROOT}/target/${CARGO_PROFILE_DIR}")
 set(SS_LIB "${SS_LIB_DIR}/libssplayer_wgpu.dylib")
-set(SS_INCLUDE_DIR "${REPO_ROOT}/libs/ssplayer-wgpu/include")
+set(SS_INCLUDE_DIR "${REPO_ROOT}/libs/ssplayer-wgpu-ffi/include")
 
 # Always run: cargo is the authority on whether anything needs rebuilding, and
 # it regenerates the header in the same pass.
 add_custom_target(ssplayer_wgpu_ffi ALL
-    COMMAND cargo build ${CARGO_ARGS} -p ssplayer-wgpu --features ffi
+    COMMAND cargo build ${CARGO_ARGS} -p ssplayer-wgpu-ffi
     WORKING_DIRECTORY "${REPO_ROOT}"
     BYPRODUCTS "${SS_LIB}" "${SS_INCLUDE_DIR}/ssplayer_wgpu.h"
-    COMMENT "cargo build -p ssplayer-wgpu --features ffi (${CARGO_PROFILE_DIR})"
+    COMMENT "cargo build -p ssplayer-wgpu-ffi (${CARGO_PROFILE_DIR})"
     VERBATIM)
 
 add_executable(ssviewer-metal src/main.mm)

@@ -63,8 +63,15 @@
   </p>
 
   <script type="module">
-    import './ss-player-webgpu.js';
-    import { sharedContext } from './ss-context.js';
+    // The published package as it ships: scripts/build.sh platform=web stages
+    // packages/ssplayer-wgpu here, so what the demo drives is the same dist/ an
+    // `npm i @spritestudio/ssplayer-wgpu` gets — not a second copy that can drift.
+    import { defineSsPlayerWebGPUElement } from './ssplayer-wgpu/dist/element.js';
+    import { sharedContext } from './ssplayer-wgpu/dist/index.js';
+
+    // Registration is opt-in in the package (the element is its own entry point),
+    // so a page that wants <ss-player-webgpu> asks for it once.
+    defineSsPlayerWebGPUElement();
 
     // Standalone single-pack animations from tests/overall (no external instance refs).
     // TextureChange is here on purpose: its parts bind by texture *file name*

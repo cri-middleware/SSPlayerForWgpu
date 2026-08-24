@@ -88,8 +88,10 @@ jobs:
 
       - name: Build the ffi face
         # No native default command compiles src/ffi.rs or src/host.rs, so build
-        # the feature explicitly. This also regenerates the cbindgen header.
-        run: cargo clippy -p ssplayer-wgpu --features ffi --all-targets -- -D warnings
+        # the feature explicitly, then build the ffi crate that regenerates the header.
+        run: |
+          cargo clippy -p ssplayer-wgpu --features ffi --all-targets -- -D warnings
+          cargo build -p ssplayer-wgpu-ffi
 
       - name: Test the ffi face
         # The `cargo test --workspace` above runs with default features, which do
@@ -101,7 +103,7 @@ jobs:
         run: cargo test -p ssplayer-wgpu --features ffi --lib
 
       - name: Check the generated header is up to date
-        run: git diff --exit-code -- libs/ssplayer-wgpu/include/ssplayer_wgpu.h
+        run: git diff --exit-code -- libs/ssplayer-wgpu-ffi/include/ssplayer_wgpu.h
 
   windows:
     name: 🪟 DX12 viewer (Windows)
@@ -131,7 +133,7 @@ jobs:
       # this is a compile check and nothing more — DX12 itself still has to be
       # exercised by running the viewer on real hardware (SPEC §14).
       - name: Build the ffi face (MSVC)
-        run: cargo build -p ssplayer-wgpu --features ffi --release
+        run: cargo build -p ssplayer-wgpu-ffi --release
 
       - name: Build the DX12 C++ viewer
         run: |
@@ -165,3 +167,32 @@ jobs:
 
       - name: Build the js face
         run: cargo build -p ssplayer-wgpu --target wasm32-unknown-unknown --no-default-features --features web
+
+      # The TypeScript layer of @spritestudio/ssplayer-wgpu types itself against
+      # wasm-pack's generated .d.ts, so a change to the js face's Rust signatures
+      # breaks it silently -- cargo compiles the wasm happily and no other job
+      # touches the package. Typechecking it here is the guard, and it needs the
+      # .d.ts, which only wasm-pack emits.
+      - name: Install wasm-pack
+        uses: taiki-e/install-action@07b4745e0c39a41822af610387492e3e53aa222b # v2
+        with:
+          tool: wasm-pack
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@0977fd99725f1db4007ccb2928dbb4e90d06cc86 # v6.0.10
+
+      - name: Setup Node
+        uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: pnpm
+          cache-dependency-path: packages/ssplayer-wgpu/pnpm-lock.yaml
+
+      # build=debug on purpose: --dev skips wasm-opt and reuses the debug artifacts
+      # the step above already built. Size figures never come from this job.
+      - name: Build the npm package
+        run: ./scripts/build.sh platform=web build=debug deploy=no
+
+      - name: Typecheck the js layer
+        working-directory: packages/ssplayer-wgpu
+        run: pnpm run typecheck
