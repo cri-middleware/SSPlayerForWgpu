@@ -12,7 +12,7 @@
 //! wrap mid-tick, and every frame stepped through raises its events. Reading
 //! only the frame that was landed on loses the rest.
 
-use ssab::ssab::ss::format::{AnimationData, SignalCommandParamValue};
+use ssab::ssab::ss::format::{AnimationData, SignalCommandParamValue, SsAnimeBinary};
 
 /// One value carried by a signal parameter.
 #[derive(Clone, Debug, PartialEq)]
@@ -40,6 +40,12 @@ pub struct SignalParam {
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct UserDataEvent {
     pub part_index: u32,
+    /// The part's name as authored, or empty when the pack has none for it.
+    pub part_name: String,
+    /// The frame the key is **authored** on, which is not necessarily the frame
+    /// it was noticed on: one update can step across several and reports every
+    /// key in between.
+    pub frame_no: u32,
     pub integer: Option<i32>,
     /// `[x1, y1, x2, y2]` as authored — two corners, not origin+size.
     pub rect: Option<[f32; 4]>,
@@ -51,6 +57,12 @@ pub struct UserDataEvent {
 #[derive(Clone, Debug, PartialEq)]
 pub struct SignalEvent {
     pub part_index: u32,
+    /// The part's name as authored, or empty when the pack has none for it.
+    pub part_name: String,
+    /// The frame the key is **authored** on, which is not necessarily the frame
+    /// it was noticed on: one update can step across several and reports every
+    /// key in between.
+    pub frame_no: u32,
     pub command_id: String,
     pub params: Vec<SignalParam>,
 }
@@ -60,6 +72,12 @@ pub struct SignalEvent {
 #[derive(Clone, Debug, PartialEq)]
 pub struct AudioEvent {
     pub part_index: u32,
+    /// The part's name as authored, or empty when the pack has none for it.
+    pub part_name: String,
+    /// The frame the key is **authored** on, which is not necessarily the frame
+    /// it was noticed on: one update can step across several and reports every
+    /// key in between.
+    pub frame_no: u32,
     /// The alias as authored, kept for diagnostics and for hosts that key their
     /// own audio by name.
     pub sound_name: String,
@@ -102,20 +120,29 @@ impl SsEvent {
 ///
 /// Signals that are switched off are skipped, matching the sibling Players:
 /// an inactive signal is authoring state, not something that happened.
-pub(crate) fn decode_events(anim: &AnimationData<'_>, indices: &[i32], out: &mut Vec<SsEvent>) {
+pub(crate) fn decode_events(ab: &SsAnimeBinary<'_>, anim: &AnimationData<'_>, indices: &[i32], out: &mut Vec<SsEvent>) {
     let Some(events) = anim.events() else { return };
     let len = events.len();
+    // The pack's part list is shared across its animations, so one lookup per
+    // event resolves the name a host would otherwise carry the pack around for.
+    let parts = ab.parts();
+    let part_name = |index: u32| -> String {
+        parts.get(index as usize).name().to_owned()
+    };
     for &index in indices {
         if index < 0 || index as usize >= len {
             continue;
         }
         let per_frame = events.get(index as usize);
+        let frame_no = per_frame.frame_index() as u32;
 
         if let Some(users) = per_frame.users() {
             for user in users {
                 let value = user.value();
                 out.push(SsEvent::UserData(UserDataEvent {
                     part_index: user.part_index() as u32,
+                    part_name: part_name(user.part_index() as u32),
+                    frame_no,
                     integer: value.integer().map(|v| v.value()),
                     rect: value.rect().map(|r| [r.x1(), r.y1(), r.x2(), r.y2()]),
                     point: value.point().map(|p| [p.v1(), p.v2()]),
@@ -131,7 +158,7 @@ pub(crate) fn decode_events(anim: &AnimationData<'_>, indices: &[i32], out: &mut
                     continue;
                 }
                 let params = value.params().iter().map(|param| SignalParam { id: param.param_id().to_owned(), value: decode_signal_value(&param) }).collect();
-                out.push(SsEvent::Signal(SignalEvent { part_index: signal.part_index() as u32, command_id: value.command_id().to_owned(), params }));
+                out.push(SsEvent::Signal(SignalEvent { part_index: signal.part_index() as u32, part_name: part_name(signal.part_index() as u32), frame_no, command_id: value.command_id().to_owned(), params }));
             }
         }
 
@@ -140,6 +167,8 @@ pub(crate) fn decode_events(anim: &AnimationData<'_>, indices: &[i32], out: &mut
                 let value = audio.value();
                 out.push(SsEvent::Audio(AudioEvent {
                     part_index: audio.part_index() as u32,
+                    part_name: part_name(audio.part_index() as u32),
+                    frame_no,
                     sound_name: value.sound_name().to_owned(),
                     sound_list_name_hash: value.sound_list_name_hash(),
                     sound_name_hash: value.sound_name_hash(),

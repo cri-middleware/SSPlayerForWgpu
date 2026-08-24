@@ -353,7 +353,7 @@ fn collect_events(node: &PlaybackNode, animation: Option<&str>, out: &mut Vec<Ss
     let Some(anim) = ab.animations().iter().find(|a| a.name() == animation) else {
         return;
     };
-    decode_events(&anim, indices, out);
+    decode_events(&ab, &anim, indices, out);
 }
 
 /// One node in the playback tree: a runtime context plus its instance children
