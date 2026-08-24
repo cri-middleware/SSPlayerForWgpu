@@ -830,7 +830,9 @@ pub unsafe extern "C" fn ss_player_set_animation(handle: *mut SsPlayer, anim_nam
     }
 }
 
-/// Start — or, after `ss_player_pause`, resume — the selected animation.
+/// Start the selected animation from the head of its section, re-arming the loop
+/// count. Not a resume: it rewinds, so lifting a `ss_player_pause` is
+/// `ss_player_resume`'s job.
 /// Does nothing until `ss_player_set_animation` has succeeded.
 ///
 /// # Safety
@@ -842,7 +844,8 @@ pub unsafe extern "C" fn ss_player_play(handle: *mut SsPlayer) {
     }
 }
 
-/// Freeze playback where it is; `ss_player_play` resumes from there.
+/// Hold playback on the current frame. Idempotent, and ignored while nothing is
+/// playing. Lift it with `ss_player_resume`.
 ///
 /// # Safety
 /// `handle` must be a live handle or null.
@@ -853,7 +856,19 @@ pub unsafe extern "C" fn ss_player_pause(handle: *mut SsPlayer) {
     }
 }
 
-/// Stop playback and rewind to the animation's start frame.
+/// Lift a `ss_player_pause`, carrying on from the same frame. Idempotent, and a
+/// no-op on a stopped animation — starting one is `ss_player_play`'s job.
+///
+/// # Safety
+/// `handle` must be a live handle or null.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn ss_player_resume(handle: *mut SsPlayer) {
+    if let Some(player) = unsafe { player(handle) } {
+        player.resume();
+    }
+}
+
+/// Stop playback. The playhead stays where it stands; nothing rewinds.
 ///
 /// # Safety
 /// `handle` must be a live handle or null.
