@@ -5,7 +5,7 @@
 A high-performance player for **[OPTPiX SpriteStudio 7](https://www.webtech.co.jp/spritestudio/)**
 animations (`.ssab`), built on [wgpu](https://wgpu.rs/). Animate the sprite art you already have
 (PNG / WebP) in a dedicated editor, then play it back through **one** rendering code path that covers
-WebGPU, Vulkan, DX12, Metal and GL — no video files, no re-authoring, no engine lock-in.
+WebGPU, Vulkan, DX12 and Metal — no video files, no re-authoring, no engine lock-in.
 
 The player never owns the wgpu `Device` / `Queue` / `Surface`: the host owns them and lends them per
 frame. That is what lets one library serve a standalone window, a browser canvas and a C++ host without

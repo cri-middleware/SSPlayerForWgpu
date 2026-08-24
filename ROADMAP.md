@@ -156,5 +156,10 @@ respect are in [`AGENTS.md`](./AGENTS.md) under *Hard constraints*.
 - **Sharing an engine's device through the C ABI.** wgpu types do not cross a C
   boundary; engine embedding is a Rust-only capability, delivered as adapter
   crates. From C the route is offscreen rendering plus a shared texture.
+- **The GL backend.** The renderer pulls its vertices from storage buffers bound
+  to the vertex stage, which GL exposes only from 4.3 / GLES 3.1 and WebGL not at
+  all. No GL adapter is selected or verified anywhere: the instance takes
+  `Backends::PRIMARY` (Vulkan / Metal / DX12 / WebGPU), and the C API's backend
+  selector offers DX12, Metal and Vulkan.
 - **A WebGL fallback.** `ssplayer-webgl` is maintained and is the answer for
   environments without WebGPU.
