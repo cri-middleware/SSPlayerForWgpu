@@ -128,8 +128,8 @@ ss_player_play(player);
 | SS6Player for CPP | 本バージョン（Rust） | C API | 備考 |
 |---|---|---|---|
 | `IndexGetAnimation(name)` + `AnimationPlay(track, index, …)` | `set_animation(name)` + `play()` | `ss_player_set_animation` / `ss_player_play` | **アニメーション選択と再生開始を分離** |
-| `AnimationStop(track)` | `stop()` | `ss_player_stop` | 停止（先頭フレームへ巻き戻し） |
-| `AnimationPause(track, true/false)` | `pause()` / `play()` | `ss_player_pause` / `ss_player_play` | `play()` で一時停止から再開 |
+| `AnimationStop(track)` | `stop()` | `ss_player_stop` | 停止（再生ヘッドはその場に残り、巻き戻さない） |
+| `AnimationPause(track, true/false)` | `pause()` / `resume()` | `ss_player_pause` / `ss_player_resume` | 一時停止の解除は `resume()`。`play()` は先頭出しなので再開には使えない |
 | `AnimationPlay(…, timesPlay)` | `set_loop_count(n)` | `ss_player_set_loop_count` | `-1` / `0` = 無限, `n` = n回 |
 | `RateTimeSet(track, rate)` | `set_speed(f32)` | `ss_player_set_speed` | 正の再生速度倍率（1.0 = 標準） |
 | `rateTime` に負値を与えて逆再生 | `set_playback_direction(Backward, style)` | `ss_player_set_playback_direction` | **速度と再生方向を分離** |
@@ -139,7 +139,7 @@ ss_player_play(player);
 | `labelRangeStart` / `labelRangeEnd` | `set_animation_section(start, end)` | `ss_player_set_animation_section` | **フレーム番号で指定** |
 | `AnimationPlay(…, framePerSecond)` | `set_frame_rate(fps)` | `ss_player_set_frame_rate` | fps 指定 |
 | `StatusGetPlay(track)` | `is_playing()` | `ss_player_is_playing` | 再生中か（一時停止中も `true`） |
-| `StatusGetPause(track)` | `is_paused()` | `ss_player_is_paused` | 一時停止中か |
+| `StatusGetPause(track)` | `is_paused()` | `ss_player_is_paused` | 一時停止中か（未再生時と `stop()` 後は `false`） |
 | `CountGetAnimation()` / `NameGetAnimation(i)` | `animation_names()` | `ss_player_animation_count` / `_name` | アニメーション名一覧 |
 | `Entity::RateSetOpacity(rate)` | `set_alpha(f32)` | `ss_player_set_alpha` | プレイヤ全体の不透明度 (0.0〜1.0) |
 | `Entity::RateSetScaleLocal()` / `Draw` の `matrixWorld` | `set_transform(x, y, sx, sy, rot)` | `ss_player_set_transform` | 位置・拡大縮小・回転（ラジアン） |

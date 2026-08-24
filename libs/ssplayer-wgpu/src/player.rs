@@ -828,7 +828,9 @@ impl SSPlayer {
         Ok(())
     }
 
-    /// Start — or, after [`SSPlayer::pause`], resume — the selected animation.
+    /// Start the selected animation from the head of its section, re-arming the
+    /// loop count. **Not a resume**: it rewinds, so lifting a
+    /// [`SSPlayer::pause`] is [`SSPlayer::resume`]'s job.
     /// No-op until [`SSPlayer::set_animation`] has succeeded.
     pub fn play(&mut self) {
         // Re-arm the completion latch. Without this, replaying an animation that
@@ -841,12 +843,26 @@ impl SSPlayer {
         }
     }
 
+    /// Hold playback on the current frame. Idempotent, and ignored while
+    /// nothing is playing. [`SSPlayer::is_playing`] stays true — a hold is not
+    /// a stop.
     pub fn pause(&mut self) {
         if let Some(root) = &mut self.root {
             root.context.pause();
         }
     }
 
+    /// Lift a [`SSPlayer::pause`], carrying on from the same frame. Idempotent,
+    /// and a no-op on a stopped animation — starting one is [`SSPlayer::play`]'s
+    /// job, and it rewinds.
+    pub fn resume(&mut self) {
+        if let Some(root) = &mut self.root {
+            root.context.resume();
+        }
+    }
+
+    /// End playback. The playhead stays where it stands; nothing rewinds, so the
+    /// host keeps drawing the frame it stopped on.
     pub fn stop(&mut self) {
         if let Some(root) = &mut self.root {
             root.context.stop();
@@ -864,6 +880,8 @@ impl SSPlayer {
     }
 
     /// Held in place rather than stopped: [`SSPlayer::is_playing`] stays true.
+    /// False before the first [`SSPlayer::play`] and after [`SSPlayer::stop`] —
+    /// the runtime keeps "paused" implying "playing".
     pub fn is_paused(&self) -> bool {
         self.root.as_ref().map(|r| r.context.is_pausing()).unwrap_or(false)
     }
