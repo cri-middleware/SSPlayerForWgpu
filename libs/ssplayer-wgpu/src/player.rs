@@ -945,8 +945,14 @@ impl SSPlayer {
     //
     // NOTE: `set_animation` rebuilds the tree from scratch, so it resets every
     // setting here (and `set_speed`) to the pack's defaults. Re-apply whatever
-    // you chose after each call. This layer does not cache them for you, as the
-    // Flutter and Unity Players do.
+    // you chose after each call. This layer caches nothing for you.
+    //
+    // That goes further than the other Players: a runtime `setup_animation`
+    // keeps the host's speed, frame skip and frame-rate override (SDK #369 /
+    // #370), but a rebuilt tree is a new `Context`, so nothing is there to be
+    // kept. Only the loop count matches them, and only because it is
+    // per-transition everywhere. The Players with a node or widget to hang it
+    // on re-apply their own loop count on top; this one leaves that to you.
 
     /// `count` cycles then stop; `-1` (or `0`) loops forever. Under
     /// [`PlaybackStyle::PingPong`] one cycle is a full round trip.
