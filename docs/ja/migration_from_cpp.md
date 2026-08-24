@@ -170,11 +170,11 @@ ss_player_play(player);
 
 | SS6Player for CPP | 本バージョン（Rust） | C API | ペイロード |
 |---|---|---|---|
-| `CallBackUserData` | `events()` の `SsEvent::UserData` | `ss_player_event_at` | パーツ名/ID、int/float/string/rect/point |
-| `CallBackSignal` | `events()` の `SsEvent::Signal` | 同上（＋ `ss_player_event_signal_param_at`） | コマンドID、パラメータ配列 |
+| `CallBackUserData` | `events()` の `SsEvent::UserData` | `ss_player_event_at` | パーツ名 / インデックス、フレーム番号、int / string / rect / point |
+| `CallBackSignal` | `events()` の `SsEvent::Signal` | 同上（＋ `ss_player_event_signal_param_at`） | パーツ名 / インデックス、フレーム番号、コマンド ID、パラメータ配列 |
 | `CallBackPlayEnd` | `finished_last_update()` | `ss_player_finished_last_update` | 再生終了判定（無限ループ時は `false`） |
 | （なし・新規） | `looped_last_update()` | `ss_player_looped_last_update` | ループ境界通過判定 |
-| （なし・新規） | `events()` の `SsEvent::Audio` | `ss_player_event_at` | サウンドアセット名等 |
+| （なし・新規） | `events()` の `SsEvent::Audio` | `ss_player_event_at` | パーツ名 / インデックス、フレーム番号、サウンド名とハッシュ、再生回数 |
 
 ### イベント取得例
 
@@ -187,14 +187,14 @@ for event in player.events() {
     match event {
         SsEvent::UserData(e) => {
             println!("UserData: part={}, frame={}", e.part_name, e.frame_no);
-            if let Some(val) = e.value_int { /* ... */ }
-            if let Some(txt) = &e.value_string { /* ... */ }
+            if let Some(val) = e.integer { /* ... */ }
+            if let Some(txt) = &e.text { /* ... */ }
         }
         SsEvent::Signal(e) => {
-            println!("Signal: command={}", e.command);
+            println!("Signal: command={}", e.command_id);
         }
         SsEvent::Audio(e) => {
-            println!("Audio: sound={}", e.name);
+            println!("Audio: sound={}", e.sound_name);
         }
     }
 }
