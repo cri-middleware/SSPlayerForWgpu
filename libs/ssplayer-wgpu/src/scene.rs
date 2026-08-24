@@ -329,10 +329,6 @@ pub struct SSScene {
     /// This frame's coverage bitmaps, kept across frames so a mask that holds its
     /// size class does not reallocate.
     coverage: Option<CoverageTargets>,
-    /// Whether the hardware stencil is in use — `mask == MaskBackend::Stencil`,
-    /// kept as its own flag because it is also what decides whether `draw` sets a
-    /// stencil reference and whether pipelines carry a depth-stencil state.
-    stencil_enabled: bool,
     /// How this target draws masks.
     mask: MaskBackend,
     /// The target's formats. Part of every [`PipelineKey`] this builds.
@@ -430,7 +426,6 @@ impl SSScene {
         debug_assert!(mask == config.mask, "MaskBackend::Stencil needs SceneConfig::stencil_format; masking is off for this scene");
 
         Self {
-            stencil_enabled: mask == MaskBackend::Stencil,
             coverage: None,
             mask,
             color_format: config.color_format,
@@ -579,9 +574,11 @@ impl SSScene {
         self.coverage = Some(CoverageTargets { _texture: texture, layer_views, bind_group, size, layers });
     }
 
-    /// Whether the hardware stencil is in use for this target.
+    /// Whether the hardware stencil is in use for this target. Also what decides
+    /// whether `draw` sets a stencil reference and whether pipelines carry a
+    /// depth-stencil state.
     pub fn stencil_enabled(&self) -> bool {
-        self.stencil_enabled
+        self.mask == MaskBackend::Stencil
     }
 
     /// How this target draws masks.
@@ -789,7 +786,7 @@ impl SSScene {
 
         // No vertex or index buffer: group(0) *is* the geometry.
         rpass.set_bind_group(0, scene_bg, &[]);
-        if self.stencil_enabled {
+        if self.stencil_enabled() {
             // Stencil ref is always 0; ops/compare are baked into the pipelines.
             rpass.set_stencil_reference(0);
         }
@@ -874,13 +871,18 @@ pub struct FrameChunk {
     coverage_calls: Vec<BatchDrawCall>,
     /// One entry per node that writes coverage this frame, in layer order.
     coverage_nodes: Vec<CoverageNode>,
+    /// Arena offsets of sub-animation coverage blocks that borrow a parent's
+    /// layer rather than owning one. They are not in `coverage_nodes` (they add
+    /// no layer), so `absorb` needs this list to rebase the layer they name when
+    /// players merge — miss it and a merged child samples a lower player's bitmap.
+    coverage_shared: Vec<u32>,
     /// Per-part integration-shader params, one `SHADER_PARAM_STRIDE_F32` slot each.
     ss_params: Vec<f32>,
 }
 
 impl FrameChunk {
     fn new(config: SceneConfig) -> Self {
-        Self { config, arena: Vec::new(), prims: Vec::new(), mesh_stream: Vec::new(), draw_calls: Vec::new(), coverage_calls: Vec::new(), coverage_nodes: Vec::new(), ss_params: Vec::new() }
+        Self { config, arena: Vec::new(), prims: Vec::new(), mesh_stream: Vec::new(), draw_calls: Vec::new(), coverage_calls: Vec::new(), coverage_nodes: Vec::new(), coverage_shared: Vec::new(), ss_params: Vec::new() }
     }
 
     /// Empty it for reuse, keeping the allocations — a chunk is recycled every
@@ -893,6 +895,7 @@ impl FrameChunk {
         self.draw_calls.clear();
         self.coverage_calls.clear();
         self.coverage_nodes.clear();
+        self.coverage_shared.clear();
         self.ss_params.clear();
     }
 
@@ -954,6 +957,14 @@ impl FrameChunk {
             let block_base = node.block_base + arena_base;
             self.arena[block_base as usize + COVERAGE_LAYER_F32] += layer_base as f32;
             self.coverage_nodes.push(CoverageNode { block_base, ..*node });
+        }
+        // Sub-animation blocks borrow a parent's layer instead of owning one, so
+        // the loop above skips them — but the layer they name still moves by the
+        // same base, or a merged child reads a lower player's bitmap.
+        for &block_base in &other.coverage_shared {
+            let block_base = block_base + arena_base;
+            self.arena[block_base as usize + COVERAGE_LAYER_F32] += layer_base as f32;
+            self.coverage_shared.push(block_base);
         }
         self.coverage_calls.extend(other.coverage_calls.iter().map(|call| BatchDrawCall { cov_layer: call.cov_layer.map(|layer| layer + layer_base), ..rebase(call) }));
     }
@@ -1034,7 +1045,11 @@ impl FrameChunk {
     /// coverage — and the rank, which is the instance part's, because that is
     /// where the sub-animation sits in the parent's draw order.
     pub fn inherit_node_coverage(&mut self, node: &mut NodeSlot, uv: &[f32; 6], layer: u32, rank: usize, writers: &MaskWriters) {
-        node.coverage = self.push_coverage_block(uv, layer, rank as f32, writers);
+        let base = self.push_coverage_block(uv, layer, rank as f32, writers);
+        // Not a `coverage_node` — it owns no layer — but `absorb` must still find
+        // it to rebase the borrowed layer when players merge.
+        self.coverage_shared.push(base);
+        node.coverage = base;
         node.coverage_layer = layer;
     }
 
