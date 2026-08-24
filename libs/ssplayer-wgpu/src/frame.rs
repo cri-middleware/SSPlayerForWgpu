@@ -5,6 +5,15 @@
 //! may be invalidated by the next frame fetch, so do not hold them across
 //! frames.
 
+/// Floats between one part's shape vertices and the next in
+/// [`FrameView::shape_vertices`] and [`FrameView::shape_vertex_box_coords`].
+///
+/// The runtime lays both out at a fixed stride rather than packing them, so a
+/// part's live vertex count (`shape_vertex_counts`) says how much of its slot is
+/// real. Shared because two readers derive offsets from it, and a stride that
+/// disagreed between them would read another part's shape.
+pub(crate) const SHAPE_VERTICES_STRIDE: usize = 24;
+
 /// Everything [`crate::SSScene`] needs to draw one frame, as borrows into
 /// runtime-owned data.
 #[derive(Clone, Copy, Default)]

@@ -22,7 +22,7 @@
 //! This is what verified the P7-6 SoA passthrough: moving vertex expansion from
 //! the CPU to the vertex stage left all 134 images bit-identical.
 
-use ssplayer_wgpu::{Retention, SSPlayer, SSRenderer, SSScene, SceneConfig};
+use ssplayer_wgpu::{MaskBackend, Retention, SSPlayer, SSRenderer, SSScene, SceneConfig};
 
 const W: u32 = 256;
 const H: u32 = 256;
@@ -160,7 +160,7 @@ fn golden_corpus() {
         for pack in &packs {
             let mut renderer = SSRenderer::new(&device);
             load_textures(&mut renderer, &device, &queue);
-            let mut scene = SSScene::new(&device, &SceneConfig { color_format: COLOR_FORMAT, stencil_format: stencil.then_some(STENCIL_FORMAT) });
+            let mut scene = SSScene::new(&device, &SceneConfig { color_format: COLOR_FORMAT, stencil_format: stencil.then_some(STENCIL_FORMAT), mask: if stencil { MaskBackend::Stencil } else { MaskBackend::None } });
             scene.set_viewport(&queue, W as f32, H as f32, false);
 
             let mut player = SSPlayer::new();
@@ -197,7 +197,7 @@ fn golden_corpus() {
     for (label, a, b) in [("mask_mask", "Mask", "Mask"), ("mask_basic", "Mask", "Basic"), ("shape_effect", "Shape", "Effect"), ("shader_mesh", "Shader", "Mesh")] {
         let mut renderer = SSRenderer::new(&device);
         load_textures(&mut renderer, &device, &queue);
-        let mut scene = SSScene::new(&device, &SceneConfig { color_format: COLOR_FORMAT, stencil_format: Some(STENCIL_FORMAT) });
+        let mut scene = SSScene::new(&device, &SceneConfig { color_format: COLOR_FORMAT, stencil_format: Some(STENCIL_FORMAT), mask: MaskBackend::Stencil });
         scene.set_viewport(&queue, W as f32, H as f32, false);
 
         let make = |pack: &str, x: f32| {

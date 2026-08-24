@@ -4,7 +4,7 @@
 //! enabled must differ from rendering with it disabled (masks ignored). Skips
 //! cleanly when no GPU adapter is available.
 
-use ssplayer_wgpu::{Retention, SSPlayer, SSRenderer, SSScene, SceneConfig};
+use ssplayer_wgpu::{MaskBackend, Retention, SSPlayer, SSRenderer, SSScene, SceneConfig};
 use std::path::Path;
 
 const W: u32 = 256;
@@ -36,7 +36,7 @@ fn load_textures(renderer: &mut SSRenderer, device: &wgpu::Device, queue: &wgpu:
 /// buffer), render `Mask.ssab`/etc. at frame `advance_frames`, return the readback.
 fn render_ssab(device: &wgpu::Device, queue: &wgpu::Queue, stencil: bool, pack: &str, advance_frames: u32) -> Vec<u8> {
     let mut renderer = SSRenderer::new(device);
-    let mut scene = SSScene::new(device, &SceneConfig { color_format: COLOR_FORMAT, stencil_format: stencil.then_some(STENCIL_FORMAT) });
+    let mut scene = SSScene::new(device, &SceneConfig { color_format: COLOR_FORMAT, stencil_format: stencil.then_some(STENCIL_FORMAT), mask: if stencil { MaskBackend::Stencil } else { MaskBackend::None } });
     let mut player = SSPlayer::new();
     load_textures(&mut renderer, device, queue, Path::new(asset_dir()));
 
@@ -240,7 +240,7 @@ fn restore_device_rebuilds_gpu_state() {
     // Reference mode (host-supplied textures): play 10 frames, lose the device,
     // restore onto the replacement, then render frame 11 there.
     let mut renderer = SSRenderer::new(&device);
-    let mut scene = SSScene::new(&device, &SceneConfig { color_format: COLOR_FORMAT, stencil_format: Some(STENCIL_FORMAT) });
+    let mut scene = SSScene::new(&device, &SceneConfig { color_format: COLOR_FORMAT, stencil_format: Some(STENCIL_FORMAT), mask: MaskBackend::Stencil });
     let mut player = SSPlayer::new();
     load_textures(&mut renderer, &device, &queue, Path::new(asset_dir()));
     let bytes = std::fs::read(format!("{}/Mask.ssab", asset_dir())).unwrap();
@@ -280,7 +280,7 @@ fn restore_device_rebuilds_gpu_state() {
     };
     let emb_expected = {
         let mut emb_renderer = SSRenderer::new(&device);
-        let mut emb_scene = SSScene::new(&device, &SceneConfig { color_format: COLOR_FORMAT, stencil_format: None });
+        let mut emb_scene = SSScene::new(&device, &SceneConfig { color_format: COLOR_FORMAT, stencil_format: None, mask: MaskBackend::None });
         let mut p = SSPlayer::new();
         p.load_ssab("Basic", &emb_bytes).unwrap();
         let anim = p.animation_names().unwrap()[0].clone();
@@ -291,7 +291,7 @@ fn restore_device_rebuilds_gpu_state() {
     };
 
     let mut emb_renderer = SSRenderer::new(&device);
-    let mut emb_scene = SSScene::new(&device, &SceneConfig { color_format: COLOR_FORMAT, stencil_format: None });
+    let mut emb_scene = SSScene::new(&device, &SceneConfig { color_format: COLOR_FORMAT, stencil_format: None, mask: MaskBackend::None });
     let mut emb = SSPlayer::new();
     emb.load_ssab("Basic", &emb_bytes).unwrap();
     let anim = emb.animation_names().unwrap()[0].clone();
@@ -335,7 +335,7 @@ fn render_embedded_ssab() {
     let reference = render_ssab(&device, &queue, false, "Basic", 10);
 
     let mut renderer = SSRenderer::new(&device);
-    let mut scene = SSScene::new(&device, &SceneConfig { color_format: COLOR_FORMAT, stencil_format: None });
+    let mut scene = SSScene::new(&device, &SceneConfig { color_format: COLOR_FORMAT, stencil_format: None, mask: MaskBackend::None });
     let mut player = SSPlayer::new();
     player.load_ssab("Basic", &bytes).unwrap(); // no load_textures — embedded supplies them
     let anim = player.animation_names().unwrap()[0].clone();

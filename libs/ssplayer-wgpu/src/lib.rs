@@ -50,7 +50,7 @@ pub use metrics::SceneStats;
 pub use pack::{EmbeddedImage, EmbeddedTexture, SSPack, TextureRef};
 pub use player::{AssetLoader, BlendOp, MissingAsset, MissingKind, OverridePriority, PlaybackDirection, PlaybackStyle, SSPlayer};
 pub use renderer::{AlphaMode, Retention, SSRenderer};
-pub use scene::{BatchInfo, FrameChunk, IDENTITY_TRANSFORM, NodeSlot, SSScene, SceneConfig};
+pub use scene::{BatchInfo, FrameChunk, IDENTITY_TRANSFORM, MaskBackend, NodeSlot, SSScene, SceneConfig};
 /// Re-exported from the runtime: how a track folds onto the tracks below it.
 pub use ssruntime::TrackBlend;
 #[cfg(feature = "web")]

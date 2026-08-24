@@ -14,7 +14,7 @@
 //! * **Per-frame values** (`PartState.mask`, draw order, batches) come from
 //!   `FrameData` and are re-read every frame here.
 
-use crate::frame::FrameView;
+use crate::frame::{FrameView, SHAPE_VERTICES_STRIDE};
 use ssruntime::runtime::framedata::ss::runtime::{DrawBatchKind, root_as_frame_data_unchecked};
 
 /// Upper bound on writers per frame (matches the WebGL planner). A single 8-bit
@@ -181,6 +181,82 @@ impl<'a> IntoIterator for &'a MaskWriters {
     fn into_iter(self) -> Self::IntoIter {
         self.iter()
     }
+}
+
+/// The player-local rectangle a frame's writers cover, as `[min_x, min_y,
+/// max_x, max_y]`, or `None` when they cover nothing.
+///
+/// This is the rectangle the coverage bitmap is stretched over (mask doc §3-2):
+/// normalising it to `[0,1]` is what makes the bitmap's resolution independent
+/// of how big the mask is on screen, and what lets one affine serve both the
+/// bake and the replay.
+///
+/// **Player-local, not world**: the points are taken after each part's own world
+/// matrix but before the player's placement, so moving or scaling the player
+/// does not move the bitmap under its own coverage.
+pub fn writer_bounds(frame: &FrameView, writers: &[MaskWriter]) -> Option<[f32; 4]> {
+    let mut bounds = [f32::INFINITY, f32::INFINITY, f32::NEG_INFINITY, f32::NEG_INFINITY];
+    let mut any = false;
+
+    let mut include = |x: f32, y: f32| {
+        // A NaN from a degenerate matrix must not poison the whole rectangle.
+        if !x.is_finite() || !y.is_finite() {
+            return;
+        }
+        bounds[0] = bounds[0].min(x);
+        bounds[1] = bounds[1].min(y);
+        bounds[2] = bounds[2].max(x);
+        bounds[3] = bounds[3].max(y);
+        any = true;
+    };
+
+    for writer in writers {
+        let part = writer.part_idx;
+        match writer.geom {
+            GeomKind::Quad => {
+                let (m, v) = (part * 16, part * 10);
+                if m + 16 > frame.world_matrices.len() || v + 10 > frame.local_vertices.len() {
+                    continue;
+                }
+                let mat = &frame.world_matrices[m..m + 16];
+                // The four corners; the fifth pair is the centre, which is inside
+                // them and cannot widen the rectangle.
+                for k in 0..4 {
+                    let (lx, ly) = (frame.local_vertices[v + k * 2], frame.local_vertices[v + k * 2 + 1]);
+                    include(mat[0] * lx + mat[4] * ly + mat[12], mat[1] * lx + mat[5] * ly + mat[13]);
+                }
+            }
+            GeomKind::Mesh => {
+                let offsets = &frame.mesh_vertex_offsets;
+                if offsets.is_empty() || part >= offsets.len() - 1 {
+                    continue;
+                }
+                let (start, end) = (offsets[part] as usize, offsets[part + 1] as usize);
+                if end > frame.mesh_vertices_x.len() || end > frame.mesh_vertices_y.len() {
+                    continue;
+                }
+                // Mesh vertices arrive already skinned into player-local space.
+                for i in start..end {
+                    include(frame.mesh_vertices_x[i], frame.mesh_vertices_y[i]);
+                }
+            }
+            GeomKind::Shape => {
+                let count = frame.shape_vertex_counts.get(part).copied().unwrap_or(0).max(0) as usize;
+                let (m, base) = (part * 16, part * SHAPE_VERTICES_STRIDE);
+                if count == 0 || m + 16 > frame.world_matrices.len() || base + count * 2 > frame.shape_vertices.len() {
+                    continue;
+                }
+                let mat = &frame.world_matrices[m..m + 16];
+                for k in 0..count {
+                    let (lx, ly) = (frame.shape_vertices[base + k * 2], frame.shape_vertices[base + k * 2 + 1]);
+                    include(mat[0] * lx + mat[4] * ly + mat[12], mat[1] * lx + mat[5] * ly + mat[13]);
+                }
+            }
+            GeomKind::Unsupported => {}
+        }
+    }
+
+    any.then_some(bounds)
 }
 
 /// Plan the frame's stencil writers by walking `draw_batches`, mirroring the

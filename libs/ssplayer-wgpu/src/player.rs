@@ -1536,7 +1536,7 @@ impl SSPlayer {
 
         let draw = NodeDraw { transform: &self.transform, alpha: self.alpha };
         let mut build = FrameBuild { scene, renderer };
-        render_node(root, &mut build, draw, frame_no, StencilTest::None);
+        render_node(root, &mut build, draw, frame_no, StencilTest::None, None);
     }
 
     /// What frame each instance child of the root is on, keyed by part index.
@@ -1690,6 +1690,11 @@ const FLAG_MASK_INFLUENCE: u8 = 0x01;
 /// writer's forward scope has begun → add it (Incr/Invert). Monotonic in
 /// `cursor`; ops are baked per pipeline, so ref is always 0.
 fn sync_masks_to(build: &mut FrameBuild<'_>, frame: &FrameView, node: &NodeSlot, writers: &[MaskWriter], cursor: &mut usize, up_to_rank: usize) {
+    // The coverage backend keeps no running state to advance: every writer was
+    // baked once and the replay decides scope per fragment.
+    if build.scene.mask_backend() == crate::MaskBackend::Coverage {
+        return;
+    }
     while *cursor < writers.len() && writers[*cursor].rank < up_to_rank {
         let w = &writers[*cursor];
         let op = if w.is_clipping {
@@ -1745,7 +1750,37 @@ struct NodeDraw<'a> {
 /// `draw` carries the owning player's placement and fade down the tree; whatever
 /// coverage this scope writes, it takes back before returning (see
 /// [`unwind_masks`]).
-fn render_node(node: &mut PlaybackNode, build: &mut FrameBuild<'_>, draw: NodeDraw, frame_no: f32, inherited_stencil: StencilTest) {
+/// A parent's coverage bitmap, as a sub-animation reads it (mask doc §3-2-2).
+///
+/// The bitmap and its writers belong to the animation that owns the mask; a
+/// child only ever borrows them, so this carries no ownership — just enough to
+/// point at the same layer through the child's own coordinates.
+#[derive(Clone, Copy)]
+struct InheritedCoverage {
+    /// Player-local -> coverage UV, in *this* node's local space.
+    uv: [f32; 6],
+    /// The layer the parent baked into.
+    layer: u32,
+    /// The rank the scope test uses: the instance part's, in the parent's order.
+    rank: usize,
+    writers: MaskWriters,
+}
+
+impl InheritedCoverage {
+    /// Push this down through one instance placement.
+    ///
+    /// `slot` is the instance part's world matrix — child-local to parent-local —
+    /// so composing it onto the affine keeps the child's own coordinates landing
+    /// where the parent's writers were baked. Only the 2D part matters: coverage
+    /// is a flat bitmap and the runtime's local Z is zero.
+    fn compose(self, slot: &[f32; 16], rank: usize) -> Self {
+        let [a, b, c, d, tx, ty] = self.uv;
+        let (m0, m1, m4, m5, m12, m13) = (slot[0], slot[1], slot[4], slot[5], slot[12], slot[13]);
+        Self { uv: [a * m0 + c * m1, b * m0 + d * m1, a * m4 + c * m5, b * m4 + d * m5, a * m12 + c * m13 + tx, b * m12 + d * m13 + ty], layer: self.layer, rank, writers: self.writers }
+    }
+}
+
+fn render_node(node: &mut PlaybackNode, build: &mut FrameBuild<'_>, draw: NodeDraw, frame_no: f32, inherited_stencil: StencilTest, inherited_coverage: Option<InheritedCoverage>) {
     let NodeDraw { transform, alpha } = draw;
     let frame_data = match node.context.get_frame_data(frame_no) {
         Ok(bytes) => unsafe { std::slice::from_raw_parts(bytes.as_ptr(), bytes.len()) },
@@ -1754,17 +1789,51 @@ fn render_node(node: &mut PlaybackNode, build: &mut FrameBuild<'_>, draw: NodeDr
     let frame = frame_view(&mut node.context, frame_data);
     // Hand this node's runtime buffers to the scene once, up front: everything
     // below refers to them by arena offset rather than expanding them.
-    let node_slot = build.scene.begin_node(&frame, transform);
+    let mut node_slot = build.scene.begin_node(&frame, transform);
 
     // Own masking runs only at the root scope; a masked sub-animation inherits.
-    let masking = build.scene.stencil_enabled() && inherited_stencil == StencilTest::None;
+    // Backend-agnostic on purpose: planning writers, skipping a pure mask's
+    // colour and testing a masked target are the same work whether coverage ends
+    // up in the hardware stencil or in a bitmap this player rasterises. Only what
+    // a writer is *appended as* differs, and that is the scene's business.
+    let masking = build.scene.mask_backend() != crate::MaskBackend::None && inherited_stencil == StencilTest::None;
     let writers = if masking { plan_writers(&frame, &node.mask_flags) } else { MaskWriters::default() };
 
+    // A sub-animation clipped by its parent's mask reads the parent's bitmap
+    // rather than baking one: same layer, same writers, an affine composed with
+    // the instance placement, and the instance part's rank (mask doc §3-2-2).
+    let mut own_coverage = None;
+    if let Some(parent) = inherited_coverage {
+        build.scene.inherit_node_coverage(&mut node_slot, &parent.uv, parent.layer, parent.rank, &parent.writers);
+        own_coverage = Some(parent);
+    }
+
+    // The coverage backend bakes every writer once, up front, and lets the replay
+    // in the fragment stage work out which of them were in scope for a given part.
+    // Nothing is pre-written, nothing is unwound, and the draw walk below carries
+    // no running mask state — `cursor` simply never advances.
+    let coverage = masking && build.scene.mask_backend() == crate::MaskBackend::Coverage;
+    if coverage && !writers.is_empty() {
+        // The bitmap is stretched over the writers' own bounding box, so its
+        // resolution follows the mask rather than the screen (mask doc §3-2).
+        if let Some([min_x, min_y, max_x, max_y]) = crate::mask::writer_bounds(&frame, &writers) {
+            let (w, h) = ((max_x - min_x).max(f32::EPSILON), (max_y - min_y).max(f32::EPSILON));
+            let uv = [1.0 / w, 0.0, 0.0, 1.0 / h, -min_x / w, -min_y / h];
+            build.scene.set_node_coverage(&mut node_slot, &uv, (w, h), &writers);
+            for (bit, w) in writers.iter().enumerate() {
+                build.scene.append_coverage_writer(&frame, &node_slot, w, bit);
+            }
+            own_coverage = Some(InheritedCoverage { uv, layer: build.scene.node_coverage_layer(&node_slot), rank: 0, writers });
+        }
+    }
+
     // Pre-write pure masks so they are active for lower-rank content (§2-1).
-    for w in &writers {
-        if !w.is_clipping {
-            let op = if w.op_invert { MaskOp::Invert } else { MaskOp::Incr };
-            build.scene.append_mask_writer(&frame, &node_slot, w, op);
+    if !coverage {
+        for w in &writers {
+            if !w.is_clipping {
+                let op = if w.op_invert { MaskOp::Invert } else { MaskOp::Incr };
+                build.scene.append_mask_writer(&frame, &node_slot, w, op);
+            }
         }
     }
     let mut cursor = 0usize;
@@ -1844,7 +1913,12 @@ fn render_node(node: &mut PlaybackNode, build: &mut FrameBuild<'_>, draw: NodeDr
                     let m: [f32; 16] = frame.world_matrices[part_idx * 16..part_idx * 16 + 16].try_into().unwrap();
                     let child_transform = mat4_mul(transform, &m);
                     let child_draw = NodeDraw { transform: &child_transform, alpha };
-                    render_node(&mut child.node, build, child_draw, child_frame_no, child_inherited);
+                    // Hand the bitmap down only when this instance part is
+                    // actually clipped; `child_inherited` is what says so, and
+                    // §2-6's AND means an unmasked instance part leaves its whole
+                    // subtree unmasked.
+                    let child_coverage = (child_inherited != StencilTest::None).then(|| own_coverage.map(|parent| parent.compose(&m, rank))).flatten();
+                    render_node(&mut child.node, build, child_draw, child_frame_no, child_inherited, child_coverage);
                 }
             }
             DrawBatchKind::Effect => {
@@ -1898,6 +1972,10 @@ fn render_node(node: &mut PlaybackNode, build: &mut FrameBuild<'_>, draw: NodeDr
 /// The extra draw calls are bounded by the writer count (at most
 /// [`crate::mask::MAX_MASK_WRITERS`]) and write no colour.
 fn unwind_masks(build: &mut FrameBuild<'_>, frame: &FrameView, node: &NodeSlot, writers: &[MaskWriter], cursor: usize) {
+    // Nothing to take back: the coverage backend never wrote into shared state.
+    if build.scene.mask_backend() == crate::MaskBackend::Coverage {
+        return;
+    }
     let remove = |w: &MaskWriter| if w.op_invert { MaskOp::Invert } else { MaskOp::Decr };
     // Consumed clipping writers: `sync_masks_to` added their coverage.
     for w in writers[..cursor].iter().filter(|w| w.is_clipping) {

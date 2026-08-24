@@ -3,6 +3,7 @@ resolver = "3"
 members = [
     "libs/ssplayer-wgpu",
     "libs/ssplayer-wgpu-ffi",
+    "libs/ssplayer-wgpu-bevy",
     "examples/viewer",
 ]
 # The SDK submodule is a workspace of its own. Without this, cargo claims every
@@ -36,6 +37,14 @@ description = "wgpu renderer for OPTPiX SpriteStudio 7 animations"
 ssruntime = { path = "SpriteStudio-SDK/libs/ssruntime" }
 ssab = { path = "SpriteStudio-SDK/libs/ssab", default-features = false }
 ssplayer-wgpu = { path = "libs/ssplayer-wgpu" }
+
+# The engine an adapter crate targets, pinned here beside `wgpu` because the two
+# constraints are one: `bevy_render` 0.19 requires wgpu ^29.0.3, so a Bevy bump
+# that moves to a new wgpu major breaks the pin above. Keeping both in this file
+# makes that a compile error in CI rather than something to remember. npm would
+# call this a peerDependency; cargo has no such thing, so the supported range is
+# stated here and in the adapter's README.
+bevy = { version = "0.19", default-features = false }
 # Versions centralized here so core, the viewer, and the wasm build never drift.
 # Pinned to the 29 line to stay compatible with Slint's `unstable-wgpu-29`: the
 # Vtuber app composes Slint UI and this player on one device, and Slint requires
