@@ -948,11 +948,12 @@ impl SSPlayer {
     // you chose after each call. This layer caches nothing for you.
     //
     // That goes further than the other Players: a runtime `setup_animation`
-    // keeps the host's speed, frame skip and frame-rate override (SDK #369 /
-    // #370), but a rebuilt tree is a new `Context`, so nothing is there to be
-    // kept. Only the loop count matches them, and only because it is
-    // per-transition everywhere. The Players with a node or widget to hang it
-    // on re-apply their own loop count on top; this one leaves that to you.
+    // keeps the host's speed, frame skip, frame-rate override and playback
+    // direction (SDK #369 / #370 / #375), but a rebuilt tree is a new
+    // `Context`, so nothing is there to be kept. Only the loop count matches
+    // them, and only because it is per-transition everywhere. The Players with
+    // a node or widget to hang it on re-apply their own loop count on top;
+    // this one leaves all of it to you.
 
     /// `count` cycles then stop; `-1` (or `0`) loops forever. Under
     /// [`PlaybackStyle::PingPong`] one cycle is a full round trip.
