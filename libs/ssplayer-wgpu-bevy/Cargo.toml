@@ -41,7 +41,7 @@ bevy = { workspace = true, features = [
 [dev-dependencies]
 # `bevy_sprite*` for the composited sprite; `bevy_audio` + the `mp3`/`wav`
 # decoders so the example can actually play the sounds the player only cues.
-bevy = { workspace = true, features = ["bevy_sprite", "bevy_sprite_render", "bevy_audio", "mp3", "wav"] }
+bevy = { workspace = true, features = ["bevy_sprite", "bevy_sprite_render", "bevy_audio", "mp3", "wav", "bevy_ui", "bevy_ui_render", "bevy_text", "default_font"] }
 ssplayer-wgpu = { workspace = true }
 wgpu = { workspace = true }
 pollster = "1.0.1"

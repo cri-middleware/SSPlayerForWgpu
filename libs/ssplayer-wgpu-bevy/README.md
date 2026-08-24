@@ -85,12 +85,34 @@ one-shot by incrementing it, with nothing to clear afterwards.
 
 ## Example
 
+`overall` is the interactive tour — the Bevy counterpart of the sibling players'
+`overall` / `webgl-example` demos. It steps one character through the shared
+sample set (the `Ringo` character and the `overall/*` feature packs: Basic, Shape,
+PartsColor, Mesh, BlendMode, Effect, Mask, Instance, TextureChange, Sound,
+UserData, Signal, plus a masked-instance scene), driven entirely through the three
+components above.
+
 ```sh
 # from the repository root, where assets/ is
-cargo run -p ssplayer-wgpu-bevy --example bevy_viewer
+cargo run -p ssplayer-wgpu-bevy --example overall
 ```
 
 `scripts/deploy-examples.sh` (or `.ps1`) generates `assets/` first.
+
+| Key | Does |
+|---|---|
+| `[` / `]` | Previous / next scene |
+| `Space` | Play / pause |
+| `Up` / `Down` | Speed (0.1–3.0) |
+| `R` | Restart from the head |
+
+The on-screen HUD shows the scene, the timeline frame, the speed, and the last
+timeline event; the `Sound` scene plays audio, which this host does — the player
+only names the cue.
+
+There is also `bevy_viewer`, a smaller harness for eyeballing one pack at a time
+(`cargo run ... --example bevy_viewer -- mask | sound | ...`); `overall` is the
+one to read first.
 
 ## How it is wired
 
