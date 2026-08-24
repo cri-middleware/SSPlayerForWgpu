@@ -1,13 +1,13 @@
 # SSPlayer for wgpu ドキュメント
 
-**SSPlayer for wgpu** は、SpriteStudio 7 アニメーションを **WebGPU / Vulkan / DirectX 12 / Metal / OpenGL** で高速描画するための公式レンダラー・プレイヤーライブラリです。
+**SSPlayer for wgpu** は、SpriteStudio 7 アニメーションを **WebGPU / Vulkan / DirectX 12 / Metal** で高速描画するための公式レンダラー・プレイヤーライブラリです。
 
 ---
 
 ## 🎯 特徴
 
 1. **モダン GPU ネイティブ (wgpu)**
-   - 単一の Rust / WGSL 実装で WebGPU, Vulkan, DirectX 12, Metal, OpenGL のすべてを網羅。
+   - 単一の Rust / WGSL 実装で WebGPU, Vulkan, DirectX 12, Metal のすべてを網羅。
    - Programmable Vertex Pulling（頂点バッファレス描画）による圧倒的な低 CPU 負荷。
 2. **借用モデル (Borrow Model)**
    - プレイヤーは GPU デバイスやコンテキストを専有・所有せず、ホストから借りて描画。

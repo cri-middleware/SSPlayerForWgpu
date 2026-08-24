@@ -6,7 +6,7 @@ animations (`.ssab`).
 This is first and foremost a **Rust** player: a clean Rust API over the
 SpriteStudio runtime, with WebGPU (wasm-bindgen) and C/C++ (cbindgen) as thin
 wrappers on top. Because it renders through wgpu, one code path covers WebGPU,
-Vulkan, DX12, Metal and GL.
+Vulkan, DX12 and Metal.
 
 For the repository as a whole — examples, build scripts, asset generation — see
 the [top-level README](../../README.md).
