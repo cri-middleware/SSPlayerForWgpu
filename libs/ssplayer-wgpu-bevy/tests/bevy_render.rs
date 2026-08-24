@@ -13,7 +13,7 @@
 
 use bevy::app::{App, PluginGroup};
 use bevy::asset::{Assets, Handle, RenderAssetUsages};
-use bevy::camera::{Camera, Camera2d, ClearColorConfig, RenderTarget};
+use bevy::camera::{Camera, Camera2d, ClearColorConfig, Hdr, RenderTarget};
 use bevy::color::Color;
 use bevy::ecs::prelude::*;
 use bevy::image::Image;
@@ -215,6 +215,39 @@ fn characters_draw_over_bevy_sprites() {
     let total = (SIZE * SIZE) as usize;
     assert!(pure_green > 0, "the Bevy sprite did not draw at all — this test would pass vacuously");
     assert!(pure_green < total - total / 50, "the sprite covers the whole target: the character drew under it, so the ordering against main_transparent_pass_2d is not holding");
+}
+
+/// A masking character draws in an HDR view.
+///
+/// An `Hdr` camera renders into an `Rgba16Float` target rather than the usual
+/// `Rgba8Unorm`, so the pipelines baked against the old format are invalid and
+/// `draw_players` has to rebuild the scene for the new one. If that swap does not
+/// happen the draw either panics on the format mismatch or produces nothing; a
+/// masked character coming back proves the rebuild fired and the coverage mask
+/// still clips at the wider format.
+#[test]
+fn a_masked_character_draws_in_hdr() {
+    if !fixtures_present() {
+        eprintln!("assets not generated, skipping");
+        return;
+    }
+    let Some((mut app, handle, captured)) = headless_app() else {
+        eprintln!("no GPU adapter available, skipping");
+        return;
+    };
+
+    app.world_mut().spawn((Camera2d, Camera { clear_color: ClearColorConfig::Custom(Color::BLACK), ..default() }, RenderTarget::Image(handle.into()), Hdr, Msaa::Off));
+    app.world_mut().spawn((SsPlayer { src: fixture(MASK_PACK), animation: MASK_ANIM.into() }, SsTransform { scale_x: 0.5, scale_y: 0.5, ..default() }, SsPlayback::default()));
+
+    app.finish();
+    app.cleanup();
+    for _ in 0..FRAMES {
+        app.update();
+    }
+    let pixels = captured.0.lock().unwrap().clone().expect("the readback never arrived — the render app did not produce a frame");
+
+    dump("04-hdr-masked-character", &pixels);
+    assert!(drawn_pixels(&pixels) > 0, "nothing drawn in an HDR (Rgba16Float) view — the format-swap path in draw_players may not be rebuilding the scene");
 }
 
 /// Playback state makes the round trip from the render world back to the main

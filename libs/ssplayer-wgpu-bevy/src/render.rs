@@ -49,6 +49,16 @@ pub(crate) struct SsRenderState {
     warned_second_view: bool,
 }
 
+/// Build the render-world state on the device Bevy just acquired.
+///
+/// Deliberately in `RenderStartup`, which Bevy re-runs every time it acquires a
+/// `RenderDevice` — including after recovering a lost one. That is the whole
+/// device-loss story for this adapter: a fresh `SSRenderer` on the new device,
+/// `slots` cleared, and `sync_players` rebuilds the players from the main world
+/// next frame (reloading each pack). So recovery needs no `restore_device` here —
+/// but it is the host's to opt into, because Bevy's default error handler quits
+/// on device loss rather than recovering. Do not move this to a run-once startup:
+/// that is what would break recovery.
 pub(crate) fn init_state(mut commands: Commands, device: Res<RenderDevice>) {
     commands.insert_resource(SsRenderState { renderer: SSRenderer::new(device.wgpu_device()), scene: None, scene_format: None, slots: Vec::new(), bound_view: None, warned_second_view: false });
 }

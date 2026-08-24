@@ -134,6 +134,14 @@ produced last frame, because it ran in the render world after last frame's
 cannot tolerate it would need playback moved into the main world, which this
 crate deliberately does not do.
 
+## Robustness
+
+| Event | What happens |
+|---|---|
+| **Window resize** | Followed automatically — the draw system reprojects to the camera's viewport every frame |
+| **HDR camera** | The view's format becomes `Rgba16Float`; the scene rebuilds its pipelines for it on the frame the format changes, mask included |
+| **Device loss** | Recovers by riding Bevy's own recovery: on a new device Bevy re-runs `RenderStartup`, which rebuilds the renderer, and the players reload from the main world next frame. **You must opt in** — Bevy's default error handler *quits* on device loss, so install a `RenderErrorHandler` that returns `RenderErrorPolicy::Recover` for it |
+
 ## What this version does not do yet
 
 * **One view.** `SSScene::update` fuses the timeline advance with the geometry
