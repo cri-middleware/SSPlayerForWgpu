@@ -20,11 +20,19 @@ use crate::feedback::{FeedbackChannel, PlaybackFeedback};
 ///
 /// `src` and `animation` are kept so a change to either can be told from the
 /// frame-to-frame traffic: rebuilding the tree allocates, the rest does not.
+///
+/// `started` / `playing` track transport, because the player's `play()` rewinds
+/// (it is a start, not a resume) and `is_playing()` stays true through a pause —
+/// so neither can be used to tell "carry on" from "restart". `started` is whether
+/// this tree has been `play()`ed at all; `playing` is the last `SsPlayback::playing`
+/// applied, for edge-detecting pause vs resume. Both reset when the tree rebuilds.
 struct PlayerSlot {
     entity: MainEntity,
     player: SSPlayer,
     src: String,
     animation: String,
+    started: bool,
+    playing: bool,
 }
 
 /// Everything the render world owns on this crate's behalf.
@@ -83,7 +91,7 @@ pub(crate) fn sync_players(mut state: Option<ResMut<SsRenderState>>, extracted: 
         let index = match position {
             Some(index) => index,
             None => {
-                state.slots.push(PlayerSlot { entity: extracted_player.entity, player: SSPlayer::new(), src: String::new(), animation: String::new() });
+                state.slots.push(PlayerSlot { entity: extracted_player.entity, player: SSPlayer::new(), src: String::new(), animation: String::new(), started: false, playing: false });
                 state.slots.len() - 1
             }
         };
@@ -93,6 +101,9 @@ pub(crate) fn sync_players(mut state: Option<ResMut<SsRenderState>>, extracted: 
         if slot.src != extracted_player.src {
             slot.src.clone_from(&extracted_player.src);
             slot.animation.clear();
+            // A different pack means a different tree; transport starts over.
+            slot.started = false;
+            slot.playing = false;
             if let Err(err) = slot.player.load(&extracted_player.src) {
                 error!("ssplayer-wgpu-bevy: could not load {:?}: {err:?}", extracted_player.src);
                 continue;
@@ -109,6 +120,9 @@ pub(crate) fn sync_players(mut state: Option<ResMut<SsRenderState>>, extracted: 
                 error!("ssplayer-wgpu-bevy: no animation {:?} in {:?} ({err:?}); it has {:?}", extracted_player.animation, extracted_player.src, slot.player.animation_names().unwrap_or_default());
                 continue;
             }
+            // A fresh tree, stopped at its head; transport starts over.
+            slot.started = false;
+            slot.playing = false;
         }
 
         // Allocation-free from here down.
@@ -120,13 +134,25 @@ pub(crate) fn sync_players(mut state: Option<ResMut<SsRenderState>>, extracted: 
         slot.player.set_order(playback.order);
         slot.player.set_alpha(playback.alpha);
         slot.player.set_visible(playback.visible);
-        if playback.playing != slot.player.is_playing() {
-            if playback.playing {
+        // Transport under the player's split play/resume semantics: `play()`
+        // rewinds and re-arms, so it is only the initial start; `pause()` holds
+        // and `resume()` lifts, neither rewinding. `is_playing()` stays true
+        // through a pause, so the wanted state is tracked here and acted on at the
+        // edge rather than compared against it.
+        let want = playback.playing;
+        if !slot.started {
+            if want {
                 slot.player.play();
+                slot.started = true;
+            }
+        } else if want != slot.playing {
+            if want {
+                slot.player.resume();
             } else {
                 slot.player.pause();
             }
         }
+        slot.playing = want;
     }
 }
 
