@@ -1004,6 +1004,22 @@ impl SSPlayer {
         self.root.as_ref().map(|r| r.context.is_pausing()).unwrap_or(false)
     }
 
+    /// Which way the playhead is actually travelling, which is **not** the
+    /// heading [`SSPlayer::set_playback_direction`] configured: under ping-pong
+    /// the return leg runs backward while [`SSPlayer::playback_direction`] still
+    /// reads forward. A negative speed does not flip it either — that is a stop.
+    ///
+    /// This is the gate to put in front of audio. SpriteStudio has no reverse
+    /// audio, so an [`crate::SsEvent::Audio`] crossed on a backward leg is not
+    /// meant to sound; the sibling players that own an audio stack apply exactly
+    /// this test before playing one.
+    ///
+    /// True with no animation set up: forward is the resting state, and
+    /// reporting backward would gate a host's audio off on its first frame.
+    pub fn is_playing_forward(&self) -> bool {
+        self.root.as_ref().map(|r| r.context.is_playing_forward()).unwrap_or(true)
+    }
+
     /// Every configured loop has played. Sticky until the next play or
     /// [`SSPlayer::set_animation`], and never true under an infinite loop.
     pub fn is_finished(&self) -> bool {
@@ -1472,6 +1488,10 @@ impl SSPlayer {
     /// Place this player: translation, scale, then rotation in radians, composed
     /// into the root transform of its tree.
     ///
+    /// `y` is measured **downward** from the centre, matching the Y-down space
+    /// the players and their [`SSPlayer::part_transform`] output live in (and
+    /// ForWeb's `offsetY`). Before v7.0.0-beta.2 this axis pointed up.
+    ///
     /// The per-player half of placement: the projection belongs to the render
     /// target ([`SSScene::set_viewport`]), the placement to the player.
     /// It costs nothing extra to draw: the tree walk already composes an
@@ -1742,6 +1762,15 @@ fn build_node(packs: &HashMap<String, SSPack>, pack: &str, anime: &str) -> Optio
     let static_res = unsafe { &*res_ptr };
     let mut context = Context::new();
     context.bind_resource(static_res);
+    // Y-down, matching every sibling Player that draws into a Y-down target
+    // (ForWeb, ForFlutter, ForGodot, ForRenPy, ForReactNative). The Brain owns
+    // the flip and applies it once at the source — it mirrors the hierarchy by
+    // negating `position_y`, `rotation_z` and `pivot_y` — so the baked geometry,
+    // the world matrices [`SSPlayer::part_transform`] hands out and the effect
+    // particles all agree about which way is up. The projection undoes it for a
+    // Y-up target (see `SSScene::set_viewport`), which is the one place the
+    // target's own sense is known.
+    context.set_coordinate_system(ssruntime::SsCoordinateSystem::YDown);
     context.setup_animation(anime).ok()?;
     let (instances, effects, mask_flags) = build_rig(&context, static_res, packs);
     Some(PlaybackNode { context, instances, effects, mask_flags, res: static_res })
@@ -1823,8 +1852,9 @@ fn step_slots(node: &mut PlaybackNode, frame_no: f32, delta_secs: f32, node_loop
     let fps = node.context.get_fps() as f32;
     for (&part_idx, effect) in node.effects.iter_mut() {
         let ev = node.context.get_active_effect_event(part_idx as u32);
-        // vert_stride=2 (packed XY), y_flip=false (Y handled by the world matrix).
-        let r = effect.slot.step(ev, frame_no, delta_secs, fps, node_looped, false, 2);
+        // vert_stride=2 (packed XY), y_flip=true: the context runs Y-down, so the
+        // particles are mirrored with the parts around them rather than against.
+        let r = effect.slot.step(ev, frame_no, delta_secs, fps, node_looped, true, 2);
         effect.plan.clear();
         if r.visible && !r.draw_plan_buf.is_null() && r.draw_plan_len > 0 {
             // SAFETY: the slot just built this buffer and owns it until its next

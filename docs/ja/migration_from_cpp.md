@@ -140,9 +140,10 @@ ss_player_play(player);
 | `AnimationPlay(…, framePerSecond)` | `set_frame_rate(fps)` | `ss_player_set_frame_rate` | fps 指定 |
 | `StatusGetPlay(track)` | `is_playing()` | `ss_player_is_playing` | 再生中か（一時停止中も `true`） |
 | `StatusGetPause(track)` | `is_paused()` | `ss_player_is_paused` | 一時停止中か（未再生時と `stop()` 後は `false`） |
+| （なし） | `is_playing_forward()` | `ss_player_is_playing_forward` | プレイヘッドが実際に進んでいる向き。ピンポン再生の戻りの脚では `playback_direction()` が Forward のままでも `false`。**音声はこれでゲートする**（逆再生音声は無い） |
 | `CountGetAnimation()` / `NameGetAnimation(i)` | `animation_names()` | `ss_player_animation_count` / `_name` | アニメーション名一覧 |
 | `Entity::RateSetOpacity(rate)` | `set_alpha(f32)` | `ss_player_set_alpha` | プレイヤ全体の不透明度 (0.0〜1.0) |
-| `Entity::RateSetScaleLocal()` / `Draw` の `matrixWorld` | `set_transform(x, y, sx, sy, rot)` | `ss_player_set_transform` | 位置・拡大縮小・回転（ラジアン） |
+| `Entity::RateSetScaleLocal()` / `Draw` の `matrixWorld` | `set_transform(x, y, sx, sy, rot)` | `ss_player_set_transform` | 位置・拡大縮小・回転（ラジアン）。**`y` は下向き**（`part_transform()` が返す空間と同じ Y-down） |
 | （描画順は呼び出し順） | `set_order(i32)` | `ss_player_set_order` | 同一シーン内での前後描画順 |
 | （なし） | `set_visible(bool)` | `ss_player_set_visible` | 非表示設定（非表示時は更新スキップ） |
 | `CanvasGet()` | `canvas_size()` | `ss_player_canvas_size` | 基準キャンバスサイズ (w, h) |

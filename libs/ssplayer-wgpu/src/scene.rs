@@ -645,8 +645,13 @@ impl SSScene {
     }
 
     /// Update the projection matrix to the target's pixel dimensions.
+    ///
+    /// `y_down` describes the **target**, not the geometry: the players hand up
+    /// Y-down world space (the Brain's coordinate system, set in `build_node`),
+    /// so a Y-down target passes it straight through and a Y-up one is where the
+    /// flip has to happen. That is why the sign reads inverted against the flag.
     fn update_projection(&self, queue: &wgpu::Queue, width: f32, height: f32, y_down: bool) {
-        let scale_y = if y_down { -2.0 / height } else { 2.0 / height };
+        let scale_y = if y_down { 2.0 / height } else { -2.0 / height };
         let matrix = [2.0 / width, 0.0, 0.0, 0.0, 0.0, scale_y, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 1.0];
         queue.write_buffer(&self.globals_buffer, 0, bytemuck::cast_slice(&matrix));
     }

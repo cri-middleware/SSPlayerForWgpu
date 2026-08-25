@@ -223,6 +223,49 @@ fn backward_playback_retreats() {
     assert!(player.frame_no() < from, "the playhead should retreat: {from} -> {}", player.frame_no());
 }
 
+/// `is_playing_forward` is the *actual* heading, and under ping-pong that parts
+/// company with the configured one: `playback_direction` still reads Forward on
+/// the return leg. This is the distinction that makes it the audio gate rather
+/// than `playback_direction` — SpriteStudio has no reverse audio, so a key
+/// crossed on the way back is not meant to sound.
+#[test]
+fn is_playing_forward_tracks_the_leg_not_the_configured_direction() {
+    let mut player = loaded();
+    // No animation set up yet reads forward: forward is the resting state, and
+    // reporting backward would gate a host's audio off on its first frame.
+    assert!(SSPlayer::new().is_playing_forward());
+
+    player.set_loop_count(-1);
+    player.set_playback_direction(PlaybackDirection::Forward, PlaybackStyle::PingPong);
+    player.play();
+    assert!(player.is_playing_forward(), "the outward leg runs forward");
+
+    let Some((device, queue)) = gpu() else {
+        eprintln!("no adapter — skipping the return leg");
+        return;
+    };
+    let mut renderer = SSRenderer::new(&device);
+    let mut scene = SSScene::new(&device, &SceneConfig { color_format: wgpu::TextureFormat::Rgba8Unorm, stencil_format: None, mask: MaskBackend::None });
+    scene.set_viewport(&queue, 256.0, 256.0, false);
+
+    // Walk into the return leg. Stepping rather than seeking: the heading is
+    // derived from how the playhead crossed the end, which a seek does not do.
+    let mut turned = false;
+    for _ in 0..600 {
+        scene.update(&mut renderer, &device, &queue, 1.0 / 60.0, &mut [&mut player]);
+        if !player.is_playing_forward() {
+            turned = true;
+            break;
+        }
+    }
+    assert!(turned, "ping-pong must eventually turn around");
+    assert_eq!(
+        player.playback_direction(),
+        PlaybackDirection::Forward,
+        "the configured heading is untouched by the turn — that is the whole point"
+    );
+}
+
 /// The four transport verbs, as the SDK's Player Porting Guide specifies them.
 /// `pause` holds and nothing else; `resume` is what lifts the hold; `play`
 /// heads out and so cannot serve as a resume; `stop` leaves the playhead alone.
