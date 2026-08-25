@@ -72,10 +72,10 @@ fn overrides_before_an_animation_are_rejected_not_lost() {
     // to record these yet. Failing is the point: a silent no-op here would look
     // like the override "not working" at draw time.
     assert!(player.find_part_index("anything").is_none());
-    assert!(player.set_part_visibility_override(0, true, false).is_err());
-    assert!(player.set_part_color_override(0, BlendOp::Mul, 0xFF0000FF, OverridePriority::default()).is_err());
-    assert!(player.set_part_cell_override(0, "Ringo", "effect3", OverridePriority::default()).is_err());
-    assert!(player.clear_part_color_override(0).is_err());
+    assert!(player.set_part_visibility_override_by_index(0, true, false).is_err());
+    assert!(player.set_part_color_override_by_index(0, 0xFF0000FF, BlendOp::Mul, OverridePriority::default()).is_err());
+    assert!(player.set_part_cell_override_by_index(0, "Ringo", "effect3", OverridePriority::default()).is_err());
+    assert!(player.clear_part_color_override_by_index(0).is_err());
 
     // Except this one, which is a "make sure nothing is set" and is happy either
     // way.
@@ -87,16 +87,16 @@ fn visibility_and_colour_overrides_are_accepted() {
     let mut player = loaded();
     let part = some_part(&player);
 
-    player.set_part_visibility_override(part, true, true).unwrap();
-    player.clear_part_visibility_override(part).unwrap();
+    player.set_part_visibility_override_by_index(part, true, true).unwrap();
+    player.clear_part_visibility_override_by_index(part).unwrap();
 
-    player.set_part_color_override(part, BlendOp::Mul, 0xFF0000FF, OverridePriority::HoldUntilNextAnimation).unwrap();
-    player.clear_part_color_override(part).unwrap();
+    player.set_part_color_override_by_index(part, 0xFF0000FF, BlendOp::Mul, OverridePriority::HoldUntilNextAnimation).unwrap();
+    player.clear_part_color_override_by_index(part).unwrap();
 
     // lt, rt, lb, rb — red on top, blue on the bottom.
     let corners = [[255, 0, 0, 255], [255, 0, 0, 255], [0, 0, 255, 255], [0, 0, 255, 255]];
-    player.set_part_color_override_corners(part, BlendOp::Mix, corners, OverridePriority::Permanent).unwrap();
-    player.clear_part_color_override(part).unwrap();
+    player.set_part_color_override_corners_by_index(part, corners, BlendOp::Mix, OverridePriority::Permanent).unwrap();
+    player.clear_part_color_override_by_index(part).unwrap();
 
     player.clear_all_part_overrides();
 }
@@ -107,9 +107,9 @@ fn an_out_of_range_part_is_rejected() {
 
     // Far past any real part count. The runtime bounds-checks against its table
     // rather than trusting the index.
-    assert!(player.set_part_visibility_override(9999, true, false).is_err());
-    assert!(player.set_part_color_override(9999, BlendOp::Mix, 0, OverridePriority::default()).is_err());
-    assert!(player.clear_part_color_override(9999).is_err());
+    assert!(player.set_part_visibility_override_by_index(9999, true, false).is_err());
+    assert!(player.set_part_color_override_by_index(9999, 0, BlendOp::Mix, OverridePriority::default()).is_err());
+    assert!(player.clear_part_color_override_by_index(9999).is_err());
 }
 
 #[test]
@@ -120,10 +120,10 @@ fn a_cell_override_resolves_its_names_at_the_call() {
     // A name that is not in the pack cannot be resolved, and saying so here is
     // the whole point — the alternative is a part that silently keeps drawing
     // its old cell.
-    assert!(player.set_part_cell_override(part, "NoSuchCellmap", "NoSuchCell", OverridePriority::default()).is_err());
+    assert!(player.set_part_cell_override_by_index(part, "NoSuchCellmap", "NoSuchCell", OverridePriority::default()).is_err());
 
     // Clearing is always fine.
-    player.clear_part_cell_override(part).unwrap();
+    player.clear_part_cell_override_by_index(part).unwrap();
 }
 
 #[test]
@@ -131,8 +131,8 @@ fn set_animation_clears_all_but_permanent() {
     let mut player = loaded();
     let part = some_part(&player);
 
-    player.set_part_color_override(part, BlendOp::Mul, 0x00FF00FF, OverridePriority::Permanent).unwrap();
-    player.set_part_visibility_override(part, true, false).unwrap();
+    player.set_part_color_override_by_index(part, 0x00FF00FF, BlendOp::Mul, OverridePriority::Permanent).unwrap();
+    player.set_part_visibility_override_by_index(part, true, false).unwrap();
 
     // Documented lifecycle, and the reason nothing is cached on this side: the
     // runtime owns the table and re-validates it here. The call must survive.
@@ -141,7 +141,7 @@ fn set_animation_clears_all_but_permanent() {
 
     // The table is live again after the rebuild, which is what a caller needs in
     // order to re-apply anything that was not permanent.
-    player.set_part_color_override(part, BlendOp::Mix, 0xFFFFFFFF, OverridePriority::default()).unwrap();
+    player.set_part_color_override_by_index(part, 0xFFFFFFFF, BlendOp::Mix, OverridePriority::default()).unwrap();
     player.clear_all_part_overrides();
 }
 
@@ -154,13 +154,13 @@ fn part_transform_is_bounds_checked_and_frame_shaped() {
     assert!(player.part_count() > 0, "a loaded animation has parts");
 
     // The root part exists and reports a finite affine.
-    let m = player.part_transform(0).expect("part 0 should resolve");
+    let m = player.part_transform_by_index(0).expect("part 0 should resolve");
     assert!(m.iter().all(|v| v.is_finite()), "affine should be finite: {m:?}");
 
     // Out of range is None rather than a read past the runtime's buffer — which
     // is what would otherwise come back as NaN.
-    assert!(player.part_transform(player.part_count() as u32).is_none());
-    assert!(player.part_transform(u32::MAX).is_none());
+    assert!(player.part_transform_by_index(player.part_count() as u32).is_none());
+    assert!(player.part_transform_by_index(u32::MAX).is_none());
 }
 
 #[test]
@@ -168,5 +168,20 @@ fn part_read_outs_are_empty_before_an_animation() {
     let player = SSPlayer::new();
 
     assert_eq!(player.part_count(), 0);
-    assert!(player.part_transform(0).is_none());
+    assert!(player.part_transform_by_index(0).is_none());
+}
+
+/// The unsuffixed form takes a part NAME — the index form is the optimisation,
+/// not the default (SDK: `20_design/40_api_conventions`). An unknown name is
+/// rejected at the call rather than silently doing nothing, which is the whole
+/// reason resolution happens here and not per frame.
+#[test]
+fn the_unsuffixed_overrides_take_a_part_name() {
+    let mut player = loaded();
+
+    assert!(player.set_part_visibility_override("NOT_A_REAL_PART", true, false).is_err());
+    assert!(player.set_part_color_override("NOT_A_REAL_PART", 0xFF0000FF, BlendOp::Mix, OverridePriority::default()).is_err());
+    assert!(player.set_part_cell_override("NOT_A_REAL_PART", "Ringo", "effect3", OverridePriority::default()).is_err());
+    assert!(player.clear_part_color_override("NOT_A_REAL_PART").is_err());
+    assert!(player.part_transform("NOT_A_REAL_PART").is_none());
 }

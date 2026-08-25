@@ -131,7 +131,7 @@ ss_player_play(player);
 | `AnimationStop(track)` | `stop()` | `ss_player_stop` | 停止（再生ヘッドはその場に残り、巻き戻さない） |
 | `AnimationPause(track, true/false)` | `pause()` / `resume()` | `ss_player_pause` / `ss_player_resume` | 一時停止の解除は `resume()`。`play()` は先頭出しなので再開には使えない |
 | `AnimationPlay(…, timesPlay)` | `set_loop_count(n)` | `ss_player_set_loop_count` | `-1` / `0` = 無限, `n` = n回 |
-| `RateTimeSet(track, rate)` | `set_speed(f32)` | `ss_player_set_speed` | 正の再生速度倍率（1.0 = 標準） |
+| `RateTimeSet(track, rate)` | `set_speed_scale(f32)` | `ss_player_set_speed_scale` | 正の再生速度倍率（1.0 = 標準） |
 | `rateTime` に負値を与えて逆再生 | `set_playback_direction(Backward, style)` | `ss_player_set_playback_direction` | **速度と再生方向を分離** |
 | `KindStylePlay::PINGPONG` | `set_playback_direction(dir, PlaybackStyle::PingPong)` | 同上 | 往復再生 |
 | `AnimationPlay(…, frameOffset)` / `CursorSet(track, cursor)` | `seek(f32)` | `ss_player_seek` | フレーム位置指定（小数可） |
@@ -139,7 +139,7 @@ ss_player_play(player);
 | `labelRangeStart` / `labelRangeEnd` | `set_animation_section(start, end)` | `ss_player_set_animation_section` | **フレーム番号で指定** |
 | `AnimationPlay(…, framePerSecond)` | `set_frame_rate(fps)` | `ss_player_set_frame_rate` | fps 指定 |
 | `StatusGetPlay(track)` | `is_playing()` | `ss_player_is_playing` | 再生中か（一時停止中も `true`） |
-| `StatusGetPause(track)` | `is_paused()` | `ss_player_is_paused` | 一時停止中か（未再生時と `stop()` 後は `false`） |
+| `StatusGetPause(track)` | `is_pausing()` | `ss_player_is_pausing` | 一時停止中か（未再生時と `stop()` 後は `false`） |
 | （なし） | `is_playing_forward()` | `ss_player_is_playing_forward` | プレイヘッドが実際に進んでいる向き。ピンポン再生の戻りの脚では `playback_direction()` が Forward のままでも `false`。**音声はこれでゲートする**（逆再生音声は無い） |
 | `CountGetAnimation()` / `NameGetAnimation(i)` | `animation_names()` | `ss_player_animation_count` / `_name` | アニメーション名一覧 |
 | `Entity::RateSetOpacity(rate)` | `set_alpha(f32)` | `ss_player_set_alpha` | プレイヤ全体の不透明度 (0.0〜1.0) |
@@ -158,7 +158,7 @@ ss_player_play(player);
 
 > [!IMPORTANT]
 > **`set_animation()` は再生設定を初期化します**  
-> `set_animation()` を呼ぶと、再生ツリーが再構築され、ループ回数・速度・再生方向・区間はデータ既定値に戻ります。`set_loop_count` や `set_speed` は **`set_animation()` の後に設定** してください。
+> `set_animation()` を呼ぶと、再生ツリーが再構築され、ループ回数・速度・再生方向・区間はデータ既定値に戻ります。`set_loop_count` や `set_speed_scale` は **`set_animation()` の後に設定** してください。
 
 ---
 
@@ -173,8 +173,8 @@ ss_player_play(player);
 |---|---|---|---|
 | `CallBackUserData` | `events()` の `SsEvent::UserData` | `ss_player_event_at` | パーツ名 / インデックス、フレーム番号、int / string / rect / point |
 | `CallBackSignal` | `events()` の `SsEvent::Signal` | 同上（＋ `ss_player_event_signal_param_at`） | パーツ名 / インデックス、フレーム番号、コマンド ID、パラメータ配列 |
-| `CallBackPlayEnd` | `finished_last_update()` | `ss_player_finished_last_update` | 再生終了判定（無限ループ時は `false`） |
-| （なし・新規） | `looped_last_update()` | `ss_player_looped_last_update` | ループ境界通過判定 |
+| `CallBackPlayEnd` | `just_finished()` | `ss_player_finished_last_update` | 再生終了判定（無限ループ時は `false`） |
+| （なし・新規） | `just_looped()` | `ss_player_just_looped` | ループ境界通過判定 |
 | （なし・新規） | `events()` の `SsEvent::Audio` | `ss_player_event_at` | パーツ名 / インデックス、フレーム番号、サウンド名とハッシュ、再生回数 |
 
 ### イベント取得例
@@ -201,10 +201,10 @@ for event in player.events() {
 }
 
 // 2. ループ・終了判定
-if player.looped_last_update() {
+if player.just_looped() {
     println!("アニメーションが1ループしました");
 }
-if player.finished_last_update() {
+if player.just_finished() {
     println!("全ループ再生が終了しました");
 }
 ```
@@ -363,7 +363,7 @@ scene.draw(&renderer, &mut rpass);
 drop(rpass);
 
 // イベント確認
-if player.finished_last_update() {
+if player.just_finished() {
     // 攻撃アニメーション完了
 }
 ```
@@ -377,7 +377,7 @@ if player.finished_last_update() {
 1. **マルチトラック / アニメーションブレンド**:
    ForCPP の複数トラック同時再生および `Transition()`（TRS アニメーションのブレンド）は、コア計算層（`ssruntime`）で実装中ですが、プレイヤ API としては未公開です。当面は**複数の `SSPlayer` を作成して描画順（`set_order`）で重ねる**ことで代用してください。
 2. **シーケンサー（`.ssqb`）**:
-   ForCPP の `Sequencer` クラス（複数アニメーションの連続再生）は、現在 `finished_last_update()` を検知して次のアニメーションを `set_animation()` するホスト側コードで代用してください。
+   ForCPP の `Sequencer` クラス（複数アニメーションの連続再生）は、現在 `just_finished()` を検知して次のアニメーションを `set_animation()` するホスト側コードで代用してください。
 3. **パーツ単位の反転（Flip）**:
    ForCPP の `FlipSetParts()` のような個別パーツ反転オーバーライドはありません。反転はデータ側のキーフレーム設定に従います。
 4. **エフェクトのシード値指定**:

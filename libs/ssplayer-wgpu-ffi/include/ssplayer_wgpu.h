@@ -631,6 +631,16 @@ int32_t ss_player_set_animation(ss_player_t *handle, const char *anim_name);
 void ss_player_play(ss_player_t *handle);
 
 /*
+ `ss_player_play` from `start_frame` rather than the head of the section. The
+ family spells this `play(startFrame)`; C has no overloads, so it is a second
+ entry point here. Re-arms the loop count exactly as `ss_player_play` does.
+
+ # Safety
+ `handle` must be a live handle or null.
+ */
+void ss_player_play_from(ss_player_t *handle, float start_frame);
+
+/*
  Hold playback on the current frame. Idempotent, and ignored while nothing is
  playing. Lift it with `ss_player_resume`.
 
@@ -666,7 +676,7 @@ void ss_player_stop(ss_player_t *handle);
  # Safety
  `handle` must be a live handle or null.
  */
-void ss_player_set_speed(ss_player_t *handle, float speed);
+void ss_player_set_speed_scale(ss_player_t *handle, float speed);
 
 /*
  Whether the root animation is advancing.
@@ -682,7 +692,7 @@ bool ss_player_is_playing(ss_player_t *handle);
  # Safety
  `handle` must be a live handle or null.
  */
-bool ss_player_is_paused(ss_player_t *handle);
+bool ss_player_is_pausing(ss_player_t *handle);
 
 /*
  Which way the playhead is actually travelling — not the heading
@@ -712,7 +722,7 @@ bool ss_player_is_finished(ss_player_t *handle);
  # Safety
  `handle` must be a live handle or null.
  */
-bool ss_player_is_looped(ss_player_t *handle);
+bool ss_player_just_looped(ss_player_t *handle);
 
 /*
  Jump to `frame`. Fractional values are honoured.
@@ -781,7 +791,7 @@ int32_t ss_player_loop_count(ss_player_t *handle);
 int32_t ss_player_remaining_loops(ss_player_t *handle);
 
 /*
- Override the advance rate in fps. Prefer `ss_player_set_speed`, which scales
+ Override the advance rate in fps. Prefer `ss_player_set_speed_scale`, which scales
  playback without replacing the authored rate.
 
  # Safety
@@ -854,7 +864,7 @@ void ss_player_set_sub_frame(ss_player_t *handle, bool enabled);
  # Safety
  `handle` must be a live handle or null.
  */
-bool ss_player_sub_frame(ss_player_t *handle);
+bool ss_player_sub_frame_enabled(ss_player_t *handle);
 
 /*
  True (the default) keeps playback on the wall clock by dropping frames under
@@ -894,7 +904,97 @@ int32_t ss_player_find_part_index(ss_player_t *handle, const char *name);
  # Safety
  `handle` must be a live handle or null.
  */
-int32_t ss_player_set_part_visibility_override(ss_player_t *handle, uint32_t part, bool hide, bool cascade);
+int32_t ss_player_set_part_visibility_override_by_index(ss_player_t *handle,
+                                                        uint32_t part,
+                                                        bool hide,
+                                                        bool cascade);
+
+/*
+ Force-hide a part (`hide` true) or revert it to the animation, by part name.
+
+ # Safety
+ `handle` must be a live handle or null; `part` must be a valid
+ null-terminated C string.
+ */
+int32_t ss_player_set_part_visibility_override(ss_player_t *handle,
+                                               const char *part,
+                                               bool hide,
+                                               bool cascade);
+
+/*
+ Revert a part to the animation's own visibility, by part name.
+
+ # Safety
+ `handle` must be a live handle or null; `part` must be a valid
+ null-terminated C string.
+ */
+int32_t ss_player_clear_part_visibility_override(ss_player_t *handle, const char *part);
+
+/*
+ Override a part's colour, by part name. Arguments as the `_by_index` sibling.
+
+ # Safety
+ `handle` must be a live handle or null; `part` must be a valid
+ null-terminated C string.
+ */
+int32_t ss_player_set_part_color_override(ss_player_t *handle,
+                                          const char *part,
+                                          uint32_t rgba,
+                                          uint8_t blend_op,
+                                          uint8_t priority);
+
+/*
+ Four-corner colour override, by part name. Arguments as the `_by_index` sibling.
+
+ # Safety
+ `handle` must be a live handle or null; `part` must be a valid
+ null-terminated C string.
+ */
+int32_t ss_player_set_part_color_override_corners(ss_player_t *handle,
+                                                  const char *part,
+                                                  const uint8_t *corners,
+                                                  uint8_t blend_op,
+                                                  uint8_t priority);
+
+/*
+ Revert a part to the animation's own colour, by part name.
+
+ # Safety
+ `handle` must be a live handle or null; `part` must be a valid
+ null-terminated C string.
+ */
+int32_t ss_player_clear_part_color_override(ss_player_t *handle, const char *part);
+
+/*
+ Make a part draw a different cell, by part name.
+
+ # Safety
+ `handle` must be a live handle or null; `part` must be a valid
+ null-terminated C string.
+ */
+int32_t ss_player_set_part_cell_override(ss_player_t *handle,
+                                         const char *part,
+                                         const char *cellmap_name,
+                                         const char *cell_name,
+                                         uint8_t priority);
+
+/*
+ Revert a part to the animation's own cell, by part name.
+
+ # Safety
+ `handle` must be a live handle or null; `part` must be a valid
+ null-terminated C string.
+ */
+int32_t ss_player_clear_part_cell_override(ss_player_t *handle, const char *part);
+
+/*
+ Write a part's current-frame transform into `out`, by part name.
+
+ # Safety
+ `handle` must be a live handle or null; `part` must be a valid
+ null-terminated C string.
+ */
+int32_t ss_player_part_transform(ss_player_t *handle, const char *part, float *out);
 
 /*
  Revert a part to the animation's own visibility.
@@ -902,7 +1002,7 @@ int32_t ss_player_set_part_visibility_override(ss_player_t *handle, uint32_t par
  # Safety
  `handle` must be a live handle or null.
  */
-int32_t ss_player_clear_part_visibility_override(ss_player_t *handle, uint32_t part);
+int32_t ss_player_clear_part_visibility_override_by_index(ss_player_t *handle, uint32_t part);
 
 /*
  Override a part's colour. `blend_op`: 0 mix, 1 mul, 2 add, 3 sub. `rgba` is
@@ -913,11 +1013,11 @@ int32_t ss_player_clear_part_visibility_override(ss_player_t *handle, uint32_t p
  # Safety
  `handle` must be a live handle or null.
  */
-int32_t ss_player_set_part_color_override(ss_player_t *handle,
-                                          uint32_t part,
-                                          uint8_t blend_op,
-                                          uint32_t rgba,
-                                          uint8_t priority);
+int32_t ss_player_set_part_color_override_by_index(ss_player_t *handle,
+                                                   uint32_t part,
+                                                   uint32_t rgba,
+                                                   uint8_t blend_op,
+                                                   uint8_t priority);
 
 /*
  Four-corner colour override, for a gradient. `corners` points at 16 bytes in
@@ -928,11 +1028,11 @@ int32_t ss_player_set_part_color_override(ss_player_t *handle,
  `handle` must be a live handle or null; `corners` must point at 16 readable
  bytes.
  */
-int32_t ss_player_set_part_color_override_corners(ss_player_t *handle,
-                                                  uint32_t part,
-                                                  uint8_t blend_op,
-                                                  const uint8_t *corners,
-                                                  uint8_t priority);
+int32_t ss_player_set_part_color_override_corners_by_index(ss_player_t *handle,
+                                                           uint32_t part,
+                                                           const uint8_t *corners,
+                                                           uint8_t blend_op,
+                                                           uint8_t priority);
 
 /*
  Revert a part to the animation's own colour.
@@ -940,7 +1040,7 @@ int32_t ss_player_set_part_color_override_corners(ss_player_t *handle,
  # Safety
  `handle` must be a live handle or null.
  */
-int32_t ss_player_clear_part_color_override(ss_player_t *handle, uint32_t part);
+int32_t ss_player_clear_part_color_override_by_index(ss_player_t *handle, uint32_t part);
 
 /*
  Make a part draw a different cell. `cellmap_name` is written without the
@@ -951,11 +1051,11 @@ int32_t ss_player_clear_part_color_override(ss_player_t *handle, uint32_t part);
  `handle` must be a live handle or null; both names must be valid
  null-terminated C strings.
  */
-int32_t ss_player_set_part_cell_override(ss_player_t *handle,
-                                         uint32_t part,
-                                         const char *cellmap_name,
-                                         const char *cell_name,
-                                         uint8_t priority);
+int32_t ss_player_set_part_cell_override_by_index(ss_player_t *handle,
+                                                  uint32_t part,
+                                                  const char *cellmap_name,
+                                                  const char *cell_name,
+                                                  uint8_t priority);
 
 /*
  Revert a part to the animation's own cell.
@@ -963,7 +1063,7 @@ int32_t ss_player_set_part_cell_override(ss_player_t *handle,
  # Safety
  `handle` must be a live handle or null.
  */
-int32_t ss_player_clear_part_cell_override(ss_player_t *handle, uint32_t part);
+int32_t ss_player_clear_part_cell_override_by_index(ss_player_t *handle, uint32_t part);
 
 /*
  Drop every override on the root animation at once.
@@ -1068,7 +1168,7 @@ int32_t ss_player_event_signal_param_at(ss_player_t *handle,
  `handle` must be a live handle or null; `out` must point at 6 writable
  `float`s.
  */
-int32_t ss_player_part_transform(ss_player_t *handle, uint32_t part, float *out);
+int32_t ss_player_part_transform_by_index(ss_player_t *handle, uint32_t part, float *out);
 
 /*
  How many animations the main pack holds (0 if nothing is loaded).

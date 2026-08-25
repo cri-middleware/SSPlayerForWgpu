@@ -154,7 +154,7 @@ struct AppState {
     reverse_order: bool,
 
     last_update: Instant,
-    is_paused: bool,
+    is_pausing: bool,
     y_down: bool,
     logged_first_draw: bool,
     /// Wall time of the last `SSScene::update`, in milliseconds.
@@ -182,7 +182,7 @@ impl AppState {
         let delta = now.duration_since(self.last_update).as_secs_f32();
         self.last_update = now;
 
-        if !self.is_paused {
+        if !self.is_pausing {
             // The whole cast goes into one `update`, so one `begin_frame` /
             // `end_frame` pair spans it and the draws end up back to back in a
             // single pass.
@@ -622,7 +622,7 @@ impl AppState {
         println!(" Frame: {} drawn / {} prims / {} draws / {:.1} KiB uploaded", stats.players, stats.prims, stats.draw_calls, stats.uploaded_bytes as f64 / 1024.0);
         println!(" Draw list: {} mergeable / {} redundant texture binds", stats.mergeable_draws, stats.redundant_texture_binds);
         println!(" GPU pass: {gpu} (cpu update {:.3} ms)", self.last_update_ms);
-        println!(" Playback: {}", if self.is_paused { "Paused" } else { "Playing" });
+        println!(" Playback: {}", if self.is_pausing { "Paused" } else { "Playing" });
         println!(" Y-Axis Mode: {}", if self.y_down { "Y-Down (flipped)" } else { "Y-Up (standard)" });
         println!(" Mask backend: {:?} ({} coverage bitmaps last frame)", self.scene.config().mask, stats.coverage_layers);
         println!("----------------------------------------------------");
@@ -731,7 +731,7 @@ impl ApplicationHandler for App {
             layout: Layout::Row,
             reverse_order: false,
             last_update: Instant::now(),
-            is_paused: false,
+            is_pausing: false,
             y_down: false,
             logged_first_draw: false,
             last_update_ms: 0.0,
@@ -793,7 +793,7 @@ impl ApplicationHandler for App {
                     event_loop.exit();
                 }
                 winit::keyboard::Key::Character(ref c) if c == " " => {
-                    state.is_paused = !state.is_paused;
+                    state.is_pausing = !state.is_pausing;
                     state.refresh_status();
                 }
                 // Focus picks who the pack/animation/appearance keys drive:

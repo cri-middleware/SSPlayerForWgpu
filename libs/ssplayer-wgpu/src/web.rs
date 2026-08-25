@@ -1046,6 +1046,12 @@ impl SsPlayerWeb {
 
     /// Start from the head of the section, re-arming the loop count. Not a
     /// resume: it rewinds. Use [`SsPlayerWeb::resume`] to lift a hold.
+    /// `play()` from `startFrame` rather than the head of the section.
+    #[wasm_bindgen(js_name = playFrom)]
+    pub fn play_from(&self, start_frame: f32) -> Result<(), JsValue> {
+        with_player!(self, |p| p.play_from(start_frame))
+    }
+
     pub fn play(&self) -> Result<(), JsValue> {
         with_player!(self, |p| p.play())
     }
@@ -1067,9 +1073,9 @@ impl SsPlayerWeb {
     }
 
     /// Playback rate multiplier (1.0 = as authored).
-    #[wasm_bindgen(js_name = setSpeed)]
-    pub fn set_speed(&self, speed: f32) -> Result<(), JsValue> {
-        with_player!(self, |p| p.set_speed(speed))
+    #[wasm_bindgen(js_name = setSpeedScale)]
+    pub fn set_speed_scale(&self, speed: f32) -> Result<(), JsValue> {
+        with_player!(self, |p| p.set_speed_scale(speed))
     }
 
     /// Whether this player is currently advancing.
@@ -1079,9 +1085,9 @@ impl SsPlayerWeb {
     }
 
     /// Held in place rather than stopped: `isPlaying` stays true.
-    #[wasm_bindgen(js_name = isPaused)]
-    pub fn is_paused(&self) -> Result<bool, JsValue> {
-        with_player!(self, |p| p.is_paused())
+    #[wasm_bindgen(js_name = isPausing)]
+    pub fn is_pausing(&self) -> Result<bool, JsValue> {
+        with_player!(self, |p| p.is_pausing())
     }
 
     /// Which way the playhead is actually travelling — not the heading
@@ -1098,13 +1104,6 @@ impl SsPlayerWeb {
     #[wasm_bindgen(js_name = isFinished)]
     pub fn is_finished(&self) -> Result<bool, JsValue> {
         with_player!(self, |p| p.is_finished())
-    }
-
-    /// The last `frame()` crossed a loop boundary — an edge, true only inside
-    /// the tick that crossed.
-    #[wasm_bindgen(js_name = isLooped)]
-    pub fn is_looped(&self) -> Result<bool, JsValue> {
-        with_player!(self, |p| p.is_looped())
     }
 
     /// Jump to `frame`. Fractional values are honoured.
@@ -1155,7 +1154,7 @@ impl SsPlayerWeb {
         with_player!(self, |p| p.remaining_loops())
     }
 
-    /// Override the advance rate in fps. Prefer `setSpeed`, which scales
+    /// Override the advance rate in fps. Prefer `setSpeedScale`, which scales
     /// playback without replacing the authored rate.
     #[wasm_bindgen(js_name = setFrameRate)]
     pub fn set_frame_rate(&self, fps: i32) -> Result<(), JsValue> {
@@ -1203,27 +1202,27 @@ impl SsPlayerWeb {
     /// unrounded), and so does the stepping of instance and effect children.
     /// This affects only what is drawn.
     #[wasm_bindgen(js_name = setSubFrame)]
-    pub fn set_sub_frame(&self, enabled: bool) -> Result<(), JsValue> {
-        with_player!(self, |p| p.set_sub_frame(enabled))
+    pub fn set_sub_frame_enabled(&self, enabled: bool) -> Result<(), JsValue> {
+        with_player!(self, |p| p.set_sub_frame_enabled(enabled))
     }
 
     /// See `setSubFrame`.
-    #[wasm_bindgen(js_name = subFrame)]
-    pub fn sub_frame(&self) -> Result<bool, JsValue> {
-        with_player!(self, |p| p.sub_frame())
+    #[wasm_bindgen(js_name = subFrameEnabled)]
+    pub fn sub_frame_enabled(&self) -> Result<bool, JsValue> {
+        with_player!(self, |p| p.sub_frame_enabled())
     }
 
     /// On (the default) keeps playback on the wall clock by dropping frames;
     /// off advances exactly one frame per `frame()` call.
     #[wasm_bindgen(js_name = setSkipFrames)]
-    pub fn set_skip_frames(&self, skip: bool) -> Result<(), JsValue> {
-        with_player!(self, |p| p.set_skip_frames(skip))
+    pub fn set_frame_skip_enabled(&self, skip: bool) -> Result<(), JsValue> {
+        with_player!(self, |p| p.set_frame_skip_enabled(skip))
     }
 
     /// See `setSkipFrames`.
     #[wasm_bindgen(js_name = skipFrames)]
-    pub fn skip_frames(&self) -> Result<bool, JsValue> {
-        with_player!(self, |p| p.skip_frames())
+    pub fn frame_skip_enabled(&self) -> Result<bool, JsValue> {
+        with_player!(self, |p| p.frame_skip_enabled())
     }
 
     // --- Per-part overrides ---
@@ -1244,33 +1243,33 @@ impl SsPlayerWeb {
     /// Force-hide a part (`hide` = true) or revert it to the animation.
     /// `cascade` propagates a force-hide to the part's descendants — a keyframe
     /// hide never cascades, so this is the only way to hide a sub-tree.
-    #[wasm_bindgen(js_name = setPartVisibilityOverride)]
-    pub fn set_part_visibility_override(&self, part: u32, hide: bool, cascade: bool) -> Result<(), JsValue> {
-        with_player!(self, |p| p.set_part_visibility_override(part, hide, cascade).map_err(js_err)?)
+    #[wasm_bindgen(js_name = setPartVisibilityOverrideByIndex)]
+    pub fn set_part_visibility_override_by_index(&self, part: u32, hide: bool, cascade: bool) -> Result<(), JsValue> {
+        with_player!(self, |p| p.set_part_visibility_override_by_index(part, hide, cascade).map_err(js_err)?)
     }
 
     /// Revert a part to the animation's own visibility.
-    #[wasm_bindgen(js_name = clearPartVisibilityOverride)]
-    pub fn clear_part_visibility_override(&self, part: u32) -> Result<(), JsValue> {
-        with_player!(self, |p| p.clear_part_visibility_override(part).map_err(js_err)?)
+    #[wasm_bindgen(js_name = clearPartVisibilityOverrideByIndex)]
+    pub fn clear_part_visibility_override_by_index(&self, part: u32) -> Result<(), JsValue> {
+        with_player!(self, |p| p.clear_part_visibility_override_by_index(part).map_err(js_err)?)
     }
 
     /// Override a part's colour. `blendOp`: 0 mix, 1 mul, 2 add, 3 sub.
     /// `rgba` is packed `0xRRGGBBAA` in the authored 8-bit sRGB space — do not
     /// pre-multiply it. `priority`: 0 until the next keyframe, 1 until the next
     /// animation, 2 permanent. Normal parts only.
-    #[wasm_bindgen(js_name = setPartColorOverride)]
-    pub fn set_part_color_override(&self, part: u32, blend_op: u8, rgba: u32, priority: u8) -> Result<(), JsValue> {
+    #[wasm_bindgen(js_name = setPartColorOverrideByIndex)]
+    pub fn set_part_color_override_by_index(&self, part: u32, rgba: u32, blend_op: u8, priority: u8) -> Result<(), JsValue> {
         let blend_op = BlendOp::from_wire(blend_op).ok_or_else(|| JsValue::from_str("blendOp must be 0..=3"))?;
         let priority = OverridePriority::from_wire(priority).ok_or_else(|| JsValue::from_str("priority must be 0..=2"))?;
-        with_player!(self, |p| p.set_part_color_override(part, blend_op, rgba, priority).map_err(js_err)?)
+        with_player!(self, |p| p.set_part_color_override_by_index(part, rgba, blend_op, priority).map_err(js_err)?)
     }
 
     /// Four-corner colour override, for a gradient. `corners` is 16 bytes in the
     /// runtime's order — left-top, right-top, left-bottom, right-bottom, each
     /// `[r, g, b, a]`. Otherwise as `setPartColorOverride`.
-    #[wasm_bindgen(js_name = setPartColorOverrideCorners)]
-    pub fn set_part_color_override_corners(&self, part: u32, blend_op: u8, corners: &[u8], priority: u8) -> Result<(), JsValue> {
+    #[wasm_bindgen(js_name = setPartColorOverrideCornersByIndex)]
+    pub fn set_part_color_override_corners_by_index(&self, part: u32, corners: &[u8], blend_op: u8, priority: u8) -> Result<(), JsValue> {
         let blend_op = BlendOp::from_wire(blend_op).ok_or_else(|| JsValue::from_str("blendOp must be 0..=3"))?;
         let priority = OverridePriority::from_wire(priority).ok_or_else(|| JsValue::from_str("priority must be 0..=2"))?;
         if corners.len() != 16 {
@@ -1280,28 +1279,110 @@ impl SsPlayerWeb {
         for (corner, chunk) in rgba.iter_mut().zip(corners.chunks_exact(4)) {
             corner.copy_from_slice(chunk);
         }
-        with_player!(self, |p| p.set_part_color_override_corners(part, blend_op, rgba, priority).map_err(js_err)?)
+        with_player!(self, |p| p.set_part_color_override_corners_by_index(part, rgba, blend_op, priority).map_err(js_err)?)
     }
 
     /// Revert a part to the animation's own colour.
-    #[wasm_bindgen(js_name = clearPartColorOverride)]
-    pub fn clear_part_color_override(&self, part: u32) -> Result<(), JsValue> {
-        with_player!(self, |p| p.clear_part_color_override(part).map_err(js_err)?)
+    #[wasm_bindgen(js_name = clearPartColorOverrideByIndex)]
+    pub fn clear_part_color_override_by_index(&self, part: u32) -> Result<(), JsValue> {
+        with_player!(self, |p| p.clear_part_color_override_by_index(part).map_err(js_err)?)
     }
 
     /// Make a part draw a different cell. `cellmapName` is written without the
     /// `.ssce` extension. Normal and Mask parts only; throws when the cell
     /// cannot be resolved against the loaded pack.
+    #[wasm_bindgen(js_name = setPartCellOverrideByIndex)]
+    pub fn set_part_cell_override_by_index(&self, part: u32, cellmap_name: &str, cell_name: &str, priority: u8) -> Result<(), JsValue> {
+        let priority = OverridePriority::from_wire(priority).ok_or_else(|| JsValue::from_str("priority must be 0..=2"))?;
+        with_player!(self, |p| p.set_part_cell_override_by_index(part, cellmap_name, cell_name, priority).map_err(js_err)?)
+    }
+
+    /// Revert a part to the animation's own cell.
+    #[wasm_bindgen(js_name = clearPartCellOverrideByIndex)]
+    pub fn clear_part_cell_override_by_index(&self, part: u32) -> Result<(), JsValue> {
+        with_player!(self, |p| p.clear_part_cell_override_by_index(part).map_err(js_err)?)
+    }
+
+    // --- overrides, by part name ---
+    //
+    // The unsuffixed form takes a NAME; `ByIndex` is the optimisation for a
+    // caller that cached one (SDK: `20_design/40_api_conventions`). wasm-bindgen
+    // cannot express a `string | number` union, so the two are separate methods
+    // here rather than one overload as in the browser Players.
+
+    /// Force-hide a part by name, or revert it to the animation.
+    #[wasm_bindgen(js_name = setPartVisibilityOverride)]
+    pub fn set_part_visibility_override(&self, part: &str, hide: bool, cascade: bool) -> Result<(), JsValue> {
+        with_player!(self, |p| p.set_part_visibility_override(part, hide, cascade).map_err(js_err)?)
+    }
+
+    /// Revert a part to the animation's own visibility, by name.
+    #[wasm_bindgen(js_name = clearPartVisibilityOverride)]
+    pub fn clear_part_visibility_override(&self, part: &str) -> Result<(), JsValue> {
+        with_player!(self, |p| p.clear_part_visibility_override(part).map_err(js_err)?)
+    }
+
+    /// Override a part's colour by name. Arguments as `setPartColorOverrideByIndex`.
+    #[wasm_bindgen(js_name = setPartColorOverride)]
+    pub fn set_part_color_override(&self, part: &str, rgba: u32, blend_op: u8, priority: u8) -> Result<(), JsValue> {
+        let blend_op = BlendOp::from_wire(blend_op).ok_or_else(|| JsValue::from_str("blendOp must be 0..=3"))?;
+        let priority = OverridePriority::from_wire(priority).ok_or_else(|| JsValue::from_str("priority must be 0..=2"))?;
+        with_player!(self, |p| p.set_part_color_override(part, rgba, blend_op, priority).map_err(js_err)?)
+    }
+
+    /// Four-corner colour override by name. Arguments as the `ByIndex` sibling.
+    #[wasm_bindgen(js_name = setPartColorOverrideCorners)]
+    pub fn set_part_color_override_corners(&self, part: &str, corners: &[u8], blend_op: u8, priority: u8) -> Result<(), JsValue> {
+        let blend_op = BlendOp::from_wire(blend_op).ok_or_else(|| JsValue::from_str("blendOp must be 0..=3"))?;
+        let priority = OverridePriority::from_wire(priority).ok_or_else(|| JsValue::from_str("priority must be 0..=2"))?;
+        if corners.len() != 16 {
+            return Err(JsValue::from_str("corners must be 16 bytes (4 corners x RGBA)"));
+        }
+        let mut rgba = [[0u8; 4]; 4];
+        for (corner, chunk) in rgba.iter_mut().zip(corners.chunks_exact(4)) {
+            corner.copy_from_slice(chunk);
+        }
+        with_player!(self, |p| p.set_part_color_override_corners(part, rgba, blend_op, priority).map_err(js_err)?)
+    }
+
+    /// Revert a part to the animation's own colour, by name.
+    #[wasm_bindgen(js_name = clearPartColorOverride)]
+    pub fn clear_part_color_override(&self, part: &str) -> Result<(), JsValue> {
+        with_player!(self, |p| p.clear_part_color_override(part).map_err(js_err)?)
+    }
+
+    /// Make a part draw a different cell, by name.
     #[wasm_bindgen(js_name = setPartCellOverride)]
-    pub fn set_part_cell_override(&self, part: u32, cellmap_name: &str, cell_name: &str, priority: u8) -> Result<(), JsValue> {
+    pub fn set_part_cell_override(&self, part: &str, cellmap_name: &str, cell_name: &str, priority: u8) -> Result<(), JsValue> {
         let priority = OverridePriority::from_wire(priority).ok_or_else(|| JsValue::from_str("priority must be 0..=2"))?;
         with_player!(self, |p| p.set_part_cell_override(part, cellmap_name, cell_name, priority).map_err(js_err)?)
     }
 
-    /// Revert a part to the animation's own cell.
+    /// Revert a part to the animation's own cell, by name.
     #[wasm_bindgen(js_name = clearPartCellOverride)]
-    pub fn clear_part_cell_override(&self, part: u32) -> Result<(), JsValue> {
+    pub fn clear_part_cell_override(&self, part: &str) -> Result<(), JsValue> {
         with_player!(self, |p| p.clear_part_cell_override(part).map_err(js_err)?)
+    }
+
+    /// A part's current-frame transform by name, as the six affine terms, or an
+    /// empty array when the name is unknown.
+    #[wasm_bindgen(js_name = partTransform)]
+    pub fn part_transform(&self, part: &str) -> Result<Vec<f32>, JsValue> {
+        with_player!(self, |p| p.part_transform(part).map(|m| m.to_vec()).unwrap_or_default())
+    }
+
+    /// Every cellmap name in the pack, without the `.ssce` extension — the
+    /// namespace `setPartCellOverride` takes.
+    #[wasm_bindgen(js_name = cellmapNames)]
+    pub fn cellmap_names(&self) -> Result<Vec<String>, JsValue> {
+        with_player!(self, |p| p.cellmap_names().unwrap_or_default())
+    }
+
+    /// The cell names inside one cellmap — the other half of what
+    /// `setPartCellOverride` takes.
+    #[wasm_bindgen(js_name = cellNames)]
+    pub fn cell_names(&self, cellmap_name: &str) -> Result<Vec<String>, JsValue> {
+        with_player!(self, |p| p.cell_names(cellmap_name).unwrap_or_default())
     }
 
     /// Drop every override on the root animation at once.
@@ -1323,17 +1404,17 @@ impl SsPlayerWeb {
 
     /// Whether the last `frame()` crossed a loop boundary. One report per call
     /// however many cycles it crossed.
-    #[wasm_bindgen(js_name = loopedLastUpdate)]
-    pub fn looped_last_update(&self) -> Result<bool, JsValue> {
-        with_player!(self, |p| p.looped_last_update())
+    #[wasm_bindgen(js_name = justLooped)]
+    pub fn just_looped(&self) -> Result<bool, JsValue> {
+        with_player!(self, |p| p.just_looped())
     }
 
     /// Whether the last `frame()` **completed** playback — true for exactly one
     /// call, unlike the sticky `isFinished`. Never true under an infinite loop,
     /// and not raised by `stop()`.
-    #[wasm_bindgen(js_name = finishedLastUpdate)]
-    pub fn finished_last_update(&self) -> Result<bool, JsValue> {
-        with_player!(self, |p| p.finished_last_update())
+    #[wasm_bindgen(js_name = justFinished)]
+    pub fn just_finished(&self) -> Result<bool, JsValue> {
+        with_player!(self, |p| p.just_finished())
     }
 
     /// Timeline events the last `frame()` crossed, as an array of plain objects
@@ -1366,9 +1447,9 @@ impl SsPlayerWeb {
     /// Empty when no animation is set up or `part` is out of range. Read it
     /// after `frame()`: it describes the frame that produced. Hidden parts still
     /// report where they would have been.
-    #[wasm_bindgen(js_name = partTransform)]
-    pub fn part_transform(&self, part: u32) -> Result<Vec<f32>, JsValue> {
-        with_player!(self, |p| p.part_transform(part).map(|m| m.to_vec()).unwrap_or_default())
+    #[wasm_bindgen(js_name = partTransformByIndex)]
+    pub fn part_transform_by_index(&self, part: u32) -> Result<Vec<f32>, JsValue> {
+        with_player!(self, |p| p.part_transform_by_index(part).map(|m| m.to_vec()).unwrap_or_default())
     }
 
     /// Place this player in the scene, in pixels from the canvas centre, with

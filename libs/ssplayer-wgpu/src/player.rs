@@ -504,7 +504,7 @@ pub struct SSPlayer {
     /// written over the animation's own default.
     loop_count: Option<i32>,
     /// Whether the *display* frame keeps its fraction (see
-    /// [`SSPlayer::set_sub_frame`]). The playhead is an `f32` either way.
+    /// [`SSPlayer::set_sub_frame_enabled`]). The playhead is an `f32` either way.
     sub_frame: bool,
 }
 
@@ -937,6 +937,19 @@ impl SSPlayer {
     /// loop count. **Not a resume**: it rewinds, so lifting a
     /// [`SSPlayer::pause`] is [`SSPlayer::resume`]'s job.
     /// No-op until [`SSPlayer::set_animation`] has succeeded.
+    /// [`SSPlayer::play`] from `start_frame` rather than from the head of the
+    /// section. The family spells this `play(startFrame)`; Rust has no
+    /// overloads, so it is a second name here.
+    ///
+    /// Not a resume either — it re-arms the loop count exactly as `play` does,
+    /// and the frame it starts from becomes the reference the loop counts from.
+    pub fn play_from(&mut self, start_frame: f32) {
+        self.prev_finished = false;
+        if let Some(root) = &mut self.root {
+            root.context.play_with_start_frame(start_frame);
+        }
+    }
+
     pub fn play(&mut self) {
         // Re-arm the completion latch. Without this, replaying an animation that
         // already finished would compare against a `true` left over from the
@@ -980,7 +993,7 @@ impl SSPlayer {
     /// [`SSPlayer::speed`] as the `0.0` they became.
     ///
     /// Survives [`SSPlayer::set_animation`], and may be set before the first one.
-    pub fn set_speed(&mut self, speed: f32) {
+    pub fn set_speed_scale(&mut self, speed: f32) {
         if let Some(root) = &mut self.root {
             root.context.set_animation_speed(speed);
         }
@@ -989,7 +1002,7 @@ impl SSPlayer {
     /// The speed in effect, as a multiple of the frame rate. Read from the
     /// runtime, so a rate that clamped to a stop reads back as `0.0` rather than
     /// as the negative that was asked for.
-    pub fn speed(&self) -> f32 {
+    pub fn speed_scale(&self) -> f32 {
         self.root.as_ref().map(|r| r.context.get_animation_speed()).unwrap_or(1.0)
     }
 
@@ -1000,7 +1013,7 @@ impl SSPlayer {
     /// Held in place rather than stopped: [`SSPlayer::is_playing`] stays true.
     /// False before the first [`SSPlayer::play`] and after [`SSPlayer::stop`] —
     /// the runtime keeps "paused" implying "playing".
-    pub fn is_paused(&self) -> bool {
+    pub fn is_pausing(&self) -> bool {
         self.root.as_ref().map(|r| r.context.is_pausing()).unwrap_or(false)
     }
 
@@ -1024,15 +1037,6 @@ impl SSPlayer {
     /// [`SSPlayer::set_animation`], and never true under an infinite loop.
     pub fn is_finished(&self) -> bool {
         self.root.as_ref().map(|r| r.context.is_finished()).unwrap_or(false)
-    }
-
-    /// The last [`SSScene::update`] crossed a loop boundary. An edge, cleared at
-    /// the top of every update, so it only reads true inside the tick that
-    /// crossed.
-    ///
-    /// [`SSScene::update`]: crate::SSScene::update
-    pub fn is_looped(&self) -> bool {
-        self.root.as_ref().map(|r| r.context.is_looped()).unwrap_or(false)
     }
 
     // --- Playhead ----------------------------------------------------------
@@ -1112,7 +1116,7 @@ impl SSPlayer {
     }
 
     /// Override the advance rate. The pack's authored rate otherwise — prefer
-    /// [`SSPlayer::set_speed`], which scales playback without replacing it.
+    /// [`SSPlayer::set_speed_scale`], which scales playback without replacing it.
     pub fn set_frame_rate(&mut self, fps: i32) {
         if let Some(root) = &mut self.root {
             root.context.set_frame_rate(fps);
@@ -1265,26 +1269,26 @@ impl SSPlayer {
     /// tick is worth less than a frame. Turning this off only floors what is
     /// drawn, which is what pins playback to whole authored frames.
     ///
-    /// Distinct from [`SSPlayer::set_skip_frames`], which is about *time*: skip
+    /// Distinct from [`SSPlayer::set_frame_skip_enabled`], which is about *time*: skip
     /// frames decides whether a long tick catches up or advances one frame; this
     /// decides whether what is drawn may sit between two of them.
-    pub fn set_sub_frame(&mut self, enabled: bool) {
+    pub fn set_sub_frame_enabled(&mut self, enabled: bool) {
         self.sub_frame = enabled;
     }
 
-    /// See [`SSPlayer::set_sub_frame`].
-    pub fn sub_frame(&self) -> bool {
+    /// See [`SSPlayer::set_sub_frame_enabled`].
+    pub fn sub_frame_enabled(&self) -> bool {
         self.sub_frame
     }
 
-    pub fn set_skip_frames(&mut self, skip: bool) {
+    pub fn set_frame_skip_enabled(&mut self, skip: bool) {
         if let Some(root) = &mut self.root {
             root.context.set_skip_frames(skip);
         }
     }
 
-    /// See [`SSPlayer::set_skip_frames`].
-    pub fn skip_frames(&self) -> bool {
+    /// See [`SSPlayer::set_frame_skip_enabled`].
+    pub fn frame_skip_enabled(&self) -> bool {
         self.root.as_ref().map(|r| r.context.get_skip_frames()).unwrap_or(true)
     }
 
@@ -1311,6 +1315,9 @@ impl SSPlayer {
 
     /// Resolve a part name to its index in the current animation, or `None` when
     /// the name is unknown or no animation is set up.
+    ///
+    /// Only worth calling to cache the index across many frames — every override
+    /// below takes the name directly and resolves it for you.
     pub fn find_part_index(&self, name: &str) -> Option<u32> {
         let root = self.root.as_ref()?;
         match root.context.find_part_index(name) {
@@ -1319,19 +1326,41 @@ impl SSPlayer {
         }
     }
 
+    /// `find_part_index` with the failure turned into the error the override
+    /// methods return, so each of them stays one line.
+    fn resolve_part(&self, name: &str) -> Result<u32, SSRuntimeError> {
+        self.find_part_index(name).ok_or(SSRuntimeError::InvalidParameter)
+    }
+
     /// Force-hide a part, or revert it to the animation.
     ///
     /// `cascade` propagates a force-hide to the part's descendants. A keyframe
     /// `hide` never cascades, so this is the only way to hide a whole sub-tree.
     /// Visibility has no priority mode: it always beats the keyframe, and is
     /// always cleared when a new animation is set up.
-    pub fn set_part_visibility_override(&mut self, part: u32, hide: bool, cascade: bool) -> Result<(), SSRuntimeError> {
+    ///
+    /// Errors with `InvalidParameter` when the name is not in the current
+    /// animation. Take [`SSPlayer::set_part_visibility_override_by_index`] when
+    /// you already hold the index.
+    pub fn set_part_visibility_override(&mut self, part: &str, hide: bool, cascade: bool) -> Result<(), SSRuntimeError> {
+        let index = self.resolve_part(part)?;
+        self.set_part_visibility_override_by_index(index, hide, cascade)
+    }
+
+    /// Index form of [`SSPlayer::set_part_visibility_override`].
+    pub fn set_part_visibility_override_by_index(&mut self, part: u32, hide: bool, cascade: bool) -> Result<(), SSRuntimeError> {
         let root = self.root.as_mut().ok_or(SSRuntimeError::NotLoaded)?;
         root.context.set_part_visibility_override(part, u8::from(hide), cascade)
     }
 
     /// Revert a part to the animation's own visibility.
-    pub fn clear_part_visibility_override(&mut self, part: u32) -> Result<(), SSRuntimeError> {
+    pub fn clear_part_visibility_override(&mut self, part: &str) -> Result<(), SSRuntimeError> {
+        let index = self.resolve_part(part)?;
+        self.clear_part_visibility_override_by_index(index)
+    }
+
+    /// Index form of [`SSPlayer::clear_part_visibility_override`].
+    pub fn clear_part_visibility_override_by_index(&mut self, part: u32) -> Result<(), SSRuntimeError> {
         let root = self.root.as_mut().ok_or(SSRuntimeError::NotLoaded)?;
         root.context.clear_part_visibility_override(part)
     }
@@ -1341,10 +1370,21 @@ impl SSPlayer {
     /// `rgba` is packed `0xRRGGBBAA` in the same 8-bit sRGB space as the
     /// authored PartColor: the runtime multiplies its alpha with the part's
     /// composed alpha itself, so do not pre-multiply or gamma-convert it here.
+    /// That alpha is also the strength, which is why `BlendOp::Mix` is the plain
+    /// case and the value to pass when you have no reason to pass another.
     ///
     /// Normal parts only. Others ignore it silently — `Ok` means the override
     /// was recorded, not that anything looks different.
-    pub fn set_part_color_override(&mut self, part: u32, blend_op: BlendOp, rgba: u32, priority: OverridePriority) -> Result<(), SSRuntimeError> {
+    ///
+    /// The C ABI takes `blend_op` before the colour; this face deliberately does
+    /// not (see the SDK's Player API conventions).
+    pub fn set_part_color_override(&mut self, part: &str, rgba: u32, blend_op: BlendOp, priority: OverridePriority) -> Result<(), SSRuntimeError> {
+        let index = self.resolve_part(part)?;
+        self.set_part_color_override_by_index(index, rgba, blend_op, priority)
+    }
+
+    /// Index form of [`SSPlayer::set_part_color_override`].
+    pub fn set_part_color_override_by_index(&mut self, part: u32, rgba: u32, blend_op: BlendOp, priority: OverridePriority) -> Result<(), SSRuntimeError> {
         let root = self.root.as_mut().ok_or(SSRuntimeError::NotLoaded)?;
         root.context.set_part_color_override(part, blend_op.as_wire(), rgba, priority.as_wire())
     }
@@ -1354,15 +1394,28 @@ impl SSPlayer {
     /// Same contract as [`SSPlayer::set_part_color_override`]. `corners` is in
     /// the runtime's order — **left-top, right-top, left-bottom, right-bottom**,
     /// each `[r, g, b, a]` — and getting that order wrong flips the gradient
-    /// silently rather than failing.
-    pub fn set_part_color_override_corners(&mut self, part: u32, blend_op: BlendOp, corners: [[u8; 4]; 4], priority: OverridePriority) -> Result<(), SSRuntimeError> {
+    /// silently rather than failing. One argument rather than four, so the pair
+    /// of colour methods reads the same.
+    pub fn set_part_color_override_corners(&mut self, part: &str, corners: [[u8; 4]; 4], blend_op: BlendOp, priority: OverridePriority) -> Result<(), SSRuntimeError> {
+        let index = self.resolve_part(part)?;
+        self.set_part_color_override_corners_by_index(index, corners, blend_op, priority)
+    }
+
+    /// Index form of [`SSPlayer::set_part_color_override_corners`].
+    pub fn set_part_color_override_corners_by_index(&mut self, part: u32, corners: [[u8; 4]; 4], blend_op: BlendOp, priority: OverridePriority) -> Result<(), SSRuntimeError> {
         let root = self.root.as_mut().ok_or(SSRuntimeError::NotLoaded)?;
         root.context.set_part_color_override_corners(part, blend_op.as_wire(), corners, priority.as_wire())
     }
 
     /// Revert a part to the animation's own colour. Clears either kind of colour
     /// override — they share one slot per part.
-    pub fn clear_part_color_override(&mut self, part: u32) -> Result<(), SSRuntimeError> {
+    pub fn clear_part_color_override(&mut self, part: &str) -> Result<(), SSRuntimeError> {
+        let index = self.resolve_part(part)?;
+        self.clear_part_color_override_by_index(index)
+    }
+
+    /// Index form of [`SSPlayer::clear_part_color_override`].
+    pub fn clear_part_color_override_by_index(&mut self, part: u32) -> Result<(), SSRuntimeError> {
         let root = self.root.as_mut().ok_or(SSRuntimeError::NotLoaded)?;
         root.context.clear_part_color_override(part)
     }
@@ -1370,10 +1423,17 @@ impl SSPlayer {
     /// Make a part draw a different cell.
     ///
     /// `cellmap_name` is written without the `.ssce` extension. Both names are
-    /// hashed here, so pass them exactly as they appear in the pack. Normal and
-    /// Mask parts only; errors when the cell cannot be resolved against the
-    /// bound `.ssab`.
-    pub fn set_part_cell_override(&mut self, part: u32, cellmap_name: &str, cell_name: &str, priority: OverridePriority) -> Result<(), SSRuntimeError> {
+    /// hashed here, so pass them exactly as they appear in the pack — see
+    /// [`SSPlayer::cellmap_names`] and [`SSPlayer::cell_names`] for what is
+    /// available. Normal and Mask parts only; errors when the cell cannot be
+    /// resolved against the bound `.ssab`.
+    pub fn set_part_cell_override(&mut self, part: &str, cellmap_name: &str, cell_name: &str, priority: OverridePriority) -> Result<(), SSRuntimeError> {
+        let index = self.resolve_part(part)?;
+        self.set_part_cell_override_by_index(index, cellmap_name, cell_name, priority)
+    }
+
+    /// Index form of [`SSPlayer::set_part_cell_override`].
+    pub fn set_part_cell_override_by_index(&mut self, part: u32, cellmap_name: &str, cell_name: &str, priority: OverridePriority) -> Result<(), SSRuntimeError> {
         let root = self.root.as_mut().ok_or(SSRuntimeError::NotLoaded)?;
         let cellmap_hash = ssruntime::fnv1a_hash_str(cellmap_name);
         let cell_hash = ssruntime::fnv1a_hash_str(cell_name);
@@ -1381,7 +1441,13 @@ impl SSPlayer {
     }
 
     /// Revert a part to the animation's own cell.
-    pub fn clear_part_cell_override(&mut self, part: u32) -> Result<(), SSRuntimeError> {
+    pub fn clear_part_cell_override(&mut self, part: &str) -> Result<(), SSRuntimeError> {
+        let index = self.resolve_part(part)?;
+        self.clear_part_cell_override_by_index(index)
+    }
+
+    /// Index form of [`SSPlayer::clear_part_cell_override`].
+    pub fn clear_part_cell_override_by_index(&mut self, part: u32) -> Result<(), SSRuntimeError> {
         let root = self.root.as_mut().ok_or(SSRuntimeError::NotLoaded)?;
         root.context.clear_part_cell_override(part)
     }
@@ -1408,10 +1474,10 @@ impl SSPlayer {
     ///
     /// One report per update however many cycles were crossed, since a long tick
     /// under frame skipping can complete several. Use it for "the walk cycle came
-    /// round"; use [`SSPlayer::finished_last_update`] for "the animation is over".
+    /// round"; use [`SSPlayer::just_finished`] for "the animation is over".
     ///
     /// [`SSScene::update`]: crate::SSScene::update
-    pub fn looped_last_update(&self) -> bool {
+    pub fn just_looped(&self) -> bool {
         self.looped
     }
 
@@ -1426,7 +1492,7 @@ impl SSPlayer {
     /// The related trap is deriving completion from `!is_playing` or from
     /// reaching the last frame; both are wrong in ways the SDK's porting guide
     /// records from sibling Players, which is why neither is offered here.
-    pub fn finished_last_update(&self) -> bool {
+    pub fn just_finished(&self) -> bool {
         self.finished_edge
     }
 
@@ -1474,7 +1540,13 @@ impl SSPlayer {
     /// is hidden, so a hidden part still reports where it would have been.
     ///
     /// [`SSScene::update`]: crate::SSScene::update
-    pub fn part_transform(&self, part: u32) -> Option<[f32; 6]> {
+    pub fn part_transform(&self, part: &str) -> Option<[f32; 6]> {
+        self.part_transform_by_index(self.find_part_index(part)?)
+    }
+
+    /// Index form of [`SSPlayer::part_transform`], for a caller that already
+    /// resolved the name and reads the pose every frame.
+    pub fn part_transform_by_index(&self, part: u32) -> Option<[f32; 6]> {
         let root = self.root.as_ref()?;
         let matrices = unsafe { slice_f32(root.context.get_world_matrices_ptr(), root.context.get_world_matrices_len()) };
         let base = (part as usize).checked_mul(16)?;
@@ -1579,6 +1651,31 @@ impl SSPlayer {
     pub fn animation_names(&self) -> Option<Vec<String>> {
         let anim_resource = self.packs.get(self.main_pack.as_ref()?)?.resource().resource()?;
         Some(anim_resource.get_animation_names())
+    }
+
+    /// Every cellmap name in the main pack, without the `.ssce` extension — the
+    /// namespace [`SSPlayer::set_part_cell_override`] takes.
+    ///
+    /// `None` until a pack is bound. Reads the `.ssab` directly rather than the
+    /// texture list, because a cellmap whose atlas is embedded still has a name.
+    pub fn cellmap_names(&self) -> Option<Vec<String>> {
+        let pack = self.packs.get(self.main_pack.as_ref()?)?;
+        let bytes = pack.resource().data();
+        // SAFETY: the pack verified the buffer when it adopted it.
+        let ab = unsafe { root_as_ss_anime_binary_unchecked(bytes.as_slice()) };
+        Some(ab.cellmaps()?.iter().map(|c| c.name().to_string()).collect())
+    }
+
+    /// The cell names inside one cellmap, or `None` when no pack is bound or the
+    /// cellmap is not in it. The other half of what
+    /// [`SSPlayer::set_part_cell_override`] takes.
+    pub fn cell_names(&self, cellmap_name: &str) -> Option<Vec<String>> {
+        let pack = self.packs.get(self.main_pack.as_ref()?)?;
+        let bytes = pack.resource().data();
+        // SAFETY: as above.
+        let ab = unsafe { root_as_ss_anime_binary_unchecked(bytes.as_slice()) };
+        let cellmap = ab.cellmaps()?.iter().find(|c| c.name() == cellmap_name)?;
+        Some(cellmap.cells()?.iter().map(|c| c.name().to_string()).collect())
     }
 
     /// The atlases a registered pack asks for, or `None` if
@@ -1925,7 +2022,7 @@ fn sync_masks_to(build: &mut FrameBuild<'_>, frame: &FrameView, node: &NodeSlot,
 struct FrameBuild<'a> {
     scene: &'a mut FrameChunk,
     renderer: &'a SSRenderer,
-    /// The owning player's [`SSPlayer::set_sub_frame`]. Carried here rather than
+    /// The owning player's [`SSPlayer::set_sub_frame_enabled`]. Carried here rather than
     /// passed down, so it reaches every node of the tree — an instance child is
     /// drawn at its own playhead and has to be floored on the same terms.
     sub_frame: bool,

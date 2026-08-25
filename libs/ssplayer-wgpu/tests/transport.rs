@@ -66,10 +66,10 @@ fn an_empty_player_answers_instead_of_panicking() {
     assert_eq!(player.frame_rate(), 0);
     assert_eq!(player.playback_direction(), PlaybackDirection::Forward);
     assert_eq!(player.playback_style(), PlaybackStyle::Normal);
-    assert!(player.skip_frames());
-    assert!(!player.is_paused());
+    assert!(player.frame_skip_enabled());
+    assert!(!player.is_pausing());
     assert!(!player.is_finished());
-    assert!(!player.is_looped());
+    assert!(!player.just_looped());
 }
 
 #[test]
@@ -135,8 +135,8 @@ fn a_real_switch_drops_the_section_and_keeps_the_rest() {
     assert!(full > 4, "need room to carve a section");
 
     player.set_animation_section(player.start_frame(), player.start_frame() + 3);
-    player.set_speed(2.0);
-    player.set_skip_frames(false);
+    player.set_speed_scale(2.0);
+    player.set_frame_skip_enabled(false);
     player.set_playback_direction(PlaybackDirection::Backward, PlaybackStyle::PingPong);
     player.set_loop_count(3);
 
@@ -149,8 +149,8 @@ fn a_real_switch_drops_the_section_and_keeps_the_rest() {
 
     // Everything else stays. The runtime carries these across a setup itself —
     // this Player used to rebuild the context and lose all four.
-    assert_eq!(player.speed(), 2.0, "speed describes the playback, not the clip");
-    assert!(!player.skip_frames(), "frame skip is a Player policy");
+    assert_eq!(player.speed_scale(), 2.0, "speed describes the playback, not the clip");
+    assert!(!player.frame_skip_enabled(), "frame skip is a Player policy");
     assert_eq!(player.playback_direction(), PlaybackDirection::Backward);
     assert_eq!(player.playback_style(), PlaybackStyle::PingPong);
     // The loop count is the one the runtime drops, because the transition states
@@ -183,11 +183,11 @@ fn loop_count_and_skip_frames_round_trip() {
     player.set_loop_count(3);
     assert_eq!(player.loop_count(), 3);
 
-    assert!(player.skip_frames(), "the runtime default is on");
-    player.set_skip_frames(false);
-    assert!(!player.skip_frames());
-    player.set_skip_frames(true);
-    assert!(player.skip_frames());
+    assert!(player.frame_skip_enabled(), "the runtime default is on");
+    player.set_frame_skip_enabled(false);
+    assert!(!player.frame_skip_enabled());
+    player.set_frame_skip_enabled(true);
+    assert!(player.frame_skip_enabled());
 }
 
 #[test]
@@ -275,36 +275,36 @@ fn pause_holds_and_only_resume_lifts_it() {
 
     // Nothing is playing yet: neither flag is set, and pause is ignored.
     assert!(!player.is_playing());
-    assert!(!player.is_paused());
+    assert!(!player.is_pausing());
     player.pause();
-    assert!(!player.is_paused(), "pausing a never-played animation does nothing");
+    assert!(!player.is_pausing(), "pausing a never-played animation does nothing");
 
     player.play();
     assert!(player.is_playing());
-    assert!(!player.is_paused());
+    assert!(!player.is_pausing());
 
     player.pause();
-    assert!(player.is_paused());
+    assert!(player.is_pausing());
     assert!(player.is_playing(), "a hold is not a stop");
 
     player.pause();
-    assert!(player.is_paused(), "pause is idempotent — it never resumes");
+    assert!(player.is_pausing(), "pause is idempotent — it never resumes");
 
     player.resume();
-    assert!(!player.is_paused());
+    assert!(!player.is_pausing());
     player.resume();
-    assert!(!player.is_paused(), "resume is idempotent too");
+    assert!(!player.is_pausing(), "resume is idempotent too");
 
     // play() clears a hold, but by heading out rather than carrying on.
     player.pause();
     player.play();
-    assert!(!player.is_paused());
+    assert!(!player.is_pausing());
 
     // stop() clears it as well, and resume does not restart from there.
     player.pause();
     player.stop();
     assert!(!player.is_playing());
-    assert!(!player.is_paused(), "stopped is not held");
+    assert!(!player.is_pausing(), "stopped is not held");
     player.resume();
     assert!(!player.is_playing(), "resume lifts a hold; it does not start playback");
 }

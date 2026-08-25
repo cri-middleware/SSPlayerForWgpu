@@ -62,7 +62,7 @@ fn play_through(renderer: &mut SSRenderer, device: &wgpu::Device, queue: &wgpu::
     for _ in 0..4000 {
         scene.update(renderer, device, queue, delta, &mut [&mut player]);
         seen.extend(player.events().iter().cloned());
-        if player.finished_last_update() {
+        if player.just_finished() {
             break;
         }
     }
@@ -74,8 +74,8 @@ fn a_player_with_no_animation_reports_nothing() {
     let player = SSPlayer::new();
 
     assert!(player.events().is_empty());
-    assert!(!player.looped_last_update());
-    assert!(!player.finished_last_update());
+    assert!(!player.just_looped());
+    assert!(!player.just_finished());
 }
 
 #[test]
@@ -98,7 +98,7 @@ fn finished_is_an_edge_and_survives_a_replay() {
     let mut edges = 0;
     for _ in 0..4000 {
         scene.update(&mut renderer, &device, &queue, 1.0 / 60.0, &mut [&mut player]);
-        if player.finished_last_update() {
+        if player.just_finished() {
             edges += 1;
         }
         if player.is_finished() && edges > 0 {
@@ -112,7 +112,7 @@ fn finished_is_an_edge_and_survives_a_replay() {
     // runtime's flag directly instead of the edge is what would fire forever.
     for _ in 0..5 {
         scene.update(&mut renderer, &device, &queue, 1.0 / 60.0, &mut [&mut player]);
-        assert!(!player.finished_last_update(), "the edge must not repeat");
+        assert!(!player.just_finished(), "the edge must not repeat");
     }
 
     // Replaying re-arms the latch. Without that, this second completion would be
@@ -121,7 +121,7 @@ fn finished_is_an_edge_and_survives_a_replay() {
     let mut second = 0;
     for _ in 0..4000 {
         scene.update(&mut renderer, &device, &queue, 1.0 / 60.0, &mut [&mut player]);
-        if player.finished_last_update() {
+        if player.just_finished() {
             second += 1;
             break;
         }
@@ -148,10 +148,10 @@ fn an_infinite_loop_loops_and_never_finishes() {
     let mut loops = 0;
     for _ in 0..4000 {
         scene.update(&mut renderer, &device, &queue, 1.0 / 60.0, &mut [&mut player]);
-        if player.looped_last_update() {
+        if player.just_looped() {
             loops += 1;
         }
-        assert!(!player.finished_last_update(), "an infinite loop never completes");
+        assert!(!player.just_finished(), "an infinite loop never completes");
     }
     assert!(loops > 0, "an infinite loop should have come round at least once");
 }
@@ -302,8 +302,8 @@ fn a_hidden_player_reports_no_events() {
     for tick in 0..5 {
         scene.update(&mut renderer, &device, &queue, 1.0 / 60.0, &mut [&mut player]);
         assert!(player.events().is_empty(), "a hidden player replayed the last visible tick's events (tick {tick})");
-        assert!(!player.looped_last_update(), "a hidden player reported a loop it did not cross (tick {tick})");
-        assert!(!player.finished_last_update(), "a hidden player reported a completion it did not reach (tick {tick})");
+        assert!(!player.just_looped(), "a hidden player reported a loop it did not cross (tick {tick})");
+        assert!(!player.just_finished(), "a hidden player reported a completion it did not reach (tick {tick})");
     }
 
     // Visible again, the reports come from the ticks that do run.

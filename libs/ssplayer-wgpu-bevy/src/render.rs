@@ -139,7 +139,7 @@ pub(crate) fn sync_players(mut state: Option<ResMut<SsRenderState>>, extracted: 
         slot.player.set_transform(transform.x, transform.y, transform.scale_x, transform.scale_y, transform.rotation);
 
         let playback = extracted_player.playback;
-        slot.player.set_speed(playback.speed);
+        slot.player.set_speed_scale(playback.speed);
         slot.player.set_order(playback.order);
         slot.player.set_alpha(playback.alpha);
         slot.player.set_visible(playback.visible);
@@ -287,7 +287,7 @@ pub(crate) fn draw_players(
             .iter()
             .map(|slot| {
                 let player = &slot.player;
-                PlaybackFeedback { entity: slot.entity.id(), frame_no: player.frame_no(), is_finished: player.is_finished(), finished_edge: player.finished_last_update(), looped: player.looped_last_update(), events: player.events().to_vec() }
+                PlaybackFeedback { entity: slot.entity.id(), frame_no: player.frame_no(), is_finished: player.is_finished(), finished_edge: player.just_finished(), looped: player.just_looped(), events: player.events().to_vec() }
             })
             .collect(),
     );
