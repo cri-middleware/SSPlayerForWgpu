@@ -14,7 +14,7 @@
 //! The player's other loop-edge rule — read the pulse from `Context::is_looped`
 //! rather than inferring it from "the frame went backwards" — has **no test
 //! here on purpose**: the two agree on every path today's public API can reach.
-//! `set_speed` cannot make the frame run backwards (the runtime clamps a
+//! `set_speed_scale` cannot make the frame run backwards (the runtime clamps a
 //! non-positive rate to 1.0) and neither reverse nor ping-pong direction is
 //! exposed, so nothing distinguishes them until one of those lands. The reason
 //! to read the pulse anyway is that it is the runtime's own answer, and the

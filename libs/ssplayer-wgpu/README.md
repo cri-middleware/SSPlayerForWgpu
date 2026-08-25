@@ -58,7 +58,7 @@ scene.draw(&renderer, &mut rpass);
 ```
 
 `set_animation` builds the instance tree and is the allocating step; `play` /
-`pause` / `stop` / `set_speed` are allocation-free transport. Players are drawn
+`pause` / `stop` / `set_speed_scale` are allocation-free transport. Players are drawn
 in ascending `set_order`, and `set_transform` / `set_visible` / `set_alpha` place
 each one in the scene.
 

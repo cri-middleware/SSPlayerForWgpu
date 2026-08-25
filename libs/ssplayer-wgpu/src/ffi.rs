@@ -844,6 +844,19 @@ pub unsafe extern "C" fn ss_player_play(handle: *mut SsPlayer) {
     }
 }
 
+/// `ss_player_play` from `start_frame` rather than the head of the section. The
+/// family spells this `play(startFrame)`; C has no overloads, so it is a second
+/// entry point here. Re-arms the loop count exactly as `ss_player_play` does.
+///
+/// # Safety
+/// `handle` must be a live handle or null.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn ss_player_play_from(handle: *mut SsPlayer, start_frame: f32) {
+    if let Some(player) = unsafe { player(handle) } {
+        player.play_from(start_frame);
+    }
+}
+
 /// Hold playback on the current frame. Idempotent, and ignored while nothing is
 /// playing. Lift it with `ss_player_resume`.
 ///
@@ -888,9 +901,9 @@ pub unsafe extern "C" fn ss_player_stop(handle: *mut SsPlayer) {
 /// # Safety
 /// `handle` must be a live handle or null.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn ss_player_set_speed(handle: *mut SsPlayer, speed: f32) {
+pub unsafe extern "C" fn ss_player_set_speed_scale(handle: *mut SsPlayer, speed: f32) {
     if let Some(player) = unsafe { player(handle) } {
-        player.set_speed(speed);
+        player.set_speed_scale(speed);
     }
 }
 
@@ -908,8 +921,8 @@ pub unsafe extern "C" fn ss_player_is_playing(handle: *mut SsPlayer) -> bool {
 /// # Safety
 /// `handle` must be a live handle or null.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn ss_player_is_paused(handle: *mut SsPlayer) -> bool {
-    unsafe { player(handle) }.map(|p| p.is_paused()).unwrap_or(false)
+pub unsafe extern "C" fn ss_player_is_pausing(handle: *mut SsPlayer) -> bool {
+    unsafe { player(handle) }.map(|p| p.is_pausing()).unwrap_or(false)
 }
 
 /// Which way the playhead is actually travelling — not the heading
@@ -941,8 +954,8 @@ pub unsafe extern "C" fn ss_player_is_finished(handle: *mut SsPlayer) -> bool {
 /// # Safety
 /// `handle` must be a live handle or null.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn ss_player_is_looped(handle: *mut SsPlayer) -> bool {
-    unsafe { player(handle) }.map(|p| p.is_looped()).unwrap_or(false)
+pub unsafe extern "C" fn ss_player_just_looped(handle: *mut SsPlayer) -> bool {
+    unsafe { player(handle) }.map(|p| p.just_looped()).unwrap_or(false)
 }
 
 /// Jump to `frame`. Fractional values are honoured.
@@ -1023,7 +1036,7 @@ pub unsafe extern "C" fn ss_player_remaining_loops(handle: *mut SsPlayer) -> i32
     unsafe { player(handle) }.map(|p| p.remaining_loops()).unwrap_or(0)
 }
 
-/// Override the advance rate in fps. Prefer `ss_player_set_speed`, which scales
+/// Override the advance rate in fps. Prefer `ss_player_set_speed_scale`, which scales
 /// playback without replacing the authored rate.
 ///
 /// # Safety
@@ -1102,7 +1115,7 @@ pub unsafe extern "C" fn ss_player_playback_style(handle: *mut SsPlayer) -> i32 
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn ss_player_set_sub_frame(handle: *mut SsPlayer, enabled: bool) {
     if let Some(player) = unsafe { player(handle) } {
-        player.set_sub_frame(enabled);
+        player.set_sub_frame_enabled(enabled);
     }
 }
 
@@ -1111,8 +1124,8 @@ pub unsafe extern "C" fn ss_player_set_sub_frame(handle: *mut SsPlayer, enabled:
 /// # Safety
 /// `handle` must be a live handle or null.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn ss_player_sub_frame(handle: *mut SsPlayer) -> bool {
-    unsafe { player(handle) }.map(|p| p.sub_frame()).unwrap_or(true)
+pub unsafe extern "C" fn ss_player_sub_frame_enabled(handle: *mut SsPlayer) -> bool {
+    unsafe { player(handle) }.map(|p| p.sub_frame_enabled()).unwrap_or(true)
 }
 
 /// True (the default) keeps playback on the wall clock by dropping frames under
@@ -1123,7 +1136,7 @@ pub unsafe extern "C" fn ss_player_sub_frame(handle: *mut SsPlayer) -> bool {
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn ss_player_set_skip_frames(handle: *mut SsPlayer, skip: bool) {
     if let Some(player) = unsafe { player(handle) } {
-        player.set_skip_frames(skip);
+        player.set_frame_skip_enabled(skip);
     }
 }
 
@@ -1133,7 +1146,7 @@ pub unsafe extern "C" fn ss_player_set_skip_frames(handle: *mut SsPlayer, skip: 
 /// `handle` must be a live handle or null.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn ss_player_skip_frames(handle: *mut SsPlayer) -> bool {
-    unsafe { player(handle) }.map(|p| p.skip_frames()).unwrap_or(true)
+    unsafe { player(handle) }.map(|p| p.frame_skip_enabled()).unwrap_or(true)
 }
 
 // --- Per-part overrides ---
@@ -1167,12 +1180,198 @@ pub unsafe extern "C" fn ss_player_find_part_index(handle: *mut SsPlayer, name: 
 /// # Safety
 /// `handle` must be a live handle or null.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn ss_player_set_part_visibility_override(handle: *mut SsPlayer, part: u32, hide: bool, cascade: bool) -> i32 {
+pub unsafe extern "C" fn ss_player_set_part_visibility_override_by_index(handle: *mut SsPlayer, part: u32, hide: bool, cascade: bool) -> i32 {
     let Some(player) = (unsafe { player(handle) }) else { return fail(SS_ERROR_INVALID_ARGUMENT, "player handle is null or destroyed") };
-    match player.set_part_visibility_override(part, hide, cascade) {
+    match player.set_part_visibility_override_by_index(part, hide, cascade) {
         Ok(()) => SS_OK,
         Err(e) => fail(e.as_code(), format!("part {part}: {e}")),
     }
+}
+
+// --- overrides, by part name ------------------------------------------
+//
+// The unsuffixed form takes a NAME; `_by_index` is the optimisation for a caller
+// that cached one (SDK: `20_design/40_api_conventions`). Each of these resolves
+// the name and forwards to its sibling, so the two cannot drift apart, and an
+// unknown name fails with SS_ERROR_INVALID_ARGUMENT rather than doing nothing.
+//
+// Written out rather than generated by a macro: cbindgen does not expand macros,
+// and a C entry point that never reaches the header cannot be called.
+
+/// Force-hide a part (`hide` true) or revert it to the animation, by part name.
+///
+/// # Safety
+/// `handle` must be a live handle or null; `part` must be a valid
+/// null-terminated C string.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn ss_player_set_part_visibility_override(handle: *mut SsPlayer, part: *const c_char, hide: bool, cascade: bool) -> i32 {
+    let Some(name) = (unsafe { c_str(part) }) else {
+        return fail(SS_ERROR_INVALID_ARGUMENT, "part name is null or not UTF-8");
+    };
+    let index = {
+        let Some(player) = (unsafe { player(handle) }) else {
+            return fail(SS_ERROR_INVALID_ARGUMENT, "player handle is null or destroyed");
+        };
+        match player.find_part_index(name) {
+            Some(i) => i,
+            None => return fail(SS_ERROR_INVALID_ARGUMENT, format!("no part called '{name}'")),
+        }
+    };
+    unsafe { ss_player_set_part_visibility_override_by_index(handle, index, hide, cascade) }
+}
+
+/// Revert a part to the animation's own visibility, by part name.
+///
+/// # Safety
+/// `handle` must be a live handle or null; `part` must be a valid
+/// null-terminated C string.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn ss_player_clear_part_visibility_override(handle: *mut SsPlayer, part: *const c_char) -> i32 {
+    let Some(name) = (unsafe { c_str(part) }) else {
+        return fail(SS_ERROR_INVALID_ARGUMENT, "part name is null or not UTF-8");
+    };
+    let index = {
+        let Some(player) = (unsafe { player(handle) }) else {
+            return fail(SS_ERROR_INVALID_ARGUMENT, "player handle is null or destroyed");
+        };
+        match player.find_part_index(name) {
+            Some(i) => i,
+            None => return fail(SS_ERROR_INVALID_ARGUMENT, format!("no part called '{name}'")),
+        }
+    };
+    unsafe { ss_player_clear_part_visibility_override_by_index(handle, index) }
+}
+
+/// Override a part's colour, by part name. Arguments as the `_by_index` sibling.
+///
+/// # Safety
+/// `handle` must be a live handle or null; `part` must be a valid
+/// null-terminated C string.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn ss_player_set_part_color_override(handle: *mut SsPlayer, part: *const c_char, rgba: u32, blend_op: u8, priority: u8) -> i32 {
+    let Some(name) = (unsafe { c_str(part) }) else {
+        return fail(SS_ERROR_INVALID_ARGUMENT, "part name is null or not UTF-8");
+    };
+    let index = {
+        let Some(player) = (unsafe { player(handle) }) else {
+            return fail(SS_ERROR_INVALID_ARGUMENT, "player handle is null or destroyed");
+        };
+        match player.find_part_index(name) {
+            Some(i) => i,
+            None => return fail(SS_ERROR_INVALID_ARGUMENT, format!("no part called '{name}'")),
+        }
+    };
+    unsafe { ss_player_set_part_color_override_by_index(handle, index, rgba, blend_op, priority) }
+}
+
+/// Four-corner colour override, by part name. Arguments as the `_by_index` sibling.
+///
+/// # Safety
+/// `handle` must be a live handle or null; `part` must be a valid
+/// null-terminated C string.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn ss_player_set_part_color_override_corners(handle: *mut SsPlayer, part: *const c_char, corners: *const u8, blend_op: u8, priority: u8) -> i32 {
+    let Some(name) = (unsafe { c_str(part) }) else {
+        return fail(SS_ERROR_INVALID_ARGUMENT, "part name is null or not UTF-8");
+    };
+    let index = {
+        let Some(player) = (unsafe { player(handle) }) else {
+            return fail(SS_ERROR_INVALID_ARGUMENT, "player handle is null or destroyed");
+        };
+        match player.find_part_index(name) {
+            Some(i) => i,
+            None => return fail(SS_ERROR_INVALID_ARGUMENT, format!("no part called '{name}'")),
+        }
+    };
+    unsafe { ss_player_set_part_color_override_corners_by_index(handle, index, corners, blend_op, priority) }
+}
+
+/// Revert a part to the animation's own colour, by part name.
+///
+/// # Safety
+/// `handle` must be a live handle or null; `part` must be a valid
+/// null-terminated C string.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn ss_player_clear_part_color_override(handle: *mut SsPlayer, part: *const c_char) -> i32 {
+    let Some(name) = (unsafe { c_str(part) }) else {
+        return fail(SS_ERROR_INVALID_ARGUMENT, "part name is null or not UTF-8");
+    };
+    let index = {
+        let Some(player) = (unsafe { player(handle) }) else {
+            return fail(SS_ERROR_INVALID_ARGUMENT, "player handle is null or destroyed");
+        };
+        match player.find_part_index(name) {
+            Some(i) => i,
+            None => return fail(SS_ERROR_INVALID_ARGUMENT, format!("no part called '{name}'")),
+        }
+    };
+    unsafe { ss_player_clear_part_color_override_by_index(handle, index) }
+}
+
+/// Make a part draw a different cell, by part name.
+///
+/// # Safety
+/// `handle` must be a live handle or null; `part` must be a valid
+/// null-terminated C string.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn ss_player_set_part_cell_override(handle: *mut SsPlayer, part: *const c_char, cellmap_name: *const c_char, cell_name: *const c_char, priority: u8) -> i32 {
+    let Some(name) = (unsafe { c_str(part) }) else {
+        return fail(SS_ERROR_INVALID_ARGUMENT, "part name is null or not UTF-8");
+    };
+    let index = {
+        let Some(player) = (unsafe { player(handle) }) else {
+            return fail(SS_ERROR_INVALID_ARGUMENT, "player handle is null or destroyed");
+        };
+        match player.find_part_index(name) {
+            Some(i) => i,
+            None => return fail(SS_ERROR_INVALID_ARGUMENT, format!("no part called '{name}'")),
+        }
+    };
+    unsafe { ss_player_set_part_cell_override_by_index(handle, index, cellmap_name, cell_name, priority) }
+}
+
+/// Revert a part to the animation's own cell, by part name.
+///
+/// # Safety
+/// `handle` must be a live handle or null; `part` must be a valid
+/// null-terminated C string.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn ss_player_clear_part_cell_override(handle: *mut SsPlayer, part: *const c_char) -> i32 {
+    let Some(name) = (unsafe { c_str(part) }) else {
+        return fail(SS_ERROR_INVALID_ARGUMENT, "part name is null or not UTF-8");
+    };
+    let index = {
+        let Some(player) = (unsafe { player(handle) }) else {
+            return fail(SS_ERROR_INVALID_ARGUMENT, "player handle is null or destroyed");
+        };
+        match player.find_part_index(name) {
+            Some(i) => i,
+            None => return fail(SS_ERROR_INVALID_ARGUMENT, format!("no part called '{name}'")),
+        }
+    };
+    unsafe { ss_player_clear_part_cell_override_by_index(handle, index) }
+}
+
+/// Write a part's current-frame transform into `out`, by part name.
+///
+/// # Safety
+/// `handle` must be a live handle or null; `part` must be a valid
+/// null-terminated C string.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn ss_player_part_transform(handle: *mut SsPlayer, part: *const c_char, out: *mut f32) -> i32 {
+    let Some(name) = (unsafe { c_str(part) }) else {
+        return fail(SS_ERROR_INVALID_ARGUMENT, "part name is null or not UTF-8");
+    };
+    let index = {
+        let Some(player) = (unsafe { player(handle) }) else {
+            return fail(SS_ERROR_INVALID_ARGUMENT, "player handle is null or destroyed");
+        };
+        match player.find_part_index(name) {
+            Some(i) => i,
+            None => return fail(SS_ERROR_INVALID_ARGUMENT, format!("no part called '{name}'")),
+        }
+    };
+    unsafe { ss_player_part_transform_by_index(handle, index, out) }
 }
 
 /// Revert a part to the animation's own visibility.
@@ -1180,9 +1379,9 @@ pub unsafe extern "C" fn ss_player_set_part_visibility_override(handle: *mut SsP
 /// # Safety
 /// `handle` must be a live handle or null.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn ss_player_clear_part_visibility_override(handle: *mut SsPlayer, part: u32) -> i32 {
+pub unsafe extern "C" fn ss_player_clear_part_visibility_override_by_index(handle: *mut SsPlayer, part: u32) -> i32 {
     let Some(player) = (unsafe { player(handle) }) else { return fail(SS_ERROR_INVALID_ARGUMENT, "player handle is null or destroyed") };
-    match player.clear_part_visibility_override(part) {
+    match player.clear_part_visibility_override_by_index(part) {
         Ok(()) => SS_OK,
         Err(e) => fail(e.as_code(), format!("part {part}: {e}")),
     }
@@ -1196,11 +1395,11 @@ pub unsafe extern "C" fn ss_player_clear_part_visibility_override(handle: *mut S
 /// # Safety
 /// `handle` must be a live handle or null.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn ss_player_set_part_color_override(handle: *mut SsPlayer, part: u32, blend_op: u8, rgba: u32, priority: u8) -> i32 {
+pub unsafe extern "C" fn ss_player_set_part_color_override_by_index(handle: *mut SsPlayer, part: u32, rgba: u32, blend_op: u8, priority: u8) -> i32 {
     let Some(blend_op) = BlendOp::from_wire(blend_op) else { return fail(SS_ERROR_INVALID_ARGUMENT, "blend_op must be 0..=3") };
     let Some(priority) = OverridePriority::from_wire(priority) else { return fail(SS_ERROR_INVALID_ARGUMENT, "priority must be 0..=2") };
     let Some(player) = (unsafe { player(handle) }) else { return fail(SS_ERROR_INVALID_ARGUMENT, "player handle is null or destroyed") };
-    match player.set_part_color_override(part, blend_op, rgba, priority) {
+    match player.set_part_color_override_by_index(part, rgba, blend_op, priority) {
         Ok(()) => SS_OK,
         Err(e) => fail(e.as_code(), format!("part {part}: {e}")),
     }
@@ -1214,7 +1413,7 @@ pub unsafe extern "C" fn ss_player_set_part_color_override(handle: *mut SsPlayer
 /// `handle` must be a live handle or null; `corners` must point at 16 readable
 /// bytes.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn ss_player_set_part_color_override_corners(handle: *mut SsPlayer, part: u32, blend_op: u8, corners: *const u8, priority: u8) -> i32 {
+pub unsafe extern "C" fn ss_player_set_part_color_override_corners_by_index(handle: *mut SsPlayer, part: u32, corners: *const u8, blend_op: u8, priority: u8) -> i32 {
     let Some(blend_op) = BlendOp::from_wire(blend_op) else { return fail(SS_ERROR_INVALID_ARGUMENT, "blend_op must be 0..=3") };
     let Some(priority) = OverridePriority::from_wire(priority) else { return fail(SS_ERROR_INVALID_ARGUMENT, "priority must be 0..=2") };
     if corners.is_null() {
@@ -1226,7 +1425,7 @@ pub unsafe extern "C" fn ss_player_set_part_color_override_corners(handle: *mut 
         corner.copy_from_slice(chunk);
     }
     let Some(player) = (unsafe { player(handle) }) else { return fail(SS_ERROR_INVALID_ARGUMENT, "player handle is null or destroyed") };
-    match player.set_part_color_override_corners(part, blend_op, rgba, priority) {
+    match player.set_part_color_override_corners_by_index(part, rgba, blend_op, priority) {
         Ok(()) => SS_OK,
         Err(e) => fail(e.as_code(), format!("part {part}: {e}")),
     }
@@ -1237,9 +1436,9 @@ pub unsafe extern "C" fn ss_player_set_part_color_override_corners(handle: *mut 
 /// # Safety
 /// `handle` must be a live handle or null.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn ss_player_clear_part_color_override(handle: *mut SsPlayer, part: u32) -> i32 {
+pub unsafe extern "C" fn ss_player_clear_part_color_override_by_index(handle: *mut SsPlayer, part: u32) -> i32 {
     let Some(player) = (unsafe { player(handle) }) else { return fail(SS_ERROR_INVALID_ARGUMENT, "player handle is null or destroyed") };
-    match player.clear_part_color_override(part) {
+    match player.clear_part_color_override_by_index(part) {
         Ok(()) => SS_OK,
         Err(e) => fail(e.as_code(), format!("part {part}: {e}")),
     }
@@ -1253,12 +1452,12 @@ pub unsafe extern "C" fn ss_player_clear_part_color_override(handle: *mut SsPlay
 /// `handle` must be a live handle or null; both names must be valid
 /// null-terminated C strings.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn ss_player_set_part_cell_override(handle: *mut SsPlayer, part: u32, cellmap_name: *const c_char, cell_name: *const c_char, priority: u8) -> i32 {
+pub unsafe extern "C" fn ss_player_set_part_cell_override_by_index(handle: *mut SsPlayer, part: u32, cellmap_name: *const c_char, cell_name: *const c_char, priority: u8) -> i32 {
     let Some(priority) = OverridePriority::from_wire(priority) else { return fail(SS_ERROR_INVALID_ARGUMENT, "priority must be 0..=2") };
     let Some(cellmap_name) = (unsafe { c_str(cellmap_name) }) else { return fail(SS_ERROR_INVALID_ARGUMENT, "cellmap_name is null or not UTF-8") };
     let Some(cell_name) = (unsafe { c_str(cell_name) }) else { return fail(SS_ERROR_INVALID_ARGUMENT, "cell_name is null or not UTF-8") };
     let Some(player) = (unsafe { player(handle) }) else { return fail(SS_ERROR_INVALID_ARGUMENT, "player handle is null or destroyed") };
-    match player.set_part_cell_override(part, cellmap_name, cell_name, priority) {
+    match player.set_part_cell_override_by_index(part, cellmap_name, cell_name, priority) {
         Ok(()) => SS_OK,
         Err(e) => fail(e.as_code(), format!("part {part} -> {cellmap_name}/{cell_name}: {e}")),
     }
@@ -1269,9 +1468,9 @@ pub unsafe extern "C" fn ss_player_set_part_cell_override(handle: *mut SsPlayer,
 /// # Safety
 /// `handle` must be a live handle or null.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn ss_player_clear_part_cell_override(handle: *mut SsPlayer, part: u32) -> i32 {
+pub unsafe extern "C" fn ss_player_clear_part_cell_override_by_index(handle: *mut SsPlayer, part: u32) -> i32 {
     let Some(player) = (unsafe { player(handle) }) else { return fail(SS_ERROR_INVALID_ARGUMENT, "player handle is null or destroyed") };
-    match player.clear_part_cell_override(part) {
+    match player.clear_part_cell_override_by_index(part) {
         Ok(()) => SS_OK,
         Err(e) => fail(e.as_code(), format!("part {part}: {e}")),
     }
@@ -1313,7 +1512,7 @@ pub unsafe extern "C" fn ss_player_part_count(handle: *mut SsPlayer) -> u32 {
 /// `handle` must be a live handle or null.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn ss_player_looped_last_update(handle: *mut SsPlayer) -> bool {
-    unsafe { player(handle) }.map(|p| p.looped_last_update()).unwrap_or(false)
+    unsafe { player(handle) }.map(|p| p.just_looped()).unwrap_or(false)
 }
 
 /// Whether the last `ss_scene_update` **completed** playback: true for exactly
@@ -1324,7 +1523,7 @@ pub unsafe extern "C" fn ss_player_looped_last_update(handle: *mut SsPlayer) -> 
 /// `handle` must be a live handle or null.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn ss_player_finished_last_update(handle: *mut SsPlayer) -> bool {
-    unsafe { player(handle) }.map(|p| p.finished_last_update()).unwrap_or(false)
+    unsafe { player(handle) }.map(|p| p.just_finished()).unwrap_or(false)
 }
 
 /// How many timeline events the last `ss_scene_update` crossed.
@@ -1500,12 +1699,12 @@ pub unsafe extern "C" fn ss_player_event_signal_param_at(handle: *mut SsPlayer, 
 /// `handle` must be a live handle or null; `out` must point at 6 writable
 /// `float`s.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn ss_player_part_transform(handle: *mut SsPlayer, part: u32, out: *mut f32) -> i32 {
+pub unsafe extern "C" fn ss_player_part_transform_by_index(handle: *mut SsPlayer, part: u32, out: *mut f32) -> i32 {
     if out.is_null() {
         return fail(SS_ERROR_INVALID_ARGUMENT, "out is null");
     }
     let Some(player) = (unsafe { player(handle) }) else { return fail(SS_ERROR_INVALID_ARGUMENT, "player handle is null or destroyed") };
-    let Some(m) = player.part_transform(part) else {
+    let Some(m) = player.part_transform_by_index(part) else {
         return fail(SS_ERROR_INVALID_ARGUMENT, format!("part {part} is out of range, or no animation is set up"));
     };
     unsafe { std::ptr::copy_nonoverlapping(m.as_ptr(), out, 6) };
