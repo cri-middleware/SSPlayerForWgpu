@@ -1187,6 +1187,23 @@ impl SsPlayerWeb {
         with_player!(self, |p| p.playback_style().as_wire())
     }
 
+    /// On (the default) draws between authored frames; off floors the frame that
+    /// is drawn, pinning playback to whole ones.
+    ///
+    /// The playhead keeps its fraction either way (`frameNo` reports it
+    /// unrounded), and so does the stepping of instance and effect children.
+    /// This affects only what is drawn.
+    #[wasm_bindgen(js_name = setSubFrame)]
+    pub fn set_sub_frame(&self, enabled: bool) -> Result<(), JsValue> {
+        with_player!(self, |p| p.set_sub_frame(enabled))
+    }
+
+    /// See `setSubFrame`.
+    #[wasm_bindgen(js_name = subFrame)]
+    pub fn sub_frame(&self) -> Result<bool, JsValue> {
+        with_player!(self, |p| p.sub_frame())
+    }
+
     /// On (the default) keeps playback on the wall clock by dropping frames;
     /// off advances exactly one frame per `frame()` call.
     #[wasm_bindgen(js_name = setSkipFrames)]

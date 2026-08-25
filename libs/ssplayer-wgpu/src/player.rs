@@ -365,6 +365,17 @@ fn collect_events(node: &PlaybackNode, animation: Option<&str>, out: &mut Vec<Ss
 /// and effect slots.
 struct PlaybackNode {
     context: Context<'static>,
+    /// The resource this node's context is bound to, for **identity** only.
+    /// `set_animation` compares it with the main pack's current resource to
+    /// decide whether the context can be handed a new clip (the cheap path, and
+    /// the one that keeps the runtime's transport settings) or has to be rebuilt
+    /// against a resource that has since been replaced.
+    ///
+    /// A shared reference rather than the `*const` the pointer comparison wants:
+    /// a raw pointer is neither `Send` nor `Sync`, and storing one here would
+    /// take both off `SSPlayer` — which the Bevy adapter needs to hold it in the
+    /// ECS at all. The context already holds the same reference.
+    res: &'static ssruntime::AnimationResource<'static>,
     /// Instance children keyed by part index (index into parts/draw_order/SoA).
     instances: HashMap<usize, InstanceChild>,
     /// Effect slots keyed by part index. Effects reuse this node's context
@@ -479,6 +490,22 @@ pub struct SSPlayer {
     /// reader of this field sees what the caller passed; `pack_tint` converts it
     /// once per frame.
     tint: u32,
+    /// The loop count the host chose, re-applied after every `setup_animation`.
+    ///
+    /// The **only** transport value this player holds, and it is held for the
+    /// reason every sibling Player holds it: the runtime resets the count on
+    /// every transition, deliberately, because a transition is what states it
+    /// (`30_core/20_playback_control.md`). Everything else the host sets —
+    /// speed, the frame-rate override, frame skip, the direction and style — the
+    /// runtime carries across a `setup_animation` itself, so keeping a copy here
+    /// would only give it something to drift from.
+    ///
+    /// `None` until the host sets one, so a count it never chose is never
+    /// written over the animation's own default.
+    loop_count: Option<i32>,
+    /// Whether the *display* frame keeps its fraction (see
+    /// [`SSPlayer::set_sub_frame`]). The playhead is an `f32` either way.
+    sub_frame: bool,
 }
 
 impl Default for SSPlayer {
@@ -510,6 +537,12 @@ impl SSPlayer {
             visible: true,
             alpha: 1.0,
             tint: WHITE_TINT,
+            loop_count: None,
+            // On, matching the Web and Flutter players: this one draws for
+            // applications and for hosts with a display refresh to keep up with,
+            // where interpolating between authored frames is the point. The game
+            // engines default it off.
+            sub_frame: true,
         }
     }
 
@@ -785,6 +818,12 @@ impl SSPlayer {
             && self.root.is_some()
         {
             self.retired.push(previous);
+            // The live tree was built from the pack just replaced, so it is no
+            // longer what this name means. Forgetting the selection is what lets
+            // `set_animation` -- a no-op for the name already set up -- still
+            // rebuild from the replacement, which is the contract this method
+            // documents ("the replacement is what the next tree is built from").
+            self.current_animation = None;
         }
     }
 
@@ -823,12 +862,54 @@ impl SSPlayer {
     /// the start/stop calls below can stay allocation-free. Mirrors the runtime's
     /// own `setup_animation` + `play` split.
     pub fn set_animation(&mut self, anim_name: &str) -> Result<(), SSRuntimeError> {
+        // Already set up: a switch with nothing to switch to, so nothing moves.
+        // `current_animation` is cleared by `set_pack` and by an `add_pack` that
+        // replaced a pack, so this can never mistake "the name the *previous*
+        // pack had selected" for a tree that is still current.
+        if self.current_animation.as_deref() == Some(anim_name) {
+            return Ok(());
+        }
         let main_pack = self.main_pack.clone().ok_or(SSRuntimeError::NotLoaded)?;
-        let root = build_node(&self.packs, &main_pack, anim_name).ok_or(SSRuntimeError::NotLoaded)?;
-        // Assigning drops the previous tree, and with it the last raw pointer into
-        // any pack a re-registration retired — so they can go now. The new tree was
-        // built from `packs`, which is where a replacement went.
-        self.root = Some(root);
+        let res_ptr = self.packs.get(&main_pack).ok_or(SSRuntimeError::NotLoaded)?.resource().resource_static_ptr();
+        if res_ptr.is_null() {
+            return Err(SSRuntimeError::NotLoaded);
+        }
+        // SAFETY: the resource lives in `packs` for the player's lifetime, and
+        // the pointer just came from the entry still held there.
+        let static_res: &'static ssruntime::AnimationResource<'static> = unsafe { &*res_ptr };
+
+        // Hand the existing root context the new clip whenever it is still bound
+        // to the pack we are selecting from. That is what every sibling Player
+        // does, and it is why they keep the speed, the frame-rate override, the
+        // frame skip and the playback direction across a switch for free: the
+        // runtime carries those itself (`30_core/20_playback_control.md`), and it
+        // can only carry them for a context that survives. Rebuilding the context
+        // here — which this used to do unconditionally — threw all four away and
+        // made this Player the only one that did.
+        //
+        // Only the per-animation rig is rebuilt: which instance children are
+        // mounted and which effect slots exist is the animation's business.
+        let reused = match &mut self.root {
+            Some(root) if std::ptr::eq(root.res, static_res) => {
+                root.context.setup_animation(anim_name)?;
+                let (instances, effects, mask_flags) = build_rig(&root.context, static_res, &self.packs);
+                root.instances = instances;
+                root.effects = effects;
+                root.mask_flags = mask_flags;
+                true
+            }
+            _ => false,
+        };
+        if !reused {
+            let root = build_node(&self.packs, &main_pack, anim_name).ok_or(SSRuntimeError::NotLoaded)?;
+            // Assigning drops the previous tree, and with it the last raw pointer
+            // into any pack a re-registration retired.
+            self.root = Some(root);
+        }
+        // Either way nothing points into a retired pack any more: a rebuilt tree
+        // replaced every context, and a reused one kept only the root's — which,
+        // by the check above, is bound to a pack that was never retired. Its rig
+        // was rebuilt from `packs`, which is where a replacement went.
         self.retired.clear();
         self.current_animation = Some(anim_name.to_string());
         // Nothing that happened under the previous animation describes this one.
@@ -836,7 +917,20 @@ impl SSPlayer {
         self.looped = false;
         self.finished_edge = false;
         self.prev_finished = false;
+        // The one thing the runtime does NOT carry across a setup, deliberately,
+        // because the transition is what states it.
+        self.reapply_loop_count();
         Ok(())
+    }
+
+    /// Put the host's loop count back after a `setup_animation` dropped it. See
+    /// [`SSPlayer::loop_count`](struct.SSPlayer.html) — it is the one value this
+    /// player holds, and this is the only place it is replayed.
+    fn reapply_loop_count(&mut self) {
+        let Some(count) = self.loop_count else { return };
+        if let Some(root) = &mut self.root {
+            root.context.set_loop(count);
+        }
     }
 
     /// Start the selected animation from the head of its section, re-arming the
@@ -880,10 +974,23 @@ impl SSPlayer {
         }
     }
 
+    /// Scale playback by `speed`, a multiple of the frame rate. `0.0` and
+    /// negatives are a **stop**, not reverse playback -- that is
+    /// [`SSPlayer::set_playback_direction`] -- and read back from
+    /// [`SSPlayer::speed`] as the `0.0` they became.
+    ///
+    /// Survives [`SSPlayer::set_animation`], and may be set before the first one.
     pub fn set_speed(&mut self, speed: f32) {
         if let Some(root) = &mut self.root {
             root.context.set_animation_speed(speed);
         }
+    }
+
+    /// The speed in effect, as a multiple of the frame rate. Read from the
+    /// runtime, so a rate that clamped to a stop reads back as `0.0` rather than
+    /// as the negative that was asked for.
+    pub fn speed(&self) -> f32 {
+        self.root.as_ref().map(|r| r.context.get_animation_speed()).unwrap_or(1.0)
     }
 
     pub fn is_playing(&self) -> bool {
@@ -954,21 +1061,25 @@ impl SSPlayer {
 
     // --- Playback shape ----------------------------------------------------
     //
-    // NOTE: `set_animation` rebuilds the tree from scratch, so it resets every
-    // setting here (and `set_speed`) to the pack's defaults. Re-apply whatever
-    // you chose after each call. This layer caches nothing for you.
+    // NOTE: everything here survives `set_animation`, as it does on every other
+    // Player, and for the same reason: the switch hands the existing `Context` a
+    // new clip, and the runtime deliberately keeps the speed, the frame skip,
+    // the frame-rate override and the playback direction across one (SDK #369 /
+    // #370 / #375). The loop count is the exception it makes on purpose — the
+    // transition is what states a count — so this Player holds that one value
+    // and puts it back, exactly as the others do.
     //
-    // That goes further than the other Players: a runtime `setup_animation`
-    // keeps the host's speed, frame skip, frame-rate override and playback
-    // direction (SDK #369 / #370 / #375), but a rebuilt tree is a new
-    // `Context`, so nothing is there to be kept. Only the loop count matches
-    // them, and only because it is per-transition everywhere. The Players with
-    // a node or widget to hang it on re-apply their own loop count on top;
-    // this one leaves all of it to you.
+    // What does NOT survive is the playback SECTION: frame numbers mean nothing
+    // against a different clip.
+    //
+    // The tree is still rebuilt when the pack under the main name has been
+    // replaced, because then there is no context to hand a new clip to. Nothing
+    // is carried across that — a new pack is a new owner.
 
     /// `count` cycles then stop; `-1` (or `0`) loops forever. Under
     /// [`PlaybackStyle::PingPong`] one cycle is a full round trip.
     pub fn set_loop_count(&mut self, count: i32) {
+        self.loop_count = Some(count);
         if let Some(root) = &mut self.root {
             root.context.set_loop(count);
         }
@@ -1129,6 +1240,27 @@ impl SSPlayer {
     /// and drops the frames in between, keeping playback on the wall clock; off
     /// advances exactly one frame per update, so nothing is skipped but a
     /// stalled host plays in slow motion.
+    /// Whether the frame handed to the runtime **for display** keeps its
+    /// fraction. On by default here.
+    ///
+    /// The playhead is an `f32` either way — [`SSPlayer::frame_no`] reports it
+    /// unrounded, and the instance / effect slots are always stepped from the
+    /// unrounded value, because truncating there would freeze a child whenever a
+    /// tick is worth less than a frame. Turning this off only floors what is
+    /// drawn, which is what pins playback to whole authored frames.
+    ///
+    /// Distinct from [`SSPlayer::set_skip_frames`], which is about *time*: skip
+    /// frames decides whether a long tick catches up or advances one frame; this
+    /// decides whether what is drawn may sit between two of them.
+    pub fn set_sub_frame(&mut self, enabled: bool) {
+        self.sub_frame = enabled;
+    }
+
+    /// See [`SSPlayer::set_sub_frame`].
+    pub fn sub_frame(&self) -> bool {
+        self.sub_frame
+    }
+
     pub fn set_skip_frames(&mut self, skip: bool) {
         if let Some(root) = &mut self.root {
             root.context.set_skip_frames(skip);
@@ -1416,6 +1548,14 @@ impl SSPlayer {
     }
 
     /// Names of all animations in the main pack, if loaded.
+    /// The animation currently set up, or `None` before the first
+    /// [`SSPlayer::set_animation`] — and again after a pack registration
+    /// replaced what the tree was built from, which is what makes the next
+    /// `set_animation` rebuild rather than recognise the name as already set up.
+    pub fn current_animation(&self) -> Option<&str> {
+        self.current_animation.as_deref()
+    }
+
     pub fn animation_names(&self) -> Option<Vec<String>> {
         let anim_resource = self.packs.get(self.main_pack.as_ref()?)?.resource().resource()?;
         Some(anim_resource.get_animation_names())
@@ -1562,7 +1702,7 @@ impl SSPlayer {
         step_slots(root, frame_no, delta_secs, looped);
 
         let draw = NodeDraw { transform: &self.transform, alpha: self.alpha, tint: pack_tint(self.tint) };
-        let mut build = FrameBuild { scene, renderer };
+        let mut build = FrameBuild { scene, renderer, sub_frame: self.sub_frame };
         render_node(root, &mut build, draw, frame_no, StencilTest::None, None);
     }
 
@@ -1603,7 +1743,19 @@ fn build_node(packs: &HashMap<String, SSPack>, pack: &str, anime: &str) -> Optio
     let mut context = Context::new();
     context.bind_resource(static_res);
     context.setup_animation(anime).ok()?;
+    let (instances, effects, mask_flags) = build_rig(&context, static_res, packs);
+    Some(PlaybackNode { context, instances, effects, mask_flags, res: static_res })
+}
 
+/// The per-animation half of a node: which instance children it mounts, which
+/// effect slots it owns, and the static mask flags its parts carry.
+///
+/// Split out of [`build_node`] because it is the only half a *switch* has to
+/// redo. The context is the animation-independent half — it belongs to the pack,
+/// and handing it a new clip through `setup_animation` is what keeps the speed,
+/// the frame-rate override, the frame skip and the playback direction across the
+/// switch, exactly as every sibling Player gets them kept.
+fn build_rig(context: &Context<'static>, static_res: &'static ssruntime::AnimationResource<'static>, packs: &HashMap<String, SSPack>) -> (HashMap<usize, InstanceChild>, HashMap<usize, EffectPart>, Vec<PartMaskFlags>) {
     let mut instances = HashMap::new();
     let mut effects = HashMap::new();
     let mut mask_flags = Vec::new();
@@ -1647,7 +1799,7 @@ fn build_node(packs: &HashMap<String, SSPack>, pack: &str, anime: &str) -> Optio
         }
     }
 
-    Some(PlaybackNode { context, instances, effects, mask_flags })
+    (instances, effects, mask_flags)
 }
 
 /// Advance every instance and effect slot this node owns, and recurse through
@@ -1743,6 +1895,10 @@ fn sync_masks_to(build: &mut FrameBuild<'_>, frame: &FrameView, node: &NodeSlot,
 struct FrameBuild<'a> {
     scene: &'a mut FrameChunk,
     renderer: &'a SSRenderer,
+    /// The owning player's [`SSPlayer::set_sub_frame`]. Carried here rather than
+    /// passed down, so it reaches every node of the tree — an instance child is
+    /// drawn at its own playhead and has to be floored on the same terms.
+    sub_frame: bool,
 }
 
 /// How one node of the tree is drawn: where it sits and how opaque it is.
@@ -1812,6 +1968,9 @@ impl InheritedCoverage {
 
 fn render_node(node: &mut PlaybackNode, build: &mut FrameBuild<'_>, draw: NodeDraw, frame_no: f32, inherited_stencil: StencilTest, inherited_coverage: Option<InheritedCoverage>) {
     let NodeDraw { transform, alpha, tint } = draw;
+    // The DISPLAY frame. The playhead keeps its fraction whatever this is set to;
+    // flooring it here is the whole of what turning sub-frame off does.
+    let frame_no = if build.sub_frame { frame_no } else { frame_no.floor() };
     let frame_data = match node.context.get_frame_data(frame_no) {
         Ok(bytes) => unsafe { std::slice::from_raw_parts(bytes.as_ptr(), bytes.len()) },
         Err(_) => return,
