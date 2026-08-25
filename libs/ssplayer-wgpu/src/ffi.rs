@@ -1561,6 +1561,19 @@ pub unsafe extern "C" fn ss_player_set_alpha(handle: *mut SsPlayer, alpha: f32) 
     }
 }
 
+/// Player-level tint, `0xRRGGBB`, multiplied into every part after the PartColor
+/// blend. `0xFFFFFF` — the default — leaves colours untouched. Mask coverage is
+/// unaffected, as with `ss_player_set_alpha`.
+///
+/// # Safety
+/// `handle` must be a live handle or null.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn ss_player_set_tint(handle: *mut SsPlayer, rgb: u32) {
+    if let Some(player) = unsafe { player(handle) } {
+        player.set_tint(rgb);
+    }
+}
+
 /// Canvas size of the animation currently playing. Either out-pointer may be null.
 ///
 /// # Safety

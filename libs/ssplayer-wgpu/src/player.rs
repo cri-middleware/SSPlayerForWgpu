@@ -13,12 +13,17 @@ use crate::frame::FrameView;
 use crate::mask::{GeomKind, MaskOp, MaskWriter, MaskWriters, PartMaskFlags, StencilTest, plan_writers};
 use crate::pack::{EmbeddedImage, SSPack, TextureRef};
 use crate::renderer::{Retention, SSRenderer};
-use crate::scene::{BatchInfo, FrameChunk, NodeSlot};
+use crate::scene::{BatchInfo, FrameChunk, NodeSlot, pack_tint};
 use ssab::ssab::ss::format::{PartType, root_as_ss_anime_binary_unchecked};
 use ssruntime::error::SSRuntimeError;
 use ssruntime::runtime::framedata::ss::runtime::{DrawBatchKind, root_as_frame_data_unchecked};
 use ssruntime::{Context, EffectSlot, InstanceSlot, TrackBlend};
 use std::collections::{HashMap, HashSet};
+
+/// The tint that changes nothing — white, in the `0xRRGGBB` order
+/// [`SSPlayer::set_tint`] takes. Deliberately not `pub`: cbindgen sweeps every
+/// module-level `pub const` into the C header.
+pub(crate) const WHITE_TINT: u32 = 0x00FF_FFFF;
 
 /// Column-major 4x4 identity.
 const IDENTITY: [f32; 16] = [1.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 1.0];
@@ -469,6 +474,11 @@ pub struct SSPlayer {
     visible: bool,
     /// Player-level fade folded into every vertex (see [`BatchInfo::alpha`]).
     alpha: f32,
+    /// Player-level tint as the API gives it, `0xRRGGBB` (see
+    /// [`SSPlayer::set_tint`]). Kept in that order rather than the shader's so a
+    /// reader of this field sees what the caller passed; `pack_tint` converts it
+    /// once per frame.
+    tint: u32,
 }
 
 impl Default for SSPlayer {
@@ -499,6 +509,7 @@ impl SSPlayer {
             order: 0,
             visible: true,
             alpha: 1.0,
+            tint: WHITE_TINT,
         }
     }
 
@@ -1388,6 +1399,22 @@ impl SSPlayer {
         self.alpha
     }
 
+    /// Player-level tint: `0xRRGGBB`, multiplied into every part the player
+    /// draws — its instance children included, since the whole tree is one
+    /// player. White (`0xFFFFFF`, the default) leaves colours untouched.
+    ///
+    /// It lands *after* the PartsColor blend, which is what makes it a tint on
+    /// the finished part rather than another term in that formula. Mask coverage
+    /// is unaffected, exactly as with [`SSPlayer::set_alpha`]: a tinted player
+    /// clips the shape it always did.
+    pub fn set_tint(&mut self, rgb: u32) {
+        self.tint = rgb & 0x00FF_FFFF;
+    }
+
+    pub fn tint(&self) -> u32 {
+        self.tint
+    }
+
     /// Names of all animations in the main pack, if loaded.
     pub fn animation_names(&self) -> Option<Vec<String>> {
         let anim_resource = self.packs.get(self.main_pack.as_ref()?)?.resource().resource()?;
@@ -1534,7 +1561,7 @@ impl SSPlayer {
         // reason — see `step_slots`.
         step_slots(root, frame_no, delta_secs, looped);
 
-        let draw = NodeDraw { transform: &self.transform, alpha: self.alpha };
+        let draw = NodeDraw { transform: &self.transform, alpha: self.alpha, tint: pack_tint(self.tint) };
         let mut build = FrameBuild { scene, renderer };
         render_node(root, &mut build, draw, frame_no, StencilTest::None, None);
     }
@@ -1730,6 +1757,9 @@ struct NodeDraw<'a> {
     /// Player-level fade; see [`BatchInfo::alpha`]. Never applied to mask
     /// coverage — a faded player clips exactly as it would at full opacity.
     alpha: f32,
+    /// Player-level tint, already in the shader's byte order; see
+    /// [`BatchInfo::tint`]. Constant for the whole walk, like `alpha`.
+    tint: u32,
 }
 
 /// Recursively append a node's geometry to the renderer, composing transforms.
@@ -1781,7 +1811,7 @@ impl InheritedCoverage {
 }
 
 fn render_node(node: &mut PlaybackNode, build: &mut FrameBuild<'_>, draw: NodeDraw, frame_no: f32, inherited_stencil: StencilTest, inherited_coverage: Option<InheritedCoverage>) {
-    let NodeDraw { transform, alpha } = draw;
+    let NodeDraw { transform, alpha, tint } = draw;
     let frame_data = match node.context.get_frame_data(frame_no) {
         Ok(bytes) => unsafe { std::slice::from_raw_parts(bytes.as_ptr(), bytes.len()) },
         Err(_) => return,
@@ -1866,7 +1896,7 @@ fn render_node(node: &mut PlaybackNode, build: &mut FrameBuild<'_>, draw: NodeDr
                             continue;
                         }
                         let stencil = node.mask_flags.get(part_idx).map(|f| f.polarity()).unwrap_or(StencilTest::None);
-                        let info = BatchInfo { start_rank: rank, count: 1, texture_hash: batch.texture_hash(), blend_type: batch.blend_type(), kind, stencil, alpha };
+                        let info = BatchInfo { start_rank: rank, count: 1, texture_hash: batch.texture_hash(), blend_type: batch.blend_type(), kind, stencil, alpha, tint };
                         build.scene.append_batch(build.renderer, &frame, &node_slot, &info);
                     }
                 } else if has_pure {
@@ -1877,11 +1907,11 @@ fn render_node(node: &mut PlaybackNode, build: &mut FrameBuild<'_>, draw: NodeDr
                         if is_pure(part_idx) {
                             continue;
                         }
-                        let info = BatchInfo { start_rank: rank, count: 1, texture_hash: batch.texture_hash(), blend_type: batch.blend_type(), kind, stencil: inherited_stencil, alpha };
+                        let info = BatchInfo { start_rank: rank, count: 1, texture_hash: batch.texture_hash(), blend_type: batch.blend_type(), kind, stencil: inherited_stencil, alpha, tint };
                         build.scene.append_batch(build.renderer, &frame, &node_slot, &info);
                     }
                 } else {
-                    let info = BatchInfo { start_rank, count, texture_hash: batch.texture_hash(), blend_type: batch.blend_type(), kind, stencil: inherited_stencil, alpha };
+                    let info = BatchInfo { start_rank, count, texture_hash: batch.texture_hash(), blend_type: batch.blend_type(), kind, stencil: inherited_stencil, alpha, tint };
                     build.scene.append_batch(build.renderer, &frame, &node_slot, &info);
                 }
             }
@@ -1912,7 +1942,7 @@ fn render_node(node: &mut PlaybackNode, build: &mut FrameBuild<'_>, draw: NodeDr
                     let child_frame_no = child.frame_no;
                     let m: [f32; 16] = frame.world_matrices[part_idx * 16..part_idx * 16 + 16].try_into().unwrap();
                     let child_transform = mat4_mul(transform, &m);
-                    let child_draw = NodeDraw { transform: &child_transform, alpha };
+                    let child_draw = NodeDraw { transform: &child_transform, alpha, tint };
                     // Hand the bitmap down only when this instance part is
                     // actually clipped; `child_inherited` is what says so, and
                     // §2-6's AND means an unmasked instance part leaves its whole
@@ -1941,7 +1971,7 @@ fn render_node(node: &mut PlaybackNode, build: &mut FrameBuild<'_>, draw: NodeDr
                     // The effect draws from its own plan, so it needs its own
                     // arena slot rather than this node's.
                     let eff_slot = build.scene.push_transform(&eff_transform);
-                    build.scene.append_effect(plan, &eff_slot, eff_stencil, alpha);
+                    build.scene.append_effect(plan, &eff_slot, eff_stencil, alpha, tint);
                 }
             }
             // Mask batches emit no colour (coverage is handled by the writer

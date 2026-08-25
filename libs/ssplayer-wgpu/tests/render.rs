@@ -35,6 +35,12 @@ fn load_textures(renderer: &mut SSRenderer, device: &wgpu::Device, queue: &wgpu:
 /// Build a reference-mode player (host-supplied textures, with/without a stencil
 /// buffer), render `Mask.ssab`/etc. at frame `advance_frames`, return the readback.
 fn render_ssab(device: &wgpu::Device, queue: &wgpu::Queue, stencil: bool, pack: &str, advance_frames: u32) -> Vec<u8> {
+    render_ssab_tinted(device, queue, stencil, pack, advance_frames, 0xFFFFFF)
+}
+
+/// The same render under a player tint. `0xFFFFFF` is what every other caller
+/// gets, and it must be indistinguishable from no tint at all.
+fn render_ssab_tinted(device: &wgpu::Device, queue: &wgpu::Queue, stencil: bool, pack: &str, advance_frames: u32, tint: u32) -> Vec<u8> {
     let mut renderer = SSRenderer::new(device);
     let mut scene = SSScene::new(device, &SceneConfig { color_format: COLOR_FORMAT, stencil_format: stencil.then_some(STENCIL_FORMAT), mask: if stencil { MaskBackend::Stencil } else { MaskBackend::None } });
     let mut player = SSPlayer::new();
@@ -44,6 +50,7 @@ fn render_ssab(device: &wgpu::Device, queue: &wgpu::Queue, stencil: bool, pack: 
     player.load_ssab(pack, &bytes).unwrap();
     let anim = player.animation_names().unwrap()[0].clone();
     player.set_animation(&anim).unwrap();
+    player.set_tint(tint);
     player.play();
     scene.set_viewport(queue, W as f32, H as f32, false);
 
@@ -211,6 +218,45 @@ fn render_integration_shaders() {
     // plain textures with no effect. Guard: stencil on/off must be pixel-identical.
     let with_stencil = render_ssab(&device, &queue, true, "Shader", 15);
     assert_eq!(plain, with_stencil, "Shader.ssab differs with a stencil buffer — shaders skipped by the masked path (no-writer gating regressed)");
+}
+
+/// The player tint lands *after* the PartColor blend, on the finished colour.
+///
+/// A pure red tint is what makes that testable without a golden image: red's own
+/// channel is multiplied by 1 and must come back bit for bit, while green and
+/// blue are multiplied by 0 and must be gone — whatever the parts themselves
+/// blended towards. Both fixtures run because they take different fragment
+/// paths: `Basic` is `fs_main`, `Shader` is the thirteen `ss_*` entries behind
+/// `ss_finish` (and `ss-blur`, which composites by hand).
+#[test]
+fn a_player_tint_multiplies_the_finished_colour() {
+    let instance = wgpu::Instance::new(wgpu::InstanceDescriptor::new_without_display_handle());
+    let adapter = match pollster::block_on(instance.request_adapter(&wgpu::RequestAdapterOptions { power_preference: wgpu::PowerPreference::default(), compatible_surface: None, force_fallback_adapter: false })) {
+        Ok(a) => a,
+        Err(_) => {
+            eprintln!("no GPU adapter available, skipping headless render test");
+            return;
+        }
+    };
+    let (device, queue) = pollster::block_on(adapter.request_device(&wgpu::DeviceDescriptor::default())).expect("request_device");
+
+    for pack in ["Basic", "Shader"] {
+        let plain = render_ssab(&device, &queue, false, pack, 10);
+        let white = render_ssab_tinted(&device, &queue, false, pack, 10, 0xFFFFFF);
+        let red = render_ssab_tinted(&device, &queue, false, pack, 10, 0xFF0000);
+
+        let drawn = drawn_pixels(&plain);
+        eprintln!("{pack}.ssab drawn pixels: {drawn}, red-tinted {}", drawn_pixels(&red));
+        assert!(drawn > 0, "{pack}.ssab drew nothing — fixture/texture problem");
+        assert_eq!(plain, white, "a white tint changed {pack}.ssab — the identity tint is not identity");
+
+        let green_or_blue = red.chunks_exact(4).filter(|p| p[1] > 0 || p[2] > 0).count();
+        assert_eq!(green_or_blue, 0, "{pack}.ssab kept green/blue under a red tint — the tint is not reaching every fragment path");
+
+        let red_kept = plain.chunks_exact(4).zip(red.chunks_exact(4)).all(|(a, b)| a[0] == b[0]);
+        assert!(red_kept, "{pack}.ssab changed its red channel under a red tint — the tint is not a plain multiply");
+        assert!(drawn_pixels(&red) > 0, "{pack}.ssab drew nothing under a red tint");
+    }
 }
 
 /// Device-loss recovery (SPEC §14). The player's pipelines, buffers, textures and
