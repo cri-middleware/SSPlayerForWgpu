@@ -37,7 +37,7 @@ defineSsPlayerWebGPUElement(); // registers <ss-player-webgpu>
 ```
 
 ```html
-<ss-player-webgpu src="/assets/Basic.ssab" style="width:360px;height:360px"></ss-player-webgpu>
+<ss-player-webgpu src="/assets/Basic.ssab" autoplay style="width:360px;height:360px"></ss-player-webgpu>
 ```
 
 | Attribute | Meaning |
@@ -45,6 +45,7 @@ defineSsPlayerWebGPUElement(); // registers <ss-player-webgpu>
 | `src` | URL of the `.ssab` (embedded or reference export). |
 | `pack` | Pack-name override; defaults to the name inside the `.ssab`. |
 | `anim` | Animation to play; defaults to the first one. |
+| `autoplay` | Start playing once the pack is loaded. A boolean attribute, so **absent means no** — without it the element holds its first frame, poster-like. |
 | `pause-when-hidden` | Stop the rAF loop while scrolled off-screen or backgrounded. On by default — opt out with `"false"`. |
 
 `element.loadSrc(src, pack?, anim?)` switches packs at runtime and resolves to the animation names.
