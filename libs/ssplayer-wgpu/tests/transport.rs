@@ -111,18 +111,51 @@ fn a_section_narrows_the_played_range() {
 }
 
 #[test]
-fn set_animation_rebuilds_the_tree_and_takes_the_section_with_it() {
+fn selecting_the_animation_already_set_up_does_nothing() {
     let mut player = loaded();
-    let full = player.total_frames();
 
     player.set_animation_section(player.start_frame(), player.start_frame() + 3);
     assert_eq!(player.total_frames(), 4);
 
-    // Documented, not incidental: `set_animation` builds a fresh context, so
-    // everything set here has to be re-applied after it.
+    // A switch with nothing to switch to. Nothing moves — not the section, not
+    // the playhead, not the loop budget. Restarting is `play`'s job.
     let anim = player.animation_names().unwrap().first().cloned().unwrap();
     player.set_animation(&anim).unwrap();
-    assert_eq!(player.total_frames(), full, "the full range should be back");
+    assert_eq!(player.total_frames(), 4, "the section should still be in force");
+}
+
+#[test]
+fn a_real_switch_drops_the_section_and_keeps_the_rest() {
+    let mut player = loaded();
+    let names = player.animation_names().unwrap();
+    let Some(other) = names.iter().find(|n| Some(n.as_str()) != player.current_animation()).cloned() else {
+        return; // single-animation pack: nothing to switch to
+    };
+    let full = player.total_frames();
+    assert!(full > 4, "need room to carve a section");
+
+    player.set_animation_section(player.start_frame(), player.start_frame() + 3);
+    player.set_speed(2.0);
+    player.set_skip_frames(false);
+    player.set_playback_direction(PlaybackDirection::Backward, PlaybackStyle::PingPong);
+    player.set_loop_count(3);
+
+    player.set_animation(&other).unwrap();
+
+    // The section goes: frame numbers mean nothing against a different clip, and
+    // the runtime drops it for that reason.
+    assert_eq!(player.total_frames(), player.end_frame() - player.start_frame() + 1);
+    assert!(player.total_frames() > 4, "the section should not have followed");
+
+    // Everything else stays. The runtime carries these across a setup itself —
+    // this Player used to rebuild the context and lose all four.
+    assert_eq!(player.speed(), 2.0, "speed describes the playback, not the clip");
+    assert!(!player.skip_frames(), "frame skip is a Player policy");
+    assert_eq!(player.playback_direction(), PlaybackDirection::Backward);
+    assert_eq!(player.playback_style(), PlaybackStyle::PingPong);
+    // The loop count is the one the runtime drops, because the transition states
+    // it — so the Player puts its own back, as every sibling Player does.
+    assert_eq!(player.loop_count(), 3, "the host's loop count survives the switch");
 }
 
 #[test]

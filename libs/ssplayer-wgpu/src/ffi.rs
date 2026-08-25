@@ -1077,6 +1077,31 @@ pub unsafe extern "C" fn ss_player_playback_style(handle: *mut SsPlayer) -> i32 
     unsafe { player(handle) }.map(|p| p.playback_style().as_wire()).unwrap_or(0)
 }
 
+/// True (the default) draws between authored frames; false floors the frame that
+/// is drawn, pinning playback to whole ones.
+///
+/// The playhead keeps its fraction either way — `ss_player_frame_no` reports it
+/// unrounded — and so does the stepping of instance and effect children. This
+/// affects only what is drawn.
+///
+/// # Safety
+/// `handle` must be a live handle or null.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn ss_player_set_sub_frame(handle: *mut SsPlayer, enabled: bool) {
+    if let Some(player) = unsafe { player(handle) } {
+        player.set_sub_frame(enabled);
+    }
+}
+
+/// See `ss_player_set_sub_frame`.
+///
+/// # Safety
+/// `handle` must be a live handle or null.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn ss_player_sub_frame(handle: *mut SsPlayer) -> bool {
+    unsafe { player(handle) }.map(|p| p.sub_frame()).unwrap_or(true)
+}
+
 /// True (the default) keeps playback on the wall clock by dropping frames under
 /// load; false advances exactly one frame per `ss_scene_update`.
 ///

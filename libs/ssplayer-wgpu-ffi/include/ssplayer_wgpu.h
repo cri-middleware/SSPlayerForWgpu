@@ -824,6 +824,27 @@ int32_t ss_player_playback_direction(ss_player_t *handle);
 int32_t ss_player_playback_style(ss_player_t *handle);
 
 /*
+ True (the default) draws between authored frames; false floors the frame that
+ is drawn, pinning playback to whole ones.
+
+ The playhead keeps its fraction either way — `ss_player_frame_no` reports it
+ unrounded — and so does the stepping of instance and effect children. This
+ affects only what is drawn.
+
+ # Safety
+ `handle` must be a live handle or null.
+ */
+void ss_player_set_sub_frame(ss_player_t *handle, bool enabled);
+
+/*
+ See `ss_player_set_sub_frame`.
+
+ # Safety
+ `handle` must be a live handle or null.
+ */
+bool ss_player_sub_frame(ss_player_t *handle);
+
+/*
  True (the default) keeps playback on the wall clock by dropping frames under
  load; false advances exactly one frame per `ss_scene_update`.
 
