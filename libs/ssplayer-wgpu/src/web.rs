@@ -1376,6 +1376,14 @@ impl SsPlayerWeb {
         with_player!(self, |p| p.set_alpha(alpha))
     }
 
+    /// Player-level tint as `0xRRGGBB`, multiplied into every part after the
+    /// PartColor blend. `0xffffff` (the default) leaves colours untouched — the
+    /// same property `tint` names on `@spritestudio/ssplayer-webgl`.
+    #[wasm_bindgen(js_name = setTint)]
+    pub fn set_tint(&self, rgb: u32) -> Result<(), JsValue> {
+        with_player!(self, |p| p.set_tint(rgb))
+    }
+
     /// The authored canvas size of the selected animation, as `[width, height]`,
     /// or an empty array when nothing is loaded. Useful for scaling a character
     /// to fit the element it was dropped into.

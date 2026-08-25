@@ -1101,6 +1101,16 @@ void ss_player_set_visible(ss_player_t *handle, bool visible);
 void ss_player_set_alpha(ss_player_t *handle, float alpha);
 
 /*
+ Player-level tint, `0xRRGGBB`, multiplied into every part after the PartColor
+ blend. `0xFFFFFF` — the default — leaves colours untouched. Mask coverage is
+ unaffected, as with `ss_player_set_alpha`.
+
+ # Safety
+ `handle` must be a live handle or null.
+ */
+void ss_player_set_tint(ss_player_t *handle, uint32_t rgb);
+
+/*
  Canvas size of the animation currently playing. Either out-pointer may be null.
 
  # Safety

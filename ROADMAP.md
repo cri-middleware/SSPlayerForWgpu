@@ -14,6 +14,10 @@ respect are in [`AGENTS.md`](./AGENTS.md) under *Hard constraints*.
 
 - [x] Draw kinds — Normal, Mesh, Shape, Instance, Effect, Mask.
 - [x] All 12 blend modes and part colours, premultiplied throughout.
+- [x] Player-level tint — `set_tint` / `ss_player_set_tint` / `setTint`, taking
+      `0xRRGGBB` like `ssplayer-webgl`'s `tint`. It applies after the PartsColor
+      mix, so it could not fold into vertex colour: it rides on `Prim` beside the
+      player alpha and multiplies the finished colour in every fragment path.
 - [x] Stencil masking, including clipping writers and per-player unwind.
 - [x] Coverage-bitmap masking (mask doc §3-2), for hosts whose pass lends no
       stencil. Same semantics, no one-frame lag, one extra pass per masking
@@ -32,8 +36,6 @@ respect are in [`AGENTS.md`](./AGENTS.md) under *Hard constraints*.
 - [ ] **Text parts.** Much larger than 9-slice despite sharing its label: the
       runtime hands over a batch with no geometry and a static string, so font
       loading, layout and a glyph atlas all land on this side.
-- [ ] **Player-level tint.** Applies after the PartsColor mix, so it cannot fold
-      into vertex colour; it belongs on `Prim`, beside the player alpha.
 - [ ] **Integration shader gaps** — `map0` / `map1` secondary textures, shader
       parts combined with a mask, and parts other than Normal.
 

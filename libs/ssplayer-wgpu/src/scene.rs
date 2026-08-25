@@ -43,6 +43,18 @@ fn pack_rgb(r: f32, g: f32, b: f32) -> u32 {
     q(r) | (q(g) << 8) | (q(b) << 16)
 }
 
+/// The identity player tint: white multiplies nothing away. It shares [`WHITE`]'s
+/// value and not its meaning — that one is a part's missing PartColor, this one is
+/// a player nobody tinted — so the two are named apart.
+const NO_TINT: u32 = WHITE;
+
+/// Turn a public `0xRRGGBB` tint into the byte order the shader unpacks
+/// ([`pack_rgb`]'s, x = byte 0). Only the outer two bytes move; green is already
+/// where it belongs.
+pub(crate) fn pack_tint(rgb: u32) -> u32 {
+    ((rgb >> 16) & 0xFF) | (rgb & 0x00FF00) | ((rgb & 0xFF) << 16)
+}
+
 /// How a scene rasterises mask coverage.
 ///
 /// The two working backends implement the same semantics from opposite ends of
@@ -107,6 +119,12 @@ pub struct BatchInfo {
     /// unchanged at alpha 0). Mask writers are deliberately not faded — their
     /// `color[0]` carries the cutout threshold, not a colour.
     pub alpha: f32,
+    /// Player-level tint, multiplied into the fragment *after* the PartsColor
+    /// mix — the place `uColor` lands in the WebGL player, and the reason it
+    /// cannot fold into the vertex colour the formula blends towards. Packed in
+    /// [`pack_rgb`]'s byte order; [`NO_TINT`] leaves the colour alone. Mask
+    /// writers are untinted for the same reason they are unfaded.
+    pub tint: u32,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -136,7 +154,7 @@ struct BatchDrawCall {
 /// Field meanings are per geometry class; see the `Prim` comment in the WGSL,
 /// which this must stay in step with.
 #[repr(C)]
-#[derive(Copy, Clone, Debug, Default, bytemuck::Pod, bytemuck::Zeroable)]
+#[derive(Copy, Clone, Debug, bytemuck::Pod, bytemuck::Zeroable)]
 struct Prim {
     /// Quad/Shape: world matrix base. Mesh: the Y vertex array. Effect: unused.
     aux_base: u32,
@@ -178,6 +196,19 @@ struct Prim {
     /// | 8..16 | writer: which bit of the bitmap it writes (0..23) |
     /// | 16..32 | target: its own `draw_order` rank, for the scope test (§2-1) |
     mask_info: u32,
+    /// Player-level tint (see [`BatchInfo::tint`]), in [`pack_rgb`]'s byte order.
+    /// Unlike every other field, zero is not the neutral value here — it is
+    /// black — which is why [`Prim`] spells its `Default` out.
+    tint: u32,
+}
+
+impl Default for Prim {
+    /// Zero everywhere the shader reads a zero as "nothing", and [`NO_TINT`]
+    /// where it would read one as black. Written against `zeroed()` rather than
+    /// field by field so a new field keeps defaulting to zero on its own.
+    fn default() -> Self {
+        Self { tint: NO_TINT, ..bytemuck::Zeroable::zeroed() }
+    }
 }
 
 /// Which backend a mask writer is being appended for, and the one value each
@@ -1121,7 +1152,7 @@ impl FrameChunk {
     /// interleave instance recursion at the right rank. `batch.stencil` selects
     /// the stencil-test content pipeline for masked parts.
     pub fn append_batch(&mut self, renderer: &SSRenderer, frame: &FrameView, node: &NodeSlot, batch: &BatchInfo) {
-        let BatchInfo { start_rank, count, texture_hash, blend_type, kind, stencil, alpha } = *batch;
+        let BatchInfo { start_rank, count, texture_hash, blend_type, kind, stencil, alpha, tint } = *batch;
         if frame.frame_data.is_empty() {
             return;
         }
@@ -1193,7 +1224,7 @@ impl FrameChunk {
                         .unwrap_or(([WHITE; 4], [part.alpha(); 4], [1.0; 4], mode::MUL));
 
                     let call_start = self.prims.len() as u32;
-                    self.push_quad_prim(frame, node, part_idx, Prim { mode, alpha, colors, alphas, rates, cov_base, mask_info, ..Default::default() });
+                    self.push_quad_prim(frame, node, part_idx, Prim { mode, alpha, tint, colors, alphas, rates, cov_base, mask_info, ..Default::default() });
                     if !shader_dispatch {
                         continue;
                     }
@@ -1235,7 +1266,7 @@ impl FrameChunk {
                         })
                         .unwrap_or((WHITE, part.alpha(), 1.0, mode::MUL));
 
-                    self.push_mesh_prim(frame, node, part_idx, Prim { mode, alpha, z: part.position_z(), colors: [color; 4], alphas: [part_alpha; 4], rates: [rate; 4], cov_base, mask_info, ..Default::default() });
+                    self.push_mesh_prim(frame, node, part_idx, Prim { mode, alpha, tint, z: part.position_z(), colors: [color; 4], alphas: [part_alpha; 4], rates: [rate; 4], cov_base, mask_info, ..Default::default() });
                 }
                 let stream_end = (self.mesh_stream.len() / 2) as u32;
                 if stream_end > stream_start {
@@ -1271,7 +1302,7 @@ impl FrameChunk {
                         })
                         .unwrap_or(([WHITE; 4], [part.alpha(); 4]));
 
-                    self.push_shape_prim(frame, node, part_idx, Prim { mode: mode::MIX, alpha, colors, alphas, rates: [if has_pc { 1.0 } else { 0.0 }; 4], cov_base, mask_info, ..Default::default() });
+                    self.push_shape_prim(frame, node, part_idx, Prim { mode: mode::MIX, alpha, tint, colors, alphas, rates: [if has_pc { 1.0 } else { 0.0 }; 4], cov_base, mask_info, ..Default::default() });
                 }
                 self.push_draw(key, GeomClass::Shape, texture_hash, first_prim, None);
             }
@@ -1477,9 +1508,10 @@ impl FrameChunk {
     /// matrix (verts are slot-relative). Blend is per-command; color is taken
     /// from the plan and modulates the cellmap texture via the sprite shader.
     /// `stencil` selects the stencil test when the effect is a masked target
-    /// (inherited from a parent mask); `None` for ordinary effects. `alpha` is
-    /// the player-level fade (see [`BatchInfo::alpha`]).
-    pub fn append_effect(&mut self, plan_buf: &[u8], node: &NodeSlot, stencil: StencilTest, alpha: f32) {
+    /// (inherited from a parent mask); `None` for ordinary effects. `alpha` and
+    /// `tint` are the player-level fade and colour (see [`BatchInfo::alpha`] and
+    /// [`BatchInfo::tint`]).
+    pub fn append_effect(&mut self, plan_buf: &[u8], node: &NodeSlot, stencil: StencilTest, alpha: f32, tint: u32) {
         if plan_buf.is_empty() {
             return;
         }
@@ -1531,6 +1563,7 @@ impl FrameChunk {
                     // Effects carry no PartsColor overlay: plain texture*color modulate.
                     mode: mode::MUL,
                     alpha,
+                    tint,
                     colors: [color; 4],
                     alphas: [colors.get(vi * 4 + 3); 4],
                     rates: [1.0; 4],

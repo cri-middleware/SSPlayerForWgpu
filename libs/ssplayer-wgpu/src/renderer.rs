@@ -379,6 +379,8 @@ struct VertexOutput {
     // stage has no primitive index of its own to look them up with.
     @location(4) @interpolate(flat) mask_info: u32,
     @location(5) @interpolate(flat) cov_base: u32,
+    // The owning player's tint, flat for the same reason.
+    @location(6) @interpolate(flat) tint: u32,
 }
 
 struct Globals {
@@ -417,6 +419,9 @@ struct Prim {
     // coverage-masked" — for every primitive under the stencil backend.
     cov_base: u32,
     mask_info: u32,
+    // The owning player's tint, packed like `colors`. White (`0x00FFFFFF`) is the
+    // identity — zero is black, so this field is never left to a default.
+    tint: u32,
 }
 
 // `mask_info` bits. Kept in step with the Rust constants of the same names.
@@ -543,6 +548,13 @@ fn normalize_uv(base: u32, k: u32) -> vec2<f32> {
     return vec2<f32>(f_arena[base + k * 2u], f_arena[base + k * 2u + 1u]) / tex_info.size.xy;
 }
 
+// The player's tint, unpacked. It multiplies the finished composite rather than
+// the colour the PartsColor formula blends towards, which is why it reaches the
+// fragment stage instead of folding into `corner_rgba`.
+fn player_tint(packed: u32) -> vec3<f32> {
+    return unpack4x8unorm(packed).rgb;
+}
+
 fn corner_rgba(pi: u32, k: u32) -> vec4<f32> {
     return vec4<f32>(unpack4x8unorm(prims[pi].colors[k]).rgb, prims[pi].alphas[k] * prims[pi].alpha);
 }
@@ -575,6 +587,7 @@ fn vs_quad(@builtin(vertex_index) vi: u32) -> VertexOutput {
     out.cov_uv = cov_uv_of(pi, local_xy((*p).aux_base, lx, ly));
     out.mask_info = prims[pi].mask_info;
     out.cov_base = prims[pi].cov_base;
+    out.tint = prims[pi].tint;
     return out;
 }
 
@@ -596,6 +609,7 @@ fn vs_mesh(@builtin(vertex_index) vi: u32) -> VertexOutput {
     out.cov_uv = cov_uv_of(pi, vec2<f32>(mx, my));
     out.mask_info = prims[pi].mask_info;
     out.cov_base = prims[pi].cov_base;
+    out.tint = prims[pi].tint;
     return out;
 }
 
@@ -633,6 +647,7 @@ fn vs_shape(@builtin(vertex_index) vi: u32) -> VertexOutput {
     out.cov_uv = cov_uv_of(pi, local_xy((*p).aux_base, lx, ly));
     out.mask_info = prims[pi].mask_info;
     out.cov_base = prims[pi].cov_base;
+    out.tint = prims[pi].tint;
     return out;
 }
 
@@ -652,6 +667,7 @@ fn vs_effect(@builtin(vertex_index) vi: u32) -> VertexOutput {
     // One colour per particle, and no PartsColor overlay: plain modulate.
     out.color = corner_rgba(pi, 0u);
     out.varg = varg_of((*p).mode, (*p).rates[0]);
+    out.tint = (*p).tint;
     return out;
 }
 "#;
@@ -676,6 +692,7 @@ fn vs_cov_quad(@builtin(vertex_index) vi: u32) -> VertexOutput {
     out.cov_uv = cov_uv_of(pi, local_xy((*p).aux_base, lx, ly));
     out.mask_info = prims[pi].mask_info;
     out.cov_base = prims[pi].cov_base;
+    out.tint = prims[pi].tint;
     out.clip_position = cov_clip(out.cov_uv);
     out.uv = normalize_uv((*p).uv_base, k);
     out.color = bit_color((*p).mask_info);
@@ -695,6 +712,7 @@ fn vs_cov_mesh(@builtin(vertex_index) vi: u32) -> VertexOutput {
     out.cov_uv = cov_uv_of(pi, vec2<f32>(mx, my));
     out.mask_info = prims[pi].mask_info;
     out.cov_base = prims[pi].cov_base;
+    out.tint = prims[pi].tint;
     out.clip_position = cov_clip(out.cov_uv);
     out.uv = normalize_uv((*p).uv_base, k);
     out.color = bit_color((*p).mask_info);
@@ -722,6 +740,7 @@ fn vs_cov_shape(@builtin(vertex_index) vi: u32) -> VertexOutput {
     out.cov_uv = cov_uv_of(pi, local_xy((*p).aux_base, lx, ly));
     out.mask_info = prims[pi].mask_info;
     out.cov_base = prims[pi].cov_base;
+    out.tint = prims[pi].tint;
     out.clip_position = cov_clip(out.cov_uv);
     // Shapes are textureless, so any constant UV samples the white fallback.
     out.uv = vec2<f32>(0.5, 0.5);
@@ -825,7 +844,7 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
     let addC = straight + in.color.rgb * rate * sign(in.varg.w);
     let rgb = mixC * in.varg.y + mulC * in.varg.z + addC * abs(in.varg.w);
     let a = tex.a * in.color.a;
-    return vec4<f32>(rgb * a, a);
+    return vec4<f32>(rgb * player_tint(in.tint) * a, a);
 }
 
 // The same composite as `fs_main`, clipped by the coverage bitmap.
@@ -850,7 +869,7 @@ fn fs_main_coverage(in: VertexOutput) -> @location(0) vec4<f32> {
     let addC = straight + in.color.rgb * rate * sign(in.varg.w);
     let rgb = mixC * in.varg.y + mulC * in.varg.z + addC * abs(in.varg.w);
     let a = tex.a * in.color.a;
-    return vec4<f32>(rgb * a, a);
+    return vec4<f32>(rgb * player_tint(in.tint) * a, a);
 }
 
 // Mask-write fragment: color output is discarded (ColorWrites::empty()); only
@@ -930,8 +949,9 @@ fn ssTex(uv: vec2<f32>) -> vec4<f32> {
     return vec4<f32>(rgb, c.a);
 }
 
-// PartColor composite (straight space) + re-premultiply — same math as fs_main.
-fn ss_finish(pixel: vec4<f32>, color: vec4<f32>, varg: vec4<f32>) -> vec4<f32> {
+// PartColor composite (straight space) + re-premultiply — same math as fs_main,
+// player tint included.
+fn ss_finish(pixel: vec4<f32>, color: vec4<f32>, varg: vec4<f32>, tint: u32) -> vec4<f32> {
     let rate = varg.x;
     let p = pixel.rgb;
     let mix_c = mix(p, color.rgb, rate);
@@ -939,7 +959,7 @@ fn ss_finish(pixel: vec4<f32>, color: vec4<f32>, varg: vec4<f32>) -> vec4<f32> {
     let add_c = p + color.rgb * rate * sign(varg.w);
     let rgb = mix_c * varg.y + mul_c * varg.z + add_c * abs(varg.w);
     let a = pixel.a * color.a;
-    return vec4<f32>(rgb * a, a);
+    return vec4<f32>(rgb * player_tint(tint) * a, a);
 }
 
 fn ss_rand(p: vec2<f32>) -> f32 {
@@ -969,7 +989,7 @@ fn fs_ss_sepia(in: VertexOutput) -> @location(0) vec4<f32> {
     let sepia_rgb = gray_rgb * vec3<f32>(1.07, 0.74, 0.43);
     let toned = mix(sepia_rgb, gray_rgb, step(f_power, 0.0));
     let mixed_rgb = mix(pixel.rgb, toned, abs(f_power));
-    return ss_finish(vec4<f32>(mixed_rgb, pixel.a), in.color, in.varg);
+    return ss_finish(vec4<f32>(mixed_rgb, pixel.a), in.color, in.varg, in.tint);
 }
 
 @fragment
@@ -985,7 +1005,7 @@ fn fs_ss_hsb(in: VertexOutput) -> @location(0) vec4<f32> {
     if (hsb.x < 0.0) { hsb.x = hsb.x + 1.0; }
     if (hsb.x > 1.0) { hsb.x = hsb.x - 1.0; }
     let shifted = ss_hsb_to_rgb(hsb);
-    return ss_finish(vec4<f32>(shifted.rgb, shifted.a), in.color, in.varg);
+    return ss_finish(vec4<f32>(shifted.rgb, shifted.a), in.color, in.varg, in.tint);
 }
 
 @fragment
@@ -1001,7 +1021,7 @@ fn fs_ss_step(in: VertexOutput) -> @location(0) vec4<f32> {
     let r = clamp(floor((b - t) / (t + e) * 256.0 / d) * d / 256.0, 0.0, 1.0);
     let c = step(t, b) * r;
     let v = mix(vec3<f32>(c), pixel.rgb * c, f_color);
-    return ss_finish(vec4<f32>(v, pixel.a), in.color, in.varg);
+    return ss_finish(vec4<f32>(v, pixel.a), in.color, in.varg, in.tint);
 }
 
 @fragment
@@ -1011,7 +1031,7 @@ fn fs_ss_pix(in: VertexOutput) -> @location(0) vec4<f32> {
     let v = 1.0 + 96.0 * f_power;
     let step_uv = vec2<f32>(v * px.x, v * px.y);
     let coord = floor(in.uv / step_uv) * step_uv;
-    return ss_finish(ssTex(coord), in.color, in.varg);
+    return ss_finish(ssTex(coord), in.color, in.varg, in.tint);
 }
 
 @fragment
@@ -1028,7 +1048,7 @@ fn fs_ss_noise(in: VertexOutput) -> @location(0) vec4<f32> {
     c.g = mix(c.r, ss_rand(t * c.r), f_color);
     c.b = mix(c.g, ss_rand(t * c.g), f_color);
     let rgb = clamp(mix(pixel.rgb, c, f_power), vec3<f32>(0.0), vec3<f32>(1.0));
-    return ss_finish(vec4<f32>(rgb, pixel.a), in.color, in.varg);
+    return ss_finish(vec4<f32>(rgb, pixel.a), in.color, in.varg, in.tint);
 }
 
 @fragment
@@ -1037,7 +1057,7 @@ fn fs_ss_bmask(in: VertexOutput) -> @location(0) vec4<f32> {
     let pixel = ssTex(in.uv);
     let b = abs(step(f_brightness, 0.0) - max(pixel.r, max(pixel.g, pixel.b)));
     if (b <= abs(f_brightness)) { discard; }
-    return ss_finish(pixel, in.color, in.varg);
+    return ss_finish(pixel, in.color, in.varg, in.tint);
 }
 
 @fragment
@@ -1054,7 +1074,7 @@ fn fs_ss_outline(in: VertexOutput) -> @location(0) vec4<f32> {
     let hi = step(f_ratio + e, center.a);
     let v = min(hi * lo, 1.0);
     if (v <= 0.0) { discard; }
-    return ss_finish(vec4<f32>(vec3<f32>(v), v), in.color, in.varg);
+    return ss_finish(vec4<f32>(vec3<f32>(v), v), in.color, in.varg, in.tint);
 }
 
 @fragment
@@ -1075,7 +1095,7 @@ fn fs_ss_blur(in: VertexOutput) -> @location(0) vec4<f32> {
     let pixel = sum / 9.0;
     // ss-blur skips the PartColor composite: straight multiply by part colour.
     let c = pixel * in.color;
-    return vec4<f32>(c.rgb * c.a, c.a);
+    return vec4<f32>(c.rgb * player_tint(in.tint) * c.a, c.a);
 }
 
 @fragment
@@ -1087,7 +1107,7 @@ fn fs_ss_wave(in: VertexOutput) -> @location(0) vec4<f32> {
     let px = ss.pixel_size.xy;
     let l = 384.0 * f_height * 0.5;
     let s = l * sin(coord.y * 384.0 * f_width * 0.5 + PI * 2.0 * f_phase) * px.x;
-    return ss_finish(ssTex(vec2<f32>(coord.x + s, coord.y)), in.color, in.varg);
+    return ss_finish(ssTex(vec2<f32>(coord.x + s, coord.y)), in.color, in.varg, in.tint);
 }
 
 @fragment
@@ -1108,7 +1128,7 @@ fn fs_ss_move(in: VertexOutput) -> @location(0) vec4<f32> {
         coord = coord - vel;
         pixel = mix(ssTex(coord), pixel, 0.96 * abs(f_power));
     }
-    return ss_finish(pixel, in.color, in.varg);
+    return ss_finish(pixel, in.color, in.varg, in.tint);
 }
 
 @fragment
@@ -1123,7 +1143,7 @@ fn fs_ss_scatter(in: VertexOutput) -> @location(0) vec4<f32> {
     let r = ss_rand(t) * PI * 2.0 - PI;
     let r2 = step(ss_rand(t * r), f_ratio);
     let v = vec2<f32>(sin(r), cos(r)) * px * 96.0 * f_power * r2;
-    return ss_finish(ssTex(coord + v), in.color, in.varg);
+    return ss_finish(ssTex(coord + v), in.color, in.varg, in.tint);
 }
 
 @fragment
@@ -1152,7 +1172,7 @@ fn fs_ss_circle(in: VertexOutput) -> @location(0) vec4<f32> {
     if (vv > 1.0) { vv = vv - 1.0; }
     if (f_direction <= 0.0) { vv = 1.0 - vv; }
     let st = dd * vec2<f32>(uu, vv) * uv1;
-    return ss_finish(ssTex(lt_uv + st), in.color, in.varg);
+    return ss_finish(ssTex(lt_uv + st), in.color, in.varg, in.tint);
 }
 
 @fragment
@@ -1178,7 +1198,7 @@ fn fs_ss_spot(in: VertexOutput) -> @location(0) vec4<f32> {
     f_r = clamp(mix(f_r, f_l, d_abs), 0.0, 1.0);
     let sampled = ssTex(in.uv).rgb;
     let pixel = vec4<f32>(mix(vec3<f32>(1.0), sampled, f_color), f_r);
-    return ss_finish(pixel, in.color, in.varg);
+    return ss_finish(pixel, in.color, in.varg, in.tint);
 }
 "#;
 
