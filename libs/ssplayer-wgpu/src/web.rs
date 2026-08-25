@@ -1084,6 +1084,15 @@ impl SsPlayerWeb {
         with_player!(self, |p| p.is_paused())
     }
 
+    /// Which way the playhead is actually travelling — not the heading
+    /// `setPlaybackDirection` configured, which `playbackDirection` reports.
+    /// Under ping-pong the return leg runs backward while that still reads
+    /// forward. Gate audio on this: SpriteStudio has no reverse audio.
+    #[wasm_bindgen(js_name = isPlayingForward)]
+    pub fn is_playing_forward(&self) -> Result<bool, JsValue> {
+        with_player!(self, |p| p.is_playing_forward())
+    }
+
     /// Every configured loop has played. Sticky, and never true under an
     /// infinite loop.
     #[wasm_bindgen(js_name = isFinished)]
@@ -1362,8 +1371,9 @@ impl SsPlayerWeb {
         with_player!(self, |p| p.part_transform(part).map(|m| m.to_vec()).unwrap_or_default())
     }
 
-    /// Place this player in the scene, in pixels from the canvas centre.
-    /// `rotation` is in radians.
+    /// Place this player in the scene, in pixels from the canvas centre, with
+    /// `y` measured **downward** (as `partTransform` reports, and as ForWeb's
+    /// `offsetY` means it). `rotation` is in radians.
     #[wasm_bindgen(js_name = setTransform)]
     pub fn set_transform(&self, x: f32, y: f32, scale_x: f32, scale_y: f32, rotation: f32) -> Result<(), JsValue> {
         with_player!(self, |p| p.set_transform(x, y, scale_x, scale_y, rotation))

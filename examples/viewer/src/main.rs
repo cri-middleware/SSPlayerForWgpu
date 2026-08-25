@@ -537,9 +537,10 @@ impl AppState {
                 }
                 Layout::Stack => {
                     // Enough stagger to tell them apart, little enough that they
-                    // still cover each other.
+                    // still cover each other. `set_transform`'s y runs downward,
+                    // so a later member steps down-right rather than up-right.
                     let step = (width * 0.04).min(48.0);
-                    (offset * step, -offset * step, (width * 0.5 / cw).min(height * 0.8 / ch).clamp(0.05, 1.5))
+                    (offset * step, offset * step, (width * 0.5 / cw).min(height * 0.8 / ch).clamp(0.05, 1.5))
                 }
             };
             member.player.set_transform(x, y, scale, scale, 0.0);

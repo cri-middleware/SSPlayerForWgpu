@@ -685,6 +685,18 @@ bool ss_player_is_playing(ss_player_t *handle);
 bool ss_player_is_paused(ss_player_t *handle);
 
 /*
+ Which way the playhead is actually travelling — not the heading
+ `ss_player_set_playback_direction` configured, which `ss_player_playback_direction`
+ reports. Under ping-pong the return leg runs backward while the configured
+ heading still reads forward. Gate audio on this: SpriteStudio has no reverse
+ audio. True with no animation set up.
+
+ # Safety
+ `handle` must be a live handle or null.
+ */
+bool ss_player_is_playing_forward(ss_player_t *handle);
+
+/*
  Whether every configured loop has played. Sticky until the next play or
  `ss_player_set_animation`, and never true under an infinite loop.
 
@@ -1080,6 +1092,10 @@ const char *ss_player_animation_name(ss_player_t *handle, uint32_t index);
 /*
  Place this player in its scene: translation in pixels from the centre, scale,
  then rotation in radians.
+
+ `y` is measured **downward** from the centre, matching the Y-down space the
+ players and `ss_player_part_transform` live in. Before v7.0.0-beta.2 this
+ axis pointed up.
 
  Without this every player sits at the origin, on top of the others.
 

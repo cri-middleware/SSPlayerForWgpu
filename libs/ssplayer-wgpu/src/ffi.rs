@@ -912,6 +912,19 @@ pub unsafe extern "C" fn ss_player_is_paused(handle: *mut SsPlayer) -> bool {
     unsafe { player(handle) }.map(|p| p.is_paused()).unwrap_or(false)
 }
 
+/// Which way the playhead is actually travelling — not the heading
+/// `ss_player_set_playback_direction` configured, which `ss_player_playback_direction`
+/// reports. Under ping-pong the return leg runs backward while the configured
+/// heading still reads forward. Gate audio on this: SpriteStudio has no reverse
+/// audio. True with no animation set up.
+///
+/// # Safety
+/// `handle` must be a live handle or null.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn ss_player_is_playing_forward(handle: *mut SsPlayer) -> bool {
+    unsafe { player(handle) }.map(|p| p.is_playing_forward()).unwrap_or(true)
+}
+
 /// Whether every configured loop has played. Sticky until the next play or
 /// `ss_player_set_animation`, and never true under an infinite loop.
 ///
@@ -1537,6 +1550,10 @@ pub unsafe extern "C" fn ss_player_animation_name(handle: *mut SsPlayer, index: 
 
 /// Place this player in its scene: translation in pixels from the centre, scale,
 /// then rotation in radians.
+///
+/// `y` is measured **downward** from the centre, matching the Y-down space the
+/// players and `ss_player_part_transform` live in. Before v7.0.0-beta.2 this
+/// axis pointed up.
 ///
 /// Without this every player sits at the origin, on top of the others.
 ///
