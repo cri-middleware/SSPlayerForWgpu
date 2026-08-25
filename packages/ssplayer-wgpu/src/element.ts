@@ -1,7 +1,8 @@
 // A `<ss-player-webgpu>` custom element: renders a SpriteStudio `.ssab` to a
 // WebGPU canvas. Attributes: `src` (.ssab URL, embedded or reference), `pack`
 // (name override; default is the name inside the .ssab), `anim` (animation name,
-// default = first), `pause-when-hidden`
+// default = first), `autoplay` (start playing once loaded; absent = hold the
+// first frame), `pause-when-hidden`
 // (default on — opt out with `pause-when-hidden="false"`).
 //
 // This is the **convenience wrapper**: one element = one canvas = one player,
@@ -206,7 +207,16 @@ export class SsPlayerWebGPUElement extends HTMLElement {
     // the allocating step, `play` is transport. The old single `play(name)` is
     // deliberately not carried over.
     this.player.setAnimation(anim || names[0]!);
-    this.player.play();
+    // `autoplay`, the HTML way: a boolean attribute is absent by default, so this
+    // is opt-in — the same shape `<video autoplay>` has, and the same shape
+    // `<ss-player>` (the WebGL element) already had. Without it the element holds
+    // its first frame, poster-like; `draw` still renders it, since drawing is
+    // independent of the transport.
+    //
+    // Sibling Players whose player is PLACED rather than constructed default the
+    // other way (ForGodot / ForUnity autoplay on), because a scene node has no
+    // code to call `play()` for it. An attribute is that code.
+    if (this.hasAttribute('autoplay')) this.player.play();
     return names;
   }
 

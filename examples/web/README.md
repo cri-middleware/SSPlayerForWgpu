@@ -57,7 +57,7 @@ several times larger, so never quote its size.
   import { defineSsPlayerWebGPUElement } from './ssplayer-wgpu/dist/element.js';
   defineSsPlayerWebGPUElement();   // opt-in: registering is not an import side effect
 </script>
-<ss-player-webgpu src="assets/Basic.ssab" style="width:360px;height:360px"></ss-player-webgpu>
+<ss-player-webgpu src="assets/Basic.ssab" autoplay style="width:360px;height:360px"></ss-player-webgpu>
 ```
 
 The element makes its own canvas, takes a surface from the page's shared context
