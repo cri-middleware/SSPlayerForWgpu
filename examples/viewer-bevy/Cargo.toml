@@ -1,0 +1,45 @@
+[package]
+name = "ssplayer-wgpu-viewer-bevy"
+version = "0.1.0"
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+description = "Bevy host that draws ssplayer-wgpu characters, for developing and verifying the Bevy adapter"
+# The adapter is not published while its API moves; neither is its viewer.
+publish = false
+
+[dependencies]
+ssplayer-wgpu-bevy = { path = "../../libs/ssplayer-wgpu-bevy" }
+# The player crate itself, for `SSPack`: this host parses the `.ssab` catalogue in
+# the main world to enumerate each pack's animation names — the same thing the
+# native viewer does — because the playback tree that could answer lives in the
+# render world, out of reach of the input systems.
+ssplayer-wgpu = { workspace = true }
+# The adapter pulls in Bevy's render, window and asset features; this binary adds
+# what a *host* needs on top: the 2d renderer (to composite a `Sprite` under the
+# characters, showing the two renderers share a target), a UI + text HUD, and
+# audio (to actually play the cues the player only names — `mp3` / `wav` are the
+# decoders the sample sounds use). The full set is spelled out so the crate builds
+# in isolation rather than relying on feature unification with the adapter.
+bevy = { workspace = true, features = [
+    "std",
+    "multi_threaded",
+    "bevy_log",
+    "bevy_asset",
+    "bevy_render",
+    "bevy_core_pipeline",
+    "bevy_window",
+    "bevy_winit",
+    "png",
+    "bevy_sprite",
+    "bevy_sprite_render",
+    "bevy_ui",
+    "bevy_ui_render",
+    "bevy_text",
+    "default_font",
+    "bevy_audio",
+    "mp3",
+    "wav",
+] }

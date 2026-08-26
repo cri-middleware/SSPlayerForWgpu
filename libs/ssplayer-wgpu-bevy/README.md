@@ -83,36 +83,30 @@ finished animation. To restart one from its head, **bump `SsPlayback::restart`**
 (any change of value) — it is a generation counter, so a host re-triggers a
 one-shot by incrementing it, with nothing to clear afterwards.
 
-## Example
+## Examples
 
-`overall` is the interactive tour — the Bevy counterpart of the sibling players'
-`overall` / `webgl-example` demos. It steps one character through the shared
-sample set (the `Ringo` character and the `overall/*` feature packs: Basic, Shape,
-PartsColor, Mesh, BlendMode, Effect, Mask, Instance, TextureChange, Sound,
-UserData, Signal, plus a masked-instance scene), driven entirely through the three
-components above.
+Two runnable hosts live in their own crates under the repository's `examples/`,
+alongside the native and C++ viewers — kept out of this crate so its dependencies
+stay honest about what the adapter itself needs (audio, UI and text are a host's,
+not the adapter's).
 
 ```sh
-# from the repository root, where assets/ is
-cargo run -p ssplayer-wgpu-bevy --example overall
+# from the repository root, where assets/ is (scripts/deploy-examples.sh first)
+cargo run -p ssplayer-wgpu-overall-bevy    # the guided feature tour — read first
+cargo run -p ssplayer-wgpu-viewer-bevy     # the interactive development viewer
 ```
 
-`scripts/deploy-examples.sh` (or `.ps1`) generates `assets/` first.
+- [`examples/overall-bevy`](../../examples/overall-bevy) — the Bevy counterpart of
+  the sibling players' `overall` / `webgl-example` demos: one character stepped
+  through the whole sample set (`[` `]` scene, `Space` play/pause, `Up`/`Down`
+  speed, `R` restart), with a HUD naming each feature. The one to read first.
+- [`examples/viewer-bevy`](../../examples/viewer-bevy) — a free-form viewer of a
+  cast in one pass (pack / animation switching, add / remove characters, layout,
+  draw order, alpha, visibility, drop-to-play), the Bevy sibling of the native
+  `examples/viewer`.
 
-| Key | Does |
-|---|---|
-| `[` / `]` | Previous / next scene |
-| `Space` | Play / pause |
-| `Up` / `Down` | Speed (0.1–3.0) |
-| `R` | Restart from the head |
-
-The on-screen HUD shows the scene, the timeline frame, the speed, and the last
-timeline event; the `Sound` scene plays audio, which this host does — the player
-only names the cue.
-
-There is also `bevy_viewer`, a smaller harness for eyeballing one pack at a time
-(`cargo run ... --example bevy_viewer -- mask | sound | ...`); `overall` is the
-one to read first.
+Both are driven entirely through the three components above; the `Sound` scenes
+play audio, which the host does — the player only names the cue.
 
 ## How it is wired
 
