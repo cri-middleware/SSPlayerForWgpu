@@ -1371,6 +1371,16 @@ impl SsPlayerWeb {
         with_player!(self, |p| p.part_transform(part).map(|m| m.to_vec()).unwrap_or_default())
     }
 
+    /// Whether the part is hidden on the frame currently displayed, or `null`
+    /// when the pack has no such part.
+    ///
+    /// The companion to `partTransform`, which reports where a part *would* be
+    /// whether or not it is drawn — a host following a part needs both.
+    #[wasm_bindgen(js_name = isPartHidden)]
+    pub fn is_part_hidden(&self, part: &str) -> Result<Option<bool>, JsValue> {
+        with_player!(self, |p| p.is_part_hidden(part))
+    }
+
     /// Every part name, in part-index order — what turns the `partIndex` an event
     /// carries back into something a human reads, and what fills a part picker.
     ///
