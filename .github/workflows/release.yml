@@ -80,7 +80,7 @@ jobs:
 
       - name: Install wasm-pack
         if: matrix.artifact == 'web-wasm32'
-        uses: taiki-e/install-action@07b4745e0c39a41822af610387492e3e53aa222b # v2
+        uses: taiki-e/install-action@6cd13508893c0e7eab5f273c2575d3859bd7229a # v2
         with:
           tool: wasm-pack
 
