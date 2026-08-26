@@ -1557,6 +1557,41 @@ impl SSPlayer {
         Some([m[0], m[4], m[1], m[5], m[12], m[13]])
     }
 
+    /// Whether `part` is hidden on the frame that is currently displayed, or
+    /// `None` when the pack has no such part.
+    ///
+    /// The companion to [`SSPlayer::part_transform`], which reports where a part
+    /// *would* be whether or not it is drawn. A host following a part with its
+    /// own scene graph needs both: the pose to place its follower, and this to
+    /// decide whether to show it — the `on_hide` option the sibling Players
+    /// offer on their built-in attachments.
+    ///
+    /// **Takes `&mut self`, unlike the other read-outs.** The hide flag lives in
+    /// the frame's `FrameData`, which the runtime rebuilds into its own buffer on
+    /// demand (`Context::get_frame_data`), where the world matrices this reads
+    /// alongside are already sitting in memory. A caller reading it every frame
+    /// is doing what the renderer does anyway.
+    pub fn is_part_hidden(&mut self, part: &str) -> Option<bool> {
+        self.is_part_hidden_by_index(self.find_part_index(part)?)
+    }
+
+    /// Index form of [`SSPlayer::is_part_hidden`], for a caller that already
+    /// resolved the name.
+    pub fn is_part_hidden_by_index(&mut self, part: u32) -> Option<bool> {
+        // The DISPLAY frame, floored when sub-frame is off -- the same frame the
+        // renderer asks for, so this cannot disagree with what is on screen.
+        let frame_no = if self.sub_frame { self.frame_no() } else { self.frame_no().floor() };
+        let root = self.root.as_mut()?;
+        let bytes = root.context.get_frame_data(frame_no).ok()?;
+        // SAFETY: the buffer is the runtime's own, built by the call above.
+        let frame_data = unsafe { root_as_frame_data_unchecked(bytes) };
+        let parts = frame_data.parts();
+        if part as usize >= parts.len() {
+            return None;
+        }
+        Some(parts.get(part as usize).hide())
+    }
+
     /// Place this player: translation, scale, then rotation in radians, composed
     /// into the root transform of its tree.
     ///

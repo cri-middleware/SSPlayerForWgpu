@@ -197,6 +197,32 @@ fn part_names_are_index_aligned_with_find_part_index() {
 }
 
 #[test]
+fn is_part_hidden_tracks_the_visibility_override() {
+    // No device and no stepping: the hide flag comes out of the FrameData the
+    // runtime builds on demand for the frame the playhead is on, which a
+    // set-up animation already has.
+    let mut player = loaded();
+    let names = player.part_names().expect("a bound pack has parts");
+    let name = names.iter().find(|n| !n.is_empty()).expect("a named part").clone();
+
+    assert_eq!(player.is_part_hidden(&name), Some(false), "nothing hides it yet");
+
+    // The override layer is the one thing that can hide a part on demand, so it
+    // is what pins that this reads the live frame rather than a load-time table.
+    player
+        .set_part_visibility_override(&name, true, false)
+        .expect("the override should apply");
+    assert_eq!(player.is_part_hidden(&name), Some(true));
+
+    player.clear_part_visibility_override(&name).expect("clearing should apply");
+    assert_eq!(player.is_part_hidden(&name), Some(false));
+
+    // Out of range is None rather than a read past the parts vector.
+    assert!(player.is_part_hidden_by_index(u32::MAX).is_none());
+    assert!(player.is_part_hidden("NOT_A_REAL_PART").is_none());
+}
+
+#[test]
 fn part_names_read_the_pack_rather_than_the_matrix_buffer() {
     // The names come from the .ssab parts table, so they are there as soon as a
     // pack is bound. `part_count` is derived from the world-matrix buffer and
