@@ -126,9 +126,7 @@ pub(crate) fn decode_events(ab: &SsAnimeBinary<'_>, anim: &AnimationData<'_>, in
     // The pack's part list is shared across its animations, so one lookup per
     // event resolves the name a host would otherwise carry the pack around for.
     let parts = ab.parts();
-    let part_name = |index: u32| -> String {
-        parts.get(index as usize).name().to_owned()
-    };
+    let part_name = |index: u32| -> String { parts.get(index as usize).name().to_owned() };
     for &index in indices {
         if index < 0 || index as usize >= len {
             continue;
