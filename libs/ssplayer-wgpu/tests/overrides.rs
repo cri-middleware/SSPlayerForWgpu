@@ -168,7 +168,48 @@ fn part_read_outs_are_empty_before_an_animation() {
     let player = SSPlayer::new();
 
     assert_eq!(player.part_count(), 0);
+    assert!(player.part_names().is_none());
     assert!(player.part_transform_by_index(0).is_none());
+}
+
+#[test]
+fn part_names_are_index_aligned_with_find_part_index() {
+    let player = loaded();
+    let names = player.part_names().expect("a bound pack has parts");
+
+    assert!(!names.is_empty(), "Basic.ssab has parts");
+
+    // len() is the part count, which is what makes this a replacement for a
+    // count accessor rather than something sitting next to one.
+    assert_eq!(names.len(), player.part_count());
+
+    for (i, name) in names.iter().enumerate() {
+        // An unnamed part holds its slot rather than shifting the ones after it.
+        if name.is_empty() {
+            continue;
+        }
+        assert_eq!(
+            player.find_part_index(name),
+            Some(i as u32),
+            "names[{i}] = {name:?} must resolve back to {i}"
+        );
+    }
+}
+
+#[test]
+fn part_names_read_the_pack_rather_than_the_matrix_buffer() {
+    // The names come from the .ssab parts table, so they are there as soon as a
+    // pack is bound. `part_count` is derived from the world-matrix buffer and
+    // stays 0 until an animation is set up -- which is exactly why the names
+    // cannot be sourced from it.
+    let mut player = SSPlayer::new();
+    player.load(format!("{}/overall/Basic.ssab", asset_root())).unwrap();
+
+    assert_eq!(player.part_count(), 0, "no animation set up yet");
+    assert!(
+        !player.part_names().expect("the pack is bound").is_empty(),
+        "names are available before the first set_animation"
+    );
 }
 
 /// The unsuffixed form takes a part NAME — the index form is the optimisation,
