@@ -39,6 +39,18 @@ ssplayer-wgpu = { git = "https://github.com/cri-middleware/SSPlayerForWgpu" }
 > 🚧 **Not on crates.io yet.** `cargo publish` refuses a crate whose dependencies have no version
 > requirement, so this waits on the SDK crates being published first — see [ROADMAP](./ROADMAP.md).
 
+Inside a **Bevy** app, depend on the adapter instead — it pulls the player in and adds the three
+components (`SsPlayer` / `SsTransform` / `SsPlayback`) that spawn a character into Bevy's own 2d pass:
+
+```toml
+[dependencies]
+ssplayer-wgpu-bevy = { git = "https://github.com/cri-middleware/SSPlayerForWgpu" }
+```
+
+It tracks one Bevy line at a time — named in [its README](./libs/ssplayer-wgpu-bevy) — because Bevy
+and the player have to resolve to a single `wgpu`. A mismatch is a compile error, not a runtime
+surprise.
+
 ### C and C++
 
 The C face is a cdylib / staticlib plus a generated header. Build it from this repository:
@@ -129,8 +141,9 @@ first — the samples below run on the SDK's own test animations.
 
 ## 🎬 Samples
 
-One host per environment, each self-contained. Every one has a README that doubles as the usage guide
-for that environment: how the window is created, how the device is lent, and how assets get in.
+One host per environment — two for Bevy, where the engine owns the window — each self-contained. Every
+one has a README that doubles as the usage guide for that environment: how the window is created, how
+the device is lent, and how assets get in.
 
 | Sample | Environment | Run it |
 |---|---|---|
@@ -139,6 +152,8 @@ for that environment: how the window is created, how the device is lent, and how
 | [`examples/viewer-metal-cpp`](./examples/viewer-metal-cpp) | C++ on Metal, macOS | `cmake -B build && cmake --build build && ./build/ssviewer-metal` |
 | [`examples/viewer-dx12-cpp`](./examples/viewer-dx12-cpp) | C++ on DX12, Windows | `cmake -B build; cmake --build build --config Release; .\build\Release\ssviewer-dx12.exe` |
 | [`examples/viewer-vulkan-cpp`](./examples/viewer-vulkan-cpp) | C++ on Vulkan, Linux — X11 and Wayland in one binary | `cmake -B build && cmake --build build && ./build/ssviewer-vulkan` |
+| [`examples/viewer-bevy`](./examples/viewer-bevy) | Bevy — the adapter's development viewer, a live cast | `cargo run -p ssplayer-wgpu-viewer-bevy` |
+| [`examples/overall-bevy`](./examples/overall-bevy) | Bevy — the scripted feature tour | `cargo run -p ssplayer-wgpu-overall-bevy` |
 
 They play generated animation data, so run this once first:
 
@@ -189,8 +204,8 @@ flowchart TD
 
     subgraph lib ["libs/"]
         crate["ssplayer-wgpu<br/>SSRenderer / SSScene / SSPlayer"]
-        bevy["ssplayer-wgpu-bevy<br/>(planned)"]
-        crate -.-> bevy
+        bevy["ssplayer-wgpu-bevy<br/>SsPlayer / SsTransform / SsPlayback"]
+        crate --> bevy
     end
 
     subgraph npm ["packages/"]
@@ -203,6 +218,7 @@ flowchart TD
         metal["viewer-metal-cpp<br/>C++, Metal"]
         dx12["viewer-dx12-cpp<br/>C++, DX12"]
         vulkan["viewer-vulkan-cpp<br/>C++, Vulkan"]
+        bevyhosts["viewer-bevy / overall-bevy<br/>Bevy"]
     end
 
     crate -->|rs| viewer
@@ -211,11 +227,13 @@ flowchart TD
     crate -->|ffi: cbindgen| metal
     crate -->|ffi: cbindgen| dx12
     crate -->|ffi: cbindgen| vulkan
+    bevy -->|rs| bevyhosts
 ```
 
 | Path | What |
 |---|---|
 | [`libs/ssplayer-wgpu/`](./libs/ssplayer-wgpu) | crate `ssplayer-wgpu` — the player. `rlib` + `cdylib` + `staticlib`, with the `web` and `ffi` faces behind features |
+| [`libs/ssplayer-wgpu-bevy/`](./libs/ssplayer-wgpu-bevy) | crate `ssplayer-wgpu-bevy` — the Bevy adapter. Its own crate, so the player never depends on an engine; see its README for the Bevy line it tracks |
 | [`packages/ssplayer-wgpu/`](./packages/ssplayer-wgpu) | npm package `@spritestudio/ssplayer-wgpu` — the wasm plus the TypeScript layer over it (`.` and `./element`). Published from where it sits; `wasm/` and `dist/` are gitignored build outputs |
 | [`examples/`](./examples) | one host per environment; see [Samples](#-samples) |
 | `scripts/build.sh` / `.ps1` | builds the library for one platform, collecting it into `bin/` |
@@ -223,7 +241,8 @@ flowchart TD
 | `bin/` | collected library artifacts. Gitignored |
 | `SpriteStudio-SDK/` | the SDK, as a git submodule — `ssruntime` and `ssab` are path dependencies into it |
 
-The two crates are versioned independently: the library and the development viewer are different
+The crates are versioned independently, because they track different things: the player tracks the
+SDK, the Bevy adapter tracks Bevy's release line, and the viewers are development hosts rather than
 products.
 
 ## 🤝 Contributing
