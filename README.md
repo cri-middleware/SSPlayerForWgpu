@@ -118,6 +118,15 @@ The full API — the three scopes, loading, transport, per-part overrides, event
 is in the [crate README](./libs/ssplayer-wgpu). The C and JavaScript faces are the same shape under
 different names, and each sample below documents its own.
 
+### Where that `.ssab` comes from
+
+Animations are authored in SpriteStudio 7 and converted ahead of time — this player converts nothing at
+runtime and bundles no converter. Use the desktop
+[SSConverterGUI](https://github.com/cri-middleware/SSConverterGUI), or the SDK's `ssconverter-cli`;
+[Converting with a standalone tool](https://cri-middleware.github.io/SpriteStudio-Docs/overview/convert-with-a-standalone-tool/)
+covers picking one and putting it in a build pipeline. Nothing of your own is needed to try the player
+first — the samples below run on the SDK's own test animations.
+
 ## 🎬 Samples
 
 One host per environment, each self-contained. Every one has a README that doubles as the usage guide
