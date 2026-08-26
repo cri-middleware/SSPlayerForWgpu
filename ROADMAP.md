@@ -88,9 +88,11 @@ respect are in [`AGENTS.md`](./AGENTS.md) under *Hard constraints*.
       Xwayland means an X11 window never reaches the `SS_WINDOW_WAYLAND` arm, so
       closing this needs one run per path on a Linux desktop. Until then the Xlib
       and Wayland arms of `surface_target` stay unverified.
-- [ ] **Bevy adapter** (`libs/ssplayer-wgpu-bevy`). Unblocked by the `set_texture`
-      borrow channel. A separate crate, so the core never depends on Bevy and the
-      adapter can follow its own wgpu major.
+- [x] Bevy — `libs/ssplayer-wgpu-bevy`, with `examples/viewer-bevy` and
+      `examples/overall-bevy` as its hosts. A separate crate, so the core never
+      depends on Bevy and the adapter can follow its own wgpu major; it tracks one
+      Bevy line at a time, because Bevy and the player must resolve to a single
+      `wgpu`.
 
 ## Resource management
 
