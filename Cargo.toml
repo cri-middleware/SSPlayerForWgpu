@@ -5,6 +5,8 @@ members = [
     "libs/ssplayer-wgpu-ffi",
     "libs/ssplayer-wgpu-bevy",
     "examples/viewer",
+    "examples/viewer-bevy",
+    "examples/overall-bevy",
 ]
 # The SDK submodule is a workspace of its own. Without this, cargo claims every
 # package under this directory and tries to resolve the SDK crates' inherited

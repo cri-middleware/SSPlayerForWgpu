@@ -10,7 +10,7 @@
 //! Run from the repository root, which is where `assets/` is:
 //!
 //! ```text
-//! cargo run -p ssplayer-wgpu-bevy --example overall
+//! cargo run -p ssplayer-wgpu-overall-bevy
 //! ```
 //!
 //! `scripts/deploy-examples.sh` (or `.ps1`) generates `assets/` first.
@@ -30,7 +30,7 @@ use ssplayer_wgpu_bevy::{SsEvent, SsEventMessage, SsFinished, SsLooped, SsPlayba
 
 /// The repo's `assets/`, absolute so the example is launchable from anywhere and
 /// so Bevy's asset root (for the audio files) points at the same tree the player
-/// loads packs from. See the colour note in `bevy_viewer.rs`.
+/// loads packs from. See the colour note in the adapter crate's README.
 const ASSET_ROOT: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/../../assets");
 
 /// The tour: `(label, pack, animation)`. The animation names are what the packs

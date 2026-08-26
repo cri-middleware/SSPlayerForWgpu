@@ -32,16 +32,17 @@ bevy = { workspace = true, features = [
     "png",
 ] }
 
-# The example composites a Bevy sprite under the characters to show the two
-# renderers sharing a target, and that needs Bevy's 2d renderer — which is
+# The render test composites a Bevy sprite under the characters to check the two
+# renderers share a target, and that needs Bevy's 2d renderer — which is
 # `bevy_sprite_render`, a separate feature from `bevy_sprite` (that one is the
 # component API alone, and a `Sprite` spawned without the renderer silently
 # draws nothing). Kept out of the library's own features so the dependency stays
-# honest about what the adapter itself needs.
+# honest about what the adapter itself needs. The runnable examples live in their
+# own crates (`examples/overall-bevy`, `examples/viewer-bevy`) and carry the
+# heavier host features — audio, UI, text — that only a host, not this crate, needs.
 [dev-dependencies]
-# `bevy_sprite*` for the composited sprite; `bevy_audio` + the `mp3`/`wav`
-# decoders so the example can actually play the sounds the player only cues.
-bevy = { workspace = true, features = ["bevy_sprite", "bevy_sprite_render", "bevy_audio", "mp3", "wav", "bevy_ui", "bevy_ui_render", "bevy_text", "default_font"] }
+# `bevy_sprite*` for the composited sprite in `tests/bevy_render.rs`.
+bevy = { workspace = true, features = ["bevy_sprite", "bevy_sprite_render"] }
 ssplayer-wgpu = { workspace = true }
 wgpu = { workspace = true }
 pollster = "1.0.1"

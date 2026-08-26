@@ -4691,6 +4691,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "ssplayer-wgpu-overall-bevy"
+version = "0.1.0"
+dependencies = [
+ "bevy",
+ "ssplayer-wgpu-bevy",
+]
+
+[[package]]
 name = "ssplayer-wgpu-viewer"
 version = "0.1.0"
 dependencies = [
@@ -4700,6 +4708,15 @@ dependencies = [
  "ssruntime",
  "wgpu",
  "winit",
+]
+
+[[package]]
+name = "ssplayer-wgpu-viewer-bevy"
+version = "0.1.0"
+dependencies = [
+ "bevy",
+ "ssplayer-wgpu",
+ "ssplayer-wgpu-bevy",
 ]
 
 [[package]]

@@ -1,0 +1,39 @@
+[package]
+name = "ssplayer-wgpu-overall-bevy"
+version = "0.1.0"
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+description = "Bevy counterpart of the sibling players' overall/webgl-example demo — a guided tour of the sample set"
+# The adapter is not published while its API moves; neither are its examples.
+publish = false
+
+[dependencies]
+ssplayer-wgpu-bevy = { path = "../../libs/ssplayer-wgpu-bevy" }
+# The adapter pulls in Bevy's render, window and asset features; this demo adds
+# what a *host* needs on top: the 2d renderer (for the backdrop `Sprite`), a UI +
+# text HUD (to narrate the tour), and audio (to play the cues the player only
+# names — `mp3` / `wav` are the decoders the sample sounds use). Spelled out in
+# full so the crate builds in isolation.
+bevy = { workspace = true, features = [
+    "std",
+    "multi_threaded",
+    "bevy_log",
+    "bevy_asset",
+    "bevy_render",
+    "bevy_core_pipeline",
+    "bevy_window",
+    "bevy_winit",
+    "png",
+    "bevy_sprite",
+    "bevy_sprite_render",
+    "bevy_ui",
+    "bevy_ui_render",
+    "bevy_text",
+    "default_font",
+    "bevy_audio",
+    "mp3",
+    "wav",
+] }
