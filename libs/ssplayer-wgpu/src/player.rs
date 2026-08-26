@@ -1653,6 +1653,27 @@ impl SSPlayer {
         Some(anim_resource.get_animation_names())
     }
 
+    /// Every part name in the main pack, in part-index order.
+    ///
+    /// `None` until a pack is bound. This is what turns the `part_index` an
+    /// [`SsEvent`](crate::SsEvent) carries back into something a human reads, and
+    /// what fills a part picker; `len()` is the part count.
+    ///
+    /// Reads the `.ssab` parts table, which is static for the resource, rather
+    /// than [`SSPlayer::part_count`] — that one is derived from the world-matrix
+    /// buffer and is zero until an animation has been set up and stepped.
+    ///
+    /// A part authored without a name holds its slot as an empty string, so the
+    /// vector stays index-aligned with `part_index`.
+    pub fn part_names(&self) -> Option<Vec<String>> {
+        let pack = self.packs.get(self.main_pack.as_ref()?)?;
+        let bytes = pack.resource().data();
+        // SAFETY: the pack verified the buffer when it adopted it.
+        let ab = unsafe { root_as_ss_anime_binary_unchecked(bytes.as_slice()) };
+        let parts = ab.parts();
+        Some((0..parts.len()).map(|i| parts.get(i).name().to_string()).collect())
+    }
+
     /// Every cellmap name in the main pack, without the `.ssce` extension — the
     /// namespace [`SSPlayer::set_part_cell_override`] takes.
     ///

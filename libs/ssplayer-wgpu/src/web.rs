@@ -1371,6 +1371,17 @@ impl SsPlayerWeb {
         with_player!(self, |p| p.part_transform(part).map(|m| m.to_vec()).unwrap_or_default())
     }
 
+    /// Every part name, in part-index order — what turns the `partIndex` an event
+    /// carries back into something a human reads, and what fills a part picker.
+    ///
+    /// An unnamed part holds its slot as an empty string, so the array stays
+    /// index-aligned. `length` is the part count, and unlike `partCount` it is
+    /// there as soon as a pack is bound rather than after the first update.
+    #[wasm_bindgen(js_name = partNames)]
+    pub fn part_names(&self) -> Result<Vec<String>, JsValue> {
+        with_player!(self, |p| p.part_names().unwrap_or_default())
+    }
+
     /// Every cellmap name in the pack, without the `.ssce` extension — the
     /// namespace `setPartCellOverride` takes.
     #[wasm_bindgen(js_name = cellmapNames)]
