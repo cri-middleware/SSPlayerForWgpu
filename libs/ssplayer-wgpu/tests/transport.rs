@@ -259,11 +259,7 @@ fn is_playing_forward_tracks_the_leg_not_the_configured_direction() {
         }
     }
     assert!(turned, "ping-pong must eventually turn around");
-    assert_eq!(
-        player.playback_direction(),
-        PlaybackDirection::Forward,
-        "the configured heading is untouched by the turn — that is the whole point"
-    );
+    assert_eq!(player.playback_direction(), PlaybackDirection::Forward, "the configured heading is untouched by the turn — that is the whole point");
 }
 
 /// The four transport verbs, as the SDK's Player Porting Guide specifies them.
