@@ -1,0 +1,82 @@
+# Japanese site. Built with `zensical build -f mkdocs.ja.yml --strict`, and always *after*
+# the English build: `site_dir` is nested inside it, and a build wipes its own output
+# directory. scripts/build-docs.sh owns that order.
+#
+# Everything not listed here comes from mkdocs.base.yml. Before adding anything, read the
+# note there about sequences: `nav` and `extra.social` are defined in this file and in
+# mkdocs.yml, and must never also appear in the base.
+INHERIT: ./mkdocs.base.yml
+
+docs_dir: docs/ja
+site_dir: site/ja
+# Must carry the `ja/` suffix: this is what `page.canonical_url` and therefore the `og:url`
+# tag are built from. Inheriting the English `site_url` would advertise every Japanese page
+# under its English address.
+site_url: "https://cri-middleware.github.io/SSPlayerForWgpu/ja/"
+# Feeds <meta name="description"> and the Open Graph tags on every ja page. Without it they
+# would inherit the English `site_description`.
+site_description: "OPTPiX SpriteStudio 7 のアニメーションを wgpu で再生する -- Rust / Bevy / C・C++ / WebGPU から"
+
+theme:
+  # Drives the UI string translations, the `html lang` attribute, and -- because the search
+  # engine segments CJK text per locale -- Japanese word splitting in the search index.
+  language: ja
+
+extra:
+  # This locale builds into site/ja, so the root of the whole multi-locale site is one level
+  # up. The language selector prepends this to its target; see
+  # overrides/partials/alternate.html.
+  site_root_prefix: "../"
+  # Footer icon labels (title / aria-label). Mirrors `extra.social` in mkdocs.yml.
+  social:
+    - icon: material/motion-play
+      link: https://cri-middleware.github.io/SpriteStudio-Docs/
+      name: SpriteStudio Docs
+    - icon: fontawesome/brands/github
+      link: https://github.com/cri-middleware/SSPlayerForWgpu
+      name: GitHub の SSPlayerForWgpu
+    - icon: material/web
+      link: https://www.webtech.co.jp/spritestudio/
+      name: OPTPiX SpriteStudio
+    - icon: fontawesome/brands/x-twitter
+      link: https://x.com/spritestudio
+      name: X の SpriteStudio
+
+# The Japanese counterpart of the `nav` in mkdocs.yml -- same paths, translated labels.
+# The reasoning behind the section order is written out there; it applies unchanged here.
+nav:
+  - 🏠 ホーム: index.md
+  - 🚀 はじめる:
+      - Rust: start/rust.md
+      - Bevy: start/bevy.md
+      - C / C++: start/cpp.md
+      - Web（WebGPU）: start/web.md
+      - アセットの準備: start/assets.md
+  - 🎬 ガイド:
+      - スコープと名前の対応: guide/concepts.md
+      - 再生と再生制御: guide/playback.md
+      - ロードとアセット: guide/loading.md
+      - イベントとユーザーデータ: guide/events.md
+      - パーツオーバーライド: guide/part-overrides.md
+      - モーションブレンディング: guide/motion-blending.md
+      - マスク: guide/masks.md
+      - デバイスロスト: guide/device-loss.md
+      - パフォーマンス: guide/performance.md
+  - 📖 API リファレンス:
+      - Rust: reference/rust.md
+      - C: reference/c.md
+      - JavaScript: reference/js.md
+      - Web Component: reference/web-component.md
+      - Bevy: reference/bevy.md
+  - 🔩 wgpu ホスト:
+      - 借用モデル: wgpu/borrow-model.md
+      - エンジンへの組み込み: wgpu/engines.md
+  - ⚠️ 制限事項と適用範囲: limitations.md
+  - 🔄 マイグレーション:
+      - SS6Player for CPP から: migration/from-ss6-cpp.md
+  - 🛠️ 開発者向け: contributing/index.md
+  - ⚖️ ライセンス: license.md
+  # The English config explains these two. The paths carry an extra `../` because
+  # this locale builds into site/ja, while both grafts sit at the site root.
+  - ▶️ ライブデモ: ../demo/index.html
+  - 📦 Rust API（rustdoc）: ../api/ssplayer_wgpu/index.html

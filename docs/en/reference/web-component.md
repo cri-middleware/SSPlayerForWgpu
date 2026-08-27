@@ -1,0 +1,141 @@
+# `<ss-player-webgpu>`
+
+The custom element is the **convenience wrapper**: one element = one canvas = one character, which
+is the shortest path for a single-character use — an ad creative, a mascot in the corner of a page,
+a character in a CMS template.
+
+It is not a second implementation. Underneath, the element takes a surface from the page's shared
+context and adds one player to it, so **ten of these on a page still cost one `GPUDevice`, one set
+of pipelines and one atlas upload**.
+
+## Registering it
+
+```js
+import { defineSsPlayerWebGPUElement } from '@spritestudio/ssplayer-wgpu/element';
+
+defineSsPlayerWebGPUElement();                    // <ss-player-webgpu>
+defineSsPlayerWebGPUElement('my-ss-player');      // ... or under a name of your own
+```
+
+Registration is **opt-in, not a side effect of the import**, so a bundle that only wants the
+[JavaScript API](./js.md) never carries the element. The call is idempotent, and the `tag` argument
+exists for a page that already has another SpriteStudio player registered under the default name.
+
+```html
+<ss-player-webgpu src="/assets/Basic.ssab" autoplay style="width:360px;height:360px"></ss-player-webgpu>
+```
+
+## Attributes
+
+| Attribute | Meaning |
+|---|---|
+| `src` | URL of the `.ssab` — reference or embedded export, either works |
+| `pack` | Pack-name override. Defaults to the name inside the `.ssab` |
+| `anim` | Animation to play. Defaults to the first one the pack declares |
+| `autoplay` | Start playing once loaded. A **boolean attribute**, so absent means no |
+| `pause-when-hidden` | Stop the rAF loop while off-screen or backgrounded. **On by default** — opt out with `pause-when-hidden="false"` |
+
+!!! warning "Attributes are read when the element connects, not watched afterwards"
+    There is no `attributeChangedCallback`: setting `element.setAttribute('src', …)` on a live
+    element does **nothing**. To switch packs at runtime, call `loadSrc()`.
+
+### `autoplay` is opt-in, like `<video>`
+
+Without it the element **loads and holds its first frame**, poster-like — drawing is independent of
+the transport, so the character is on screen, not moving. That is the HTML convention (`<video
+autoplay>`), and it matches `<ss-player>`, the WebGL player's element.
+
+It is worth knowing that the *placed* players in the family (Godot, Unity) default the other way: a
+scene node has no code to call `play()` for it, and an attribute **is** that code.
+
+## Properties and methods
+
+The element does not hide the API — it exposes what it built, so anything on the
+[JavaScript API](./js.md) is reachable:
+
+| | |
+|---|---|
+| `element.player` | the `SsPlayerWeb` — part overrides, events, transport, everything |
+| `element.surface` | the `SsSurfaceWeb` for this canvas — `stats()`, `resize()` |
+| `element.ctx` | the page's shared `SsContextWeb` |
+| `element.canvas` | the `<canvas>` the element created |
+
+```js
+const el = document.querySelector('ss-player-webgpu');
+await el.loadSrc('/assets/Other.ssab');       // resolves to the animation names
+el.player.setSpeedScale(0.5);
+el.player.setPartVisibilityOverride('hat', true, false);
+for (const e of el.player.events()) { /* ... */ }
+```
+
+### `loadSrc(src, pack?, anim?)`
+
+Fetches and plays a `.ssab`, and is how you switch packs at runtime. It resolves to the array of
+animation names, so a UI can offer them.
+
+It selects the animation (`anim`, or the first) and then honours `autoplay` exactly as the initial
+load did — so an element without `autoplay` holds the new pack's first frame too.
+
+Passing `pack` makes the element fetch the bytes itself and register them under that name, because
+`load` deliberately takes no name override.
+
+## Layout and resolution
+
+* A custom element is `display: inline` unless the page says otherwise, and an inline box ignores
+  `width` / `height`. The element therefore **sets `display: block` only if the page left it
+  `inline`** — an author who chose `inline-block`, a flex item, or `none` keeps that choice.
+* The canvas fills the element (`100%` × `100%`).
+* The backing store is **CSS size × `devicePixelRatio`**, so output is crisp on a HiDPI screen.
+* Both are computed **when the element connects**, and the element does not observe later size
+  changes. For a panel that resizes, either re-create the element or drive
+  [`SsSurfaceWeb.resize()`](./js.md) yourself through `element.surface`.
+* Give the element a size. With none, it falls back to 360 × 360.
+
+## Pausing when nobody is looking
+
+`pause-when-hidden` is on by default and gates the animation frame loop on **two** signals: an
+`IntersectionObserver` on the canvas, and the document's `visibilitychange`. It exists for battery
+on mobile, and for the viewability rule ad creatives are measured against.
+
+Two details worth knowing:
+
+* **Until the first observer callback the element assumes it is hidden**, so an element that starts
+  off-screen never paints an initial frame it would immediately throw away.
+* Where the APIs are missing — or with the gating turned off — the loop simply always runs, rather
+  than never starting.
+
+The frame delta is clamped to 50 ms, and the clock is reset after a pause, so returning to a
+backgrounded tab does not advance the animation by the whole idle gap.
+
+## Device loss, handled for you
+
+The element checks for a lost device every frame and calls `restoreSharedDevice` itself. Since the
+device belongs to the *page*, **the first element to notice recovers for every element on it**, and
+playback resumes on the frame it was interrupted on. See [Device loss](../guide/device-loss.md).
+
+## Errors
+
+Anything thrown during startup, loading or a frame is caught: the element logs to the console under
+`[ss-player-webgpu]` and replaces its own content with a plain error box. The message is written as
+text, never as markup — it can carry a URL or a pack name that came off an attribute, and an error
+path is a poor place to start parsing HTML.
+
+The most common cause is a browser without WebGPU. If you want a designed fallback rather than the
+default box, use [`sharedContext()`](./js.md) directly and `catch`.
+
+## Lifecycle
+
+Removing the element from the DOM destroys its player and its surface — **not** the page's context,
+which the other elements share. That teardown is why the element cannot just drop its references: a
+surface holds a swapchain, and one per element that ever existed would leak.
+
+## When to use the API instead
+
+Reach for [`SsContextWeb`](./js.md) directly when you want:
+
+* **several characters in one canvas** — the element is deliberately one-to-one;
+* your own frame loop, or the animation driven by something other than `requestAnimationFrame`;
+* control over when the device is created, or a designed fallback where WebGPU is missing;
+* a canvas you already own and manage.
+
+Everything the element does is written on top of that API, and the two mix freely on one page.

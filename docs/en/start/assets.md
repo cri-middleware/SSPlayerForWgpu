@@ -1,0 +1,74 @@
+# Preparing assets
+
+Every face plays the same file: a **`.ssab`**, converted ahead of time from the `.sspj` project your
+artist works in. **This player converts nothing at runtime and bundles no converter.**
+
+Nothing of your own is needed to try it first — every sample in the repository runs on the SDK's own
+test animations, produced by one command:
+
+```bash
+./scripts/deploy-examples.sh    # builds ssconverter-cli from the SDK, converts into assets/
+```
+
+## Converting your own
+
+| Tool | Use it for |
+|---|---|
+| [SSConverterGUI](https://github.com/cri-middleware/SSConverterGUI) | a desktop drag-and-drop conversion, no toolchain |
+| `ssconverter-cli` (in the SDK) | a build pipeline, CI, a watch loop |
+
+The portal covers picking one and putting it in a pipeline:
+[Converting Assets](https://cri-middleware.github.io/SpriteStudio-Docs/overview/conversion/) and
+[Standalone conversion tools](https://cri-middleware.github.io/SpriteStudio-Docs/overview/convert-with-a-standalone-tool/).
+That material is the SDK's and is not repeated here.
+
+## The two export modes
+
+A `.ssab` names its atlases one of two ways, and **both work through the same one-call load** on
+every face — you do not choose differently in code.
+
+| Mode | On disk | Good for |
+|---|---|---|
+| **Reference** | `Character.ssab` plus its `.png` / `.webp` siblings | shared atlases, a CDN, hot-swapping art without reconverting |
+| **Embedded** | one `Character.ssab`, atlas bytes inside it | a single file to ship, no second fetch, no missing-texture class of bug |
+
+Under reference mode the image paths are written **relative to the `.ssab`'s own directory** — so
+keep the exported files together, and the loader finds them.
+
+!!! note "Embedded costs nothing extra in the browser"
+    The web face carries no image decoder on purpose: the browser already ships one, so embedded
+    atlases go out as encoded bytes and come back through `createImageBitmap`. On native, the
+    `embedded` feature (on by default) carries the decoder.
+
+## Where the files have to be
+
+| Face | `load` takes | Resolved against |
+|---|---|---|
+| Rust | a filesystem path | the process's working directory; everything the pack names, against the `.ssab`'s own directory |
+| Bevy | a filesystem path in `SsPlayer::src` | the same. It reads the filesystem directly rather than going through `AssetServer` |
+| C / C++ | a filesystem path | the same |
+| Web | a URL | the page, then the `.ssab`'s own URL directory |
+
+An engine or a packed build where `File::open` cannot reach the bytes — a Godot `.pck`, an APK, an
+asset server — plugs in its own loader instead. See [Loading and assets](../guide/loading.md).
+
+## What one `load` brings in
+
+Not just the pack. A single call resolves, transitively:
+
+* the pack itself;
+* its atlases from **both** texture tables — the cell maps, *and* the texture files named by parts
+  the artist gave a TextureChange (`TCHG`). Missing the second table is a bug that fails quietly:
+  the part draws as a white silhouette with no error;
+* the sibling `.ssab` files its **instance parts** play from — a character that plays another
+  character's animation inside itself.
+
+So a pack that looks like one file is often three or four, and shipping only the one you named is
+the most common cause of a character that loads but renders wrong. Anything that did not arrive is
+listed by `missing_assets()` / `ss_player_missing_*` / `missingAssets()` — check it once in
+development.
+
+## Next
+
+* [Loading and assets](../guide/loading.md) — the loader seam, supplying textures yourself, and
+  what a missing asset means

@@ -1,0 +1,122 @@
+# Settings shared by every locale. `mkdocs.yml` (English) and `mkdocs.ja.yml` both start
+# with `INHERIT: ./mkdocs.base.yml` and add only what differs between them.
+#
+# This file is never built directly -- it has no `docs_dir` and no `nav`. It is named
+# `mkdocs.base.yml` rather than `mkdocs.yml` precisely so that a bare `zensical build`
+# picks up the English locale config instead of this one.
+#
+# IMPORTANT -- the rule that shapes this split: **every YAML sequence must be defined in
+# exactly one of the three files.** Zensical's `INHERIT` *concatenates* sequences from
+# parent and child, where MkDocs replaces them. Put `nav` here as well as in a locale file
+# and the Japanese site renders the English navigation followed by the Japanese one; do the
+# same with `extra.social` and the footer grows six icons. Mappings deep-merge in both
+# tools, so scalars like `theme.language` are safe to override.
+#
+# Hence: sequences that are genuinely shared (`theme.palette`, `theme.features`, `plugins`,
+# `markdown_extensions`, `extra.alternate`) live here and *only* here, while the ones that
+# differ per locale (`nav`, `extra.social`) live in the locale files and *only* there.
+
+site_name: SSPlayer for wgpu
+site_author: "CRI Middleware Co., Ltd."
+repo_name: "cri-middleware/SSPlayerForWgpu"
+repo_url: "https://github.com/cri-middleware/SSPlayerForWgpu"
+copyright: "Copyright &copy; CRI Middleware Co., Ltd."
+
+# Nothing builds the docs on a pull request, so a plain `zensical build` must fail on a
+# broken link too - not just the `--strict` invocation people remember to type.
+strict: true
+
+theme:
+  name: material
+  # overrides/main.html appends the Open Graph / Twitter Card metadata the theme does not
+  # emit on its own and repairs the page title; overrides/partials/alternate.html keeps the
+  # language selector on the page the reader is on. Both are shared with the portal and the
+  # sibling players - fix a bug in one and carry it across.
+  custom_dir: overrides
+  favicon: assets/favicon.svg
+  icon:
+    logo: material/motion-play
+  palette:
+    - media: "(prefers-color-scheme: light)"
+      scheme: default
+      primary: blue grey
+      accent: indigo
+      toggle:
+        icon: material/brightness-7
+        name: Switch to dark mode
+    - media: "(prefers-color-scheme: dark)"
+      scheme: slate
+      primary: blue grey
+      accent: indigo
+      toggle:
+        icon: material/brightness-4
+        name: Switch to light mode
+  features:
+    - navigation.tabs
+    - navigation.sections
+    - navigation.expand
+    - navigation.top
+    - navigation.tracking
+    - navigation.footer
+    - toc.follow
+    - search.suggest
+    - search.highlight
+    - content.code.copy
+    # The load-bearing one for this site. Every reader arrives writing exactly one of
+    # Rust / C / JavaScript, and the Guide pages carry all three side by side in tabs;
+    # `content.tabs.link` makes picking a language once stick for the whole site, so
+    # nobody re-picks their own language on every page.
+    - content.tabs.link
+
+plugins:
+  - search
+
+markdown_extensions:
+  - toc:
+      slugify: !!python/object/apply:pymdownx.slugs.slugify
+        kwds:
+          case: lower
+  - admonition
+  # Required by the "grid cards" on index.md - the `markdown` attr on the wrapping <div>
+  # and the `{ .card }`-style attributes both need these two.
+  - attr_list
+  - md_in_html
+  - pymdownx.emoji:
+      emoji_index: !!python/name:material.extensions.emoji.twemoji
+      emoji_generator: !!python/name:material.extensions.emoji.to_svg
+  - pymdownx.details
+  - pymdownx.superfences:
+      custom_fences:
+        - name: mermaid
+          class: mermaid
+          format: !!python/name:pymdownx.superfences.fence_code_format
+  # The per-face code tabs. `alternate_style` is what `content.tabs.link` above links on,
+  # and the slugify keeps the anchors stable so a deep link into a tab survives a rebuild.
+  - pymdownx.tabbed:
+      alternate_style: true
+      slugify: !!python/object/apply:pymdownx.slugs.slugify
+        kwds:
+          case: lower
+  - pymdownx.highlight:
+      anchor_linenums: true
+      line_spans: __span
+      pygments_lang_class: true
+  - pymdownx.inlinehilite
+  - pymdownx.snippets:
+      base_path:
+        - .
+      check_paths: true
+
+extra:
+  # The header language selector. `link` is each locale's subpath under the site root, NOT
+  # a full URL -- overrides/partials/alternate.html rebuilds the href from it plus the
+  # current page, so switching language keeps the reader on the same page instead of
+  # dropping them on the other locale's home page. `extra.site_root_prefix` in each locale
+  # config is the other half of that calculation.
+  alternate:
+    - name: English
+      link: ""
+      lang: en
+    - name: 日本語
+      link: ja/
+      lang: ja

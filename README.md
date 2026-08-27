@@ -14,8 +14,13 @@ of its own.
 
 ## 📚 Documentation
 
-- [**Japanese documentation (日本語ドキュメント)**](./docs/ja/index.md)
-- [**Migrating from SS6Player for CPP**](./docs/ja/migration_from_cpp.md)
+- [**Documentation site**](https://cri-middleware.github.io/SSPlayerForWgpu/) — start here: one path per
+  host (Rust / Bevy / C・C++ / WebGPU), a shared guide, the API reference for every face, and the
+  live WebGPU demo. 🚧 Live once this repository's Pages workflow is published; until then build it
+  locally with `./scripts/build-pages.sh serve=yes`, or read [`docs/en/`](./docs/en/index.md)
+- [**日本語ドキュメント**](https://cri-middleware.github.io/SSPlayerForWgpu/ja/) — the same site
+  ([`docs/ja/`](./docs/ja/index.md) in the repository)
+- [**Migrating from SS6Player for CPP**](./docs/en/migration/from-ss6-cpp.md)
 - [**ROADMAP**](./ROADMAP.md) — what is implemented, what is planned, and what was deliberately declined
 - [**SpriteStudio Docs (portal)**](https://cri-middleware.github.io/SpriteStudio-Docs/) — the SDK and every
   official player in one place (live with the first release)

@@ -1,0 +1,86 @@
+# Rust API リファレンス
+
+生成されたリファレンスはこのドキュメントと一緒に公開されています：
+
+<a href="../../api/ssplayer_wgpu/index.html" target="_blank" rel="noreferrer">**📦 `ssplayer_wgpu` の rustdoc**</a>
+&nbsp;·&nbsp;
+<a href="../../api/ssplayer_wgpu_bevy/index.html" target="_blank" rel="noreferrer">**`ssplayer_wgpu_bevy` の rustdoc**</a>
+
+手元では `cargo doc --no-deps --all-features -p ssplayer-wgpu --open` で同じものが見られます。
+
+このページはその見取り図です。何がどこにあり、どの feature で有効になるか。
+
+## 公開されているもの
+
+```rust
+pub use events::{AudioEvent, SignalEvent, SignalParam, SignalValue, SsEvent, UserDataEvent};
+pub use frame::FrameView;
+pub use mask::{GeomKind, MaskOp, MaskWriter, MaskWriters, PartMaskFlags, StencilTest, plan_writers};
+pub use metrics::SceneStats;
+pub use pack::{EmbeddedImage, EmbeddedTexture, SSPack, TextureRef};
+pub use player::{AssetLoader, BlendOp, MissingAsset, MissingKind, OverridePriority,
+                 PlaybackDirection, PlaybackStyle, SSPlayer};
+pub use renderer::{AlphaMode, Retention, SSRenderer};
+pub use scene::{BatchInfo, FrameChunk, IDENTITY_TRANSFORM, MaskBackend, NodeSlot, SSScene, SceneConfig};
+pub use ssruntime::TrackBlend;
+```
+
+ほとんどのアプリが触るのはこのうち 6 つです：`SSRenderer` / `SSScene` / `SceneConfig` / `SSPlayer` /
+`MaskBackend` / `SsEvent`。
+
+## 3 つの型
+
+| 型 | スコープ | 主な呼び出し |
+|---|---|---|
+| `SSRenderer` | デバイス | `new`, `set_texture`, `upload_texture`, `texture_size`, `restore_device` |
+| `SSScene` | 描画ターゲット | `new`, `set_viewport`, `update`, `encode_mask_coverage`, `draw`, `stats`, `restore_device` |
+| `SSPlayer` | キャラクター | `load`, `set_animation`, 再生制御, オーバーライド, `events`, `set_transform`, `restore_textures` |
+
+`SSPlayer` は設計上 **wgpu の型のフィールドを一切持ちません**。「1 キャンバス＝1 キャラクター」を
+戻さないための規則です。[借用モデル](../wgpu/borrow-model.md)を参照。
+
+## モジュール
+
+| モジュール | 役割 |
+|---|---|
+| `renderer` | デバイススコープ：パイプライン（初回使用時に構築）、シェーダー、テクスチャマップ |
+| `scene` | ターゲットスコープ：投影、フレームアリーナ、ドローリスト、GPU 計測 |
+| `player` | 再生ノードツリー、ロード、再生制御、パーツオーバーライド |
+| `pack` | `SSPack` — キャラクター間で共有される `.ssab`。CPU データのみ |
+| `assets` / `decode` | ローダーの継ぎ目と、アトラスの一括デコード |
+| `mask` | ステンシルプランナ |
+| `events` / `metrics` / `roster` | タイムラインイベント、フレームカウンタ、世代付きハンドル |
+| `host` | ウィンドウを持つ wgpu スタック（`ffi` feature）。自前で wgpu を組まず生のウィンドウハンドルを持つ Rust ホストからも使えます |
+| `ffi` / `web` | C と JavaScript の Face |
+
+## feature
+
+| feature | 既定 | 追加されるもの |
+|---|---|---|
+| `embedded` | ✅ | 埋め込みモードのアトラスをクレート内でデコードし、`SSPlayer::load` のファイルパス経路を提供します。ホスト側でデコードする場合はオフに |
+| `web` | | wasm-bindgen 経由の `SsContextWeb` / `SsSurfaceWeb` / `SsPlayerWeb`。**意図的に `embedded` を引き込みません** — ブラウザが既にデコーダを持っているためです |
+| `ffi` | | C のエントリポイントと、生のウィンドウハンドルから wgpu を構築する `NativeHost` |
+
+クレートは `rlib` ＋ `cdylib` ＋ `staticlib` としてビルドされるので、1 つのソースが Rust の依存・wasm
+モジュール・ネイティブ共有ライブラリの 3 役を担います。
+
+!!! note "`SSPlayer::load` には `embedded` とファイルシステムが必要です"
+    この簡便な経路は `#[cfg(all(feature = "embedded", not(target_arch = "wasm32")))]` です。それ以外
+    （wasm、アーカイブ、エンジンのアセットサーバー）では `load_with(&mut loader, src)` が入口になります。
+    [ロードとアセット](../guide/loading.md)を参照。
+
+## エラー
+
+ロードは `Result<(), SSRuntimeError>` を返し、**`.ssab` 本体が読めなかったときだけ**失敗します。それ以外に
+届かなかったものは `missing_assets()` にあります。
+
+オーバーライドやトラック系の多くも `Result<(), SSRuntimeError>` を返し、何もロードされていないか名前が
+解決できない場合に `Err` になります。
+
+## バージョニング
+
+`ssplayer-wgpu` と `ssplayer-wgpu-bevy` は**独立**にバージョン管理されています。追いかける対象が違うから
+です（Player は SDK、アダプタは Bevy のリリース系列）。workspace 共通バージョンは意図的にありません。
+
+wgpu はリポジトリ全体で **29** 系に固定されています。
+[エンジンへの組み込み](../wgpu/engines.md#the-wgpu-pin)を参照。
