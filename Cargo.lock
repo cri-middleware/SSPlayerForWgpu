@@ -4655,7 +4655,7 @@ dependencies = [
 
 [[package]]
 name = "ssplayer-bevy"
-version = "0.1.0-alpha.1"
+version = "7.0.0-alpha.1"
 dependencies = [
  "bevy",
  "image",
@@ -4684,7 +4684,7 @@ dependencies = [
 
 [[package]]
 name = "ssplayer-wgpu"
-version = "0.1.0"
+version = "7.0.0-beta.1"
 dependencies = [
  "bytemuck",
  "console_error_panic_hook",
@@ -4701,7 +4701,7 @@ dependencies = [
 
 [[package]]
 name = "ssplayer-wgpu-ffi"
-version = "0.1.0"
+version = "7.0.0-beta.1"
 dependencies = [
  "cbindgen",
  "ssplayer-wgpu",

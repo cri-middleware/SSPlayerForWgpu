@@ -25,7 +25,7 @@ this for you.
 
     ```toml
     [dependencies]
-    ssplayer-wgpu = "0.1"
+    ssplayer-wgpu = "7.0.0-beta.1"
     ```
 
     Nothing else about your code changes — the git dependency below builds the same crate.

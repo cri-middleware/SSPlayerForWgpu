@@ -26,7 +26,7 @@ resolving a single `wgpu`.
 
     ```toml
     [dependencies]
-    ssplayer-bevy = "0.1.0-alpha.1"
+    ssplayer-bevy = "7.0.0-alpha.1"
     ```
 
 === "From source"

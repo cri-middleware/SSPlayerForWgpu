@@ -15,6 +15,13 @@ exclude = ["SpriteStudio-SDK"]
 
 # `version` is deliberately not inherited: the player and the viewer are versioned
 # independently, so each crate declares its own.
+#
+# The three published crates carry the SDK family line, which is what `ssab` and
+# `ssruntime` resolve to — `ssplayer-wgpu` and `ssplayer-wgpu-ffi` at `7.0.0-beta.1`,
+# `ssplayer-bevy` at `7.0.0-alpha.1`. The prerelease word is the maturity signal and
+# is not cosmetic: beta means the surface is frozen and only quality moves, alpha
+# means it is still open, which the Bevy adapter is while it tracks one Bevy line at
+# a time. `examples/*` publish nowhere and stay at `0.1.0` on purpose.
 [workspace.package]
 edition = "2024"
 rust-version = "1.97"

@@ -26,7 +26,7 @@ workspace が 1 つの `wgpu` に解決することで担保しています。
 
     ```toml
     [dependencies]
-    ssplayer-bevy = "0.1.0-alpha.1"
+    ssplayer-bevy = "7.0.0-alpha.1"
     ```
 
 === "ソースから"
