@@ -120,13 +120,17 @@ let draw_calls = scene.draw(&renderer, &mut rpass);
 そのターゲットの**全キャラクターを 1 回の `update` に渡し、1 パスで描画してください**。10 体でもアトラス
 アップロード 1 回・パイプライン 1 セットで済むのはそのためです。前後関係は `SSPlayer::set_order` の昇順です。
 
-パスが守るべきことは 3 つ：
+パスが守るべきことは 4 つ：
 
 * **カラーフォーマットが `SceneConfig::color_format` と一致していること。** パイプラインはこれに対して
   焼かれているので、フォーマットが変わるなら `SSScene` を作り直します。
 * **`MaskBackend::Stencil` ならステンシルアタッチメントが必須**（宣言したフォーマットで）。貸せる
   ステンシルが無い場合は `MaskBackend::Coverage` を使ってください（[マスク](../guide/masks.md)）。
 * **MSAA はオフ。** Player のパイプラインはシングルサンプルです。
+* **非 sRGB ターゲットを渡すこと。** Player はアトラスのバイト列をそのまま書き、色管理をしません。
+  sRGB ターゲットでは二重にエンコードされて全体が明るくなりすぎます。`examples/viewer` は
+  `capabilities.formats.iter().find(|f| !f.is_srgb())` でサーフェスフォーマットを選んでいます。
+  sRGB 空間で合成する方法でも構いません。
 
 リサイズ時は自分のアタッチメントを作り直して `set_viewport` を呼び直します。
 

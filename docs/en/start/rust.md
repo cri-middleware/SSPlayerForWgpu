@@ -124,13 +124,17 @@ Pass **every** player of that target to one `update` and draw them in one pass â
 ten characters cost one atlas upload and one set of pipelines. Their order on screen is
 `SSPlayer::set_order`, ascending.
 
-Three rules the pass has to honour:
+Four rules the pass has to honour:
 
 * **The colour format must match `SceneConfig::color_format`.** Pipelines are baked against it; a
   format change means a new `SSScene`.
 * **A stencil attachment is required for `MaskBackend::Stencil`**, in the format you declared. No
   stencil to lend? Use `MaskBackend::Coverage` â€” see [Masks](../guide/masks.md).
 * **MSAA must be off.** The player's pipelines are single-sampled.
+* **Give it a non-sRGB target.** The player writes atlas bytes verbatim and does no colour
+  management, so an sRGB target encodes them a second time and everything comes out too bright.
+  `examples/viewer` picks its surface format with
+  `capabilities.formats.iter().find(|f| !f.is_srgb())`; compositing in sRGB space works too.
 
 On resize, recreate your own attachments and call `set_viewport` again.
 
