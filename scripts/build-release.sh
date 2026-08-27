@@ -72,7 +72,7 @@ usage () {
   echo "  -h | --help             Show this help"
   echo ""
   echo "Output, in <out>:"
-  echo "  ssplayer-wgpu-<platform>-<arch>.zip   include/, lib/, LICENSE.md"
+  echo "  ssplayer-wgpu-<platform>-<arch>.zip   include/, lib/, LICENSE.md, LICENSE.ja.md"
   echo "  ssplayer-wgpu-web-wasm32.zip          the npm package (dist/, wasm/, package.json)"
   echo "  SHA256SUMS                            covers every zip above"
   echo ""
@@ -189,6 +189,7 @@ for p in $NATIVE; do
     [ -f "$dir/libs/$os/$arch/$lib" ] || fail "$p/libs/$os/$arch/$lib is missing (the static library this platform ships)"
     [ -f "$dir/include/ssplayer_wgpu.h" ] || fail "$p/include/ssplayer_wgpu.h is missing"
     [ -f "$dir/LICENSE.md" ] || fail "$p/LICENSE.md is missing"
+    [ -f "$dir/LICENSE.ja.md" ] || fail "$p/LICENSE.ja.md is missing"
   fi
 done
 
@@ -249,7 +250,7 @@ for p in $NATIVE; do
   # a CMake host points at include/ and lib/ without a per-OS branch.
   cp "$IN/$p/include/ssplayer_wgpu.h" "$stage/include/"
   cp "$IN/$p/libs/$os/$arch/$lib" "$stage/lib/"
-  cp "$IN/$p/LICENSE.md" "$stage/"
+  cp "$IN/$p/LICENSE.md" "$IN/$p/LICENSE.ja.md" "$stage/"
   [ -f "$ROOT_DIR/THIRD_PARTY_NOTICES.md" ] && cp "$ROOT_DIR/THIRD_PARTY_NOTICES.md" "$stage/"
 
   zipname="ssplayer-wgpu-$p.zip"
@@ -288,7 +289,7 @@ if [ "$VERIFY" = "yes" ]; then
     lib="$(lib_for "$p")"
     zipname="ssplayer-wgpu-$p.zip"
     names="$(unzip -Z1 "$OUT/$zipname")"
-    for want in "include/ssplayer_wgpu.h" "lib/$lib" "LICENSE.md"; do
+    for want in "include/ssplayer_wgpu.h" "lib/$lib" "LICENSE.md" "LICENSE.ja.md"; do
       printf '%s\n' "$names" | grep -qx "$want" || fail "$zipname does not contain $want"
     done
     # A static library that is a few kilobytes is a link that produced nothing.

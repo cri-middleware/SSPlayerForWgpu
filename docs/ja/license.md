@@ -4,7 +4,7 @@
 **BSD 3-Clause License** で公開されています。
 
 全文はリポジトリの
-[LICENSE.md](https://github.com/cri-middleware/SSPlayerForWgpu/blob/main/LICENSE.md) にあり、
+[LICENSE.md](https://github.com/cri-middleware/SSPlayerForWgpu/blob/main/LICENSE.md) にあり（参考訳: [LICENSE.ja.md](https://github.com/cri-middleware/SSPlayerForWgpu/blob/main/LICENSE.ja.md)）、
 リリース zip と npm パッケージにも同梱されています。
 
 Copyright © CRI Middleware Co., Ltd.

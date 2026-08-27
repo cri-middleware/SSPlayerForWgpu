@@ -71,6 +71,7 @@ That collects everything a C or C++ project needs into `bin/`:
 ```
 bin/include/ssplayer_wgpu.h                              # the C header (cbindgen)
 bin/LICENSE.md
+bin/LICENSE.ja.md
 bin/libs/<platform>/<arch>/libssplayer_wgpu.{a,dylib}    # .lib/.dll on Windows
 ```
 

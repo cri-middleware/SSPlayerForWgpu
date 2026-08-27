@@ -20,6 +20,7 @@
 | `include/ssplayer_wgpu.h` | ヘッダ 1 枚。C99、依存なし。cbindgen が生成 |
 | `lib/libssplayer_wgpu.a`（MSVC では `ssplayer_wgpu.lib`） | 静的ライブラリ |
 | `LICENSE.md` | BSD-3-Clause |
+| `LICENSE.ja.md` | その参考訳 |
 
 ## 導入 { #install }
 
