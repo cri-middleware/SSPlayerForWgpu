@@ -12,7 +12,9 @@
 # and then deploys them to the examples that cannot read assets/ in place:
 #
 #   examples/web/assets/       <- assets/overall (reference mode, + its .png atlases)
+#   examples/web/assets/Ringo/ <- assets/Ringo   (reference mode, + Ringo.png)
 #   examples/web/assets_emb/   <- assets/overall_emb (embedded mode)
+#   examples/web/assets_emb/Ringo/ <- assets/Ringo_emb (embedded mode)
 #
 # Both modes go out because the demo page has a selector for the two: an embedded
 # pack carries its atlas, a reference pack names sibling files that `loadSsab`
@@ -89,11 +91,20 @@ echo ">> deploying reference .ssab + atlases -> examples/web/assets"
 rm -rf "$WEB_DIR/assets"; mkdir -p "$WEB_DIR/assets"
 cp "$ASSET_DIR/overall/"*.ssab "$WEB_DIR/assets/"
 cp "$ASSET_DIR/overall/"*.png  "$WEB_DIR/assets/"
+# Ringo is an authored character rather than a feature fixture, which is what the
+# layout pages want on the page. Kept in a subdirectory of its own: sibling packs
+# and atlases resolve against the .ssab's own directory, so two projects sharing
+# one flat directory would be one atlas filename away from colliding.
+mkdir -p "$WEB_DIR/assets/Ringo"
+cp "$ASSET_DIR/Ringo/"*.ssab "$WEB_DIR/assets/Ringo/"
+cp "$ASSET_DIR/Ringo/"*.png  "$WEB_DIR/assets/Ringo/"
 
 # Embedded mode: the atlas is baked in, so these need no sibling files.
 echo ">> deploying embedded .ssab -> examples/web/assets_emb"
 rm -rf "$WEB_DIR/assets_emb"; mkdir -p "$WEB_DIR/assets_emb"
 cp "$ASSET_DIR/overall_emb/"*.ssab "$WEB_DIR/assets_emb/"
+mkdir -p "$WEB_DIR/assets_emb/Ringo"
+cp "$ASSET_DIR/Ringo_emb/"*.ssab "$WEB_DIR/assets_emb/Ringo/"
 
 echo "deploy-examples.sh: done -> assets/{overall,overall_emb,Ringo,Ringo_emb}/"
-echo "deploy-examples.sh:      -> examples/web/{assets,assets_emb}/"
+echo "deploy-examples.sh:      -> examples/web/{assets,assets_emb}/{,Ringo/}"

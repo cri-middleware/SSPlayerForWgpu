@@ -12,7 +12,9 @@
 # and then deploys them to the examples that cannot read assets/ in place:
 #
 #   examples/web/assets/       <- assets/overall (reference mode, + its .png atlases)
+#   examples/web/assets/Ringo/ <- assets/Ringo   (reference mode, + Ringo.png)
 #   examples/web/assets_emb/   <- assets/overall_emb (embedded mode)
+#   examples/web/assets_emb/Ringo/ <- assets/Ringo_emb (embedded mode)
 #
 # Both modes go out because the demo page has a selector for the two: an embedded
 # pack carries its atlas, a reference pack names sibling files that `loadSsab`
@@ -123,12 +125,23 @@ $dest = Join-Path $WEB_DIR "assets"
 Reset-Dir $dest
 Copy-Item -Force (Join-Path $ASSET_DIR "overall/*.ssab") $dest
 Copy-Item -Force (Join-Path $ASSET_DIR "overall/*.png") $dest
+# Ringo is an authored character rather than a feature fixture, which is what the
+# layout pages want on the page. Kept in a subdirectory of its own: sibling packs
+# and atlases resolve against the .ssab's own directory, so two projects sharing
+# one flat directory would be one atlas filename away from colliding.
+$ringo = Join-Path $dest "Ringo"
+New-Item -ItemType Directory -Force -Path $ringo | Out-Null
+Copy-Item -Force (Join-Path $ASSET_DIR "Ringo/*.ssab") $ringo
+Copy-Item -Force (Join-Path $ASSET_DIR "Ringo/*.png") $ringo
 
 # Embedded mode: the atlas is baked in, so these need no sibling files.
 Write-Host ">> deploying embedded .ssab -> examples/web/assets_emb"
 $dest = Join-Path $WEB_DIR "assets_emb"
 Reset-Dir $dest
 Copy-Item -Force (Join-Path $ASSET_DIR "overall_emb/*.ssab") $dest
+$ringo = Join-Path $dest "Ringo"
+New-Item -ItemType Directory -Force -Path $ringo | Out-Null
+Copy-Item -Force (Join-Path $ASSET_DIR "Ringo_emb/*.ssab") $ringo
 
 Write-Host "${APP}: done -> assets/{overall,overall_emb,Ringo,Ringo_emb}/"
-Write-Host "${APP}:      -> examples/web/{assets,assets_emb}/"
+Write-Host "${APP}:      -> examples/web/{assets,assets_emb}/{,Ringo/}"

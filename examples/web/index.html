@@ -17,10 +17,13 @@
     select, button { font: inherit; padding: 0.3em 0.6em; }
     code { background: color-mix(in srgb, currentColor 12%, transparent); padding: 0.1em 0.4em; border-radius: 4px; }
     .hint { opacity: 0.7; font-size: 0.9em; }
+    nav { float: right; font-size: 0.9em; }
+    nav a { margin-left: 1em; }
     #stats { font-family: ui-monospace, monospace; font-size: 0.85em; white-space: pre-wrap; opacity: 0.85; }
   </style>
 </head>
 <body>
+  <nav><a href="element.html">要素の使い方 →</a> <a href="multi.html">1 ページに複数 →</a></nav>
   <h1>ssplayer-wgpu — WebGPU demo</h1>
   <p>SpriteStudio 7 の <code>.ssab</code> を <strong>WebGPU</strong> で再生します。
      reference（外部 PNG）／ embedded（埋め込み）どちらも <code>load()</code> 1コールで、
@@ -90,7 +93,13 @@
     }
     // The same call for both export modes: an embedded pack decodes what it
     // carries, a reference pack fetches its sibling PNGs relative to the .ssab.
-    const reload = () => player.loadSrc(`${mode.value}/${pick.value}.ssab`);
+    // An event handler cannot await, so the rejection needs a home: an unhandled
+    // one is a console warning with no context, and the element only routes its
+    // *own* startup failure to the on-page error box. Overlapping switches are
+    // the element's problem, not the page's — `loadSrc` serialises them.
+    const reload = () => {
+      player.loadSrc(`${mode.value}/${pick.value}.ssab`).catch((e) => console.error('[demo] could not load the pack:', e));
+    };
     pick.addEventListener('change', reload);
     mode.addEventListener('change', reload);
 
