@@ -14,7 +14,7 @@ Bevy game?"
 
 For a scripted, one-character walk through the whole sample set (Basic, Shape,
 Effect, Mesh, …), run [`../overall-bevy`](../overall-bevy) instead
-(`cargo run -p ssplayer-wgpu-overall-bevy`); this one is the interactive harness
+(`cargo run -p ssplayer-bevy-overall`); this one is the interactive harness
 for poking at a live cast.
 
 ## Build and run
@@ -22,7 +22,7 @@ for poking at a live cast.
 ```bash
 git submodule update --init          # once
 ./scripts/deploy-examples.sh         # once — generates assets/
-cargo run -p ssplayer-wgpu-viewer-bevy
+cargo run -p ssplayer-bevy-viewer
 ```
 
 It starts with two characters on `Basic`, in one pass. Every `.ssab` under

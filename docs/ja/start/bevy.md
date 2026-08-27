@@ -140,8 +140,8 @@ Bevy 自身のパス内で完結します。コストはマスクを使うキャ
 git clone --recursive https://github.com/cri-middleware/SSPlayerForWgpu.git
 cd SSPlayerForWgpu
 ./scripts/deploy-examples.sh
-cargo run -p ssplayer-wgpu-overall-bevy    # 機能ツアー — まずこちら
-cargo run -p ssplayer-wgpu-viewer-bevy     # 複数キャラクターを自由に触るビューア
+cargo run -p ssplayer-bevy-overall    # 機能ツアー — まずこちら
+cargo run -p ssplayer-bevy-viewer     # 複数キャラクターを自由に触るビューア
 ```
 
 ## 次に読む

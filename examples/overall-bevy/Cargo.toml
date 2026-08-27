@@ -1,5 +1,5 @@
 [package]
-name = "ssplayer-wgpu-overall-bevy"
+name = "ssplayer-bevy-overall"
 version = "0.1.0"
 edition.workspace = true
 authors.workspace = true

@@ -50,7 +50,7 @@ prerequisite for `cargo test`, not an optional step.
 | npm package (wasm + TS layer) | `./scripts/build.sh platform=web` — needs `pnpm` and `wasm-pack` |
 | TS layer typecheck | `cd packages/ssplayer-wgpu && pnpm run typecheck` |
 | Native viewer | `cargo run -p ssplayer-wgpu-viewer` |
-| Bevy viewers | `cargo run -p ssplayer-wgpu-overall-bevy` / `-p ssplayer-wgpu-viewer-bevy` |
+| Bevy viewers | `cargo run -p ssplayer-bevy-overall` / `-p ssplayer-bevy-viewer` |
 | Metal C++ viewer (macOS) | `cd examples/viewer-metal-cpp && cmake -B build && cmake --build build && ./build/ssviewer-metal` |
 | DX12 C++ viewer (Windows) | `cd examples\viewer-dx12-cpp; cmake -B build; cmake --build build --config Release` |
 | Vulkan C++ viewer (Linux) | `cd examples/viewer-vulkan-cpp && cmake -B build && cmake --build build && ./build/ssviewer-vulkan` |

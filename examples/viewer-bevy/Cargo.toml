@@ -1,12 +1,12 @@
 [package]
-name = "ssplayer-wgpu-viewer-bevy"
+name = "ssplayer-bevy-viewer"
 version = "0.1.0"
 edition.workspace = true
 authors.workspace = true
 license.workspace = true
 repository.workspace = true
 homepage.workspace = true
-description = "Bevy host that draws ssplayer-wgpu characters, for developing and verifying the Bevy adapter"
+description = "Bevy host for developing and verifying ssplayer-bevy"
 # The adapter is not published while its API moves; neither is its viewer.
 publish = false
 

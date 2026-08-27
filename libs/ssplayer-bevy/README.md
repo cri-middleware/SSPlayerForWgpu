@@ -92,8 +92,8 @@ not the adapter's).
 
 ```sh
 # from the repository root, where assets/ is (scripts/deploy-examples.sh first)
-cargo run -p ssplayer-wgpu-overall-bevy    # the guided feature tour — read first
-cargo run -p ssplayer-wgpu-viewer-bevy     # the interactive development viewer
+cargo run -p ssplayer-bevy-overall    # the guided feature tour — read first
+cargo run -p ssplayer-bevy-viewer     # the interactive development viewer
 ```
 
 - [`examples/overall-bevy`](../../examples/overall-bevy) — the Bevy counterpart of

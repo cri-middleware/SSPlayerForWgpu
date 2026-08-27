@@ -14,7 +14,7 @@ see what the adapter can do.
 ```bash
 git submodule update --init          # once
 ./scripts/deploy-examples.sh         # once — generates assets/
-cargo run -p ssplayer-wgpu-overall-bevy
+cargo run -p ssplayer-bevy-overall
 ```
 
 ## What it steps through

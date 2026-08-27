@@ -143,8 +143,8 @@ handler *quits* on device loss. Install a `RenderErrorHandler` returning `Render
 git clone --recursive https://github.com/cri-middleware/SSPlayerForWgpu.git
 cd SSPlayerForWgpu
 ./scripts/deploy-examples.sh
-cargo run -p ssplayer-wgpu-overall-bevy    # the guided feature tour — read first
-cargo run -p ssplayer-wgpu-viewer-bevy     # a free-form viewer of a whole cast
+cargo run -p ssplayer-bevy-overall    # the guided feature tour — read first
+cargo run -p ssplayer-bevy-viewer     # a free-form viewer of a whole cast
 ```
 
 ## Next

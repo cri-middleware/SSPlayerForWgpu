@@ -10,7 +10,7 @@
 //! Run from the repository root, which is where `assets/` is:
 //!
 //! ```text
-//! cargo run -p ssplayer-wgpu-viewer-bevy
+//! cargo run -p ssplayer-bevy-viewer
 //! ```
 //!
 //! `scripts/deploy-examples.sh` (or `.ps1`) generates `assets/` first.
