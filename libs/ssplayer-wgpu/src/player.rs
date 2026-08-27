@@ -1995,7 +1995,7 @@ fn build_rig(context: &Context<'static>, static_res: &'static ssruntime::Animati
 /// part is hidden. For an independently-played effect or instance — one running
 /// on its own elapsed time rather than the parent's frame — that freezes the
 /// clock and makes it resume late by exactly the time it spent hidden, which is
-/// not what SS7 means by independent playback (instance doc §Supporting
+/// not what SpriteStudio means by independent playback (instance doc §Supporting
 /// Independent Playback, effect doc). The slots are built from the pack's part
 /// list in [`build_node`], so they are all here to walk.
 ///
