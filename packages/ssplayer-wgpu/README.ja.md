@@ -85,7 +85,7 @@ requestAnimationFrame(loop);
 非同期なのは `load()` だけです。パック本体に加えて、**2つのテクスチャテーブル**（セルマップと
 TextureChange の参照先）双方のアトラスを、どちらのエクスポート形態でも解決し、さらに Instance パーツが
 再生する兄弟 `.ssab` まで辿ります。届かなかったものは例外ではなく `missingAssets()` から返ります。
-`setAnimation()` と再生制御（`play` / `pause` / `stop` / `seek` / `setSpeed`）は同期です。
+`setAnimation()` と再生制御（`play` / `pause` / `resume` / `stop` / `seek` / `setSpeedScale`）は同期です。
 
 wasm に画像デコーダは意図的に入れていません。ブラウザが既に持っているので、embedded のアトラスは
 エンコード済みバイト列で出て `createImageBitmap` で戻ってきます。

@@ -14,8 +14,13 @@ of its own.
 
 ## 📚 Documentation
 
-- [**Japanese documentation (日本語ドキュメント)**](./docs/ja/index.md)
-- [**Migrating from SS6Player for CPP**](./docs/ja/migration_from_cpp.md)
+- [**Documentation site**](https://cri-middleware.github.io/SSPlayerForWgpu/) — start here: one path per
+  host (Rust / Bevy / C・C++ / WebGPU), a shared guide, the API reference for every face, and the
+  live WebGPU demo. 🚧 Live once this repository's Pages workflow is published; until then build it
+  locally with `./scripts/build-pages.sh serve=yes`, or read [`docs/en/`](./docs/en/index.md)
+- [**日本語ドキュメント**](https://cri-middleware.github.io/SSPlayerForWgpu/ja/) — the same site
+  ([`docs/ja/`](./docs/ja/index.md) in the repository)
+- [**Migrating from SS6Player for CPP**](./docs/en/migration/from-ss6-cpp.md)
 - [**ROADMAP**](./ROADMAP.md) — what is implemented, what is planned, and what was deliberately declined
 - [**SpriteStudio Docs (portal)**](https://cri-middleware.github.io/SpriteStudio-Docs/) — the SDK and every
   official player in one place (live with the first release)
@@ -44,10 +49,10 @@ components (`SsPlayer` / `SsTransform` / `SsPlayback`) that spawn a character in
 
 ```toml
 [dependencies]
-ssplayer-wgpu-bevy = { git = "https://github.com/cri-middleware/SSPlayerForWgpu" }
+ssplayer-bevy = { git = "https://github.com/cri-middleware/SSPlayerForWgpu" }
 ```
 
-It tracks one Bevy line at a time — named in [its README](./libs/ssplayer-wgpu-bevy) — because Bevy
+It tracks one Bevy line at a time — named in [its README](./libs/ssplayer-bevy) — because Bevy
 and the player have to resolve to a single `wgpu`. A mismatch is a compile error, not a runtime
 surprise.
 
@@ -152,8 +157,8 @@ the device is lent, and how assets get in.
 | [`examples/viewer-metal-cpp`](./examples/viewer-metal-cpp) | C++ on Metal, macOS | `cmake -B build && cmake --build build && ./build/ssviewer-metal` |
 | [`examples/viewer-dx12-cpp`](./examples/viewer-dx12-cpp) | C++ on DX12, Windows | `cmake -B build; cmake --build build --config Release; .\build\Release\ssviewer-dx12.exe` |
 | [`examples/viewer-vulkan-cpp`](./examples/viewer-vulkan-cpp) | C++ on Vulkan, Linux — X11 and Wayland in one binary | `cmake -B build && cmake --build build && ./build/ssviewer-vulkan` |
-| [`examples/viewer-bevy`](./examples/viewer-bevy) | Bevy — the adapter's development viewer, a live cast | `cargo run -p ssplayer-wgpu-viewer-bevy` |
-| [`examples/overall-bevy`](./examples/overall-bevy) | Bevy — the scripted feature tour | `cargo run -p ssplayer-wgpu-overall-bevy` |
+| [`examples/viewer-bevy`](./examples/viewer-bevy) | Bevy — the adapter's development viewer, a live cast | `cargo run -p ssplayer-bevy-viewer` |
+| [`examples/overall-bevy`](./examples/overall-bevy) | Bevy — the scripted feature tour | `cargo run -p ssplayer-bevy-overall` |
 
 They play generated animation data, so run this once first:
 
@@ -204,7 +209,7 @@ flowchart TD
 
     subgraph lib ["libs/"]
         crate["ssplayer-wgpu<br/>SSRenderer / SSScene / SSPlayer"]
-        bevy["ssplayer-wgpu-bevy<br/>SsPlayer / SsTransform / SsPlayback"]
+        bevy["ssplayer-bevy<br/>SsPlayer / SsTransform / SsPlayback"]
         crate --> bevy
     end
 
@@ -233,7 +238,7 @@ flowchart TD
 | Path | What |
 |---|---|
 | [`libs/ssplayer-wgpu/`](./libs/ssplayer-wgpu) | crate `ssplayer-wgpu` — the player. `rlib` + `cdylib` + `staticlib`, with the `web` and `ffi` faces behind features |
-| [`libs/ssplayer-wgpu-bevy/`](./libs/ssplayer-wgpu-bevy) | crate `ssplayer-wgpu-bevy` — the Bevy adapter. Its own crate, so the player never depends on an engine; see its README for the Bevy line it tracks |
+| [`libs/ssplayer-bevy/`](./libs/ssplayer-bevy) | crate `ssplayer-bevy` — the Bevy adapter. Its own crate, so the player never depends on an engine; see its README for the Bevy line it tracks |
 | [`packages/ssplayer-wgpu/`](./packages/ssplayer-wgpu) | npm package `@spritestudio/ssplayer-wgpu` — the wasm plus the TypeScript layer over it (`.` and `./element`). Published from where it sits; `wasm/` and `dist/` are gitignored build outputs |
 | [`examples/`](./examples) | one host per environment; see [Samples](#-samples) |
 | `scripts/build.sh` / `.ps1` | builds the library for one platform, collecting it into `bin/` |

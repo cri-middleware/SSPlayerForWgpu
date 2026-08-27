@@ -1,0 +1,138 @@
+# C API リファレンス
+
+`ssplayer_wgpu.h` の全エントリポイントを用途別に並べたものです。関数ごとの詳細と安全性の注意はヘッダ自身に
+書かれています。このページはその見取り図です。
+
+ヘッダは[リリース zip かソースビルド](../start/cpp.md#install)から入手します。C99 で、依存はありません。
+
+## 約束事
+
+| | |
+|---|---|
+| 戻り値 | 失敗しうる関数は `int32_t`：`SS_OK`（0）、`SS_ERROR_INVALID_ARGUMENT`（-1）、`SS_ERROR_GPU`（-2） |
+| エラーテキスト | `ss_last_error()` — 呼び出しスレッドで最後に起きた失敗。ログ用であり、分岐用ではありません |
+| null ハンドル | どの関数も null ハンドルを許容し、クラッシュではなく `SS_ERROR_INVALID_ARGUMENT`（またはゼロ値）を返します |
+| 文字列 | 入力は UTF-8 の `const char *`。**出力**の文字列はシーンが所有し、同種の次の呼び出しまで有効です — 保持するならコピーを |
+| サイズ | 常に**描画ピクセル**。ポイントではありません。ディスプレイ倍率は自分で掛けてください |
+
+## ライフタイム
+
+| | |
+|---|---|
+| `ss_scene_create(desc)` | ウィンドウ上にシーンを構築。失敗時は null |
+| `ss_scene_destroy(scene)` | 破棄 — **その中の全プレイヤーも** |
+| `ss_scene_create_player(scene)` | キャラクターを追加 |
+| `ss_player_destroy(player)` | 1 体削除。ハンドルの箱はシーンが消えるまで残るので、二重破棄は安全な no-op |
+| `ss_scene_player_count(scene)` | 診断用 |
+
+ハンドルは世代付きです。古い `ss_player_t *` は「破棄済み」に解決し、そのスロットを引き継いだ別の
+キャラクターには決して解決しません。
+
+## フレーム
+
+| | |
+|---|---|
+| `ss_scene_update(scene, delta_seconds)` | 全プレイヤーを進め、このフレームのジオメトリを構築 |
+| `ss_scene_render(scene)` | キャスト全体を 1 レンダーパスで描画し、present |
+| `ss_scene_resize(scene, width, height)` | 描画ピクセル |
+| `ss_scene_stats(scene, out)` | [パフォーマンス](../guide/performance.md)を参照 |
+| `ss_scene_is_device_lost(scene)` / `ss_scene_restore_device(scene)` | [デバイスロスト](../guide/device-loss.md)を参照 |
+
+## ロード
+
+| | |
+|---|---|
+| `ss_player_load(player, path)` | 1 呼び出しでパック・アトラス・兄弟パック |
+| `ss_player_load_ssab(player, name, data, len)` | バイト列を登録し、そのパックを選択対象にする |
+| `ss_player_add_ssab(player, name, data, len)` | 登録のみ（インスタンスパーツ用） |
+| `ss_player_missing_count(player)` / `ss_player_missing_at(player, i, out)` | 届かなかったもの。**エラーではありません** |
+| `ss_player_texture_count(player, pack)` / `ss_player_texture_at(player, pack, i, out)` | パックが要求するアトラスと、エクスポータが書いた位置 |
+| `ss_scene_add_texture(scene, hash, rgba, w, h)` | ストレートアルファ RGBA8 でアトラスを供給 |
+| `ss_scene_add_texture_png(scene, hash, data, len)` | エンコード済み PNG を渡してライブラリにデコードさせる |
+
+テクスチャは**シーン**に登録します。テクスチャマップがデバイススコープだからです。ウィンドウ内の全
+プレイヤーから見え、同じパックを 5 体で表示してもアップロードは 1 回です。
+
+## アニメーションの選択と情報
+
+| | |
+|---|---|
+| `ss_player_set_animation(player, name)` | 再生ツリーを構築。アロケーションを伴う呼び出し |
+| `ss_player_animation_count(player)` / `ss_player_animation_name(player, i)` | パックが持つもの |
+| `ss_player_canvas_size(player, &w, &h)` | オーサリング時のキャンバス。周囲のレイアウト用 |
+| `ss_player_total_frames(player)` / `ss_player_start_frame` / `ss_player_end_frame` | 現在の範囲 |
+
+## 再生制御
+
+| | |
+|---|---|
+| `ss_player_play(player)` | **先頭出し** — 巻き戻してループ回数を張り直す |
+| `ss_player_play_from(player, frame)` | 指定フレームから同じことを |
+| `ss_player_pause(player)` / `ss_player_resume(player)` | 保持と、その場からの継続 |
+| `ss_player_stop(player)` | 終了。再生ヘッドはその場に残る |
+| `ss_player_seek(player, frame)` | ジャンプ。小数フレーム可 |
+| `ss_player_set_speed_scale(player, speed)` | 既定 fps の倍率。`0` と負値は停止 |
+| `ss_player_set_frame_rate(player, fps)` / `ss_player_frame_rate` | 既定 fps を置き換える |
+| `ss_player_set_loop_count(player, n)` / `ss_player_loop_count` / `ss_player_remaining_loops` | `n` 回。`-1` / `0` で無限 |
+| `ss_player_set_animation_section(player, start, end)` | 再生範囲を制限。`set_animation` の**後**に |
+| `ss_player_set_playback_direction(player, dir, style)` | `0`/`1` = 順/逆、通常/ピンポン |
+| `ss_player_playback_direction` / `ss_player_playback_style` | 読み戻し |
+| `ss_player_set_sub_frame(player, on)` / `ss_player_sub_frame_enabled` | フレーム間を補間 |
+| `ss_player_set_skip_frames(player, on)` / `ss_player_skip_frames` | 長い tick で複数フレームを跨ぐ |
+
+[再生と再生制御](../guide/playback.md)も参照してください。特に `pause` の解除に `play` を使えない理由を。
+
+## 再生が何をしたかを問い合わせる
+
+| | |
+|---|---|
+| `ss_player_is_playing` / `ss_player_is_pausing` / `ss_player_is_playing_forward` | 状態 |
+| `ss_player_is_finished` | **持続的**：設定されたループをすべて再生し終えた。無限ループでは常に false |
+| `ss_player_finished_last_update` | **エッジ**：再生を完了させた update でだけ true。`stop` では立ちません |
+| `ss_player_frame_no` | 再生ヘッドの位置 |
+| `ss_player_looped_last_update` | エッジ：直前の update がループ境界を跨いだ。何周跨いでも 1 回の報告 |
+| `ss_player_just_looped` | ファミリー側の別名で同じ答え — 実装は 1 つを共有しています |
+
+## イベント
+
+| | |
+|---|---|
+| `ss_player_event_count(player)` | 直前の update が跨いだ数 — **スキップしたフレームの分も含みます** |
+| `ss_player_event_at(player, i, out)` | `SsEventData` 1 件。`kind` がどのフィールドに値があるかを示します |
+| `ss_player_event_signal_param_count(player, i)` / `ss_player_event_signal_param_at(player, i, p, out)` | シグナルのパラメータ |
+
+`kind` は `SS_EVENT_USER_DATA`（0）/ `SS_EVENT_SIGNAL`（1）/ `SS_EVENT_AUDIO`（2）。シグナルパラメータの
+`value_type` は `SS_SIGNAL_VALUE_NONE` / `_BOOL` / `_INDEX` / `_INTEGER` / `_FLOATING` / `_TEXT`（0–5）です。
+[イベントとユーザーデータ](../guide/events.md)を参照。
+
+## キャラクターの配置
+
+| | |
+|---|---|
+| `ss_player_set_transform(player, x, y, sx, sy, rotation)` | 位置・スケール・回転 |
+| `ss_player_set_order(player, order)` | シーン内の描画順（昇順） |
+| `ss_player_set_visible(player, visible)` | 非表示のキャラクターは**進まず**、イベントも出しません |
+| `ss_player_set_alpha(player, a)` / `ss_player_set_tint(player, rgb)` | キャラクター全体 |
+
+## パーツとオーバーライド
+
+各オーバーライドには名前探索を省く `_by_index` 版があります。`ss_player_find_part_index` で一度だけ引いて
+保持してください。
+
+| | |
+|---|---|
+| `ss_player_part_count` / `ss_player_find_part_index` | 列挙と解決 |
+| `ss_player_part_transform(player, part, out)`（＋ `_by_index`） | float 6 個：`[m00, m01, m10, m11, tx, ty]`、アニメーションローカルの Y-down |
+| `ss_player_set_part_visibility_override(player, part, hide, cascade)`（＋ `_by_index` / `clear_`） | キーフレームの非表示はカスケードしないので、サブツリーを隠す唯一の方法です |
+| `ss_player_set_part_color_override(player, part, rgba, blend_op, priority)`（＋ `_corners` / `_by_index` / `clear_`） | `blend_op` 0–3、`priority` 0–2 |
+| `ss_player_set_part_cell_override(player, part, cellmap, cell, priority)`（＋ `_by_index` / `clear_`） | 別の画像を描く |
+| `ss_player_clear_all_part_overrides(player)` | まとめてリセット |
+
+`blend_op` と `priority` の意味は[パーツオーバーライド](../guide/part-overrides.md)を参照。
+
+## この Face に無いもの
+
+**モーションブレンディング**（トラックスタック）は Rust だけです。自分が持つレンダーパスへの描画も同様で、
+この Face はデバイスを自分で構築し所有します。全体像は
+[スコープと名前の対応](../guide/concepts.md#what-each-face-can-do)、デバイス共有を提供しない理由は
+[制限事項](../limitations.md#no-device-sharing-across-the-c-abi)を参照してください。

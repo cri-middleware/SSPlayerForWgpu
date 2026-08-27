@@ -638,6 +638,13 @@ CLAUDE.md
 /release-dist/
 /build/
 
+# Documentation site. `scripts/build-docs.sh` writes both locales into site/
+# (English at the root, Japanese at site/ja), and `scripts/prepare-docs.sh`
+# creates the virtualenv the pinned zensical lives in. Neither is committed --
+# .github/workflows/pages.yml rebuilds the site from the Markdown on publish.
+/site/
+/.venv/
+
 # --- repository-specific exceptions (keep last) ---------------------------
 # The npm package (@spritestudio/ssplayer-wgpu) is source, not a build output.
 # The VisualStudio template above ignores `**/[Pp]ackages/*` wholesale -- that

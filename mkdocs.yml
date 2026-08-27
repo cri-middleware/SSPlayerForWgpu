@@ -1,0 +1,96 @@
+# English site -- the default locale, so it builds to the site root and keeps the plain
+# `mkdocs.yml` name that the tooling looks for when no `-f` is given.
+#
+# Everything not listed here comes from mkdocs.base.yml. Before adding anything, read the
+# note there about sequences: `nav` and `extra.social` are defined in this file and in
+# mkdocs.ja.yml, and must never also appear in the base.
+INHERIT: ./mkdocs.base.yml
+
+docs_dir: docs/en
+site_dir: site
+site_url: "https://cri-middleware.github.io/SSPlayerForWgpu/"
+site_description: "Play OPTPiX SpriteStudio 7 animations through wgpu -- from Rust, Bevy, C/C++ or WebGPU"
+
+theme:
+  # Drives the UI string translations and the `html lang` attribute.
+  language: en
+
+extra:
+  # English builds to the site root, so the root of the whole multi-locale site is right
+  # here. The language selector prepends this to its target; see
+  # overrides/partials/alternate.html.
+  site_root_prefix: ""
+  # Footer icons. Keep to destinations that outlive any single release. Mirrored, with
+  # translated labels, in mkdocs.ja.yml - add or reorder an icon in both files.
+  social:
+    # The family entry point. Every sibling site carries this as its first footer icon, so a
+    # reader who arrives here from a search can reach the portal and the other players.
+    - icon: material/motion-play
+      link: https://cri-middleware.github.io/SpriteStudio-Docs/
+      name: SpriteStudio Docs
+    - icon: fontawesome/brands/github
+      link: https://github.com/cri-middleware/SSPlayerForWgpu
+      name: SSPlayerForWgpu on GitHub
+    - icon: material/web
+      link: https://www.webtech.co.jp/spritestudio/
+      name: OPTPiX SpriteStudio
+    # Keep the handle here in sync with `twitter:site` in overrides/main.html.
+    - icon: fontawesome/brands/x-twitter
+      link: https://x.com/spritestudio
+      name: SpriteStudio on X
+
+# The shape of this navigation, and why it is not the sibling players' shape:
+#
+# Every other player has one host language. This one has four audiences that share a
+# library -- a Rust/wgpu app, a Bevy app, a C or C++ app, and a browser -- and only the
+# first of them wants to hear the word "wgpu". So:
+#
+#   * "Get started" is the ONLY place the reader picks a face, and each page there is
+#     complete on its own: install, load, play, frame loop. Four short paths, no crossing.
+#   * "Guide" is face-neutral prose with per-face code tabs. Written once, read by
+#     everyone; `content.tabs.link` makes the language choice stick site-wide.
+#   * "wgpu hosts" is the deep end, and is deliberately LAST of the reading sections: it
+#     is the only place that assumes the reader owns a device. A C++ or browser reader
+#     never has to enter it.
+#
+# Paths are locale-relative and identical to the ones in mkdocs.ja.yml; only the labels
+# differ. When you add, move, or rename a page, edit both files.
+nav:
+  - 🏠 Home: index.md
+  - 🚀 Get started:
+      - Rust: start/rust.md
+      - Bevy: start/bevy.md
+      - C / C++: start/cpp.md
+      - Web (WebGPU): start/web.md
+      - Preparing assets: start/assets.md
+  - 🎬 Guide:
+      - Scopes and names: guide/concepts.md
+      - Playback and transport: guide/playback.md
+      - Loading and assets: guide/loading.md
+      - Events and user data: guide/events.md
+      - Part overrides: guide/part-overrides.md
+      - Motion blending: guide/motion-blending.md
+      - Masks: guide/masks.md
+      - Device loss: guide/device-loss.md
+      - Performance: guide/performance.md
+  - 📖 API reference:
+      - Rust: reference/rust.md
+      - C: reference/c.md
+      - JavaScript: reference/js.md
+      - Web Component: reference/web-component.md
+      - Bevy: reference/bevy.md
+  - 🔩 wgpu hosts:
+      - The borrow model: wgpu/borrow-model.md
+      - Engine integration: wgpu/engines.md
+  - ⚠️ Limitations & Scope: limitations.md
+  - 🔄 Migration:
+      - From SS6Player for CPP: migration/from-ss6-cpp.md
+  - 🛠️ For contributors: contributing/index.md
+  - ⚖️ License: license.md
+  # Two trees that are not pages of this site: scripts/build-pages.sh grafts the
+  # workspace rustdoc onto site/api/ and the WebGPU demo onto site/demo/. A
+  # documentation-only build (scripts/build-docs.sh) leaves both out, so these
+  # links 404 locally until you run build-pages.sh -- that is expected, and is
+  # why they are plain paths rather than pages the build would try to validate.
+  - ▶️ Live demo: demo/index.html
+  - 📦 Rust API (rustdoc): api/ssplayer_wgpu/index.html

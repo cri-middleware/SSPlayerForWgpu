@@ -90,7 +90,7 @@ requestAnimationFrame(loop);
 (cell maps and TextureChange targets) in either export mode, and transitively the sibling `.ssab`
 files that its instance parts play from. Anything that did not arrive comes back from
 `missingAssets()` rather than throwing. `setAnimation()` and the transport calls
-(`play` / `pause` / `stop` / `seek` / `setSpeed`) are synchronous.
+(`play` / `pause` / `resume` / `stop` / `seek` / `setSpeedScale`) are synchronous.
 
 There is no image decoder in the wasm, on purpose: the browser already ships one, so embedded
 atlases go out as encoded bytes and come back through `createImageBitmap`.

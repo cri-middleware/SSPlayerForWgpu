@@ -1,0 +1,110 @@
+name: Publish docs via GitHub Pages
+
+on:
+  # Published with a release, and on demand. The site describes the library as it
+  # stands on the branch this runs from, so a dispatch from `main` between
+  # releases is the way to ship a documentation-only fix.
+  release:
+    types: [published]
+  workflow_dispatch:
+
+# Least privilege: the site is published via the Pages deployment API (OIDC),
+# not by pushing to a branch, so no `contents: write` is needed.
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+# One concurrent deployment at a time; don't cancel an in-flight production deploy.
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+        with:
+          # The site is not only Markdown: it carries the workspace rustdoc at
+          # /api/ and the WebGPU demo at /demo/, and the demo's animation data is
+          # converted by ssconverter-cli out of the SDK. So this job needs the
+          # submodule, exactly like ci.yml and release.yml.
+          #
+          # SpriteStudio-SDK is a private submodule in a different repository, so
+          # the job-scoped GITHUB_TOKEN cannot fetch it. Supply a fine-grained PAT
+          # (or GitHub App token) with read access to it as SDK_SUBMODULE_TOKEN.
+          # Once the SDK is public, drop this line and the secret.
+          token: ${{ secrets.SDK_SUBMODULE_TOKEN || github.token }}
+          submodules: recursive
+
+      # --- the documentation half -----------------------------------------
+      - uses: actions/setup-python@v7
+        with:
+          python-version: 3.x
+          cache: pip
+          cache-dependency-path: docs/requirements.txt
+
+      # The pin, installed straight onto PATH. build-docs.sh finds it there when
+      # there is no venv, which is exactly this case -- hence prepare=no below.
+      - name: Install the documentation toolchain
+        run: pip install -r docs/requirements.txt
+
+      # --- the rustdoc and demo halves ------------------------------------
+      - name: Setup Rust toolchain
+        uses: dtolnay/rust-toolchain@4360b52568e2003a75bf9bc1d59f33a8e3fc893c # stable
+        with:
+          # Pinned by SHA, so the channel must be named explicitly here.
+          toolchain: stable
+
+      - name: Setup Rust cache
+        uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+
+      - name: Install the wasm target
+        run: rustup target add wasm32-unknown-unknown
+
+      - name: Install wasm-pack
+        uses: taiki-e/install-action@07b4745e0c39a41822af610387492e3e53aa222b # v2
+        with:
+          tool: wasm-pack
+
+      # The npm package's `.` / `./element` entry points are TypeScript, built by
+      # tsdown, so the demo needs node as well as cargo. The pnpm version comes
+      # from the package's `packageManager` field, not from here.
+      - name: Setup pnpm
+        uses: pnpm/action-setup@0977fd99725f1db4007ccb2928dbb4e90d06cc86 # v6.0.10
+
+      - name: Setup Node
+        uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: pnpm
+          cache-dependency-path: packages/ssplayer-wgpu/pnpm-lock.yaml
+
+      # scripts/build-pages.sh IS the published tree: the two locales, the
+      # rustdoc grafted at site/api, and examples/web at site/demo -- assembled
+      # in the one order that works, because the English build clears site/ and
+      # everything else lives inside it. The same command a maintainer runs
+      # locally, so a publish cannot differ from what was checked by hand.
+      #
+      # prepare=no: the toolchain is a step of its own above, so a dependency
+      # failure is legible as one in the run summary.
+      - name: Build the site (docs + rustdoc + demo)
+        run: ./scripts/build-pages.sh prepare=no
+
+      - uses: actions/configure-pages@v6
+
+      - uses: actions/upload-pages-artifact@v4
+        with:
+          path: site
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v4

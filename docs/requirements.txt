@@ -1,0 +1,10 @@
+# Documentation toolchain (Zensical). Pinned for reproducible builds; bump deliberately.
+#
+# Zensical is the successor to MkDocs + Material for MkDocs from the same team. The
+# SpriteStudio-Docs portal moved first and this player follows it; the remaining sibling
+# players are still on `mkdocs-material`, so keep this pin aligned with the portal's
+# rather than with theirs.
+#
+# The configs here are deliberately still valid MkDocs configs, so installing
+# `mkdocs-material` instead builds the same site if you need to compare the two engines.
+zensical==0.0.56

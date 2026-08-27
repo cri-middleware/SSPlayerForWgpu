@@ -4654,6 +4654,35 @@ dependencies = [
 ]
 
 [[package]]
+name = "ssplayer-bevy"
+version = "0.1.0-alpha.1"
+dependencies = [
+ "bevy",
+ "image",
+ "pollster",
+ "ssplayer-wgpu",
+ "ssruntime",
+ "wgpu",
+]
+
+[[package]]
+name = "ssplayer-bevy-overall"
+version = "0.1.0"
+dependencies = [
+ "bevy",
+ "ssplayer-bevy",
+]
+
+[[package]]
+name = "ssplayer-bevy-viewer"
+version = "0.1.0"
+dependencies = [
+ "bevy",
+ "ssplayer-bevy",
+ "ssplayer-wgpu",
+]
+
+[[package]]
 name = "ssplayer-wgpu"
 version = "0.1.0"
 dependencies = [
@@ -4671,31 +4700,11 @@ dependencies = [
 ]
 
 [[package]]
-name = "ssplayer-wgpu-bevy"
-version = "0.1.0-alpha.1"
-dependencies = [
- "bevy",
- "image",
- "pollster",
- "ssplayer-wgpu",
- "ssruntime",
- "wgpu",
-]
-
-[[package]]
 name = "ssplayer-wgpu-ffi"
 version = "0.1.0"
 dependencies = [
  "cbindgen",
  "ssplayer-wgpu",
-]
-
-[[package]]
-name = "ssplayer-wgpu-overall-bevy"
-version = "0.1.0"
-dependencies = [
- "bevy",
- "ssplayer-wgpu-bevy",
 ]
 
 [[package]]
@@ -4708,15 +4717,6 @@ dependencies = [
  "ssruntime",
  "wgpu",
  "winit",
-]
-
-[[package]]
-name = "ssplayer-wgpu-viewer-bevy"
-version = "0.1.0"
-dependencies = [
- "bevy",
- "ssplayer-wgpu",
- "ssplayer-wgpu-bevy",
 ]
 
 [[package]]

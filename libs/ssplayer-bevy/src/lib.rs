@@ -84,7 +84,7 @@ impl Plugin for SsPlayerPlugin {
             .add_systems(PreUpdate, feedback::dispatch_feedback);
 
         let Some(render_app) = app.get_sub_app_mut(RenderApp) else {
-            error!("ssplayer-wgpu-bevy: no render app — add this plugin after DefaultPlugins");
+            error!("ssplayer-bevy: no render app — add this plugin after DefaultPlugins");
             return;
         };
 

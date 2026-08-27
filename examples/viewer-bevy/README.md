@@ -1,6 +1,6 @@
 # viewer-bevy — Bevy host
 
-The reference host for the **Bevy adapter** (`ssplayer-wgpu-bevy`), and its
+The reference host for the **Bevy adapter** (`ssplayer-bevy`), and its
 development viewer — the Bevy sibling of [`../viewer`](../viewer) (native winit)
 and the [`../viewer-metal-cpp`](../viewer-metal-cpp) / [`../viewer-dx12-cpp`](../viewer-dx12-cpp)
 / [`../viewer-vulkan-cpp`](../viewer-vulkan-cpp) C++ hosts.
@@ -14,7 +14,7 @@ Bevy game?"
 
 For a scripted, one-character walk through the whole sample set (Basic, Shape,
 Effect, Mesh, …), run [`../overall-bevy`](../overall-bevy) instead
-(`cargo run -p ssplayer-wgpu-overall-bevy`); this one is the interactive harness
+(`cargo run -p ssplayer-bevy-overall`); this one is the interactive harness
 for poking at a live cast.
 
 ## Build and run
@@ -22,7 +22,7 @@ for poking at a live cast.
 ```bash
 git submodule update --init          # once
 ./scripts/deploy-examples.sh         # once — generates assets/
-cargo run -p ssplayer-wgpu-viewer-bevy
+cargo run -p ssplayer-bevy-viewer
 ```
 
 It starts with two characters on `Basic`, in one pass. Every `.ssab` under
@@ -95,6 +95,6 @@ shared repo tree so there is one copy of the data, out of git.
 
 ## Related
 
-- [`../../libs/ssplayer-wgpu-bevy/README.md`](../../libs/ssplayer-wgpu-bevy/README.md) — the adapter: components, colour, masking, device loss
+- [`../../libs/ssplayer-bevy/README.md`](../../libs/ssplayer-bevy/README.md) — the adapter: components, colour, masking, device loss
 - [`../../libs/ssplayer-wgpu/README.md`](../../libs/ssplayer-wgpu/README.md) — the player crate's API
 - [`../viewer`](../viewer) — the same cast in a native winit host

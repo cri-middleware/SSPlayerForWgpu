@@ -114,11 +114,11 @@ pub(crate) fn sync_players(mut state: Option<ResMut<SsRenderState>>, extracted: 
             slot.started = false;
             slot.playing = false;
             if let Err(err) = slot.player.load(&extracted_player.src) {
-                error!("ssplayer-wgpu-bevy: could not load {:?}: {err:?}", extracted_player.src);
+                error!("ssplayer-bevy: could not load {:?}: {err:?}", extracted_player.src);
                 continue;
             }
             for missing in slot.player.missing_assets() {
-                warn!("ssplayer-wgpu-bevy: {:?} is missing {:?}", extracted_player.src, missing);
+                warn!("ssplayer-bevy: {:?} is missing {:?}", extracted_player.src, missing);
             }
         }
         if !extracted_player.animation.is_empty() && slot.animation != extracted_player.animation {
@@ -126,7 +126,7 @@ pub(crate) fn sync_players(mut state: Option<ResMut<SsRenderState>>, extracted: 
             if let Err(err) = slot.player.set_animation(&extracted_player.animation) {
                 // The names come from the pack, so listing them turns a typo
                 // into a one-line fix rather than a hunt through the .ssab.
-                error!("ssplayer-wgpu-bevy: no animation {:?} in {:?} ({err:?}); it has {:?}", extracted_player.animation, extracted_player.src, slot.player.animation_names().unwrap_or_default());
+                error!("ssplayer-bevy: no animation {:?} in {:?} ({err:?}); it has {:?}", extracted_player.animation, extracted_player.src, slot.player.animation_names().unwrap_or_default());
                 continue;
             }
             // A fresh tree, stopped at its head; transport starts over.
@@ -211,7 +211,7 @@ pub(crate) fn draw_players(
         if !state.warned_msaa {
             state.warned_msaa = true;
             warn!(
-                "ssplayer-wgpu-bevy: the view is multisampled (MSAA on); the player's pipelines \
+                "ssplayer-bevy: the view is multisampled (MSAA on); the player's pipelines \
                  are single-sampled, so nothing is drawn. Add `Msaa::Off` to the camera."
             );
         }
@@ -223,7 +223,7 @@ pub(crate) fn draw_players(
             if !state.warned_second_view {
                 state.warned_second_view = true;
                 warn!(
-                    "ssplayer-wgpu-bevy: more than one view is rendering; only the first draws. \
+                    "ssplayer-bevy: more than one view is rendering; only the first draws. \
                      A scene per view needs the timeline advance split off from the geometry build."
                 );
             }
@@ -249,7 +249,7 @@ pub(crate) fn draw_players(
     if format.is_srgb() && !state.warned_srgb {
         state.warned_srgb = true;
         warn!(
-            "ssplayer-wgpu-bevy: rendering into an sRGB target ({format:?}); SpriteStudio art \
+            "ssplayer-bevy: rendering into an sRGB target ({format:?}); SpriteStudio art \
              is authored in sRGB and will look too bright. Add `CompositingSpace::Srgb` to the \
              camera to composite in sRGB (a non-sRGB target)."
         );

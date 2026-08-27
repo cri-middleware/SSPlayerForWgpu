@@ -14,7 +14,7 @@ see what the adapter can do.
 ```bash
 git submodule update --init          # once
 ./scripts/deploy-examples.sh         # once — generates assets/
-cargo run -p ssplayer-wgpu-overall-bevy
+cargo run -p ssplayer-bevy-overall
 ```
 
 ## What it steps through
@@ -48,5 +48,5 @@ it — Bevy has no Unity/Godot-style project format).
 
 ## Related
 
-- [`../../libs/ssplayer-wgpu-bevy/README.md`](../../libs/ssplayer-wgpu-bevy/README.md) — the adapter: components, colour, masking, device loss
+- [`../../libs/ssplayer-bevy/README.md`](../../libs/ssplayer-bevy/README.md) — the adapter: components, colour, masking, device loss
 - [`../viewer-bevy`](../viewer-bevy) — the interactive development viewer
