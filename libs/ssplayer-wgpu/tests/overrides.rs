@@ -188,11 +188,7 @@ fn part_names_are_index_aligned_with_find_part_index() {
         if name.is_empty() {
             continue;
         }
-        assert_eq!(
-            player.find_part_index(name),
-            Some(i as u32),
-            "names[{i}] = {name:?} must resolve back to {i}"
-        );
+        assert_eq!(player.find_part_index(name), Some(i as u32), "names[{i}] = {name:?} must resolve back to {i}");
     }
 }
 
@@ -209,9 +205,7 @@ fn is_part_hidden_tracks_the_visibility_override() {
 
     // The override layer is the one thing that can hide a part on demand, so it
     // is what pins that this reads the live frame rather than a load-time table.
-    player
-        .set_part_visibility_override(&name, true, false)
-        .expect("the override should apply");
+    player.set_part_visibility_override(&name, true, false).expect("the override should apply");
     assert_eq!(player.is_part_hidden(&name), Some(true));
 
     player.clear_part_visibility_override(&name).expect("clearing should apply");
@@ -232,10 +226,7 @@ fn part_names_read_the_pack_rather_than_the_matrix_buffer() {
     player.load(format!("{}/overall/Basic.ssab", asset_root())).unwrap();
 
     assert_eq!(player.part_count(), 0, "no animation set up yet");
-    assert!(
-        !player.part_names().expect("the pack is bound").is_empty(),
-        "names are available before the first set_animation"
-    );
+    assert!(!player.part_names().expect("the pack is bound").is_empty(), "names are available before the first set_animation");
 }
 
 /// The unsuffixed form takes a part NAME — the index form is the optimisation,
