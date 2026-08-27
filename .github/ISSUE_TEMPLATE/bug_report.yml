@@ -1,0 +1,96 @@
+name: 🛠️ Bug report / 不具合の報告
+description: Something in the player behaves incorrectly. / プレイヤーの動作に問題がある場合。
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for taking the time to report this.
+
+        Before filing, please [search existing issues](https://github.com/cri-middleware/SSPlayerForWgpu/issues?q=is%3Aissue).
+        **Do not attach proprietary `.sspj` files here** — this is a public tracker. Use the
+        [Help Center](https://www.webtech.co.jp/help/en/spritestudio7/inquiries/ssplayer_tool/) to send those privately.
+
+        投稿前に既存の Issue を検索してください。**業務データの `.sspj` は公開の場である本 Issue に
+        添付しないでください。** 送付が必要な場合はヘルプセンターをご利用ください。
+
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened? / 症状
+      description: What you expected, and what you got instead. / 期待した挙動と、実際の挙動。
+    validations:
+      required: true
+
+  - type: textarea
+    id: repro
+    attributes:
+      label: Steps to reproduce / 再現手順
+      description: |
+        The smallest sequence that shows the problem. A minimal `.ssab` helps a lot.
+        問題を再現できる最小限の手順。最小限の `.ssab` があると助かります。
+      placeholder: |
+        1. Create the player with ...
+        2. Load the .ssab
+        3. Play "..."
+        4. See ...
+    validations:
+      required: true
+
+  - type: dropdown
+    id: face
+    attributes:
+      label: How are you using it? / 利用方法
+      options:
+        - Rust crate (ssplayer-wgpu)
+        - Bevy crate (ssplayer-bevy)
+        - C / C++ (static library + header)
+        - npm package (@spritestudio/ssplayer-wgpu, WebGPU)
+        - Not sure / わからない
+    validations:
+      required: true
+
+  - type: input
+    id: version
+    attributes:
+      label: Version / バージョン
+      description: The release you installed, or the commit you are on.
+      placeholder: 7.0.0-beta.1
+    validations:
+      required: true
+
+  - type: dropdown
+    id: backend
+    attributes:
+      label: wgpu backend / バックエンド
+      options:
+        - Vulkan
+        - Metal
+        - DX12
+        - OpenGL / GLES
+        - WebGPU (browser)
+        - Not sure / わからない
+    validations:
+      required: true
+
+  - type: input
+    id: os-gpu
+    attributes:
+      label: OS and GPU / OS と GPU
+      placeholder: macOS 26, Apple M3 / Windows 11, RTX 4070
+
+  - type: textarea
+    id: logs
+    attributes:
+      label: Log output / ログ出力
+      description: Any errors, warnings, or stack traces. / エラー・警告・スタックトレース。
+      render: text
+
+  - type: textarea
+    id: other-players
+    attributes:
+      label: Does it reproduce on another SpriteStudio player? / 他の SpriteStudio Player でも再現しますか？
+      description: |
+        If it does, the cause is most likely the shared SpriteStudio runtime rather than this
+        player, and saying so here saves a round trip.
+        再現する場合は、この Player 固有ではなく共通ランタイム側の可能性が高いため、その旨をお書きください。
