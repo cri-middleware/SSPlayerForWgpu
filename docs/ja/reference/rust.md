@@ -36,8 +36,8 @@ pub use ssruntime::TrackBlend;
 | `SSScene` | 描画ターゲット | `new`, `set_viewport`, `update`, `encode_mask_coverage`, `draw`, `stats`, `restore_device` |
 | `SSPlayer` | キャラクター | `load`, `set_animation`, 再生制御, オーバーライド, `events`, `set_transform`, `restore_textures` |
 
-`SSPlayer` は設計上 **wgpu の型のフィールドを一切持ちません**。「1 キャンバス＝1 キャラクター」を
-戻さないための規則です。[借用モデル](../wgpu/borrow-model.md)を参照。
+`SSPlayer` は **wgpu の型のフィールドを一切持ちません**。だから 1 つのシーンに何体でも載り、パックの
+アトラスのアップロードを共有します。[借用モデル](../wgpu/borrow-model.md)を参照。
 
 ## モジュール
 
@@ -80,7 +80,7 @@ pub use ssruntime::TrackBlend;
 ## バージョニング
 
 `ssplayer-wgpu` と `ssplayer-wgpu-bevy` は**独立**にバージョン管理されています。追いかける対象が違うから
-です（Player は SDK、アダプタは Bevy のリリース系列）。workspace 共通バージョンは意図的にありません。
+です（Player は SDK、アダプタは Bevy のリリース系列）。
 
 wgpu はリポジトリ全体で **29** 系に固定されています。
 [エンジンへの組み込み](../wgpu/engines.md#the-wgpu-pin)を参照。

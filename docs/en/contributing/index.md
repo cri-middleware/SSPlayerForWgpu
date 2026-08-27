@@ -113,11 +113,17 @@ cargo build -p ssplayer-wgpu --target wasm32-unknown-unknown --no-default-featur
 cargo build -p ssplayer-wgpu-ffi                          # also regenerates the C header
 ```
 
-Two testing notes that have caught people out:
+Three testing notes:
 
 * **Rendering tests skip themselves when no GPU adapter is present**, so a green run on such a
   machine may have verified nothing. CI installs a software Vulkan device (Mesa lavapipe) and fails
   hard if none is found. When you change rasterisation, dump the readback to a PNG and look at it.
+* **Measure a performance change before and after, and drive a real frame loop while doing it.**
+  Interleave `update` with the render pass exactly as a frame does: timing them in separate loops
+  makes anything that caches across frames look far better than it is. `cargo test --test scale --
+  --ignored` is the repository's throughput harness and does both; it is `#[ignore]`d because CI's
+  software GPU cannot judge speed. The counters a host sees are in
+  [Performance](../guide/performance.md).
 * **Take a golden dump before touching geometry.** `tests/golden.rs::golden_corpus` (ignored by
   default) renders every fixture/animation/frame/stencil combination and byte-compares it against a
   previous run:

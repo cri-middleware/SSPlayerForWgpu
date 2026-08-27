@@ -77,9 +77,9 @@ fn setup(mut commands: Commands) {
 | `SsTransform` | `x`, `y`, `scale_x`, `scale_y`, `rotation` | ゼロ |
 | `SsPlayback` | `playing`, `speed`, `order`, `alpha`, `visible`, `restart` | ゼロ |
 
-Bevy の `Transform` を**あえて使っていません**。あちらは 3D アフィンで、Player の 5 つのスカラーへの
-分解は非可逆です。両者を連動させたいアプリは、コピーするシステムを 1 つ書き、どちらを正とするかを
-自分で決められます。
+Bevy の `Transform` では**ありません**。あちらは 3D アフィンで、Player の 5 つのスカラーへの分解は
+非可逆だからです。連動させたい場合はコピーするシステムを 1 つ書いてください。どちらを正とするかは
+あなたが決められます。
 
 ## 色：カメラに `CompositingSpace::Srgb` を付ける
 

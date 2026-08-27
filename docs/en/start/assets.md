@@ -36,8 +36,8 @@ Under reference mode the image paths are written **relative to the `.ssab`'s own
 keep the exported files together, and the loader finds them.
 
 !!! note "Embedded costs nothing extra in the browser"
-    The web face carries no image decoder on purpose: the browser already ships one, so embedded
-    atlases go out as encoded bytes and come back through `createImageBitmap`. On native, the
+    The web face carries no image decoder: the browser already ships one, so embedded atlases go out
+    as encoded bytes and come back through `createImageBitmap`. On native, the
     `embedded` feature (on by default) carries the decoder.
 
 ## Where the files have to be

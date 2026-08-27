@@ -118,10 +118,8 @@ The runtime's structure-of-arrays data is copied into the scene's arena and expa
 stage from `@builtin(vertex_index)`. The CPU writes one 80-byte primitive per part and nothing per
 vertex.
 
-Two consequences for anyone extending the player: put new per-part data **on the primitive** rather
-than reintroducing per-vertex CPU work, and leave the vertex stage's scalar position arithmetic
-alone — rewriting it "cleanly" as a matrix multiply invites FMA contraction and costs the bit-exact
-golden comparison the renderer is verified with.
+What that means for you: the cost of a character scales with its part count, not with the geometry
+those parts expand into, and there is no vertex buffer for you to supply, share or resize.
 
 ## Device loss
 

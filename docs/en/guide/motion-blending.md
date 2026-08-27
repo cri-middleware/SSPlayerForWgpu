@@ -78,9 +78,8 @@ player.cancel_track_fade(1)?;
 
 ## Scrubbing a track: continuous control
 
-The trick worth knowing. Author a control axis as an animation — a head turning from full left to
-full right, an eyelid opening — then do not *play* it. **Scrub it** with whatever value you are
-tracking:
+Author a control axis as an animation — a head turning from full left to full right, an eyelid
+opening — then do not *play* it. **Scrub it** with whatever value you are tracking:
 
 ```rust
 player.set_track_animation(1, "look_lr")?;

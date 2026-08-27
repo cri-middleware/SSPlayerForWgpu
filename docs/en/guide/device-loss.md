@@ -86,9 +86,8 @@ format, and the scene rebuilds its pipelines on the frame that happens — mask 
 
 There is no portable "lose the device now" call. In a browser, `device.destroy()` from the console
 is the closest thing; on a desktop, a driver reset or switching the discrete/integrated GPU while
-running does it. Worth doing once before shipping: the failure mode of *not* handling it is a
-window that is frozen or gone, and it is the kind of bug that only ever reproduces on someone
-else's machine.
+running does it. Try it once before shipping: unhandled, this shows up as a frozen or blank window
+on someone else's machine.
 
 ## Next
 

@@ -1,7 +1,7 @@
 # Playback and transport
 
-Four verbs, and they are not interchangeable. Getting this page wrong is the most common source of
-"why did my animation jump back to the start?", so it is short and blunt.
+Four verbs, and they are not interchangeable. If an animation jumps back to its start when you did
+not ask it to, this page is why.
 
 ## The four verbs
 
@@ -188,7 +188,7 @@ player's invention.
 | Survives `set_animation` | Does **not** survive |
 |---|---|
 | speed scale, frame-rate override, playback direction, frame skip | the **section** — frame numbers mean nothing against a different clip |
-| the loop count (this player restores it deliberately, as the others do) | |
+| the loop count | |
 
 The tree *is* rebuilt from scratch when the pack behind the name has been replaced — a new pack is
 a new owner, and nothing is carried across that.

@@ -8,8 +8,7 @@ functions a frame; it renders through **DirectX 12 on Windows, Metal on macOS an
     here: **no wgpu type crosses this ABI**, and none appears in the header. What you hand over is
     a platform window handle, and what comes back is `SS_OK` or an error code.
 
-    The one consequence worth knowing up front: this face **owns its own graphics device**, built
-    on the window you name. It does not draw into a `ID3D12CommandList` or `MTLCommandBuffer` of
+    One consequence: this face **owns its own graphics device**, built on the window you name. It does not draw into a `ID3D12CommandList` or `MTLCommandBuffer` of
     yours. Sharing an engine's device through a C ABI is a
     [deliberate non-goal](../limitations.md#no-device-sharing-across-the-c-abi) — from C the route
     to compositing is offscreen rendering plus a shared texture.
@@ -38,10 +37,8 @@ functions a frame; it renders through **DirectX 12 on Windows, Metal on macOS an
     | `ssplayer-wgpu-linux-x86_64.zip` | Linux x86_64 (Vulkan) |
     | `ssplayer-wgpu-linux-aarch64.zip` | Linux aarch64 (Vulkan) |
 
-    **Static libraries only, on purpose.** A C++ host links the library into its own binary, which
-    is the point of this face owning its device; shipping the `.dll` / `.dylib` / `.so` alongside
-    would add code signing, SONAMEs and import-library pairing to every release for a second way to
-    do the same thing.
+    **Static libraries only** — you link the library into your own binary, and there is no runtime
+    dependency to ship beside it. For a shared library, build from source; `build.sh` produces one.
 
 === "From source"
 

@@ -45,8 +45,8 @@ Without it the element **loads and holds its first frame**, poster-like — draw
 the transport, so the character is on screen, not moving. That is the HTML convention (`<video
 autoplay>`), and it matches `<ss-player>`, the WebGL player's element.
 
-It is worth knowing that the *placed* players in the family (Godot, Unity) default the other way: a
-scene node has no code to call `play()` for it, and an attribute **is** that code.
+(The *placed* players in the family, Godot and Unity, default the other way: a scene node has no
+code to call `play()` for it, and an attribute **is** that code.)
 
 ## Properties and methods
 
@@ -76,8 +76,8 @@ animation names, so a UI can offer them.
 It selects the animation (`anim`, or the first) and then honours `autoplay` exactly as the initial
 load did — so an element without `autoplay` holds the new pack's first frame too.
 
-Passing `pack` makes the element fetch the bytes itself and register them under that name, because
-`load` deliberately takes no name override.
+Passing `pack` makes the element fetch the bytes itself and register them under that name, since
+`load` takes no name override.
 
 ## Layout and resolution
 
@@ -97,7 +97,7 @@ Passing `pack` makes the element fetch the bytes itself and register them under 
 `IntersectionObserver` on the canvas, and the document's `visibilitychange`. It exists for battery
 on mobile, and for the viewability rule ad creatives are measured against.
 
-Two details worth knowing:
+Two behaviours to expect:
 
 * **Until the first observer callback the element assumes it is hidden**, so an element that starts
   off-screen never paints an initial frame it would immediately throw away.
@@ -133,7 +133,7 @@ surface holds a swapchain, and one per element that ever existed would leak.
 
 Reach for [`SsContextWeb`](./js.md) directly when you want:
 
-* **several characters in one canvas** — the element is deliberately one-to-one;
+* **several characters in one canvas** — the element is one canvas, one character;
 * your own frame loop, or the animation driven by something other than `requestAnimationFrame`;
 * control over when the device is created, or a designed fallback where WebGPU is missing;
 * a canvas you already own and manage.

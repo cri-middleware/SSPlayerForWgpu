@@ -10,8 +10,7 @@ crosses them. Three kinds:
 | **Audio** | a sound name, its hashes, and a play count | a footstep, a voice cue |
 
 !!! warning "The player never produces sound"
-    An audio event says *what* to play and *how many times*. Feeding it to an audio stack is the
-    host's job — deliberately, because sound belongs to the application, not to a renderer.
+    An audio event says *what* to play and *how many times*. Feed the cue to your own audio stack.
 
 ## Reading them
 
@@ -92,7 +91,7 @@ Read after the update that produced them. What you get is **the events the last 
 
 ## Every frame stepped through raises its events
 
-This is the property that makes the list trustworthy, and it is easy to get wrong by hand.
+This is what makes the list complete.
 
 A slow tick under frame skipping crosses several authored frames at once, and a loop can wrap in
 the middle of one. **Every frame stepped over reports its events**, not just the frame the playhead

@@ -21,9 +21,9 @@ exposes today is the matrix in [Scopes and names](./guide/concepts.md#what-each-
 The C face **builds and owns its graphics device** on the window handle you give it. It cannot draw
 into a command list or render pass of yours.
 
-This is structural, not an omission: wgpu types have no stable C representation, so there is nothing
-to pass across the boundary. Embedding the player in an engine that owns a device is therefore a
-**Rust-only** capability, delivered as [adapter crates](./wgpu/engines.md).
+wgpu types have no stable C representation, so there is nothing to pass across the boundary.
+Embedding the player in an engine that owns a device is therefore a **Rust-only** capability,
+delivered as [adapter crates](./wgpu/engines.md).
 
 From C, the route to compositing is offscreen rendering plus a shared texture.
 
@@ -58,9 +58,8 @@ which is maintained and is this player's rendering-parity reference. A browser w
 
 ### Masks: 24 writers
 
-The coverage-bitmap backend carries one bit per mask writer, 24 of them. That is the mask
-specification's own number, shared with the reference implementations, not a shortcut taken here.
-See [Masks](./guide/masks.md).
+The coverage-bitmap backend carries one bit per mask writer, 24 of them — the same limit the other
+SpriteStudio players implement. See [Masks](./guide/masks.md).
 
 ## Playback
 

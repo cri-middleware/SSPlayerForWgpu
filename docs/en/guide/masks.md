@@ -4,8 +4,7 @@ A mask part clips what it covers — a character seen through a keyhole, a healt
 sprite revealed by a shape. The animator authors it; the player has to clip with something the GPU
 offers, and **which something depends on your render target, not on the animation**.
 
-That is the whole of this page: the same `.ssab` must look the same either way, and it is tested
-that it does.
+The same `.ssab` looks the same either way; what changes is what you have to provide.
 
 ## The two backends
 
@@ -83,10 +82,9 @@ scene.draw(&renderer, &mut rpass);
 **The bake and the pass that samples it go on one `CommandEncoder`.** Passes in one encoder run in
 order, so the bitmap and the transform that samples it are both *this* frame's and cannot disagree.
 
-That is why this player has none of the one-frame mask lag that engines working around this
-problem carry. Splitting the bake into another encoder, another system or another frame puts that
-bug back — and the double-buffer workaround the reference implementations use is for engines that
-have the lag, not for this one.
+That ordering is the whole guarantee: split the bake into another encoder, another system or
+another frame and the mask a character is clipped by is the previous frame's — visible as the clip
+trailing fast movement by one frame.
 
 Under `MaskBackend::Stencil` the call is a harmless no-op, so it is safe to leave in a host that
 can switch backends at runtime.
@@ -96,15 +94,14 @@ can switch backends at runtime.
 Every character **unwinds the stencil writers it applied** before the next one draws. Without that,
 putting two characters in one render pass would let the first one's mask clip the second.
 
-This is worth knowing because it is invisible until it is not: drawing one character per pass with
-`LoadOp::Clear(0)` cannot show the bug, so a host that starts with one character per pass and later
-merges them would meet it at the worst moment. The player handles it; a regression test compares
-"N characters, one pass" against "one pass each", pixel for pixel.
+You get this without asking. It is worth pointing out only because of when it would otherwise
+appear: one character per pass with `LoadOp::Clear(0)` cannot show the bug, so it would surface on
+the day you merge your cast into a single pass.
 
 ## Limits
 
-* The coverage bitmap carries **one bit per mask writer, 24 writers**. That is the mask
-  specification's own number, shared with the reference implementations, not a shortcut taken here.
+* The coverage bitmap carries **one bit per mask writer, 24 writers** — the same limit the other
+  SpriteStudio players implement.
 * Mask parts are clipping shapes, not colours: what they draw is the clip, never pixels.
 
 ## Next

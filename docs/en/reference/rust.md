@@ -36,8 +36,8 @@ Most applications touch six of these: `SSRenderer`, `SSScene`, `SceneConfig`, `S
 | `SSScene` | one render target | `new`, `set_viewport`, `update`, `encode_mask_coverage`, `draw`, `stats`, `restore_device` |
 | `SSPlayer` | one character | `load`, `set_animation`, transport, overrides, `events`, `set_transform`, `restore_textures` |
 
-`SSPlayer` holds **no wgpu-typed field**, by design — that is what keeps "one canvas, one
-character" from coming back. See [The borrow model](../wgpu/borrow-model.md).
+`SSPlayer` holds **no wgpu-typed field**, so one scene carries any number of them and they share
+one upload of a pack's atlases. See [The borrow model](../wgpu/borrow-model.md).
 
 ## Modules
 
@@ -80,8 +80,7 @@ loaded or the name does not resolve.
 ## Versioning
 
 `ssplayer-wgpu` and `ssplayer-wgpu-bevy` are versioned **independently**, because they track
-different things: the player tracks the SDK, and the adapter tracks Bevy's release line. There is
-deliberately no shared workspace version.
+different things: the player tracks the SDK, and the adapter tracks Bevy's release line.
 
 wgpu is pinned to the **29** line repository-wide. See
 [Engine integration](../wgpu/engines.md#the-wgpu-pin).

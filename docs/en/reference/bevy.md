@@ -80,8 +80,8 @@ fn on_finish(mut finished: MessageReader<SsFinished>, mut commands: Commands) {
 !!! warning "Both feedback surfaces are one frame behind"
     Playback runs in the render world, after that frame's `Update`. What you read this frame is
     what playback produced last frame. For a sound cue or a state change that is imperceptible; a
-    host that cannot tolerate it would need playback in the main world, which this crate
-    deliberately does not do.
+    host that cannot tolerate it would need playback in the main world, which this adapter does not
+    do.
 
 ## Where the work happens
 

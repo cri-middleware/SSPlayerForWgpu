@@ -45,7 +45,7 @@ a second character on screen costs a playback tree and nothing else.
 | Target | `SSScene` | `ss_scene_t` | `SsSurfaceWeb` | *(the camera's view)* |
 | Character | `SSPlayer` | `ss_player_t` | `SsPlayerWeb` | an entity with `SsPlayer` |
 
-Two asymmetries worth knowing, because they change what is cheap:
+Two asymmetries change what is cheap:
 
 * **C fuses the device and target scopes into `ss_scene_t`.** That handle is a whole graphics
   stack built on the window you named — so *one window is one device*. Two windows in one C++
@@ -115,8 +115,8 @@ for what is planned.
 | [Frame statistics](./performance.md) | ✅ | ✅ | ✅ | — |
 | Drawing into a render pass you own | ✅ | — | — | ✅ |
 
-**Motion blending is Rust-only today**, and it is the feature this player has that the sibling
-players do not — see [Motion blending](./motion-blending.md).
+**[Motion blending](./motion-blending.md) is Rust-only today.** From the other faces, layer several
+characters and order them with `set_order` instead.
 
 ## Two calls, not one: selecting and starting
 

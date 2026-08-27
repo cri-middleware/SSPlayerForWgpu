@@ -78,9 +78,9 @@ at their defaults.
 | `SsTransform` | `x`, `y`, `scale_x`, `scale_y`, `rotation` | Free |
 | `SsPlayback` | `playing`, `speed`, `order`, `alpha`, `visible`, `restart` | Free |
 
-It is deliberately **not** Bevy's `Transform`: that is a 3D affine whose decomposition into the
-player's five scalars is lossy. An app that wants the two linked writes the one system that copies
-across, and keeps the choice of which is authoritative.
+It is **not** Bevy's `Transform`: that is a 3D affine, and decomposing it into the player's five
+scalars is lossy. If you want the two linked, write the one system that copies across — you keep the
+choice of which is authoritative.
 
 ## Colour: the camera needs `CompositingSpace::Srgb`
 

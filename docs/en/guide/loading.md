@@ -1,8 +1,8 @@
 # Loading and assets
 
 **Loading is one call on every face.** It resolves the pack, its atlases in either export mode, and
-transitively the sibling `.ssab` files its instance parts play from. There is no API that makes you
-collect textures by hand — hosts avoid players that demand it.
+transitively the sibling `.ssab` files its instance parts play from. You never have to collect the
+textures yourself.
 
 === "Rust"
 
@@ -71,8 +71,8 @@ The borrow model lends no device until the frame starts, so a load reads bytes a
 it read is decoded and uploaded by the **first `update`**, on exactly the timeline an embedded
 atlas has always taken.
 
-One consequence worth remembering: immediately after a load, the renderer does not know a texture's
-size yet. Ask after the first frame.
+So immediately after a load, the renderer does not know a texture's size yet. Ask after the first
+frame.
 
 ## What did not arrive: `missing`, not an error
 
