@@ -131,9 +131,20 @@ respect are in [`AGENTS.md`](./AGENTS.md) under *Hard constraints*.
 - [ ] **Version stamping.** Versions are hand-written, and the SDK is a submodule
       rather than a release zip, so artifacts need to record the SDK commit they
       were built from.
-- [ ] **Missing repository assets** — `CHANGELOG.md`, `THIRD_PARTY_NOTICES.md`,
-      `SHA256SUMS` for artifacts, and the `CONTRIBUTING.md` / `SUPPORT.md` /
-      `CODE_OF_CONDUCT.md` every sibling player carries.
+- [ ] **`CHANGELOG.md`** — with the first release, not before it. Entries written
+      now would describe a version nobody can install, and the shape of the
+      first one is decided by what actually ships.
+- [ ] **`THIRD_PARTY_NOTICES.md`.** The other repository asset the sibling players
+      carry and this one does not, and the only one that is not just prose:
+      `cargo about` generates it, which means adding `about.toml` and
+      `about-markdown.hbs` here. **The SDK's `accepted` list does not cover this
+      dependency tree** — a run against it stops on 12 crates, over four
+      licences the SDK never meets: `MPL-2.0` ×4 (the symphonia family, pulled in
+      through Bevy's audio), `BSD-2-Clause` ×4, `MIT-0` ×3 and one
+      `(MIT OR Apache-2.0) AND NCSA`. Each is a decision to accept rather than a
+      config line, MPL-2.0 most of all, so this wants its own review.
+      `build-release.sh` already copies the file into every archive when it
+      exists, so nothing else has to change once it does.
 - [ ] ⛔ **crates.io.** `ssruntime` and `ssab` are path dependencies into the
       submodule; cargo will not publish a crate that depends on paths only.
 - [ ] **Browser-side measurement.** `surface.stats()` is wired through to

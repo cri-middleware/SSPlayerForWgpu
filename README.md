@@ -1,3 +1,5 @@
+[**English**](./README.md) | [**日本語**](./README.ja.md)
+
 # SSPlayerForWgpu
 
 **Professional 2D animation for Rust — one wgpu renderer, from a native window to the browser to a C++ host.**
@@ -253,16 +255,10 @@ products.
 
 ## 🤝 Contributing
 
-[AGENTS.md](./AGENTS.md) records the invariants every change has to respect and how to verify one;
-[ROADMAP.md](./ROADMAP.md) is what is planned and what was deliberately declined. A full check is:
-
-```bash
-cargo fmt --all -- --check
-cargo clippy --workspace --all-targets -- -D warnings
-cargo test --workspace                                                  # needs deploy-examples.sh first
-cargo build -p ssplayer-wgpu --target wasm32-unknown-unknown --no-default-features --features web
-cargo build -p ssplayer-wgpu --features ffi                             # also regenerates the C header
-```
+[CONTRIBUTING.md](./CONTRIBUTING.md) is the guide — the constraints, how to report a bug, how to set
+the environment up, and what to run before opening a pull request. [AGENTS.md](./AGENTS.md) is the full
+invariant list and the verification matrix; [ROADMAP.md](./ROADMAP.md) is what is planned and what was
+deliberately declined.
 
 The SDK is a submodule, so a change that needs `ssruntime` or `ssab` is a pull request there followed by
 a submodule bump here.

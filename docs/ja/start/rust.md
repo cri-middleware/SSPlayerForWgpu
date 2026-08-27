@@ -23,7 +23,7 @@
 
     ```toml
     [dependencies]
-    ssplayer-wgpu = "0.1"
+    ssplayer-wgpu = "7.0.0-beta.1"
     ```
 
     コード側は何も変わりません。下の git 依存でビルドされるものと同じクレートです。
