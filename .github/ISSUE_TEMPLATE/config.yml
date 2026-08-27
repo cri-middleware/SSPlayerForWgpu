@@ -1,0 +1,15 @@
+# Issues are for bugs and feature requests. Everything else has a better home —
+# see SUPPORT.md, which these links mirror.
+#
+# Two links the sibling players carry are deliberately absent. SpriteStudio-SDK
+# is not public, so its issue tracker would 404 for exactly the people who
+# would follow it; and this repository has no SECURITY.md to point at yet.
+blank_issues_enabled: false
+contact_links:
+  - name: ❓ Question about how to use the player / 使い方の質問
+    url: https://spritestudio.jp/community/
+    about: Implementation advice and tips, in the official community forum. Issues are not for usage questions.
+
+  - name: 🔒 Private inquiry, or sending reproduction data / 個別のお問い合わせ・データ送付
+    url: https://www.webtech.co.jp/help/en/spritestudio7/inquiries/ssplayer_tool/
+    about: Use the Help Center for sensitive reports, proprietary .sspj files, or contractual support. Never attach proprietary data to a public issue.
