@@ -1,6 +1,6 @@
 # License
 
-`ssplayer-wgpu`, `ssplayer-wgpu-bevy` and `@spritestudio/ssplayer-wgpu` are released under the
+`ssplayer-wgpu`, `ssplayer-bevy` and `@spritestudio/ssplayer-wgpu` are released under the
 **BSD 3-Clause License**.
 
 The full text is

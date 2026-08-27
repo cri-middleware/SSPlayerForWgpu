@@ -11,7 +11,7 @@ description = "Bevy host that draws ssplayer-wgpu characters, for developing and
 publish = false
 
 [dependencies]
-ssplayer-wgpu-bevy = { path = "../../libs/ssplayer-wgpu-bevy" }
+ssplayer-bevy = { path = "../../libs/ssplayer-bevy" }
 # The player crate itself, for `SSPack`: this host parses the `.ssab` catalogue in
 # the main world to enumerate each pack's animation names — the same thing the
 # native viewer does — because the playback tree that could answer lives in the

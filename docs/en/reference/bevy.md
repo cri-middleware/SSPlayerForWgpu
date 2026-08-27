@@ -2,7 +2,7 @@
 
 The whole authoring surface is one plugin, three components, one state component and three
 messages. Generated docs:
-<a href="../../api/ssplayer_wgpu_bevy/index.html" target="_blank" rel="noreferrer">**rustdoc for `ssplayer_wgpu_bevy`**</a>.
+<a href="../../api/ssplayer_bevy/index.html" target="_blank" rel="noreferrer">**rustdoc for `ssplayer_bevy`**</a>.
 
 **Bevy 0.19.x, and no other line** — see [Get started with Bevy](../start/bevy.md#supported-bevy).
 

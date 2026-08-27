@@ -4,7 +4,7 @@ The generated reference is published beside these pages:
 
 <a href="../../api/ssplayer_wgpu/index.html" target="_blank" rel="noreferrer">**📦 rustdoc for `ssplayer_wgpu`**</a>
 &nbsp;·&nbsp;
-<a href="../../api/ssplayer_wgpu_bevy/index.html" target="_blank" rel="noreferrer">**rustdoc for `ssplayer_wgpu_bevy`**</a>
+<a href="../../api/ssplayer_bevy/index.html" target="_blank" rel="noreferrer">**rustdoc for `ssplayer_bevy`**</a>
 
 Locally, `cargo doc --no-deps --all-features -p ssplayer-wgpu --open` renders the same thing.
 
@@ -79,7 +79,7 @@ loaded or the name does not resolve.
 
 ## Versioning
 
-`ssplayer-wgpu` and `ssplayer-wgpu-bevy` are versioned **independently**, because they track
+`ssplayer-wgpu` and `ssplayer-bevy` are versioned **independently**, because they track
 different things: the player tracks the SDK, and the adapter tracks Bevy's release line.
 
 wgpu is pinned to the **29** line repository-wide. See

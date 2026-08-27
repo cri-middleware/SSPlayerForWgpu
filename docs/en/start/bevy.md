@@ -1,7 +1,7 @@
 # Get started with Bevy
 
 Spawn a character as an entity, and Bevy draws it in its own 2D pass on the device it already owns.
-`ssplayer-wgpu-bevy` is an adapter, not a second player: the drawing is `ssplayer-wgpu`, and this
+`ssplayer-bevy` is an adapter, not a second player: the drawing is `ssplayer-wgpu`, and this
 crate is the seam.
 
 **You never touch wgpu here.** If you find yourself wanting a `SSRenderer`, you are on the
@@ -26,18 +26,18 @@ resolving a single `wgpu`.
 
     ```toml
     [dependencies]
-    ssplayer-wgpu-bevy = "0.1.0-alpha.1"
+    ssplayer-bevy = "0.1.0-alpha.1"
     ```
 
 === "From source"
 
     ```toml
     [dependencies]
-    ssplayer-wgpu-bevy = { git = "https://github.com/cri-middleware/SSPlayerForWgpu" }
+    ssplayer-bevy = { git = "https://github.com/cri-middleware/SSPlayerForWgpu" }
     ```
 
     It pulls `ssplayer-wgpu` in; you do not depend on both. To vendor the source instead, point at
-    `libs/ssplayer-wgpu-bevy` inside a checkout of this repository and run
+    `libs/ssplayer-bevy` inside a checkout of this repository and run
     `git submodule update --init --recursive` there.
 
 ## A whole app
@@ -46,7 +46,7 @@ resolving a single `wgpu`.
 use bevy::prelude::*;
 use bevy::camera::CompositingSpace;
 use bevy::render::view::Msaa;
-use ssplayer_wgpu_bevy::{SsPlayback, SsPlayer, SsPlayerPlugin, SsTransform};
+use ssplayer_bevy::{SsPlayback, SsPlayer, SsPlayerPlugin, SsTransform};
 
 fn main() {
     App::new()

@@ -74,7 +74,7 @@ beside these pages.
 
 Two more things are published beside this text rather than inside it: the
 <a href="./api/" target="_blank" rel="noreferrer">Rust API reference</a> (rustdoc for
-`ssplayer_wgpu` and `ssplayer_wgpu_bevy`) and the
+`ssplayer_wgpu` and `ssplayer_bevy`) and the
 <a href="./demo/" target="_blank" rel="noreferrer">WebGPU demo</a>. Both are in the navigation bar
 as well.
 
@@ -86,7 +86,7 @@ today, and each page says what unblocks its released form.
 | Face | Released as | Status |
 |---|---|---|
 | Rust | `ssplayer-wgpu` on crates.io | 🚧 waits on the SDK crates publishing first |
-| Bevy | `ssplayer-wgpu-bevy` on crates.io | 🚧 same, plus the player itself |
+| Bevy | `ssplayer-bevy` on crates.io | 🚧 same, plus the player itself |
 | C / C++ | `ssplayer-wgpu-<platform>.zip` on GitHub Releases — `include/`, `lib/`, `LICENSE.md` | 🚧 the workflow exists; no release cut yet |
 | Web | `@spritestudio/ssplayer-wgpu` on npm | 🚧 not on npm yet |
 

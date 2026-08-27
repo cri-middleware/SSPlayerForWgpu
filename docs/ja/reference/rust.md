@@ -4,7 +4,7 @@
 
 <a href="../../api/ssplayer_wgpu/index.html" target="_blank" rel="noreferrer">**📦 `ssplayer_wgpu` の rustdoc**</a>
 &nbsp;·&nbsp;
-<a href="../../api/ssplayer_wgpu_bevy/index.html" target="_blank" rel="noreferrer">**`ssplayer_wgpu_bevy` の rustdoc**</a>
+<a href="../../api/ssplayer_bevy/index.html" target="_blank" rel="noreferrer">**`ssplayer_bevy` の rustdoc**</a>
 
 手元では `cargo doc --no-deps --all-features -p ssplayer-wgpu --open` で同じものが見られます。
 
@@ -79,7 +79,7 @@ pub use ssruntime::TrackBlend;
 
 ## バージョニング
 
-`ssplayer-wgpu` と `ssplayer-wgpu-bevy` は**独立**にバージョン管理されています。追いかける対象が違うから
+`ssplayer-wgpu` と `ssplayer-bevy` は**独立**にバージョン管理されています。追いかける対象が違うから
 です（Player は SDK、アダプタは Bevy のリリース系列）。
 
 wgpu はリポジトリ全体で **29** 系に固定されています。

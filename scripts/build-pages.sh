@@ -53,7 +53,7 @@ usage () {
   echo "                          docs=no keeps whatever is already in site/, which is"
   echo "                          how you re-check only a graft."
   echo "  api=<yes|no>            Build the rustdoc for ssplayer-wgpu and"
-  echo "                          ssplayer-wgpu-bevy into site/api/ (default: $API)."
+  echo "                          ssplayer-bevy into site/api/ (default: $API)."
   echo "  demo=<yes|no>           Build examples/web into site/demo/ (default: $DEMO)."
   echo "                          Needs the wasm32 target, wasm-pack and pnpm."
   echo "  assets=<auto|yes|no>    Run deploy-examples.sh before the demo, which converts"
@@ -178,10 +178,17 @@ fi
 # (it is what documents the `ffi` and `web` faces) and wrong for the adapter,
 # which has none to turn on.
 build_api () {
-  step cargo doc --no-deps --all-features -p ssplayer-wgpu
-  step cargo doc --no-deps -p ssplayer-wgpu-bevy
-
   local doc_dir="${CARGO_TARGET_DIR:-$ROOT_DIR/target}/doc"
+
+  # Cleared first, because `cargo doc` only ever ADDS to this directory: a crate
+  # that has since been renamed or removed would still be sitting there from an
+  # earlier build, and the copy below would publish it. Costs a re-render of two
+  # crates, not a rebuild -- the compiled artifacts it reads live in target/debug.
+  rm -rf "$doc_dir"
+
+  step cargo doc --no-deps --all-features -p ssplayer-wgpu
+  step cargo doc --no-deps -p ssplayer-bevy
+
   if [ ! -d "$doc_dir" ]; then
     echo "$APP: cargo doc produced no $doc_dir" >&2
     exit 1
@@ -209,7 +216,7 @@ build_api () {
 <h1>SSPlayer for wgpu — Rust API</h1>
 <ul>
   <li><a href="ssplayer_wgpu/index.html">ssplayer_wgpu</a> — the player</li>
-  <li><a href="ssplayer_wgpu_bevy/index.html">ssplayer_wgpu_bevy</a> — the Bevy adapter</li>
+  <li><a href="ssplayer_bevy/index.html">ssplayer_bevy</a> — the Bevy adapter</li>
 </ul>
 HTML
 }

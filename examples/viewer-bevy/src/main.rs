@@ -42,8 +42,8 @@ use bevy::input::ButtonInput;
 use bevy::prelude::*;
 use bevy::render::view::Msaa;
 use bevy::window::FileDragAndDrop;
+use ssplayer_bevy::{SsEvent, SsEventMessage, SsFinished, SsLooped, SsPlayback, SsPlaybackState, SsPlayer, SsPlayerPlugin, SsTransform};
 use ssplayer_wgpu::SSPack;
-use ssplayer_wgpu_bevy::{SsEvent, SsEventMessage, SsFinished, SsLooped, SsPlayback, SsPlaybackState, SsPlayer, SsPlayerPlugin, SsTransform};
 use std::path::{Path, PathBuf};
 
 /// The repo's `assets/`, absolute so the viewer is launchable from anywhere and so

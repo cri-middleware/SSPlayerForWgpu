@@ -26,7 +26,7 @@ use bevy::camera::CompositingSpace;
 use bevy::input::ButtonInput;
 use bevy::prelude::*;
 use bevy::render::view::Msaa;
-use ssplayer_wgpu_bevy::{SsEvent, SsEventMessage, SsFinished, SsLooped, SsPlayback, SsPlaybackState, SsPlayer, SsPlayerPlugin, SsTransform};
+use ssplayer_bevy::{SsEvent, SsEventMessage, SsFinished, SsLooped, SsPlayback, SsPlaybackState, SsPlayer, SsPlayerPlugin, SsTransform};
 
 /// The repo's `assets/`, absolute so the example is launchable from anywhere and
 /// so Bevy's asset root (for the audio files) points at the same tree the player

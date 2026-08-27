@@ -1,4 +1,4 @@
-# ssplayer-wgpu-bevy
+# ssplayer-bevy
 
 SpriteStudio 7 characters inside a [Bevy](https://bevy.org) app, drawn on the
 device Bevy already owns.
@@ -25,7 +25,7 @@ no such thing, so the range is stated here and the workspace resolving a single
 use bevy::prelude::*;
 use bevy::camera::CompositingSpace;
 use bevy::render::view::Msaa;
-use ssplayer_wgpu_bevy::{SsPlayback, SsPlayer, SsPlayerPlugin, SsTransform};
+use ssplayer_bevy::{SsPlayback, SsPlayer, SsPlayerPlugin, SsTransform};
 
 fn main() {
     App::new()

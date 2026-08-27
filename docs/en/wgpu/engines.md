@@ -12,7 +12,7 @@ and it is delivered as an *adapter crate* rather than as a feature of the player
 * an adapter can follow its engine's line — including its wgpu major, if that ever diverges from
   the player's — without dragging the player along.
 
-So `ssplayer-wgpu-bevy` lives beside the player, versioned independently, and any future adapter
+So `ssplayer-bevy` lives beside the player, versioned independently, and any future adapter
 does the same.
 
 ## The wgpu pin

@@ -49,10 +49,10 @@ components (`SsPlayer` / `SsTransform` / `SsPlayback`) that spawn a character in
 
 ```toml
 [dependencies]
-ssplayer-wgpu-bevy = { git = "https://github.com/cri-middleware/SSPlayerForWgpu" }
+ssplayer-bevy = { git = "https://github.com/cri-middleware/SSPlayerForWgpu" }
 ```
 
-It tracks one Bevy line at a time — named in [its README](./libs/ssplayer-wgpu-bevy) — because Bevy
+It tracks one Bevy line at a time — named in [its README](./libs/ssplayer-bevy) — because Bevy
 and the player have to resolve to a single `wgpu`. A mismatch is a compile error, not a runtime
 surprise.
 
@@ -209,7 +209,7 @@ flowchart TD
 
     subgraph lib ["libs/"]
         crate["ssplayer-wgpu<br/>SSRenderer / SSScene / SSPlayer"]
-        bevy["ssplayer-wgpu-bevy<br/>SsPlayer / SsTransform / SsPlayback"]
+        bevy["ssplayer-bevy<br/>SsPlayer / SsTransform / SsPlayback"]
         crate --> bevy
     end
 
@@ -238,7 +238,7 @@ flowchart TD
 | Path | What |
 |---|---|
 | [`libs/ssplayer-wgpu/`](./libs/ssplayer-wgpu) | crate `ssplayer-wgpu` — the player. `rlib` + `cdylib` + `staticlib`, with the `web` and `ffi` faces behind features |
-| [`libs/ssplayer-wgpu-bevy/`](./libs/ssplayer-wgpu-bevy) | crate `ssplayer-wgpu-bevy` — the Bevy adapter. Its own crate, so the player never depends on an engine; see its README for the Bevy line it tracks |
+| [`libs/ssplayer-bevy/`](./libs/ssplayer-bevy) | crate `ssplayer-bevy` — the Bevy adapter. Its own crate, so the player never depends on an engine; see its README for the Bevy line it tracks |
 | [`packages/ssplayer-wgpu/`](./packages/ssplayer-wgpu) | npm package `@spritestudio/ssplayer-wgpu` — the wasm plus the TypeScript layer over it (`.` and `./element`). Published from where it sits; `wasm/` and `dist/` are gitignored build outputs |
 | [`examples/`](./examples) | one host per environment; see [Samples](#-samples) |
 | `scripts/build.sh` / `.ps1` | builds the library for one platform, collecting it into `bin/` |

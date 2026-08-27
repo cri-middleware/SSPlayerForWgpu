@@ -1,7 +1,7 @@
 # Bevy ではじめる
 
 キャラクターをエンティティとして spawn すると、Bevy が自分の 2D パスで、自分が持っているデバイス上に
-描画します。`ssplayer-wgpu-bevy` は 2 つ目の Player ではなく**アダプタ**です。描画しているのは
+描画します。`ssplayer-bevy` は 2 つ目の Player ではなく**アダプタ**です。描画しているのは
 `ssplayer-wgpu` で、このクレートはその継ぎ目にすぎません。
 
 **ここでは wgpu に一切触れません。** `SSRenderer` を触りたくなったら、それは
@@ -26,18 +26,18 @@ workspace が 1 つの `wgpu` に解決することで担保しています。
 
     ```toml
     [dependencies]
-    ssplayer-wgpu-bevy = "0.1.0-alpha.1"
+    ssplayer-bevy = "0.1.0-alpha.1"
     ```
 
 === "ソースから"
 
     ```toml
     [dependencies]
-    ssplayer-wgpu-bevy = { git = "https://github.com/cri-middleware/SSPlayerForWgpu" }
+    ssplayer-bevy = { git = "https://github.com/cri-middleware/SSPlayerForWgpu" }
     ```
 
     これが `ssplayer-wgpu` を引き込むので、両方に依存する必要はありません。ソースを取り込む場合は
-    チェックアウト内の `libs/ssplayer-wgpu-bevy` を指し、そこで
+    チェックアウト内の `libs/ssplayer-bevy` を指し、そこで
     `git submodule update --init --recursive` を実行してください。
 
 ## アプリ全体
@@ -46,7 +46,7 @@ workspace が 1 つの `wgpu` に解決することで担保しています。
 use bevy::prelude::*;
 use bevy::camera::CompositingSpace;
 use bevy::render::view::Msaa;
-use ssplayer_wgpu_bevy::{SsPlayback, SsPlayer, SsPlayerPlugin, SsTransform};
+use ssplayer_bevy::{SsPlayback, SsPlayer, SsPlayerPlugin, SsTransform};
 
 fn main() {
     App::new()

@@ -48,5 +48,5 @@ it — Bevy has no Unity/Godot-style project format).
 
 ## Related
 
-- [`../../libs/ssplayer-wgpu-bevy/README.md`](../../libs/ssplayer-wgpu-bevy/README.md) — the adapter: components, colour, masking, device loss
+- [`../../libs/ssplayer-bevy/README.md`](../../libs/ssplayer-bevy/README.md) — the adapter: components, colour, masking, device loss
 - [`../viewer-bevy`](../viewer-bevy) — the interactive development viewer

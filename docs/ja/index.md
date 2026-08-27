@@ -71,7 +71,7 @@ Windows のゲームも、macOS のアプリも、4 本の移植版ではなく�
 | **[開発者向け](./contributing/index.md)** | ライブラリの全 Face を手元でビルドする手順と、変更が守るべきルール |
 
 本文とは別に、<a href="../api/" target="_blank" rel="noreferrer">Rust API リファレンス</a>（`ssplayer_wgpu` と
-`ssplayer_wgpu_bevy` の rustdoc）と <a href="../demo/" target="_blank" rel="noreferrer">WebGPU デモ</a>
+`ssplayer_bevy` の rustdoc）と <a href="../demo/" target="_blank" rel="noreferrer">WebGPU デモ</a>
 が同じサイト上に公開されています。ナビゲーションバーからも辿れます。
 
 ## 📦 成果物
@@ -82,7 +82,7 @@ Windows のゲームも、macOS のアプリも、4 本の移植版ではなく�
 | Face | 公開形態 | 状況 |
 |---|---|---|
 | Rust | crates.io の `ssplayer-wgpu` | 🚧 先に SDK のクレート公開が必要 |
-| Bevy | crates.io の `ssplayer-wgpu-bevy` | 🚧 同上（＋ Player 本体の公開） |
+| Bevy | crates.io の `ssplayer-bevy` | 🚧 同上（＋ Player 本体の公開） |
 | C / C++ | GitHub Releases の `ssplayer-wgpu-<platform>.zip`（`include/` `lib/` `LICENSE.md`） | 🚧 ワークフローはあるがリリース未実施 |
 | Web | npm の `@spritestudio/ssplayer-wgpu` | 🚧 npm 未公開 |
 

@@ -25,7 +25,7 @@ use bevy::render::render_resource::{Extent3d, TextureDimension, TextureFormat, T
 use bevy::render::view::Msaa;
 use bevy::sprite::Sprite;
 use bevy::window::WindowPlugin;
-use ssplayer_wgpu_bevy::{SsPlayback, SsPlaybackState, SsPlayer, SsPlayerPlugin, SsTransform};
+use ssplayer_bevy::{SsPlayback, SsPlaybackState, SsPlayer, SsPlayerPlugin, SsTransform};
 use std::path::Path;
 use std::sync::{Arc, Mutex};
 
@@ -119,7 +119,7 @@ fn drawn_pixels(rgba: &[u8]) -> usize {
 }
 
 /// Write a readback out, so what these assert about can be looked at:
-/// `SS_BEVY_DUMP=<dir> cargo test -p ssplayer-wgpu-bevy --test bevy_render`.
+/// `SS_BEVY_DUMP=<dir> cargo test -p ssplayer-bevy --test bevy_render`.
 ///
 /// A pixel count is a poor description of a picture, and a rendering test that
 /// can only be believed is not much of a test.

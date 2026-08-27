@@ -11,7 +11,7 @@ description = "Bevy counterpart of the sibling players' overall/webgl-example de
 publish = false
 
 [dependencies]
-ssplayer-wgpu-bevy = { path = "../../libs/ssplayer-wgpu-bevy" }
+ssplayer-bevy = { path = "../../libs/ssplayer-bevy" }
 # The adapter pulls in Bevy's render, window and asset features; this demo adds
 # what a *host* needs on top: the 2d renderer (for the backdrop `Sprite`), a UI +
 # text HUD (to narrate the tour), and audio (to play the cues the player only

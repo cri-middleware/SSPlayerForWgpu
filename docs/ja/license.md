@@ -1,6 +1,6 @@
 # ライセンス
 
-`ssplayer-wgpu` / `ssplayer-wgpu-bevy` / `@spritestudio/ssplayer-wgpu` は
+`ssplayer-wgpu` / `ssplayer-bevy` / `@spritestudio/ssplayer-wgpu` は
 **BSD 3-Clause License** で公開されています。
 
 全文はリポジトリの

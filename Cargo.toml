@@ -3,7 +3,7 @@ resolver = "3"
 members = [
     "libs/ssplayer-wgpu",
     "libs/ssplayer-wgpu-ffi",
-    "libs/ssplayer-wgpu-bevy",
+    "libs/ssplayer-bevy",
     "examples/viewer",
     "examples/viewer-bevy",
     "examples/overall-bevy",

@@ -2,7 +2,7 @@
 
 公開されているのは、プラグイン 1 つ・コンポーネント 3 つ・状態コンポーネント 1 つ・メッセージ 3 つだけです。
 生成ドキュメント：
-<a href="../../api/ssplayer_wgpu_bevy/index.html" target="_blank" rel="noreferrer">**`ssplayer_wgpu_bevy` の rustdoc**</a>。
+<a href="../../api/ssplayer_bevy/index.html" target="_blank" rel="noreferrer">**`ssplayer_bevy` の rustdoc**</a>。
 
 **Bevy 0.19.x のみ** — [Bevy ではじめる](../start/bevy.md#supported-bevy)を参照。
 
