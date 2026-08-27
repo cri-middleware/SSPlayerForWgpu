@@ -576,7 +576,7 @@ impl AppState {
         // Clear screen using ANSI escape code.
         print!("\x1b[2J\x1b[H");
         println!("====================================================");
-        println!(" SpriteStudio 7 wgpu Player Viewer");
+        println!(" SpriteStudio wgpu Player Viewer");
         println!("====================================================");
 
         let focus = match self.focus {
@@ -654,7 +654,7 @@ impl ApplicationHandler for App {
             return;
         }
 
-        let attributes = WindowAttributes::default().with_title("SpriteStudio 7 wgpu Viewer").with_inner_size(winit::dpi::LogicalSize::new(960.0, 540.0));
+        let attributes = WindowAttributes::default().with_title("SpriteStudio wgpu Viewer").with_inner_size(winit::dpi::LogicalSize::new(960.0, 540.0));
         let window = Arc::new(event_loop.create_window(attributes).expect("Failed to create window"));
 
         let mut instance_desc = wgpu::InstanceDescriptor::new_without_display_handle();

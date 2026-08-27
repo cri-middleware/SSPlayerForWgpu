@@ -1,6 +1,6 @@
 # 🦀 SSPlayer for wgpu
 
-Play **[OPTPiX SpriteStudio 7](https://www.webtech.co.jp/spritestudio/)** animations (`.ssab`)
+Play **[SpriteStudio](https://www.webtech.co.jp/spritestudio/)** animations (`.ssab`)
 through [wgpu](https://wgpu.rs/) — one renderer, one set of shaders, and four ways to call it.
 Your artist rigs the motion in a dedicated editor; you load the file and press play. No video
 files, no re-authoring, no engine lock-in.

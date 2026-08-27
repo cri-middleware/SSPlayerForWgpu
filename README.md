@@ -2,7 +2,7 @@
 
 **Professional 2D animation for Rust — one wgpu renderer, from a native window to the browser to a C++ host.**
 
-A high-performance player for **[OPTPiX SpriteStudio 7](https://www.webtech.co.jp/spritestudio/)**
+A high-performance player for **[SpriteStudio](https://www.webtech.co.jp/spritestudio/)**
 animations (`.ssab`), built on [wgpu](https://wgpu.rs/). Animate the sprite art you already have
 (PNG / WebP) in a dedicated editor, then play it back through **one** rendering code path that covers
 WebGPU, Vulkan, DX12 and Metal — no video files, no re-authoring, no engine lock-in.
@@ -138,7 +138,7 @@ different names, and each sample below documents its own.
 
 ### Where that `.ssab` comes from
 
-Animations are authored in SpriteStudio 7 and converted ahead of time — this player converts nothing at
+Animations are authored in SpriteStudio and converted ahead of time — this player converts nothing at
 runtime and bundles no converter. Use the desktop
 [SSConverterGUI](https://github.com/cri-middleware/SSConverterGUI), or the SDK's `ssconverter-cli`;
 [Converting with a standalone tool](https://cri-middleware.github.io/SpriteStudio-Docs/overview/convert-with-a-standalone-tool/)

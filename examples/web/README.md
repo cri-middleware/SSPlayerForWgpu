@@ -1,6 +1,6 @@
 # ssplayer-wgpu — WebGPU demo (js face)
 
-Renders a SpriteStudio 7 `.ssab` to an HTML `<canvas>` via **WebGPU**, using the
+Renders a SpriteStudio `.ssab` to an HTML `<canvas>` via **WebGPU**, using the
 wasm-bindgen bindings from the player's `web` feature. This is
 not a separate crate — the WebGPU player lives in `libs/ssplayer-wgpu` behind
 `--features web`; this directory is just the static page.

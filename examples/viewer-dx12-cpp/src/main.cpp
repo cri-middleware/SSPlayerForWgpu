@@ -616,7 +616,7 @@ void Viewer::PrintStatus() {
         printf("\033[2J\033[H");
     }
     printf("====================================================\n");
-    printf("   SpriteStudio 7 wgpu Viewer - DX12 / C API\n");
+    printf("   SpriteStudio wgpu Viewer - DX12 / C API\n");
     printf("====================================================\n");
     printf("  Active File:   %s (%zu/%zu)\n", Utf8(FileName(packs_[packIndex_])).c_str(), packIndex_ + 1, packs_.size());
     printf("  Animation:     %s (%zu/%zu)\n", anims_.empty() ? "none" : anims_[animIndex_].c_str(), animIndex_ + 1, anims_.size());
@@ -762,7 +762,7 @@ int main() {
 
     Viewer viewer(assetDir, initialPack);
 
-    HWND hwnd = CreateWindowExW(WS_EX_ACCEPTFILES, cls.lpszClassName, L"SpriteStudio 7 wgpu Viewer (DX12 / C API)", WS_OVERLAPPEDWINDOW, CW_USEDEFAULT,
+    HWND hwnd = CreateWindowExW(WS_EX_ACCEPTFILES, cls.lpszClassName, L"SpriteStudio wgpu Viewer (DX12 / C API)", WS_OVERLAPPEDWINDOW, CW_USEDEFAULT,
                                 CW_USEDEFAULT, 960, 540, nullptr, nullptr, instance, &viewer);
     if (hwnd == nullptr) {
         fprintf(stderr, "CreateWindowEx failed (%lu)\n", GetLastError());

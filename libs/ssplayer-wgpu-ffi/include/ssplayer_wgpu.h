@@ -1,5 +1,5 @@
 /* SPDX-License-Identifier: BSD-3-Clause */
-/* ssplayer-wgpu — C API for the wgpu SpriteStudio 7 player. */
+/* ssplayer-wgpu — C API for the wgpu SpriteStudio player. */
 
 #ifndef SSPLAYER_WGPU_H
 #define SSPLAYER_WGPU_H

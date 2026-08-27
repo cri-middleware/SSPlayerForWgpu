@@ -469,7 +469,7 @@ void Viewer::PrintStatus() {
     ss_player_canvas_size(PlayerAt(0), &canvasWidth, &canvasHeight);
     printf("\033[2J\033[H");
     printf("====================================================\n");
-    printf("   SpriteStudio 7 wgpu Viewer — Vulkan / C API\n");
+    printf("   SpriteStudio wgpu Viewer — Vulkan / C API\n");
     printf("====================================================\n");
     // Which arm of `surface_target` this run is exercising. Xwayland makes the
     // two indistinguishable from the desktop, so it is worth printing.
@@ -556,7 +556,7 @@ static int RunX11(Viewer &viewer) {
     Window window = XCreateWindow(display, RootWindow(display, screen), 0, 0, kDefaultWidth, kDefaultHeight, 0, CopyFromParent, InputOutput,
                                   (Visual *)CopyFromParent, CWBackPixel | CWEventMask, &attributes);
 
-    XStoreName(display, window, "SpriteStudio 7 wgpu Viewer (Vulkan / C API)");
+    XStoreName(display, window, "SpriteStudio wgpu Viewer (Vulkan / C API)");
     // Without this the close button kills the connection under us, and the
     // scene would be destroyed after its window rather than before it.
     Atom deleteWindow = XInternAtom(display, "WM_DELETE_WINDOW", False);
@@ -904,7 +904,7 @@ static int RunWayland(Viewer &viewer) {
         xdg_surface_add_listener(wl.xdgSurface, &kXdgSurfaceListener, &wl);
         wl.toplevel = xdg_surface_get_toplevel(wl.xdgSurface);
         xdg_toplevel_add_listener(wl.toplevel, &kToplevelListener, &wl);
-        xdg_toplevel_set_title(wl.toplevel, "SpriteStudio 7 wgpu Viewer (Vulkan / C API)");
+        xdg_toplevel_set_title(wl.toplevel, "SpriteStudio wgpu Viewer (Vulkan / C API)");
         xdg_toplevel_set_app_id(wl.toplevel, "jp.co.webtech.ssplayer-wgpu.viewer");
 
         // The commit that asks for the first configure. It must carry no buffer:

@@ -1,4 +1,4 @@
-//! Bevy adapter for [`ssplayer_wgpu`] — SpriteStudio 7 characters inside a Bevy
+//! Bevy adapter for [`ssplayer_wgpu`] — SpriteStudio characters inside a Bevy
 //! app, drawn on the device Bevy already owns.
 //!
 //! # Shape

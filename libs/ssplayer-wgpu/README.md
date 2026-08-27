@@ -1,6 +1,6 @@
 # ssplayer-wgpu
 
-A [wgpu](https://wgpu.rs/) renderer for [OPTPiX SpriteStudio 7](https://www.webtech.co.jp/spritestudio/)
+A [wgpu](https://wgpu.rs/) renderer for [SpriteStudio](https://www.webtech.co.jp/spritestudio/)
 animations (`.ssab`).
 
 This is first and foremost a **Rust** player: a clean Rust API over the

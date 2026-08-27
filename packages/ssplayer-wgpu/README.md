@@ -1,6 +1,6 @@
 # @spritestudio/ssplayer-wgpu
 
-A **WebGPU** renderer for [OPTPiX SpriteStudio 7](https://www.webtech.co.jp/spritestudio/)
+A **WebGPU** renderer for [SpriteStudio](https://www.webtech.co.jp/spritestudio/)
 animations (`.ssab`), compiled to WebAssembly from the Rust/[wgpu](https://wgpu.rs/) player.
 
 One `GPUDevice` per page, one `SSScene` per canvas, and **any number of characters drawn into one
@@ -143,7 +143,7 @@ export carries them inside it. Both work here through the same `load()` call.
 - [Repository](https://github.com/cri-middleware/SSPlayerForWgpu) — the Rust library, plus native
   C/C++ viewers for Metal, DX12 and Vulkan built on the same core.
 - [Issues](https://github.com/cri-middleware/SSPlayerForWgpu/issues)
-- [OPTPiX SpriteStudio](https://www.webtech.co.jp/spritestudio/)
+- [SpriteStudio](https://www.webtech.co.jp/spritestudio/)
 
 ## License
 

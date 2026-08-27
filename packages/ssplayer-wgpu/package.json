@@ -1,7 +1,7 @@
 {
   "name": "@spritestudio/ssplayer-wgpu",
   "version": "7.0.0-beta.1",
-  "description": "WebGPU renderer for OPTPiX SpriteStudio 7 animations, compiled from Rust/wgpu",
+  "description": "WebGPU renderer for SpriteStudio animations, compiled from Rust/wgpu",
   "keywords": [
     "spritestudio",
     "spritestudio7",

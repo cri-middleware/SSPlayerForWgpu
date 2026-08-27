@@ -1,4 +1,4 @@
-//! `ssplayer-wgpu` — a wgpu-based player for SpriteStudio 7 animations.
+//! `ssplayer-wgpu` — a wgpu-based player for SpriteStudio animations.
 //!
 //! The player borrows the host's wgpu device, queue and render target rather
 //! than owning them, so it draws into any wgpu host — a standalone viewer, a
