@@ -312,7 +312,7 @@ SSScene -> update(&renderer, &device, &queue, dt, &mut [a, b])
     scene.draw(&renderer, &mut rpass);
     ```
 
-## 8. SS6 にあって扱いが変わったもの
+## 8. SS6 にあって扱いが変わったもの { #8-things-ss6-had-that-work-differently }
 
 | | |
 |---|---|

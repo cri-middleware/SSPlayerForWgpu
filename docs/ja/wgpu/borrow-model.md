@@ -59,7 +59,7 @@ Player の側だからです。
 
 `SSPack` が持つのは CPU 側のデータだけです。
 
-## レンダーパスに求められること
+## レンダーパスに求められること { #what-your-render-pass-has-to-be }
 
 | | |
 |---|---|
@@ -94,7 +94,7 @@ scene.draw(&renderer, &mut rpass);
 持ち、どちらのバッファが先にキューへ届くかは指定しなければ競合します（Bevy アダプタの描画システムが
 `main_transparent_pass_2d` の後に明示的に順序付けされているのはこのためです）。
 
-## 複数ターゲット、1 デバイス
+## 複数ターゲット、1 デバイス { #several-targets-one-device }
 
 `SSScene` は描画ターゲットごとで、デバイススコープのレンダラーを共有します：
 
