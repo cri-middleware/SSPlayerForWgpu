@@ -114,10 +114,14 @@ const loop = (now) => {
 requestAnimationFrame(loop);
 ```
 
-**`load()` is the only asynchronous call.** It fetches the pack, its atlases from both texture
-tables, and transitively the sibling `.ssab` files its instance parts play from. Anything that did
-not arrive comes back from `missingAssets()` rather than throwing. `setAnimation()` and every
-transport call are synchronous.
+**The `load` family is the only asynchronous part of the player API.** It fetches the pack, its
+atlases from both texture tables, and transitively the sibling `.ssab` files its instance parts play
+from. Anything that did not arrive comes back from `missingAssets()` rather than throwing.
+`setAnimation()` and every transport call are synchronous.
+
+One load at a time per player: a second one started before the first settles is rejected rather
+than silently losing one of the two, so `await` it — or chain the calls, the way the element does.
+Two *different* players load concurrently as usual.
 
 Handles are explicit: call `player.destroy()` / `surface.destroy()` when you are done with one —
 dropping the JS reference would leave a swapchain behind. Both are idempotent.

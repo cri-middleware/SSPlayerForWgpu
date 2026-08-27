@@ -60,7 +60,10 @@ your own is required to try the player first: every sample runs on the SDK's own
 
 ▶️ **Prefer to see it first?** The <a href="./demo/" target="_blank" rel="noreferrer">WebGPU demo</a>
 runs in the browser, with nothing installed — it needs a WebGPU-capable browser and is published
-beside these pages.
+beside these pages. Three of them: the API in both its shapes, the
+<a href="./demo/element.html" target="_blank" rel="noreferrer">custom element</a> on its own, and
+<a href="./demo/multi.html" target="_blank" rel="noreferrer">a page full of them</a> — overlapping
+other content, on one `GPUDevice`.
 
 ## 🧭 How these docs are laid out
 

@@ -79,6 +79,13 @@ load did — so an element without `autoplay` holds the new pack's first frame t
 Passing `pack` makes the element fetch the bytes itself and register them under that name, since
 `load` takes no name override.
 
+Calls are **serialised**: a player is lifted out of the shared context while it loads, so the
+context rejects a second load started before the first settles. Switching packs is usually a user
+gesture, and two in quick succession must switch twice rather than fail — so each waits for the one
+before it, and the last one called is what stays on screen. The returned promise still rejects if
+*that* load fails, and it is yours to catch: only a startup failure reaches the element's own error
+box.
+
 ## Layout and resolution
 
 * A custom element is `display: inline` unless the page says otherwise, and an inline box ignores

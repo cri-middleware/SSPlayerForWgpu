@@ -59,6 +59,9 @@ Windows のゲームも、macOS のアプリも、4 本の移植版ではなく�
 
 ▶️ **まず動いているところを見たい場合**：<a href="../demo/" target="_blank" rel="noreferrer">WebGPU デモ</a>
 がこのドキュメントと一緒に公開されています。インストール不要（WebGPU 対応ブラウザが必要）。
+ページは 3 つ：API の 2 つの形、<a href="../demo/element.html" target="_blank" rel="noreferrer">カスタム要素</a>
+単体、そして<a href="../demo/multi.html" target="_blank" rel="noreferrer">それを 1 ページに並べたもの</a>
+（他の要素と重ねても `GPUDevice` は 1 つ）。
 
 ## 🧭 このドキュメントの構成
 

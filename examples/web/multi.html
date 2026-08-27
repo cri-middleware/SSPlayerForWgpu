@@ -1,0 +1,266 @@
+<!doctype html>
+<html lang="ja">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>1 ページに複数 — ssplayer-wgpu</title>
+  <style>
+    :root { color-scheme: light dark; }
+    body { font: 16px/1.8 system-ui, sans-serif; margin: 0; }
+    article { max-width: 760px; margin-inline: auto; padding: 6vh 24px 20vh; }
+    h1 { font-size: 1.6rem; line-height: 1.35; margin: 0 0 0.4em; }
+    h2 { font-size: 1.1rem; margin: 3em 0 0.6em; }
+    p { margin: 1em 0; }
+    .lede { font-size: 1.05rem; opacity: 0.85; }
+    .hint { opacity: 0.7; font-size: 0.9em; }
+    code { background: color-mix(in srgb, currentColor 12%, transparent); padding: 0.1em 0.4em; border-radius: 4px; font-size: 0.9em; }
+    pre { background: color-mix(in srgb, currentColor 8%, transparent); padding: 0.9em 1em; border-radius: 8px; overflow-x: auto; font-size: 0.82rem; line-height: 1.6; }
+    figure { margin: 2.5em 0; }
+    figcaption { font-size: 0.85em; opacity: 0.7; text-align: center; margin-top: 0.5em; }
+
+    /* Every animation on this page is one of these. It owns a <canvas>, so it is
+       an ordinary box: the page sizes it, stacks it and styles it like any other. */
+    ss-player-webgpu { display: block; width: 100%; height: 300px; }
+    .checker { background: repeating-conic-gradient(#8883 0% 25%, transparent 0% 50%) 50% / 24px 24px; border-radius: 8px; overflow: hidden; }
+    .inline { display: inline-block; width: 84px; height: 84px; vertical-align: middle; }
+    .pair { display: flex; gap: 1rem; }
+    .pair ss-player-webgpu { height: 220px; }
+
+    /* --- overlap ---------------------------------------------------------- */
+    .card { position: relative; border-radius: 12px; overflow: hidden; background: linear-gradient(140deg, #2b3a67, #6b4a86 55%, #b06a7a); color: #fff; }
+    .card ss-player-webgpu { height: 320px; }
+    .card .copy { position: absolute; inset: auto 0 0 0; padding: 1.2em 1.4em; background: linear-gradient(transparent, #000a 45%); }
+    .card .copy h3 { margin: 0 0 0.2em; font-size: 1.15rem; }
+    .card .copy p { margin: 0; font-size: 0.9em; opacity: 0.9; }
+    .card .badge { position: absolute; top: 12px; left: 12px; z-index: 2; background: #000a; color: #fff; padding: 0.25em 0.7em; border-radius: 999px; font-size: 0.78rem; }
+    .behind { position: relative; }
+    .behind ss-player-webgpu { position: absolute; inset: 0; height: 100%; z-index: 0; opacity: 0.5; }
+    .behind .text { position: relative; z-index: 1; padding: 2.5em 1.5em; }
+
+    /* --- CSS applies to the element, because it is a real box -------------- */
+    .fx { display: flex; gap: 1rem; }
+    .fx > div { flex: 1; text-align: center; }
+    .fx ss-player-webgpu { height: 160px; }
+    .round { border-radius: 50%; overflow: hidden; }
+    .gray { filter: grayscale(1) contrast(1.1); }
+    .hue { filter: hue-rotate(140deg); }
+
+    .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 0.8rem; }
+    .grid ss-player-webgpu { height: 150px; }
+
+    /* --- HUD -------------------------------------------------------------- */
+    #hud { position: fixed; top: 12px; right: 12px; z-index: 20; font: 12px/1.7 ui-monospace, monospace;
+      background: color-mix(in srgb, Canvas 88%, transparent); border: 1px solid color-mix(in srgb, currentColor 25%, transparent);
+      border-radius: 8px; padding: 0.7em 1em; backdrop-filter: blur(6px); min-width: 190px; }
+    #hud b { font-size: 1.15em; }
+    #hud a { font-family: system-ui, sans-serif; }
+    .badge { display: block; text-align: center; font: 11px ui-monospace, monospace; opacity: 0.65; margin-top: 0.3em; }
+    .badge.stopped { opacity: 1; color: #d08a2a; }
+  </style>
+</head>
+<body>
+  <div id="hud">
+    要素数: <b id="count">0</b><br>
+    canvas（surface）: <b id="surfaces">0</b><br>
+    GPUDevice: <b id="devices">–</b><br>
+    いま進んでいる: <b id="active">0</b><br>
+    <a href="index.html">← デモ index</a> / <a href="element.html">要素の使い方</a>
+  </div>
+
+  <article>
+    <h1>1 ページに複数 —<br>device は 1 つ、canvas は要素ごと</h1>
+    <p class="lede">
+      このページのアニメーションはすべて <code>&lt;ss-player-webgpu&gt;</code> です。
+      要素はそれぞれ自分の <code>&lt;canvas&gt;</code> を持ちますが、
+      <strong>WebGPU の device・パイプライン・アトラスはページで 1 組</strong>。
+      右上の HUD の GPUDevice は、全要素の <code>el.ctx</code> が同一オブジェクトか数えた実測値です。
+    </p>
+
+    <figure>
+      <ss-player-webgpu class="checker" src="assets/Ringo/Ringo.ssab" data-origin="bottom" autoplay></ss-player-webgpu>
+      <figcaption>ふつうのブロック要素。ページがサイズを決め、要素がそこを canvas で埋めます。</figcaption>
+    </figure>
+
+    <pre>&lt;ss-player-webgpu src="Ringo.ssab" autoplay&gt;&lt;/ss-player-webgpu&gt;</pre>
+    <p class="hint">ページ側で書くのはこれだけです。<code>defineSsPlayerWebGPUElement()</code> を 1 回呼べば、
+       何個置いても最初の 1 個が作った device を全員で共有します。</p>
+
+    <h2>文中にも置けます</h2>
+    <p>
+      要素は行の中にも収まります <ss-player-webgpu class="inline" src="assets/Ringo/Ringo.ssab" data-origin="bottom" autoplay></ss-player-webgpu>
+      — <code>display: inline-block</code> にして高さを与えるだけで、行送りの一部として扱われます。
+      canvas は要素の CSS ボックスに追従するので、ウィンドウ幅を変えれば解像度も付いてきます。
+    </p>
+
+    <h2>他の要素と重ねられます</h2>
+    <p>
+      canvas を要素ごとに持つ設計のいちばんの見返りがこれです。アニメーションはページの合成に
+      普通に参加するので、<strong>上に文字を載せる／下に敷く／間に別の要素を挟む</strong>が
+      そのまま z-index で書けます。
+    </p>
+
+    <div class="card">
+      <span class="badge">上に HTML</span>
+      <ss-player-webgpu src="assets/Ringo/Ringo.ssab" data-origin="bottom" autoplay></ss-player-webgpu>
+      <div class="copy">
+        <h3>テキストはアニメーションの上</h3>
+        <p>グラデーションの帯も、見出しも、ただの子要素です。</p>
+      </div>
+    </div>
+
+    <div class="behind" style="margin-top:2em">
+      <ss-player-webgpu class="checker" src="assets/Effect.ssab" autoplay></ss-player-webgpu>
+      <div class="text">
+        <h3 style="margin-top:0">下に敷く</h3>
+        <p style="margin-bottom:0">こちらは逆に、アニメーションを <code>position:absolute</code> で背面に置いて
+           本文を上に流したもの。<code>opacity</code> も効いています。</p>
+      </div>
+    </div>
+
+    <h2>CSS もそのまま効きます</h2>
+    <p>
+      要素は本物の DOM ボックスなので、<code>border-radius</code> でのクリップ、<code>filter</code>、
+      <code>opacity</code>、<code>transform</code> がブラウザの合成としてかかります。
+    </p>
+
+    <div class="fx">
+      <div>
+        <ss-player-webgpu class="checker round" src="assets/Ringo/Ringo.ssab" data-origin="bottom" autoplay></ss-player-webgpu>
+        <span class="hint">border-radius: 50%</span>
+      </div>
+      <div>
+        <ss-player-webgpu class="checker gray" src="assets/Ringo/Ringo.ssab" data-origin="bottom" autoplay></ss-player-webgpu>
+        <span class="hint">filter: grayscale(1)</span>
+      </div>
+      <div>
+        <ss-player-webgpu class="checker hue" src="assets/Ringo/Ringo.ssab" data-origin="bottom" autoplay></ss-player-webgpu>
+        <span class="hint">filter: hue-rotate(140deg)</span>
+      </div>
+    </div>
+
+    <h2>その代わりに払っているもの</h2>
+    <p>
+      canvas が要素の数だけあるということは、<strong>合成する面もその数だけある</strong>ということです。
+      1 枚の canvas に何体も描く形（<a href="index.html">デモ index の ②</a>）なら描画は 1 パスで済み、
+      キャラクター同士の前後関係も 1 つの <code>order</code> で決まります。
+      ページの流れに沿って散らしたい・CSS で飾りたいときは要素、
+      1 つの舞台に大勢を並べたいときは 1 canvas に N 体 — というのが使い分けです。
+    </p>
+
+    <h2>画面外に出たら止まります</h2>
+    <p>
+      要素は <code>IntersectionObserver</code> と <code>visibilitychange</code> を見ていて、
+      画面外・バックグラウンドタブでは rAF を止めます（<code>pause-when-hidden</code>、既定 on）。
+      各アニメーションの下にフレーム番号を出しているので、スクロールで画面外に送ると数字が止まり、
+      戻すと<strong>止まったところから</strong>続くのが読めます。HUD の「いま進んでいる」も同時に減ります。
+    </p>
+
+    <div class="pair">
+      <ss-player-webgpu class="checker" src="assets/Shape.ssab" autoplay></ss-player-webgpu>
+      <ss-player-webgpu class="checker" src="assets/Mesh.ssab" autoplay></ss-player-webgpu>
+    </div>
+
+    <p style="margin-top:2em">
+      下の 1 体だけ <code>pause-when-hidden="false"</code> です。画面外に送っても数字が進み続けるので、
+      止まっているのが既定の挙動だと確かめられます。
+    </p>
+    <figure>
+      <ss-player-webgpu class="checker" src="assets/PartsColor.ssab" pause-when-hidden="false" autoplay></ss-player-webgpu>
+      <figcaption>これだけは画面外でも回り続けます。</figcaption>
+    </figure>
+
+    <h2>数を増やしても device は増えません</h2>
+    <p class="hint">以下は数を稼ぐためだけのものです。HUD の canvas は増え、GPUDevice は 1 のままです。</p>
+    <div class="grid">
+      <ss-player-webgpu class="checker" src="assets/Ringo/Ringo.ssab" data-origin="bottom" autoplay></ss-player-webgpu>
+      <ss-player-webgpu class="checker" src="assets/Basic.ssab" autoplay></ss-player-webgpu>
+      <ss-player-webgpu class="checker" src="assets/Mask.ssab" autoplay></ss-player-webgpu>
+      <ss-player-webgpu class="checker" src="assets/Shape.ssab" autoplay></ss-player-webgpu>
+      <ss-player-webgpu class="checker" src="assets/Mesh.ssab" autoplay></ss-player-webgpu>
+      <ss-player-webgpu class="checker" src="assets/Ringo/Ringo.ssab" data-origin="bottom" autoplay></ss-player-webgpu>
+    </div>
+
+    <p style="margin-top:2.5em">
+      同じパックを何度置いても、アトラスのアップロードは 1 回です。テクスチャは device に紐づく
+      <code>SSRenderer</code> が持っていて、2 体目の <code>load</code> は「もうある」と分かった時点で
+      デコードもアップロードもしません。
+    </p>
+  </article>
+
+  <script type="module">
+    import { defineSsPlayerWebGPUElement } from './ssplayer-wgpu/dist/element.js';
+
+    defineSsPlayerWebGPUElement();
+
+    const els = Array.from(document.querySelectorAll('ss-player-webgpu'));
+    document.getElementById('count').textContent = String(els.length);
+
+    // A frame counter under each animation. Two claims on this page are invisible
+    // otherwise: that an off-screen element stops, and that it resumes where it
+    // stopped — a looping animation looks identical either way.
+    const badges = new Map();
+    for (const el of els) {
+      const badge = document.createElement('span');
+      badge.className = 'badge';
+      badge.textContent = 'frame —';
+      // Not everywhere: after an inline element a badge would break the line, and
+      // inside the grid it would become a grid item of its own and take a cell.
+      if (!el.classList.contains('inline') && !el.closest('.grid')) el.after(badge);
+      badges.set(el, { badge, last: -1, advancing: false });
+    }
+
+    /**
+     * Scale a player so its authored canvas fits its element's box.
+     *
+     * The element draws 1:1 — one authored pixel is one CSS pixel — and puts the
+     * animation's **origin** at the centre of the box, so fitting is the page's
+     * job. `data-origin="bottom"` is for a character authored standing *on* the
+     * origin, like Ringo: all of its artwork is above the origin, so centring the
+     * origin would hang its head out of the box. Re-run on resize, because the
+     * element follows the box but the scale into it is the page's call.
+     */
+    function fit(el) {
+      const p = el.player;
+      if (!p) return;
+      const [aw, ah] = p.canvasSize();
+      if (!aw || !ah) return;
+      const s = Math.min(el.clientWidth / aw, el.clientHeight / ah);
+      // y is measured downward from the centre of the box.
+      const y = el.dataset.origin === 'bottom' ? (ah * s) / 2 : 0;
+      p.setTransform(0, y, s, s, 0);
+    }
+    addEventListener('resize', () => els.forEach(fit));
+
+    const countEl = document.getElementById('active');
+    const surfacesEl = document.getElementById('surfaces');
+    const devicesEl = document.getElementById('devices');
+
+    setInterval(() => {
+      let advancing = 0;
+      let ctx = null;
+      const contexts = new Set();
+      for (const el of els) {
+        const state = badges.get(el);
+        // `el.ctx` appears once the element has started; they are all the same
+        // object, which is the claim the HUD is making — counted rather than
+        // asserted.
+        if (el.ctx) { contexts.add(el.ctx); ctx = el.ctx; }
+        const player = el.player;
+        if (!player) continue;
+        // Cheap and idempotent, and the element it belongs to may only just have
+        // finished loading — so this doubles as "fit it once it exists".
+        fit(el);
+        const frame = player.frameNo();
+        state.advancing = frame !== state.last;
+        state.last = frame;
+        if (state.advancing) advancing++;
+        state.badge.textContent = `frame ${frame.toFixed(0)}`;
+        state.badge.classList.toggle('stopped', !state.advancing);
+      }
+      countEl.textContent = String(advancing);
+      devicesEl.textContent = contexts.size === 0 ? '–' : String(contexts.size);
+      surfacesEl.textContent = ctx ? String(ctx.surfaceCount()) : '0';
+    }, 250);
+  </script>
+</body>
+</html>

@@ -31,7 +31,9 @@ export class SsPlayerWebGPUElement extends HTMLElement {
   private _wantTicker = false;
   private _last = 0;
   private _io: IntersectionObserver | null = null;
+  private _ro: ResizeObserver | null = null;
   private _onVisibilityChange: (() => void) | null = null;
+  private _loads: Promise<unknown> = Promise.resolve();
 
   connectedCallback(): void {
     // A custom element is `display: inline` unless the page says otherwise, and an
@@ -44,17 +46,21 @@ export class SsPlayerWebGPUElement extends HTMLElement {
     }
 
     const canvas = document.createElement('canvas');
-    // Backing-store resolution = CSS size × devicePixelRatio for crisp output.
-    const dpr = window.devicePixelRatio || 1;
-    const w = this.clientWidth || 360;
-    const h = this.clientHeight || 360;
-    canvas.width = Math.round(w * dpr);
-    canvas.height = Math.round(h * dpr);
     canvas.style.width = '100%';
     canvas.style.height = '100%';
     canvas.style.display = 'block';
     this.appendChild(canvas);
     this.canvas = canvas;
+    this._applySize();
+    // A page that sizes the element in `%` / `vw` / a flex track resizes it
+    // whenever the window does, and a swapchain does not follow on its own: the
+    // backing store would keep the size it had at connect time and the browser
+    // would stretch it. Watching the element rather than the window also catches
+    // a layout change the window never saw.
+    if (typeof ResizeObserver !== 'undefined') {
+      this._ro = new ResizeObserver(() => this._applySize());
+      this._ro.observe(this);
+    }
 
     // --- Visibility gating (SPEC §14) -------------------------------------
     // Assume on-screen until the observer says otherwise, so a host without
@@ -75,6 +81,10 @@ export class SsPlayerWebGPUElement extends HTMLElement {
       this._io.disconnect();
       this._io = null;
     }
+    if (this._ro) {
+      this._ro.disconnect();
+      this._ro = null;
+    }
     if (this._onVisibilityChange) {
       document.removeEventListener('visibilitychange', this._onVisibilityChange);
       this._onVisibilityChange = null;
@@ -85,6 +95,34 @@ export class SsPlayerWebGPUElement extends HTMLElement {
     this.player?.destroy();
     this.surface?.destroy();
     this.player = this.surface = null;
+    // The canvas goes with them. Moving an element in the DOM disconnects and
+    // reconnects it, and `connectedCallback` builds a canvas each time — leaving
+    // this one would stack a dead swapchain's canvas under the live one on every
+    // move.
+    this.canvas?.remove();
+    this.canvas = undefined;
+  }
+
+  /**
+   * Match the backing store to the CSS box × `devicePixelRatio`, and tell the
+   * surface — which reconfigures the swapchain and the projection, so the
+   * animation keeps its authored size in CSS pixels instead of being stretched.
+   *
+   * Idempotent, because a `ResizeObserver` fires for changes that leave the
+   * pixel size where it was.
+   */
+  private _applySize(): void {
+    const canvas = this.canvas;
+    if (!canvas) return;
+    const dpr = window.devicePixelRatio || 1;
+    const w = Math.max(1, Math.round((this.clientWidth || 360) * dpr));
+    const h = Math.max(1, Math.round((this.clientHeight || 360) * dpr));
+    if (canvas.width === w && canvas.height === h) return;
+    canvas.width = w;
+    canvas.height = h;
+    // Before `_start` finishes there is no surface yet; it configures itself
+    // from the canvas it is handed, which is now the right size.
+    this.surface?.resize(w, h);
   }
 
   /**
@@ -187,8 +225,25 @@ export class SsPlayerWebGPUElement extends HTMLElement {
     }
   }
 
-  /** Fetch + play a `.ssab`, embedded or reference. Can be called to switch packs. */
-  async loadSrc(src: string, pack?: string | null, anim?: string | null): Promise<string[] | undefined> {
+  /**
+   * Fetch + play a `.ssab`, embedded or reference. Can be called to switch packs.
+   *
+   * Calls are **serialised**: the player is lifted out of the shared context for
+   * the duration of a load, so two in flight at once would race for the slot and
+   * the context rejects the second (see `SsPlayerWeb::load`). A pack switch is
+   * usually a user gesture — a dropdown, a scroll — and two of those in quick
+   * succession must switch twice, not fail, so each waits for the one before it
+   * and the last one called is the one left on screen.
+   */
+  loadSrc(src: string, pack?: string | null, anim?: string | null): Promise<string[] | undefined> {
+    const run = this._loads.then(() => this._loadSrc(src, pack, anim));
+    // What the next call waits on must settle, so the chain survives a load that
+    // rejected. The caller still sees `run` itself, rejection and all.
+    this._loads = run.catch(() => {});
+    return run;
+  }
+
+  private async _loadSrc(src: string, pack?: string | null, anim?: string | null): Promise<string[] | undefined> {
     if (!this.player) return;
     // One call fetches the pack, its atlases and any sibling `.ssab` its instance
     // parts play from (SPEC §8.1, §7.1) — a URL answers both "what bytes" and
@@ -202,6 +257,10 @@ export class SsPlayerWebGPUElement extends HTMLElement {
     } else {
       await this.player.load(src);
     }
+    // Disconnected while the bytes were in flight: `disconnectedCallback` has
+    // destroyed the player, and calling a destroyed handle is not a diagnostic
+    // worth raising over an element that is no longer on the page.
+    if (!this.player) return;
     const names = this.player.animationNames();
     // Selecting and starting are separate calls (SPEC §9.3): `setAnimation` is
     // the allocating step, `play` is transport. The old single `play(name)` is

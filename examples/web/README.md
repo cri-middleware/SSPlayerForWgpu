@@ -45,6 +45,24 @@ python3 -m http.server                 # serve THIS directory
 
 `ssplayer-wgpu/`, `assets/` and `assets_emb/` are all generated (git-ignored).
 
+## The three pages
+
+Each is self-contained static HTML — no build step, no bundler, one inline module
+script — and all three share the same staged package and the same data.
+
+| Page | What it is for |
+|---|---|
+| [`index.html`](./index.html) | The two shapes of the API side by side: one `<ss-player-webgpu>` element, and one canvas driven directly with several players on it, printing `SceneStats`. Both export modes are selectable, which is what exercises the fetch path as well as the embedded one. |
+| [`element.html`](./element.html) | The Web Component on its own: the declarative markup, a panel over `element.player` for transport / speed / loop count, a copy-pasteable snippet that tracks the panel, and `loadSrc` switching packs at runtime. |
+| [`multi.html`](./multi.html) | Many elements on one page, in article flow — block, inline, overlapped with HTML above and below, and styled with `border-radius` / `filter`. The HUD counts elements, canvases and **distinct `SsContextWeb` objects**, so "one device however many elements" is measured rather than claimed; per-animation frame counters make `pause-when-hidden` visible. |
+
+Both new pages fit the animation to the element's box themselves
+(`canvasSize()` + `setTransform`), because the player draws one authored pixel to
+one CSS pixel and puts the animation's **origin** — wherever the artist put it — at
+the centre of the box. Ringo stands on his origin, so those elements ask for it at
+the foot of the box instead; that decision is the host's and the demo shows it
+being made rather than hiding it.
+
 `build=debug` passes `--dev` to wasm-pack, which skips `wasm-opt` — the result is
 several times larger, so never quote its size.
 
