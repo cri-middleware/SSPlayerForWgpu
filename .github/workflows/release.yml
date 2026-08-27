@@ -145,6 +145,7 @@ jobs:
             packages/ssplayer-wgpu/README.md
             packages/ssplayer-wgpu/README.ja.md
             packages/ssplayer-wgpu/LICENSE.md
+            packages/ssplayer-wgpu/LICENSE.ja.md
           if-no-files-found: error
           retention-days: 7
 
