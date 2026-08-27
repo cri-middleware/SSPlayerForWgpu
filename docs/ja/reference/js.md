@@ -44,7 +44,9 @@ import { defineSsPlayerWebGPUElement } from '@spritestudio/ssplayer-wgpu/element
 
 ## `SsPlayerWeb` — キャラクター 1 体
 
-**ロード** — 非同期なのは `load` 系だけです。
+**ロード** — 非同期なのは `load` 系だけで、1 つのプレイヤーが同時に走らせられるロードは **1 本**
+です。前のロードが完了する前に次を始めると reject されるので、`await` するか呼び出しを直列に
+つないでください。
 
 | | |
 |---|---|

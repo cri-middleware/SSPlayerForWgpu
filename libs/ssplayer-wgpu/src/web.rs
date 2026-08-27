@@ -39,7 +39,7 @@ use crate::player::{AssetLoader, BlendOp, MissingKind, OverridePriority, Playbac
 use crate::renderer::{AlphaMode, Retention, SSRenderer};
 use crate::roster::{Roster, SlotId};
 use crate::scene::{MaskBackend, SSScene, SceneConfig};
-use std::cell::RefCell;
+use std::cell::{Cell, RefCell};
 use std::collections::HashMap;
 use std::rc::Rc;
 use std::sync::Arc;
@@ -61,6 +61,20 @@ fn js_err<E: core::fmt::Debug>(e: E) -> JsValue {
 fn gone(what: &str) -> JsValue {
     JsValue::from_str(&format!("this {what} has been destroyed"))
 }
+
+/// How a canvas composites with the page behind it.
+///
+/// **Premultiplied, always.** A canvas on a page is a box in a layout, not a
+/// window: the transparent parts of a frame have to let the page through, or an
+/// element dropped onto a coloured card is a black rectangle over it. Nothing is
+/// converted for this — the whole pipeline already produces premultiplied pixels,
+/// which is also why `createImageBitmap` is asked for premultiplied bitmaps.
+///
+/// Not read off `SurfaceCapabilities`: wgpu's WebGPU backend reports `[Opaque]`
+/// there and accepts `PreMultiplied` in `configure` anyway, mapping it onto the
+/// canvas context's `alphaMode: "premultiplied"`. Picking the first reported mode
+/// is what made every element an opaque black box.
+const PAGE_ALPHA_MODE: wgpu::CompositeAlphaMode = wgpu::CompositeAlphaMode::PreMultiplied;
 
 fn create_stencil_view(device: &wgpu::Device, width: u32, height: u32) -> wgpu::TextureView {
     let texture = device.create_texture(&wgpu::TextureDescriptor {
@@ -302,7 +316,7 @@ impl WebContext {
         let &first = caps.formats.first().ok_or_else(|| JsValue::from_str("the adapter cannot present to this canvas"))?;
         // Prefer a non-sRGB format so the premultiplied pipeline composites as authored.
         let format = caps.formats.iter().copied().find(|f| !f.is_srgb()).unwrap_or(first);
-        let config = wgpu::SurfaceConfiguration { usage: wgpu::TextureUsages::RENDER_ATTACHMENT, format, width, height, present_mode: wgpu::PresentMode::Fifo, alpha_mode: caps.alpha_modes[0], view_formats: vec![], desired_maximum_frame_latency: 2 };
+        let config = wgpu::SurfaceConfiguration { usage: wgpu::TextureUsages::RENDER_ATTACHMENT, format, width, height, present_mode: wgpu::PresentMode::Fifo, alpha_mode: PAGE_ALPHA_MODE, view_formats: vec![], desired_maximum_frame_latency: 2 };
         surface.configure(&self.device, &config);
 
         // The scene is format-specific; the renderer is not, which is
@@ -505,7 +519,7 @@ impl SsContextWeb {
                 if !caps.formats.contains(&surface.config.format) {
                     return Err(JsValue::from_str("the restored adapter cannot present a canvas's original surface format; rebuild the context"));
                 }
-                surface.config.alpha_mode = caps.alpha_modes[0];
+                surface.config.alpha_mode = PAGE_ALPHA_MODE;
                 surface.surface.configure(&device, &surface.config);
                 surface.stencil_view = create_stencil_view(&device, surface.config.width, surface.config.height);
                 surface.scene.restore_device(&device, &queue);
@@ -581,7 +595,7 @@ impl SsSurfaceWeb {
         let ctx = &mut *self.ctx.borrow_mut();
         let entry = ctx.surfaces.get_mut(self.id).ok_or_else(|| gone("surface"))?;
         let id = entry.players.insert(SSPlayer::new());
-        Ok(SsPlayerWeb { ctx: Rc::clone(&self.ctx), surface: self.id, id })
+        Ok(SsPlayerWeb { ctx: Rc::clone(&self.ctx), surface: self.id, id, loading: Cell::new(false) })
     }
 
     /// Advance every player on this canvas by `dt` seconds and render one frame.
@@ -703,6 +717,11 @@ pub struct SsPlayerWeb {
     ctx: Rc<RefCell<WebContext>>,
     surface: SlotId,
     id: SlotId,
+    /// Set while a load holds this player outside the context — see
+    /// [`SsPlayerWeb::with_player_detached`], which is the only thing that reads
+    /// it. On the handle rather than in the slot because `createPlayer` is the
+    /// only way to get one, so there is exactly one of these per player.
+    loading: Cell<bool>,
 }
 
 /// Run `body` on the player this handle names.
@@ -826,19 +845,29 @@ impl SsPlayerWeb {
     /// If the handle is destroyed while the load is in flight, the finished
     /// player is dropped rather than written back over its successor — the same
     /// rule the generation-tagged slots exist for.
+    ///
+    /// **One at a time**, which is what [`SsPlayerWeb::ensure_idle`] enforces: a
+    /// second load would detach the blank placeholder the first one left, walk
+    /// *that*, and write it back over the finished player — so whichever settled
+    /// last would win, taking the other one's pack, atlases and transform with
+    /// it. A host that starts a load without awaiting the previous one is told
+    /// so rather than losing one of them quietly.
     async fn with_player_detached<F, Fut, T>(&self, body: F) -> Result<T, JsValue>
     where
         F: FnOnce(SSPlayer) -> Fut,
         Fut: core::future::Future<Output = (SSPlayer, T)>,
     {
         let taken = {
+            self.ensure_idle()?;
             let ctx = &mut *self.ctx.borrow_mut();
             let entry = ctx.surfaces.get_mut(self.surface).ok_or_else(|| gone("surface"))?;
             let slot = entry.players.get_mut(self.id).ok_or_else(|| gone("player"))?;
+            self.loading.set(true);
             core::mem::take(slot)
         };
 
         let (player, out) = body(taken).await;
+        self.loading.set(false);
 
         let ctx = &mut *self.ctx.borrow_mut();
         if let Some(entry) = ctx.surfaces.get_mut(self.surface)
@@ -847,6 +876,19 @@ impl SsPlayerWeb {
             *slot = player;
         }
         Ok(out)
+    }
+
+    /// Refuse a call that would register or load into the placeholder another
+    /// load has left in this player's slot.
+    ///
+    /// Checked before the registration `loadSsab` / `addSsab` do as well as in
+    /// [`SsPlayerWeb::with_player_detached`], because a pack registered into that
+    /// placeholder goes the same way the placeholder does.
+    fn ensure_idle(&self) -> Result<(), JsValue> {
+        if self.loading.get() {
+            return Err(JsValue::from_str("this player is already loading; await that promise before starting another load on it"));
+        }
+        Ok(())
     }
 }
 
@@ -881,6 +923,7 @@ impl SsPlayerWeb {
     /// `console.warn`: one missing image should not cost you the character.
     #[wasm_bindgen(js_name = loadSsab)]
     pub async fn load_ssab(&self, bytes: Vec<u8>, pack: Option<String>, base_url: Option<String>) -> Result<(), JsValue> {
+        self.ensure_idle()?;
         let registered = self.register(&bytes, pack, true)?;
         let mut loader = WebAssetLoader::new(Rc::clone(&self.ctx), base_url);
         let name = registered.name().to_string();
@@ -908,6 +951,12 @@ impl SsPlayerWeb {
     /// [`SSPlayer::load`]. Use [`SsPlayerWeb::load_ssab`] when the bytes
     /// come from somewhere that is not URL-addressable — a drop, a bundler, an
     /// archive — and pass `baseUrl` if that pack still has siblings to find.
+    ///
+    /// **One load at a time per player.** Starting a second before the first has
+    /// settled is rejected, because the two would otherwise race for the slot the
+    /// player was lifted out of and one of them would be lost — `await` the
+    /// promise, or chain the calls. Two *different* players load concurrently as
+    /// usual, and share whatever atlases they have in common.
     pub async fn load(&self, src: &str) -> Result<(), JsValue> {
         // No base of our own: `src` is page-relative like any other URL here, so
         // the document resolves it. The walk then hands `src` to `set_base` — after
@@ -934,6 +983,7 @@ impl SsPlayerWeb {
     /// `ssplayer-core` covers with its `InstancePackProvider` hook.
     #[wasm_bindgen(js_name = addSsab)]
     pub async fn add_ssab(&self, bytes: Vec<u8>, pack: Option<String>, base_url: Option<String>) -> Result<(), JsValue> {
+        self.ensure_idle()?;
         let registered = self.register(&bytes, pack, false)?;
         let mut loader = WebAssetLoader::new(Rc::clone(&self.ctx), base_url);
         let name = registered.name().to_string();

@@ -44,7 +44,9 @@ The element lives behind its own entry point, so a bundle that only wants the AP
 
 ## `SsPlayerWeb` — one character
 
-**Loading** — `load` is the only asynchronous call.
+**Loading** — the `load` family is the only asynchronous part of the API, and a player takes **one
+load at a time**: starting a second before the first settles is rejected, so `await` it or chain
+the calls.
 
 | | |
 |---|---|
