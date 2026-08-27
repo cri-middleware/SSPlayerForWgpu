@@ -1,6 +1,6 @@
 # 🦀 SSPlayer for wgpu
 
-**[OPTPiX SpriteStudio 7](https://www.webtech.co.jp/spritestudio/)** のアニメーション（`.ssab`）を
+**[SpriteStudio](https://www.webtech.co.jp/spritestudio/)** のアニメーション（`.ssab`）を
 [wgpu](https://wgpu.rs/) で再生します。レンダラーもシェーダーも 1 つ、呼び方が 4 通り。モーションは
 専用エディタでアーティストが作り、あなたはファイルを読み込んで再生するだけです。動画ファイルも、
 作り直しも、エンジンへのロックインもありません。

@@ -167,7 +167,7 @@ static const float kFallbackCanvas = 320.0f;
                                           styleMask:NSWindowStyleMaskTitled | NSWindowStyleMaskClosable | NSWindowStyleMaskMiniaturizable | NSWindowStyleMaskResizable
                                             backing:NSBackingStoreBuffered
                                               defer:NO];
-    _window.title = @"SpriteStudio 7 wgpu Viewer (Metal / C API)";
+    _window.title = @"SpriteStudio wgpu Viewer (Metal / C API)";
     _window.delegate = self;
 
     _view = [[SSMetalView alloc] initWithFrame:frame];
@@ -540,7 +540,7 @@ static const float kFallbackCanvas = 320.0f;
     ss_player_canvas_size([self playerAt:0], &canvasWidth, &canvasHeight);
     printf("\033[2J\033[H");
     printf("====================================================\n");
-    printf("   SpriteStudio 7 wgpu Viewer — Metal / C API\n");
+    printf("   SpriteStudio wgpu Viewer — Metal / C API\n");
     printf("====================================================\n");
     printf("  Active File:   %s (%lu/%lu)\n", _packs[_packIndex].lastPathComponent.UTF8String, (unsigned long)_packIndex + 1, (unsigned long)_packs.count);
     printf("  Animation:     %s (%lu/%lu)\n", _anims.count ? _anims[_animIndex].UTF8String : "none", (unsigned long)_animIndex + 1, (unsigned long)_anims.count);

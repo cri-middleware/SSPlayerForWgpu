@@ -9,7 +9,7 @@ INHERIT: ./mkdocs.base.yml
 docs_dir: docs/en
 site_dir: site
 site_url: "https://cri-middleware.github.io/SSPlayerForWgpu/"
-site_description: "Play OPTPiX SpriteStudio 7 animations through wgpu -- from Rust, Bevy, C/C++ or WebGPU"
+site_description: "Play SpriteStudio animations through wgpu -- from Rust, Bevy, C/C++ or WebGPU"
 
 theme:
   # Drives the UI string translations and the `html lang` attribute.
@@ -33,7 +33,7 @@ extra:
       name: SSPlayerForWgpu on GitHub
     - icon: material/web
       link: https://www.webtech.co.jp/spritestudio/
-      name: OPTPiX SpriteStudio
+      name: SpriteStudio
     # Keep the handle here in sync with `twitter:site` in overrides/main.html.
     - icon: fontawesome/brands/x-twitter
       link: https://x.com/spritestudio

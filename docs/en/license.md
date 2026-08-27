@@ -16,5 +16,5 @@ dependencies chief among them — each under its own licence. Their terms are th
 those crates; a build of your application should collect them the way it collects any other Rust
 dependency's notices (`cargo about` and `cargo license` both do this).
 
-[OPTPiX SpriteStudio](https://www.webtech.co.jp/spritestudio/) itself, and the animation data you
+[SpriteStudio](https://www.webtech.co.jp/spritestudio/) itself, and the animation data you
 author with it, are covered by their own terms — not by this licence.

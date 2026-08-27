@@ -16,5 +16,5 @@ Player は SpriteStudio SDK（`ssruntime` / `ssab`）と、wgpu とその依存�
 アプリケーションのビルドでは、他の Rust 依存の告知と同じ方法で収集してください（`cargo about` や
 `cargo license` がこれを行います）。
 
-[OPTPiX SpriteStudio](https://www.webtech.co.jp/spritestudio/) 自体と、それでオーサリングした
+[SpriteStudio](https://www.webtech.co.jp/spritestudio/) 自体と、それでオーサリングした
 アニメーションデータには、このライセンスではなくそれぞれの規約が適用されます。

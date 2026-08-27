@@ -1,6 +1,6 @@
 # ssplayer-bevy
 
-SpriteStudio 7 characters inside a [Bevy](https://bevy.org) app, drawn on the
+SpriteStudio characters inside a [Bevy](https://bevy.org) app, drawn on the
 device Bevy already owns.
 
 An adapter, not a second player: the drawing is `ssplayer-wgpu`, and this crate

@@ -1,6 +1,6 @@
 # @spritestudio/ssplayer-wgpu
 
-[OPTPiX SpriteStudio 7](https://www.webtech.co.jp/spritestudio/) のアニメーション（`.ssab`）を
+[SpriteStudio](https://www.webtech.co.jp/spritestudio/) のアニメーション（`.ssab`）を
 **WebGPU** で再生するレンダラです。Rust / [wgpu](https://wgpu.rs/) 実装のプレイヤーを WebAssembly に
 コンパイルしたものです。
 
@@ -138,7 +138,7 @@ canvas・全 player が保持済みのデータから作り直され、止まっ
 - [リポジトリ](https://github.com/cri-middleware/SSPlayerForWgpu) — Rust ライブラリ本体と、同じコアで
   動く Metal / DX12 / Vulkan の C/C++ ビューア
 - [Issues](https://github.com/cri-middleware/SSPlayerForWgpu/issues)
-- [OPTPiX SpriteStudio](https://www.webtech.co.jp/spritestudio/)
+- [SpriteStudio](https://www.webtech.co.jp/spritestudio/)
 
 ## ライセンス
 
