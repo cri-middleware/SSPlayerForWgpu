@@ -1876,7 +1876,7 @@ impl SSPlayer {
 
         let draw = NodeDraw { transform: &self.transform, alpha: self.alpha, tint: pack_tint(self.tint) };
         let mut build = FrameBuild { scene, renderer, sub_frame: self.sub_frame };
-        render_node(root, &mut build, draw, frame_no, StencilTest::None, None);
+        render_node(root, &mut build, draw, frame_no, false, InheritedMask::ROOT, None);
     }
 
     /// What frame each instance child of the root is on, keyed by part index.
@@ -2175,6 +2175,54 @@ struct Bubble<'a> {
     eff_influence: bool,
 }
 
+/// The mask context a sub-animation inherits from the instance part that draws
+/// it, composed down the hierarchy (mask doc §2-6). A masked instance does NOT
+/// replace the child's own masking — it is *added* to it: the child keeps running
+/// its own writers, and every child part composes these inherited values with its
+/// own (`ForUnity` is the reference; `ForGodot` drops the child's own masking,
+/// which the mask doc's §2-1 treats as a gap). The identity — a top-level
+/// animation called by no instance — is [`InheritedMask::ROOT`].
+#[derive(Clone, Copy)]
+struct InheritedMask {
+    /// An ancestor instance part is a mask target, so the inherited outer mask
+    /// reaches this sub-animation's parts.
+    active: bool,
+    /// AND-chain of every ancestor instance part's `mask_influence` (identity
+    /// `true`). Once it reaches `false` the whole subtree is unmasked.
+    influence: bool,
+    /// OR-chain of every ancestor instance part's `visible_inside_mask` (identity
+    /// `false`). Once `true`, everything below draws inside.
+    visible_inside: bool,
+}
+
+impl InheritedMask {
+    /// The identity a top-level animation starts from (mask doc §2-6).
+    const ROOT: Self = Self { active: false, influence: true, visible_inside: false };
+
+    /// Push this context down through one instance part (mask doc §2-6): the
+    /// instance part's own flags compose with the inherited ones — `mask_influence`
+    /// with AND, `visible_inside_mask` with OR — and `active` records whether the
+    /// mask reaches below at all (the instance part is a target: composed influence,
+    /// or it writes a mask of its own).
+    fn compose(self, part: &PartMaskFlags) -> Self {
+        let influence = self.influence && part.mask_influence;
+        Self { active: influence || part.mask_write, influence, visible_inside: self.visible_inside || part.visible_inside_mask }
+    }
+
+    /// The effective polarity for a part with its own `visible_inside_mask`,
+    /// OR-composed with the inherited value (mask doc §2-4/§2-6).
+    fn polarity(self, part: &PartMaskFlags) -> StencilTest {
+        if self.visible_inside || part.visible_inside_mask { StencilTest::Inside } else { StencilTest::Outside }
+    }
+
+    /// Whether a drawn part is a mask target — its effective `mask_influence`
+    /// (own AND inherited) is set (mask doc §2-2/§2-6). `mask_write` does not make
+    /// it a target here; that is the writer's own local fact.
+    fn targets(self, part: &PartMaskFlags) -> bool {
+        self.influence && part.mask_influence
+    }
+}
+
 /// Transform a player-local bounding rectangle by an instance's slot matrix,
 /// returning the parent-local rectangle that encloses it. Only the affine 2D part
 /// of `slot` matters (the runtime's local Z is zero).
@@ -2266,7 +2314,7 @@ fn gather_bubbles<'r>(node: &mut PlaybackNode, frame: &FrameView<'r>) -> Vec<Bub
     out
 }
 
-fn render_node(node: &mut PlaybackNode, build: &mut FrameBuild<'_>, draw: NodeDraw, frame_no: f32, inherited_stencil: StencilTest, inherited_coverage: Option<InheritedCoverage>) {
+fn render_node(node: &mut PlaybackNode, build: &mut FrameBuild<'_>, draw: NodeDraw, frame_no: f32, parent_driven: bool, inherited: InheritedMask, inherited_coverage: Option<InheritedCoverage>) {
     let NodeDraw { transform, alpha, tint } = draw;
     // The DISPLAY frame. The playhead keeps its fraction whatever this is set to;
     // flooring it here is the whole of what turning sub-frame off does.
@@ -2280,12 +2328,16 @@ fn render_node(node: &mut PlaybackNode, build: &mut FrameBuild<'_>, draw: NodeDr
     // below refers to them by arena offset rather than expanding them.
     let mut node_slot = build.scene.begin_node(&frame, transform);
 
-    // Own masking runs only at the root scope; a masked sub-animation inherits.
-    // Backend-agnostic on purpose: planning writers, skipping a pure mask's
-    // colour and testing a masked target are the same work whether coverage ends
-    // up in the hardware stencil or in a bitmap this player rasterises. Only what
-    // a writer is *appended as* differs, and that is the scene's business.
-    let masking = build.scene.mask_backend() != crate::MaskBackend::None && inherited_stencil == StencilTest::None;
+    // A node runs its OWN masking only at the top (player) scope. Every instance
+    // sub-animation is *parent-driven*: it never rasterises its own coverage, so
+    // its own clipping masks do NOT clip its own parts (SpriteStudio 7.5 renders an
+    // instance's parts un-clipped by their siblings — verified against the tool's
+    // output; the ForGodot player is parent-driven the same way). What a
+    // sub-animation still gets is the outer mask it inherited, composed per part
+    // (§2-6 below), and its clipping writers still carry OUT to the parent
+    // (`gather_bubbles`). Backend-agnostic on purpose — only what a writer is
+    // *appended as* differs, and that is the scene's business.
+    let masking = build.scene.mask_backend() != crate::MaskBackend::None && !parent_driven;
     let writers = if masking { plan_writers(&frame, &node.mask_flags) } else { MaskWriters::default() };
 
     // A sub-animation clipped by its parent's mask reads the parent's bitmap
@@ -2440,6 +2492,23 @@ fn render_node(node: &mut PlaybackNode, build: &mut FrameBuild<'_>, draw: NodeDr
                         let info = BatchInfo { start_rank: rank, count: 1, texture_hash: batch.texture_hash(), blend_type: batch.blend_type(), kind, stencil, alpha, tint };
                         build.scene.append_batch(build.renderer, &frame, &node_slot, &info);
                     }
+                } else if inherited.active {
+                    // Clipped by an inherited outer mask. Each part composes its OWN
+                    // polarity and target with the inherited context (mask doc §2-6):
+                    // polarity = own `visible_inside` OR inherited; a part whose
+                    // effective `mask_influence` (own AND inherited) is 0 opts out and
+                    // draws unclipped. The instance part's setting no longer applies
+                    // to the whole sub-animation uniformly.
+                    for rank in start_rank..start_rank + count {
+                        let part_idx = draw_order.get(rank) as usize;
+                        if is_pure(part_idx) {
+                            continue;
+                        }
+                        let f = node.mask_flags.get(part_idx).copied().unwrap_or_default();
+                        let stencil = if inherited.targets(&f) { inherited.polarity(&f) } else { StencilTest::None };
+                        let info = BatchInfo { start_rank: rank, count: 1, texture_hash: batch.texture_hash(), blend_type: batch.blend_type(), kind, stencil, alpha, tint };
+                        build.scene.append_batch(build.renderer, &frame, &node_slot, &info);
+                    }
                 } else if has_pure {
                     // Non-masked batch that still contains a pure mask: draw the
                     // non-mask parts individually, skipping the mask's own colour.
@@ -2448,11 +2517,11 @@ fn render_node(node: &mut PlaybackNode, build: &mut FrameBuild<'_>, draw: NodeDr
                         if is_pure(part_idx) {
                             continue;
                         }
-                        let info = BatchInfo { start_rank: rank, count: 1, texture_hash: batch.texture_hash(), blend_type: batch.blend_type(), kind, stencil: inherited_stencil, alpha, tint };
+                        let info = BatchInfo { start_rank: rank, count: 1, texture_hash: batch.texture_hash(), blend_type: batch.blend_type(), kind, stencil: StencilTest::None, alpha, tint };
                         build.scene.append_batch(build.renderer, &frame, &node_slot, &info);
                     }
                 } else {
-                    let info = BatchInfo { start_rank, count, texture_hash: batch.texture_hash(), blend_type: batch.blend_type(), kind, stencil: inherited_stencil, alpha, tint };
+                    let info = BatchInfo { start_rank, count, texture_hash: batch.texture_hash(), blend_type: batch.blend_type(), kind, stencil: StencilTest::None, alpha, tint };
                     build.scene.append_batch(build.renderer, &frame, &node_slot, &info);
                 }
             }
@@ -2460,20 +2529,18 @@ fn render_node(node: &mut PlaybackNode, build: &mut FrameBuild<'_>, draw: NodeDr
                 for rank in start_rank..start_rank + count {
                     let part_idx = draw_order.get(rank) as usize;
 
-                    // Decide the stencil this child sub-animation inherits: our own
-                    // mask (if the instance part is a masked target), else propagate
-                    // whatever we inherited (screen-space clip continues down).
-                    let child_inherited = if masking && has_writers {
-                        let f = node.mask_flags.get(part_idx).copied().unwrap_or_default();
-                        if f.mask_influence {
-                            sync_masks_to(build, &write_plan, &mut cursor, rank);
-                            f.polarity()
-                        } else {
-                            StencilTest::None
-                        }
-                    } else {
-                        inherited_stencil
-                    };
+                    // The context this sub-animation inherits: compose this instance
+                    // part's own flags onto what THIS node inherited (mask doc §2-6,
+                    // `mask_influence` AND / `visible_inside_mask` OR). At a root owner
+                    // this starts from ROOT, so the child inherits this node's own mask
+                    // through the instance part; nested, it chains. Advance the stencil
+                    // cursor so the child tests against this node's writers up to the
+                    // instance's rank when this node owns a mask that reaches it.
+                    let f = node.mask_flags.get(part_idx).copied().unwrap_or_default();
+                    let child_ctx = inherited.compose(&f);
+                    if masking && has_writers && child_ctx.active {
+                        sync_masks_to(build, &write_plan, &mut cursor, rank);
+                    }
 
                     let Some(child) = node.instances.get_mut(&part_idx) else { continue };
                     if !child.visible {
@@ -2491,12 +2558,11 @@ fn render_node(node: &mut PlaybackNode, build: &mut FrameBuild<'_>, draw: NodeDr
                     // boundary — no player propagates an instance part's tint.
                     let child_alpha = alpha * fd.parts().get(part_idx).alpha();
                     let child_draw = NodeDraw { transform: &child_transform, alpha: child_alpha, tint };
-                    // Hand the bitmap down only when this instance part is
-                    // actually clipped; `child_inherited` is what says so, and
-                    // §2-6's AND means an unmasked instance part leaves its whole
-                    // subtree unmasked.
-                    let child_coverage = (child_inherited != StencilTest::None).then(|| own_coverage.map(|parent| parent.compose(&m, rank))).flatten();
-                    render_node(&mut child.node, build, child_draw, child_frame_no, child_inherited, child_coverage);
+                    // Hand the bitmap down only when the mask actually reaches this
+                    // instance part (`child_ctx.active`); §2-6's AND means an
+                    // unmasked instance part leaves its whole subtree unmasked.
+                    let child_coverage = child_ctx.active.then(|| own_coverage.map(|parent| parent.compose(&m, rank))).flatten();
+                    render_node(&mut child.node, build, child_draw, child_frame_no, true, child_ctx, child_coverage);
                 }
             }
             DrawBatchKind::Effect => {
@@ -2506,8 +2572,14 @@ fn render_node(node: &mut PlaybackNode, build: &mut FrameBuild<'_>, draw: NodeDr
                     let part_idx = draw_order.get(start_rank) as usize;
                     sync_masks_to(build, &write_plan, &mut cursor, start_rank);
                     node.mask_flags.get(part_idx).map(|f| f.polarity()).unwrap_or(StencilTest::None)
+                } else if inherited.active {
+                    // Same §2-6 composition as a drawn part: the emitter's own flags
+                    // OR/AND the inherited context; opt out (no test) when not a target.
+                    let part_idx = draw_order.get(start_rank) as usize;
+                    let f = node.mask_flags.get(part_idx).copied().unwrap_or_default();
+                    if inherited.targets(&f) { inherited.polarity(&f) } else { StencilTest::None }
                 } else {
-                    inherited_stencil
+                    StencilTest::None
                 };
                 for rank in start_rank..start_rank + count {
                     let part_idx = draw_order.get(rank) as usize;

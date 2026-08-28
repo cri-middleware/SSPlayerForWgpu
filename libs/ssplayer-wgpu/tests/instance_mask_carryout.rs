@@ -103,7 +103,11 @@ fn render(device: &wgpu::Device, queue: &wgpu::Queue, path: &str, backend: MaskB
     let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor { label: None });
     scene.encode_mask_coverage(&mut renderer, device, &mut encoder);
     {
-        let depth_stencil_attachment = depth_view.as_ref().map(|view| wgpu::RenderPassDepthStencilAttachment { view, depth_ops: None, stencil_ops: Some(wgpu::Operations { load: wgpu::LoadOp::Clear(0), store: wgpu::StoreOp::Store }) });
+        let depth_stencil_attachment = depth_view.as_ref().map(|view| wgpu::RenderPassDepthStencilAttachment {
+            view,
+            depth_ops: Some(wgpu::Operations { load: wgpu::LoadOp::Clear(1.0), store: wgpu::StoreOp::Store }),
+            stencil_ops: Some(wgpu::Operations { load: wgpu::LoadOp::Clear(0), store: wgpu::StoreOp::Store }),
+        });
         let mut rpass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
             label: None,
             color_attachments: &[Some(wgpu::RenderPassColorAttachment {
@@ -211,14 +215,12 @@ fn instance_internal_clip_carries_out_and_both_backends_agree() {
     assert!(brightness(&cov) < brightness(&none), "coverage carry-out removed nothing vs unmasked (cov={} none={})", brightness(&cov), brightness(&none));
     assert!(brightness(&sten) < brightness(&none), "stencil carry-out removed nothing vs unmasked (sten={} none={})", brightness(&sten), brightness(&none));
 
-    // Both backends must carry the mask out *consistently*. They are independent
-    // implementations — a bitmap replay vs the hardware stencil — and this fixture
-    // also carries a pre-existing, carry-out-independent divergence of its own
-    // (~6k px: a Check part the stencil clips and the coverage keeps; present on
-    // `main`, and unchanged whether carry-out is on or off), so the budget is wider
-    // than the edge-only one `coverage.rs` uses. What it still catches is a backend
-    // that fails to carry the mask out: with only one backend clipping the Arrows
-    // the disagreement roughly triples, far past this.
-    let budget = drawn(&sten) / 8;
-    assert!(differing <= budget, "coverage and stencil disagree on {differing} pixels (budget {budget}) — a backend is not carrying the instance mask out consistently");
+    // The two backends are independent implementations of the same spec — a bitmap
+    // replay vs the hardware stencil — so on this fixture their interiors must
+    // agree; only the mask edges may land on different pixels (the same 5% budget
+    // `coverage.rs` allows). A backend that clips an instance differently — e.g.
+    // applying a sub-animation's own masks to its own parts, which SpriteStudio 7.5
+    // does not — blows far past this.
+    let budget = drawn(&sten) / 20;
+    assert!(differing <= budget, "coverage and stencil disagree on {differing} pixels (budget {budget}) — the instance mask is not treated the same on both backends");
 }
