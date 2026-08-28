@@ -324,12 +324,40 @@ fn stencil_compare(stencil: StencilTest) -> wgpu::CompareFunction {
     }
 }
 
-/// The stencil write a mask writer performs.
+/// Stencil bit planes, one per OP family (mask doc §3-1-4). `Invert` and the
+/// increment/decrement pair do not commute, so they must never share bits:
+/// mixed they make coverage depend on writer order and leave the cancellation
+/// short of zero. A stencil write is `new = (op(old) & write_mask) | (old &
+/// ~write_mask)`, so restricting the written bits per OP throws the carry/borrow
+/// away and keeps each plane closed. The Test side is unaffected — it reads both
+/// planes (`read_mask` 0xFF, `value != 0`), which is exactly the union that
+/// masks of differing `mask_influence` compose to.
+///
+/// The counter must be contiguous from bit 0 (increment/decrement are ordinary
+/// arithmetic); parity takes one dedicated high bit. Unlike ForUnity — which
+/// fences SS masking into URP's low nibble — this player owns the whole 8-bit
+/// stencil, so the counter gets seven bits (overlap depth up to 127) and parity
+/// the eighth.
+const STENCIL_PLANE_COUNTER: u32 = 0x7F;
+const STENCIL_PLANE_PARITY: u32 = 0x80;
+
+/// The stencil write a mask writer performs. Increment/decrement wrap *within the
+/// counter plane* (`write_mask` discards the carry past bit 6), so a full
+/// increment/decrement cycle returns the plane to zero exactly like the coverage
+/// backend's counter accumulator.
 fn stencil_write_op(op: MaskOp) -> wgpu::StencilOperation {
     match op {
-        MaskOp::Incr => wgpu::StencilOperation::IncrementClamp,
-        MaskOp::Decr => wgpu::StencilOperation::DecrementClamp,
+        MaskOp::Incr => wgpu::StencilOperation::IncrementWrap,
+        MaskOp::Decr => wgpu::StencilOperation::DecrementWrap,
         MaskOp::Invert => wgpu::StencilOperation::Invert,
+    }
+}
+
+/// The bit plane a writer's OP writes into (mask doc §3-1-4).
+fn stencil_write_plane(op: MaskOp) -> u32 {
+    match op {
+        MaskOp::Incr | MaskOp::Decr => STENCIL_PLANE_COUNTER,
+        MaskOp::Invert => STENCIL_PLANE_PARITY,
     }
 }
 
@@ -339,8 +367,9 @@ fn stencil_face(compare: wgpu::CompareFunction, pass_op: wgpu::StencilOperation)
 }
 
 /// Depth/stencil state for a pipeline that only *tests* coverage (content), or
-/// only *writes* it (mask writers, `write_mask` 0xFF). The depth aspect is
-/// inert throughout: never written, always passing.
+/// only *writes* it (mask writers, `write_mask` = the OP's own plane, mask doc
+/// §3-1-4). `read_mask` is always 0xFF so a test reads both planes as a union.
+/// The depth aspect is inert throughout: never written, always passing.
 fn depth_stencil_state(format: Option<wgpu::TextureFormat>, compare: wgpu::CompareFunction, pass_op: wgpu::StencilOperation, write_mask: u32) -> Option<wgpu::DepthStencilState> {
     format.map(|format| wgpu::DepthStencilState {
         format,
@@ -1416,7 +1445,7 @@ impl SSRenderer {
                 blend: None,
                 // Coverage only — the fragment's colour is thrown away.
                 write_mask: wgpu::ColorWrites::empty(),
-                depth_stencil: depth_stencil_state(key.stencil_format, wgpu::CompareFunction::Always, stencil_write_op(op), 0xFF),
+                depth_stencil: depth_stencil_state(key.stencil_format, wgpu::CompareFunction::Always, stencil_write_op(op), stencil_write_plane(op)),
                 color_format: key.color_format,
             },
             PipelineKind::ContentCoverage(blend_idx, stencil, class) => {
