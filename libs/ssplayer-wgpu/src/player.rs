@@ -2051,22 +2051,22 @@ const FLAG_MASK_INFLUENCE: u8 = 0x01;
 /// a pure mask's backward scope has ended → remove it (Decr/Invert); a clipping
 /// writer's forward scope has begun → add it (Incr/Invert). Monotonic in
 /// `cursor`; ops are baked per pipeline, so ref is always 0.
-fn sync_masks_to(build: &mut FrameBuild<'_>, frame: &FrameView, node: &NodeSlot, writers: &[MaskWriter], cursor: &mut usize, up_to_rank: usize) {
+fn sync_masks_to(build: &mut FrameBuild<'_>, plan: &[SWrite], cursor: &mut usize, up_to_rank: usize) {
     // The coverage backend keeps no running state to advance: every writer was
     // baked once and the replay decides scope per fragment.
     if build.scene.mask_backend() == crate::MaskBackend::Coverage {
         return;
     }
-    while *cursor < writers.len() && writers[*cursor].rank < up_to_rank {
-        let w = &writers[*cursor];
-        let op = if w.is_clipping {
-            if w.op_invert { MaskOp::Invert } else { MaskOp::Incr }
-        } else if w.op_invert {
+    while *cursor < plan.len() && plan[*cursor].w.rank < up_to_rank {
+        let sw = &plan[*cursor];
+        let op = if sw.w.is_clipping {
+            if sw.w.op_invert { MaskOp::Invert } else { MaskOp::Incr }
+        } else if sw.w.op_invert {
             MaskOp::Invert
         } else {
             MaskOp::Decr
         };
-        build.scene.append_mask_writer(frame, node, w, op);
+        build.scene.append_mask_writer(sw.frame, &sw.slot, &sw.w, op);
         *cursor += 1;
     }
 }
@@ -2149,6 +2149,123 @@ impl InheritedCoverage {
     }
 }
 
+/// A visible instance child's clipping writers, gathered so the *parent* can
+/// carry them past the instance boundary (mask doc §2-1 clipping scope, extended
+/// across an instance; the fix ForUnity #133 / ForGodot #295 landed). A clipping
+/// mask written inside a sub-animation must keep clipping the parent's parts
+/// drawn *after* the instance, so the parent folds each such writer into its own
+/// coverage: baked from the child's geometry through the slot placement, and
+/// ranked at the instance part so the replay's forward scope (`rank > slot`)
+/// reaches exactly the parent parts after it. Pure masks do not bubble — they
+/// close inside the child (§2-1 backward scope). Only the coverage backend uses
+/// this today; the stencil path is a separate step.
+struct Bubble<'a> {
+    /// The instance part's rank in the parent's draw order — the scope point.
+    rank: usize,
+    /// The instance placement, child-local to parent-local (the slot matrix).
+    slot: [f32; 16],
+    /// The child's own current frame, decoupled from its context (raw slices).
+    frame: FrameView<'a>,
+    /// The child's clipping writers (only), in child part-index space.
+    clip: Vec<MaskWriter>,
+    /// The instance part's effective `mask_influence`, composed down the chain
+    /// (mask doc §2-6, AND). A writer inside a `mask_influence == 0` instance is
+    /// forced onto the union/counter plane so it composes with an outer mask as a
+    /// union instead of cancelling it (§3-1-4).
+    eff_influence: bool,
+}
+
+/// Transform a player-local bounding rectangle by an instance's slot matrix,
+/// returning the parent-local rectangle that encloses it. Only the affine 2D part
+/// of `slot` matters (the runtime's local Z is zero).
+fn transform_bounds(bounds: [f32; 4], slot: &[f32; 16]) -> [f32; 4] {
+    let (m0, m1, m4, m5, m12, m13) = (slot[0], slot[1], slot[4], slot[5], slot[12], slot[13]);
+    let [min_x, min_y, max_x, max_y] = bounds;
+    let mut out = [f32::INFINITY, f32::INFINITY, f32::NEG_INFINITY, f32::NEG_INFINITY];
+    for (x, y) in [(min_x, min_y), (max_x, min_y), (min_x, max_y), (max_x, max_y)] {
+        let px = m0 * x + m4 * y + m12;
+        let py = m1 * x + m5 * y + m13;
+        out[0] = out[0].min(px);
+        out[1] = out[1].min(py);
+        out[2] = out[2].max(px);
+        out[3] = out[3].max(py);
+    }
+    out
+}
+
+/// A column-major 4x4 identity; the placement a coverage-only bake needs, since
+/// the coverage vertex stage positions from the writers' player-local geometry
+/// and the coverage affine, never from the node's world transform.
+const IDENTITY_MATRIX: [f32; 16] = [1.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 1.0];
+
+/// One planned stencil writer paired with the geometry it bakes from. The stencil
+/// backend interleaves writers into the buffer during the draw walk and unwinds
+/// them at the end, so unlike the coverage backend (which bakes everything up
+/// front) it needs, per writer, both the frame to validate against and the arena
+/// slot to read: this node's own for its own writers, and a bubbled child's for a
+/// writer carried out past an instance boundary (see [`Bubble`]).
+struct SWrite<'a> {
+    w: MaskWriter,
+    frame: &'a FrameView<'a>,
+    slot: NodeSlot,
+}
+
+/// Collect every visible instance child's clipping writers so this node can carry
+/// them past the instance boundary (see [`Bubble`]). Reads each child's current
+/// frame, decoupled from its context like the parent's, and keeps only the
+/// clipping writers (`mask_write && !pure_mask`) — a pure mask closes inside the
+/// child. `'r` is the parent frame's lifetime; the child frames live at least as
+/// long, because their contexts hang off `node` for the whole draw walk.
+fn gather_bubbles<'r>(node: &mut PlaybackNode, frame: &FrameView<'r>) -> Vec<Bubble<'r>> {
+    let mut out = Vec::new();
+    if frame.frame_data.is_empty() {
+        return out;
+    }
+    // SAFETY: same contract as the render walk's `FrameData`.
+    let fd = unsafe { root_as_frame_data_unchecked(frame.frame_data) };
+    let draw_order = fd.draw_order();
+    // Snapshot the instance parts first, so iterating the parent's batches does
+    // not overlap the per-child borrows below.
+    let mut instances: Vec<(usize, usize, [f32; 16])> = Vec::new();
+    for batch in fd.draw_batches() {
+        if batch.kind() != DrawBatchKind::Instance {
+            continue;
+        }
+        let start = batch.start_rank() as usize;
+        for rank in start..start + batch.count() as usize {
+            let part_idx = draw_order.get(rank) as usize;
+            if (part_idx + 1) * 16 > frame.world_matrices.len() {
+                continue;
+            }
+            let slot: [f32; 16] = frame.world_matrices[part_idx * 16..part_idx * 16 + 16].try_into().unwrap();
+            instances.push((part_idx, rank, slot));
+        }
+    }
+    for (part_idx, rank, slot) in instances {
+        // The instance part's own influence composes with the identity a top-level
+        // owner starts from (mask doc §2-6, AND). A masked sub-animation never bakes
+        // coverage — only the top owner does — so the inherited term is 1 here.
+        let eff_influence = node.mask_flags.get(part_idx).map(|f| f.mask_influence).unwrap_or(false);
+        let Some(child) = node.instances.get_mut(&part_idx) else { continue };
+        if !child.visible {
+            continue;
+        }
+        let Ok(bytes) = child.node.context.get_frame_data(child.frame_no) else { continue };
+        // SAFETY: the child's context outlives `'r` (it hangs off `node` for the
+        // whole walk), so its frame bytes and runtime buffers are valid for `'r`;
+        // this is the same raw-slice decoupling the parent frame uses.
+        let cfd: &'r [u8] = unsafe { std::slice::from_raw_parts(bytes.as_ptr(), bytes.len()) };
+        let cframe = frame_view(&mut child.node.context, cfd);
+        let cwriters = plan_writers(&cframe, &child.node.mask_flags);
+        let clip: Vec<MaskWriter> = cwriters.iter().filter(|w| w.is_clipping).copied().collect();
+        if clip.is_empty() {
+            continue;
+        }
+        out.push(Bubble { rank, slot, frame: cframe, clip, eff_influence });
+    }
+    out
+}
+
 fn render_node(node: &mut PlaybackNode, build: &mut FrameBuild<'_>, draw: NodeDraw, frame_no: f32, inherited_stencil: StencilTest, inherited_coverage: Option<InheritedCoverage>) {
     let NodeDraw { transform, alpha, tint } = draw;
     // The DISPLAY frame. The playhead keeps its fraction whatever this is set to;
@@ -2185,26 +2302,108 @@ fn render_node(node: &mut PlaybackNode, build: &mut FrameBuild<'_>, draw: NodeDr
     // Nothing is pre-written, nothing is unwound, and the draw walk below carries
     // no running mask state — `cursor` simply never advances.
     let coverage = masking && build.scene.mask_backend() == crate::MaskBackend::Coverage;
-    if coverage && !writers.is_empty() {
-        // The bitmap is stretched over the writers' own bounding box, so its
-        // resolution follows the mask rather than the screen (mask doc §3-2).
-        if let Some([min_x, min_y, max_x, max_y]) = crate::mask::writer_bounds(&frame, &writers) {
+
+    // Carry-out: gather each visible instance child's clipping writers so this
+    // node keeps clipping the parent parts drawn after the instance (mask doc
+    // §2-1/§2-6; see [`Bubble`]). Both backends consume these — coverage bakes
+    // them below, the stencil path folds them into its write plan. The children
+    // are read now, before either, because a coverage block's writer metadata is
+    // fixed the moment it is baked.
+    let bubbles = if masking { gather_bubbles(node, &frame) } else { Vec::new() };
+
+    // A node with no writers of its own still bakes when a visible child bubbles a
+    // clipping writer up into it (the "coverage stays open" case), so masked
+    // targets below can be tested against it.
+    let has_writers = !writers.is_empty() || !bubbles.is_empty();
+
+    if coverage && has_writers {
+        // Bounds enclose every writer this node bakes: its own, plus each bubbled
+        // child writer mapped through its instance placement into this node's local
+        // space, so the bitmap covers them all (mask doc §3-2).
+        let mut bounds = crate::mask::writer_bounds(&frame, &writers);
+        for b in &bubbles {
+            if let Some(cb) = crate::mask::writer_bounds(&b.frame, &b.clip) {
+                let cb = transform_bounds(cb, &b.slot);
+                bounds = Some(match bounds {
+                    Some([a, bb, c, d]) => [a.min(cb[0]), bb.min(cb[1]), c.max(cb[2]), d.max(cb[3])],
+                    None => cb,
+                });
+            }
+        }
+        if let Some([min_x, min_y, max_x, max_y]) = bounds {
             let (w, h) = ((max_x - min_x).max(f32::EPSILON), (max_y - min_y).max(f32::EPSILON));
             let uv = [1.0 / w, 0.0, 0.0, 1.0 / h, -min_x / w, -min_y / h];
-            build.scene.set_node_coverage(&mut node_slot, &uv, (w, h), &writers);
-            for (bit, w) in writers.iter().enumerate() {
-                build.scene.append_coverage_writer(&frame, &node_slot, w, bit);
+
+            // One writer list — own first, then bubbled — drives both the block's
+            // replay metadata and the bit each writer bakes into. A bubbled writer
+            // is re-ranked at its instance part (so its forward scope reaches the
+            // parent parts after it) and its OP composed with the effective
+            // influence (mask doc §2-6/§3-1-4).
+            let mut all = writers;
+            for b in &bubbles {
+                for cw in &b.clip {
+                    if all.len() >= crate::mask::MAX_MASK_WRITERS {
+                        break;
+                    }
+                    all.push(MaskWriter { rank: b.rank, op_invert: cw.op_invert && b.eff_influence, ..*cw });
+                }
             }
-            own_coverage = Some(InheritedCoverage { uv, layer: build.scene.node_coverage_layer(&node_slot), rank: 0, writers });
+            build.scene.set_node_coverage(&mut node_slot, &uv, (w, h), &all);
+            let layer = build.scene.node_coverage_layer(&node_slot);
+            own_coverage = Some(InheritedCoverage { uv, layer, rank: 0, writers: all });
+
+            // Own writers bake into the leading bits; then each bubbled child's
+            // writers into the bits that follow, in the same order they were pushed
+            // above so the bit each bakes matches its metadata slot.
+            let mut bit = 0usize;
+            for cw in &writers {
+                build.scene.append_coverage_writer(&frame, &node_slot, cw, bit);
+                bit += 1;
+            }
+            for b in &bubbles {
+                // The child bakes through a coverage block whose affine folds its
+                // slot placement onto this node's, so its own local coordinates
+                // land where this node's writers were baked (mask doc §3-2-2).
+                let child_uv = own_coverage.unwrap().compose(&b.slot, b.rank).uv;
+                let mut child_slot = build.scene.begin_node(&b.frame, &IDENTITY_MATRIX);
+                build.scene.inherit_node_coverage(&mut child_slot, &child_uv, layer, b.rank, &MaskWriters::default());
+                for cw in &b.clip {
+                    if bit >= crate::mask::MAX_MASK_WRITERS {
+                        break;
+                    }
+                    let bw = MaskWriter { rank: b.rank, op_invert: cw.op_invert && b.eff_influence, ..*cw };
+                    build.scene.append_coverage_writer(&b.frame, &child_slot, &bw, bit);
+                    bit += 1;
+                }
+            }
         }
     }
-
-    // Pre-write pure masks so they are active for lower-rank content (§2-1).
+    // The stencil backend interleaves and unwinds writers during the walk, so it
+    // needs one rank-ordered plan that pairs each writer with the geometry it bakes
+    // from: this node's own writers from this node's frame, and each bubbled child
+    // writer from the child's frame through the slot placement (world space — the
+    // child's own render transform). The coverage backend baked everything above,
+    // so its plan is only this node's own writers and is never replayed here.
+    let mut write_plan: Vec<SWrite> = writers.iter().map(|w| SWrite { w: *w, frame: &frame, slot: node_slot }).collect();
     if !coverage {
-        for w in &writers {
-            if !w.is_clipping {
-                let op = if w.op_invert { MaskOp::Invert } else { MaskOp::Incr };
-                build.scene.append_mask_writer(&frame, &node_slot, w, op);
+        for b in &bubbles {
+            let child_slot = build.scene.begin_node(&b.frame, &mat4_mul(transform, &b.slot));
+            for cw in &b.clip {
+                let bw = MaskWriter { rank: b.rank, op_invert: cw.op_invert && b.eff_influence, ..*cw };
+                write_plan.push(SWrite { w: bw, frame: &b.frame, slot: child_slot });
+            }
+        }
+        // `sync_masks_to` / `unwind_masks` walk this in ascending rank order.
+        write_plan.sort_by_key(|sw| sw.w.rank);
+    }
+
+    // Pre-write pure masks so they are active for lower-rank content (§2-1). Bubbled
+    // writers are all clipping, so none of them are pre-written here.
+    if !coverage {
+        for sw in &write_plan {
+            if !sw.w.is_clipping {
+                let op = if sw.w.op_invert { MaskOp::Invert } else { MaskOp::Incr };
+                build.scene.append_mask_writer(sw.frame, &sw.slot, &sw.w, op);
             }
         }
     }
@@ -2220,7 +2419,7 @@ fn render_node(node: &mut PlaybackNode, build: &mut FrameBuild<'_>, draw: NodeDr
         // (WebGL gates the masked path on maskWriterCount > 0). With no writers the
         // mask_influence opt-in is inert, so the content draws normally — crucially
         // via the stencil=None path, which is where shader dispatch happens.
-        let masked_target = masking && !writers.is_empty() && (batch.flags() & FLAG_MASK_INFLUENCE) != 0;
+        let masked_target = masking && has_writers && (batch.flags() & FLAG_MASK_INFLUENCE) != 0;
         match kind {
             DrawBatchKind::Normal | DrawBatchKind::Mesh | DrawBatchKind::Shape => {
                 // Pure masks (PartTypeMask / draw_as_mask) contribute coverage but
@@ -2233,7 +2432,7 @@ fn render_node(node: &mut PlaybackNode, build: &mut FrameBuild<'_>, draw: NodeDr
                     // Polarity and active coverage vary per part → draw one at a time.
                     for rank in start_rank..start_rank + count {
                         let part_idx = draw_order.get(rank) as usize;
-                        sync_masks_to(build, &frame, &node_slot, &writers, &mut cursor, rank);
+                        sync_masks_to(build, &write_plan, &mut cursor, rank);
                         if is_pure(part_idx) {
                             continue;
                         }
@@ -2264,10 +2463,10 @@ fn render_node(node: &mut PlaybackNode, build: &mut FrameBuild<'_>, draw: NodeDr
                     // Decide the stencil this child sub-animation inherits: our own
                     // mask (if the instance part is a masked target), else propagate
                     // whatever we inherited (screen-space clip continues down).
-                    let child_inherited = if masking && !writers.is_empty() {
+                    let child_inherited = if masking && has_writers {
                         let f = node.mask_flags.get(part_idx).copied().unwrap_or_default();
                         if f.mask_influence {
-                            sync_masks_to(build, &frame, &node_slot, &writers, &mut cursor, rank);
+                            sync_masks_to(build, &write_plan, &mut cursor, rank);
                             f.polarity()
                         } else {
                             StencilTest::None
@@ -2284,7 +2483,14 @@ fn render_node(node: &mut PlaybackNode, build: &mut FrameBuild<'_>, draw: NodeDr
                     let child_frame_no = child.frame_no;
                     let m: [f32; 16] = frame.world_matrices[part_idx * 16..part_idx * 16 + 16].try_into().unwrap();
                     let child_transform = mat4_mul(transform, &m);
-                    let child_draw = NodeDraw { transform: &child_transform, alpha, tint };
+                    // Fold the instance part's own opacity into the chain the child
+                    // draws with. SpriteStudio modulates a sub-animation by its
+                    // instance part's effective alpha (SS6/SS7.5 `RateOpacity`, an
+                    // unconditional multiply cascade); `part.alpha()` is that
+                    // hierarchical value. Colour deliberately does not cross the
+                    // boundary — no player propagates an instance part's tint.
+                    let child_alpha = alpha * fd.parts().get(part_idx).alpha();
+                    let child_draw = NodeDraw { transform: &child_transform, alpha: child_alpha, tint };
                     // Hand the bitmap down only when this instance part is
                     // actually clipped; `child_inherited` is what says so, and
                     // §2-6's AND means an unmasked instance part leaves its whole
@@ -2298,7 +2504,7 @@ fn render_node(node: &mut PlaybackNode, build: &mut FrameBuild<'_>, draw: NodeDr
                 // against the screen-space stencil; sync coverage once at its rank.
                 let eff_stencil = if masked_target {
                     let part_idx = draw_order.get(start_rank) as usize;
-                    sync_masks_to(build, &frame, &node_slot, &writers, &mut cursor, start_rank);
+                    sync_masks_to(build, &write_plan, &mut cursor, start_rank);
                     node.mask_flags.get(part_idx).map(|f| f.polarity()).unwrap_or(StencilTest::None)
                 } else {
                     inherited_stencil
@@ -2313,7 +2519,11 @@ fn render_node(node: &mut PlaybackNode, build: &mut FrameBuild<'_>, draw: NodeDr
                     // The effect draws from its own plan, so it needs its own
                     // arena slot rather than this node's.
                     let eff_slot = build.scene.push_transform(&eff_transform);
-                    build.scene.append_effect(plan, &eff_slot, eff_stencil, alpha, tint);
+                    // Same opacity fold as an instance part: the effect emitter's own
+                    // alpha scales every particle it draws (the particles carry their
+                    // own per-vertex alpha on top).
+                    let eff_alpha = alpha * fd.parts().get(part_idx).alpha();
+                    build.scene.append_effect(plan, &eff_slot, eff_stencil, eff_alpha, tint);
                 }
             }
             // Mask batches emit no colour (coverage is handled by the writer
@@ -2323,7 +2533,7 @@ fn render_node(node: &mut PlaybackNode, build: &mut FrameBuild<'_>, draw: NodeDr
     }
 
     if masking {
-        unwind_masks(build, &frame, &node_slot, &writers, cursor);
+        unwind_masks(build, &write_plan, cursor);
     }
 }
 
@@ -2343,19 +2553,21 @@ fn render_node(node: &mut PlaybackNode, build: &mut FrameBuild<'_>, draw: NodeDr
 ///
 /// The extra draw calls are bounded by the writer count (at most
 /// [`crate::mask::MAX_MASK_WRITERS`]) and write no colour.
-fn unwind_masks(build: &mut FrameBuild<'_>, frame: &FrameView, node: &NodeSlot, writers: &[MaskWriter], cursor: usize) {
+fn unwind_masks(build: &mut FrameBuild<'_>, plan: &[SWrite], cursor: usize) {
     // Nothing to take back: the coverage backend never wrote into shared state.
     if build.scene.mask_backend() == crate::MaskBackend::Coverage {
         return;
     }
     let remove = |w: &MaskWriter| if w.op_invert { MaskOp::Invert } else { MaskOp::Decr };
-    // Consumed clipping writers: `sync_masks_to` added their coverage.
-    for w in writers[..cursor].iter().filter(|w| w.is_clipping) {
-        build.scene.append_mask_writer(frame, node, w, remove(w));
+    // Consumed clipping writers (own and bubbled): `sync_masks_to` added their
+    // coverage. A bubbled clipping writer is unwound here, at the *parent's* end
+    // rather than at the instance boundary — that deferral is what carries it out.
+    for sw in plan[..cursor].iter().filter(|sw| sw.w.is_clipping) {
+        build.scene.append_mask_writer(sw.frame, &sw.slot, &sw.w, remove(&sw.w));
     }
     // Unconsumed pure masks: pre-written before the batch loop, never removed.
-    for w in writers[cursor..].iter().filter(|w| !w.is_clipping) {
-        build.scene.append_mask_writer(frame, node, w, remove(w));
+    for sw in plan[cursor..].iter().filter(|sw| !sw.w.is_clipping) {
+        build.scene.append_mask_writer(sw.frame, &sw.slot, &sw.w, remove(&sw.w));
     }
 }
 
