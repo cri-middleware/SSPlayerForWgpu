@@ -17,6 +17,13 @@ test animations, produced by one command:
 | [SSConverterGUI](https://github.com/cri-middleware/SSConverterGUI) | a desktop drag-and-drop conversion, no toolchain |
 | `ssconverter-cli` (in the SDK) | a build pipeline, CI, a watch loop |
 
+!!! tip "No `.sspj` of your own yet?"
+    The [official SpriteStudio sample data](https://www.webtech.co.jp/help/ja/spritestudio7/download/sample/) works as-is
+    (that page is only available in Japanese; the downloads themselves are language-neutral).
+    [Ringo](https://www.webtech.co.jp/help/ja/spritestudio7/download/sample/#ringo) is a good character sample, and
+    [Particle](https://www.webtech.co.jp/help/ja/spritestudio7/download/sample/#Perticle_sample) is a good one if you want
+    effects. The downloaded project feeds either tool above as-is.
+
 The portal covers picking one and putting it in a pipeline:
 [Converting Assets](https://cri-middleware.github.io/SpriteStudio-Docs/overview/conversion/) and
 [Standalone conversion tools](https://cri-middleware.github.io/SpriteStudio-Docs/overview/convert-with-a-standalone-tool/).
