@@ -9,6 +9,12 @@ wgpu puts **WebGPU, Vulkan, DirectX 12 and Metal** behind a single API, which is
 canvas, a Windows game and a macOS app can all be served by the same library instead of by four
 ports of it.
 
+!!! tip "No SpriteStudio data of your own yet?"
+    The [official sample data](https://www.webtech.co.jp/help/ja/spritestudio7/download/sample/) works as-is — that page is
+    Japanese only, but the downloads themselves are language-neutral.
+    [Ringo](https://www.webtech.co.jp/help/ja/spritestudio7/download/sample/#ringo) is a good character sample, and
+    [Particle](https://www.webtech.co.jp/help/ja/spritestudio7/download/sample/#Perticle_sample) is a good one if you want effects.
+
 ## 🚀 Start here
 
 Four ways to call one library. Pick the one your app is written in — each path is complete on its
