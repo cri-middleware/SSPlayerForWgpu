@@ -217,6 +217,35 @@ fn is_part_hidden_tracks_the_visibility_override() {
 }
 
 #[test]
+fn is_part_skinned_mesh_tells_bound_from_rigid() {
+    // Mesh.ssab is the mesh fixture: a bone-skinned mesh, a rigid deform-only
+    // mesh, and the bones / joint / null around them. The skinned one is the
+    // only part a follower cannot pin to -- its node stays at the root while the
+    // bones move the vertices -- so it is the only one that must report true.
+    let mut player = SSPlayer::new();
+    player.load(format!("{}/overall/Mesh.ssab", asset_root())).unwrap();
+    let anim = player.animation_names().unwrap().first().cloned().unwrap();
+    player.set_animation(&anim).unwrap();
+
+    // The bone-bound mesh: exactly the case the follow-a-part docs warn about.
+    assert_eq!(player.is_part_skinned_mesh("mesh_skin"), Some(true));
+    // A rigid (deform-only) mesh carries its own transform, so it follows
+    // correctly and is NOT flagged -- the line the influence-bone test draws.
+    assert_eq!(player.is_part_skinned_mesh("mesh_deform"), Some(false));
+    // Non-mesh anchors -- null / bone / joint -- are all good follow targets.
+    assert_eq!(player.is_part_skinned_mesh("root"), Some(false));
+    assert_eq!(player.is_part_skinned_mesh("bone_1"), Some(false));
+
+    // The name and index forms agree.
+    let i = player.find_part_index("mesh_skin").expect("mesh_skin resolves");
+    assert_eq!(player.is_part_skinned_mesh_by_index(i), Some(true));
+
+    // Out of range is None rather than a read past the parts vector.
+    assert!(player.is_part_skinned_mesh_by_index(u32::MAX).is_none());
+    assert!(player.is_part_skinned_mesh("NOT_A_REAL_PART").is_none());
+}
+
+#[test]
 fn part_names_read_the_pack_rather_than_the_matrix_buffer() {
     // The names come from the .ssab parts table, so they are there as soon as a
     // pack is bound. `part_count` is derived from the world-matrix buffer and

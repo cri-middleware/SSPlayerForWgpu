@@ -199,6 +199,102 @@ Player が元々書いているパーツ単位のプリミティブに相乗り�
 * update の**後**に読んでください。update が生成したフレームを表す値です。非表示のパーツも、
   「そこにあったはずの位置」を返します。
 
+!!! warning "メッシュ（スキン）パーツには直接追従できません"
+
+    上の `hand_r` がまさに罠です。**ボーンにバインドされたメッシュパーツ**（手や顔などの変形パーツ）は、
+    頂点がボーンのスキニングで描かれる一方、パーツ*自身*の変換はセットアップ時のノード位置（多くは
+    キャラクターのルート付近）に留まります。そのため、こうしたパーツに対する `part_transform` は絵では
+    なくルート付近を返し、追従させた対象はルートに吸い寄せられます。
+
+    メッシュパーツの位置に追従させたいときは、SpriteStudio 側でその位置に **NULL パーツ**（ボーンポイント／
+    空パーツ）を1つ置き、そのパーツに追従させてください。ボーン（armature）やジョイントパーツでも同様です
+    — いずれも描画される頂点が実際に追う変換を持っています。
+
+    どのパーツが該当するかを問い合わせれば、「追従先」ピッカーで注意表示や淡色化ができます。**リジッド**
+    （変形のみ）メッシュは正常に追従でき `false` を返します（メッシュ以外のパーツも同様）。
+
+    === "Rust"
+
+        ```rust
+        if player.is_part_skinned_mesh("hand_r") == Some(true) {
+            // 手の近くの NULL／ボーンパーツに追従させる
+        }
+        ```
+
+    === "C"
+
+        ```c
+        /* 1 = スキン, 0 = 正常に追従, -1 = そのパーツは無い */
+        if (ss_player_is_part_skinned_mesh(player, "hand_r") == 1) { /* 警告 */ }
+        ```
+
+    === "JavaScript"
+
+        ```js
+        if (player.isPartSkinnedMesh('hand_r')) { /* 警告 */ }
+        ```
+
+## パーツに追従させる
+
+追従用のオブジェクトを取り付ける、という仕組みはありません。プレイヤはパーツの姿勢を**渡す**だけで、
+それを使って自分の対象を毎フレーム置くのは**あなた**です。これは意図的で、同じ読み取り値で DOM オーバーレイ
+にも、別 canvas にも、自前の描画パスの矩形にも追従させられ、プレイヤはシーングラフではなくレンダラのまま
+でいられます。ルールは2つ: **update の後**に読むこと、そして**自分の空間へ合成する**こと。
+
+`part_transform` は**アニメーションローカル・Y-down** 空間の 6 要素アフィンです。画面に届かせるには、
+レンダラと同じ2つの変換 — プレイヤ自身の配置、次に投影 — を通します:
+
+```
+画面  ←  投影  ←  プレイヤの set_transform  ←  part_transform
+```
+
+パーツのピボットは並進の対 `(tx, ty)` — 6 数字の最後の2つです。
+
+### WebGPU canvas 上で — DOM マーカー
+
+組み込みの surface はアニメーションを中央に置き、**1 world 単位 = 1 バッキングピクセル・Y は下向き**（反転なし）
+で写します。よって world 点は canvas 上の *ボックスの半分 ＋ その点* に落ち、canvas に重ねた DOM 要素は
+device-pixel-ratio で割るだけで済みます:
+
+```js
+// NULL／ボーン／ジョイントパーツは絵に追従しますが、skinned メッシュは追従しません（上の警告参照）。
+// だからここでは `hand_r` ではなく手のチェーンのボーンに追従させています。
+const PART = 'bone_14';
+const dpr = window.devicePixelRatio || 1;
+const s = 0.6, ox = 0, oy = 120 * dpr;   // プレイヤの配置: setTransform(ox, oy, s, s, 0)
+player.setTransform(ox, oy, s, s, 0);
+
+function frame(dt) {
+  surface.frame(dt);                     // まず update + draw
+  const m = player.partTransform(PART);  // [m00, m01, m10, m11, tx, ty] — アニメーションローカル・Y-down
+  if (m) {
+    const wx = s * m[4] + ox;            // プレイヤの配置を合成（ここでは回転なし）
+    const wy = s * m[5] + oy;
+    // world -> canvas CSS ピクセル: ボックス中心 ＋ その点、を dpr で割る。Y-down、反転なし。
+    marker.style.left = canvas.clientWidth  / 2 + wx / dpr + 'px';
+    marker.style.top  = canvas.clientHeight / 2 + wy / dpr + 'px';
+  }
+  requestAnimationFrame(frame);
+}
+```
+
+`setTransform` を一度も呼ばなければ、プレイヤは中央・等倍なので `wx = m[4]`, `wy = m[5]` に単純化されます。
+
+### 自前の描画パスで — native / C
+
+投影とビューポートは既にあなたが持っているので、surface 固有の処理はありません: 投影 × プレイヤのルート変換
+× パーツアフィン を掛け合わせ（`SSScene` がしているのと同じ）、その結果でマーカーのジオメトリを置きます。
+6 数字はどの面でも同じ `[m00, m01, m10, m11, tx, ty]` で、`ss_player_part_transform` はそれを `float[6]` に
+書き込みます。
+
+### Bevy
+
+未提供です。Bevy アダプタは配置・再生・イベントは露出しますが、パーツ単位の姿勢は出していないため、現状
+組み込みのパーツ追従経路はありません。
+
+**part-follow デモ**（`examples/web/part-follow.html`）が Ringo でまさにこれを動かします: パーツを選ぶと
+マーカーが追従し、skinned パーツには印が付きます。
+
 ## 次に読む
 
 * [イベントとユーザーデータ](./events.md) — もう半分

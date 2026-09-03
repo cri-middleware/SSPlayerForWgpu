@@ -1431,6 +1431,19 @@ impl SsPlayerWeb {
         with_player!(self, |p| p.is_part_hidden(part))
     }
 
+    /// Whether the part is a **skinned** mesh — one whose vertices are drawn by
+    /// bone skinning — or `null` when the pack has no such part.
+    ///
+    /// A skinned mesh cannot be followed with `partTransform`: its node stays at
+    /// the setup position (near the character root) while the bones move the
+    /// visible vertices, so a follower would snap to the root. A picker can use
+    /// this to warn, or to steer the choice to a null / bone part. A rigid
+    /// (deform-only) mesh follows correctly and reports `false`.
+    #[wasm_bindgen(js_name = isPartSkinnedMesh)]
+    pub fn is_part_skinned_mesh(&self, part: &str) -> Result<Option<bool>, JsValue> {
+        with_player!(self, |p| p.is_part_skinned_mesh(part))
+    }
+
     /// Every part name, in part-index order — what turns the `partIndex` an event
     /// carries back into something a human reads, and what fills a part picker.
     ///

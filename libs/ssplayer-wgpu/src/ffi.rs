@@ -1496,6 +1496,48 @@ pub unsafe extern "C" fn ss_player_part_count(handle: *mut SsPlayer) -> u32 {
     unsafe { player(handle) }.map(|p| p.part_count() as u32).unwrap_or(0)
 }
 
+/// Whether `part` is a **skinned** mesh — a mesh part whose vertices are drawn
+/// by bone skinning: `1` if it is, `0` if it is not (a rigid deform-only mesh,
+/// or any non-mesh part — all good follow targets), or `-1` when the name is
+/// unknown, `part` is not valid UTF-8, or no pack is bound.
+///
+/// A skinned mesh cannot be followed with `ss_player_part_transform`: its node
+/// stays at the setup position (near the character root) while the bones move
+/// the visible vertices, so a follower snaps to the root rather than onto the
+/// art. Use this to warn in a "follow this part" picker, or to steer the choice
+/// to a null / bone part, which carries its transform. Like
+/// `ss_player_find_part_index` this returns a value rather than a status, so it
+/// does not touch `ss_last_error`.
+///
+/// # Safety
+/// `handle` must be a live handle or null; `part` must be a valid
+/// null-terminated C string.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn ss_player_is_part_skinned_mesh(handle: *mut SsPlayer, part: *const c_char) -> i32 {
+    let Some(player) = (unsafe { player(handle) }) else { return -1 };
+    let Some(part) = (unsafe { c_str(part) }) else { return -1 };
+    match player.is_part_skinned_mesh(part) {
+        Some(true) => 1,
+        Some(false) => 0,
+        None => -1,
+    }
+}
+
+/// Index form of `ss_player_is_part_skinned_mesh`: `1` skinned, `0` not, `-1`
+/// when `part` is out of range or no pack is bound.
+///
+/// # Safety
+/// `handle` must be a live handle or null.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn ss_player_is_part_skinned_mesh_by_index(handle: *mut SsPlayer, part: u32) -> i32 {
+    let Some(player) = (unsafe { player(handle) }) else { return -1 };
+    match player.is_part_skinned_mesh_by_index(part) {
+        Some(true) => 1,
+        Some(false) => 0,
+        None => -1,
+    }
+}
+
 // --- Events ---
 //
 // Polled after `ss_scene_update`, which is what advanced the clock. Everything

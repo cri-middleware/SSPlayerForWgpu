@@ -204,6 +204,104 @@ Three things to know about the numbers:
 * read them **after** the update, because they describe the frame it produced. Hidden parts still
   report where they would have been.
 
+!!! warning "Mesh (skinned) parts cannot be followed directly"
+
+    The `hand_r` above is the trap. A **bone-bound mesh part** — a deforming part such as a hand or
+    a face — has its vertices drawn by bone skinning, while the part's *own* transform stays at its
+    setup node position, usually near the character root. So `part_transform` on such a part reports
+    the root, not the visible art, and a follower pinned to it snaps to the root.
+
+    To follow the position of a mesh part, add a **null part** (a bone-point / empty part) at that
+    spot in SpriteStudio and follow that part instead. A bone (armature) or joint part works the same
+    way — each carries a transform the drawn vertices actually track.
+
+    Ask which parts are affected so a "follow this part" picker can warn or grey them out. A **rigid**
+    (deform-only) mesh follows correctly and reports `false`, as does every non-mesh part.
+
+    === "Rust"
+
+        ```rust
+        if player.is_part_skinned_mesh("hand_r") == Some(true) {
+            // follow a null / bone part near the hand instead
+        }
+        ```
+
+    === "C"
+
+        ```c
+        /* 1 = skinned, 0 = follows correctly, -1 = no such part */
+        if (ss_player_is_part_skinned_mesh(player, "hand_r") == 1) { /* warn */ }
+        ```
+
+    === "JavaScript"
+
+        ```js
+        if (player.isPartSkinnedMesh('hand_r')) { /* warn */ }
+        ```
+
+## Following a part
+
+There is no follower object to attach — the player hands you a part's pose and *you* place your own
+thing with it, every frame. This is deliberate: the same reading drives a DOM overlay, a second
+canvas, or a quad in your own render pass, and the player stays a renderer rather than a scene graph.
+Two rules: read the pose **after the update**, and **compose it into your space** yourself.
+
+`part_transform` is a six-term affine in **animation-local, Y-down** space. To reach the screen you
+pass it through the same two transforms the renderer does — the player's own placement, then the
+projection:
+
+```
+screen  ←  projection  ←  the player's set_transform  ←  part_transform
+```
+
+The part's pivot is the translation pair `(tx, ty)` — the last two of the six numbers.
+
+### On the WebGPU canvas — a DOM marker
+
+The built-in surface centres the animation and uses **1 world unit = 1 backing pixel, Y pointing
+down** (no flip). So a world point lands on the canvas at *half the box, plus the point*, and a DOM
+element over the canvas needs only the device-pixel-ratio divide:
+
+```js
+// A null / bone / joint part tracks its art; a skinned mesh does not (see the warning above),
+// which is why this follows a bone in the hand chain rather than `hand_r` itself.
+const PART = 'bone_14';
+const dpr = window.devicePixelRatio || 1;
+const s = 0.6, ox = 0, oy = 120 * dpr;   // the player's own placement: setTransform(ox, oy, s, s, 0)
+player.setTransform(ox, oy, s, s, 0);
+
+function frame(dt) {
+  surface.frame(dt);                     // update + draw first
+  const m = player.partTransform(PART);  // [m00, m01, m10, m11, tx, ty] — animation-local, Y-down
+  if (m) {
+    const wx = s * m[4] + ox;            // compose the player's placement (no rotation here)
+    const wy = s * m[5] + oy;
+    // world -> canvas CSS pixels: centre of the box, plus the point, over dpr. Y-down, no flip.
+    marker.style.left = canvas.clientWidth  / 2 + wx / dpr + 'px';
+    marker.style.top  = canvas.clientHeight / 2 + wy / dpr + 'px';
+  }
+  requestAnimationFrame(frame);
+}
+```
+
+If you never call `setTransform`, the player is centred and unscaled, so it collapses to
+`wx = m[4]`, `wy = m[5]`.
+
+### In your own render pass — native / C
+
+You already own a projection and a viewport, so there is nothing surface-specific: multiply your
+projection by the player's root transform by the part affine — exactly what `SSScene` does — and use
+the result to place your marker geometry. The six numbers are the same `[m00, m01, m10, m11, tx, ty]`
+on every face; `ss_player_part_transform` writes them into a `float[6]`.
+
+### Bevy
+
+Not yet exposed. The Bevy adapter surfaces placement, playback and events, but not per-part poses, so
+there is no built-in part-follow path there today.
+
+The **part-follow demo** (`examples/web/part-follow.html`) drives exactly this on Ringo: pick a part
+and watch a marker track it, with the skinned parts flagged.
+
 ## Next
 
 * [Events and user data](./events.md) — the other half of "react to what the animation is doing"

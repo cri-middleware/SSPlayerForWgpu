@@ -1082,6 +1082,35 @@ void ss_player_clear_all_part_overrides(ss_player_t *handle);
 uint32_t ss_player_part_count(ss_player_t *handle);
 
 /*
+ Whether `part` is a **skinned** mesh — a mesh part whose vertices are drawn
+ by bone skinning: `1` if it is, `0` if it is not (a rigid deform-only mesh,
+ or any non-mesh part — all good follow targets), or `-1` when the name is
+ unknown, `part` is not valid UTF-8, or no pack is bound.
+
+ A skinned mesh cannot be followed with `ss_player_part_transform`: its node
+ stays at the setup position (near the character root) while the bones move
+ the visible vertices, so a follower snaps to the root rather than onto the
+ art. Use this to warn in a "follow this part" picker, or to steer the choice
+ to a null / bone part, which carries its transform. Like
+ `ss_player_find_part_index` this returns a value rather than a status, so it
+ does not touch `ss_last_error`.
+
+ # Safety
+ `handle` must be a live handle or null; `part` must be a valid
+ null-terminated C string.
+ */
+int32_t ss_player_is_part_skinned_mesh(ss_player_t *handle, const char *part);
+
+/*
+ Index form of `ss_player_is_part_skinned_mesh`: `1` skinned, `0` not, `-1`
+ when `part` is out of range or no pack is bound.
+
+ # Safety
+ `handle` must be a live handle or null.
+ */
+int32_t ss_player_is_part_skinned_mesh_by_index(ss_player_t *handle, uint32_t part);
+
+/*
  Whether the last `ss_scene_update` crossed a loop boundary. One report per
  update however many cycles it crossed.
 
