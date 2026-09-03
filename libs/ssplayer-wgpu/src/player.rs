@@ -1592,6 +1592,47 @@ impl SSPlayer {
         Some(parts.get(part as usize).hide())
     }
 
+    /// Whether `part` is a **skinned** mesh — a mesh part whose vertices are
+    /// drawn by bone skinning — or `None` when the pack has no such part.
+    ///
+    /// **Why a host wants it.** [`SSPlayer::part_transform`] reports a part's own
+    /// node transform, which for a skinned mesh stays at its setup position
+    /// (usually near the character root) while the visible vertices are pulled
+    /// around by their bones. So pinning a follower to a skinned mesh snaps it to
+    /// the root rather than onto the art. A host offering a "follow this part"
+    /// picker can use this to warn, or to steer the choice to a null / bone part,
+    /// which *does* carry its transform. It does not change what plays — the
+    /// transform is faithful to the node, this only names when that is not what a
+    /// follower wants.
+    ///
+    /// A **rigid** (deform-only) mesh is not skinned and follows correctly, so it
+    /// reports `false`, as does every non-mesh part. The test is one bone binding
+    /// or more, matching the sibling Players' `is_part_skinned_mesh`.
+    ///
+    /// Unlike [`SSPlayer::is_part_hidden`], this is a static property of the pack,
+    /// not a per-frame state, so it takes `&self` and reads the `.ssab` directly.
+    pub fn is_part_skinned_mesh(&self, part: &str) -> Option<bool> {
+        self.is_part_skinned_mesh_by_index(self.find_part_index(part)?)
+    }
+
+    /// Index form of [`SSPlayer::is_part_skinned_mesh`], for a caller that already
+    /// resolved the name.
+    pub fn is_part_skinned_mesh_by_index(&self, part: u32) -> Option<bool> {
+        let pack = self.packs.get(self.main_pack.as_ref()?)?;
+        let bytes = pack.resource().data();
+        // SAFETY: the pack verified the buffer when it adopted it.
+        let ab = unsafe { root_as_ss_anime_binary_unchecked(bytes.as_slice()) };
+        let parts = ab.parts();
+        if part as usize >= parts.len() {
+            return None;
+        }
+        // Skinned == bound to at least one bone. A rigid (deform-only) mesh has a
+        // binding with no influence bones, and a non-mesh part has none at all;
+        // both are followable, so both report false.
+        let skinned = parts.get(part as usize).mesh_binding().and_then(|b| b.influence_bone()).is_some_and(|bones| !bones.is_empty());
+        Some(skinned)
+    }
+
     /// Place this player: translation, scale, then rotation in radians, composed
     /// into the root transform of its tree.
     ///

@@ -1,0 +1,289 @@
+<!doctype html>
+<html lang="ja">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>ssplayer-wgpu — part following</title>
+  <style>
+    :root { color-scheme: light dark; }
+    body { font: 15px/1.6 system-ui, sans-serif; margin: 0; padding: 2rem; max-width: 720px; margin-inline: auto; }
+    h1 { font-size: 1.3rem; }
+    code { background: color-mix(in srgb, currentColor 12%, transparent); padding: 0.1em 0.4em; border-radius: 4px; }
+    .hint { opacity: 0.7; font-size: 0.9em; }
+    nav { float: right; font-size: 0.9em; }
+    nav a { margin-left: 1em; }
+    label { font-weight: 600; }
+    select, button { font: inherit; padding: 0.3em 0.6em; }
+    .controls { display: flex; flex-wrap: wrap; gap: 0.75rem 1.25rem; align-items: center; margin: 1rem 0; }
+
+    /* Language switch: two buttons, the active one filled. */
+    .lang { display: inline-flex; gap: 0; border: 1px solid color-mix(in srgb, currentColor 30%, transparent); border-radius: 6px; overflow: hidden; }
+    .lang button { border: 0; background: transparent; cursor: pointer; padding: 0.2em 0.7em; }
+    .lang button[aria-pressed="true"] { background: color-mix(in srgb, currentColor 18%, transparent); font-weight: 600; }
+
+    /* The canvas and the marker share one positioned box, so the marker's CSS
+       left/top are measured from the same origin the coordinate maths uses. */
+    .stage { position: relative; width: 420px; height: 460px; max-width: 100%; margin: 1rem 0;
+      border: 1px solid color-mix(in srgb, currentColor 20%, transparent); border-radius: 8px;
+      background: repeating-conic-gradient(#8883 0% 25%, transparent 0% 50%) 50% / 24px 24px; }
+    canvas.stage-canvas { display: block; width: 100%; height: 100%; }
+
+    /* The follower: a ring + crosshair, centred on its own left/top. Never eats a
+       click, so the controls under it stay usable. */
+    #marker { position: absolute; left: 50%; top: 50%; width: 26px; height: 26px; margin: -13px 0 0 -13px;
+      pointer-events: none; will-change: left, top; }
+    #marker::before, #marker::after { content: ''; position: absolute; background: var(--mk, #16a34a); }
+    #marker::before { left: 12px; top: 0; width: 2px; height: 26px; }
+    #marker::after { left: 0; top: 12px; width: 26px; height: 2px; }
+    #ring { position: absolute; inset: 3px; border: 2px solid var(--mk, #16a34a); border-radius: 50%; }
+
+    #status { font-family: ui-monospace, monospace; font-size: 0.85em; white-space: pre-wrap; opacity: 0.9; min-height: 3em; }
+    #warn { color: #c0392b; font-weight: 600; min-height: 1.4em; }
+    option.skinned { color: #c0392b; }
+  </style>
+</head>
+<body>
+  <nav>
+    <span class="lang" role="group" aria-label="Language">
+      <button type="button" data-lang="ja">日本語</button>
+      <button type="button" data-lang="en">English</button>
+    </span>
+    <a href="index.html" data-i18n="navBack">← demo に戻る</a>
+  </nav>
+  <h1 data-i18n="h1">ssplayer-wgpu — パーツ追従 demo</h1>
+  <p data-i18n="intro1"></p>
+  <p class="hint" data-i18n="intro2"></p>
+
+  <div class="controls">
+    <span><label for="anim" data-i18n="labelAnim">アニメ:</label> <select id="anim"></select></span>
+    <span><label for="part" data-i18n="labelPart">追従先パーツ:</label> <select id="part"></select></span>
+  </div>
+
+  <div class="stage" id="stage">
+    <canvas class="stage-canvas" id="canvas"></canvas>
+    <div id="marker"><div id="ring"></div></div>
+  </div>
+
+  <p id="warn"></p>
+  <p id="status">…</p>
+
+  <p class="hint" data-i18n="serve"></p>
+
+  <script type="module">
+    // Same staged package the other demos drive (scripts/build.sh platform=web).
+    import { sharedContext } from './ssplayer-wgpu/dist/index.js';
+
+    // --- i18n ------------------------------------------------------------------
+    // The demo's prose in both languages; the switch swaps textContent/innerHTML.
+    // Values with markup are inserted as innerHTML — they are static, trusted text.
+    const I18N = {
+      ja: {
+        title: 'ssplayer-wgpu — パーツ追従 demo',
+        navBack: '← demo に戻る',
+        h1: 'ssplayer-wgpu — パーツ追従 demo',
+        intro1:
+          'このプレイヤに「追従オブジェクト」はありません。<code>partTransform(パーツ名)</code> で姿勢を' +
+          '<strong>読み出し</strong>、ホスト（このページ）が毎フレーム自分の対象を置きます。ここでは canvas に重ねた' +
+          '<strong>DOM マーカー</strong>を、選んだパーツへ追従させています。',
+        intro2:
+          '⚠ の付いたパーツは <strong>スキン（ボーンバインド）メッシュ</strong>です。頂点はボーンで描かれる一方、' +
+          'パーツ自身の変換はセットアップ位置（≒ルート付近）に留まるため、追従先に選ぶと' +
+          '<strong>マーカーが絵ではなくルートに吸い寄せられます</strong>。手・脚・耳・尻尾を選んで確かめてください。' +
+          '正しく追従させたいときは、その位置のボーン／ジョイント／NULL パーツ（既定の <code>bone_14</code> など）を選びます。',
+        labelAnim: 'アニメ:',
+        labelPart: '追従先パーツ:',
+        serve:
+          'WebGPU 対応ブラウザ（Chrome / Edge 113+ など）＋ <code>http://localhost</code> 配信が必要です。' +
+          'ビルド: <code>../../scripts/build.sh platform=web</code> → 本ディレクトリを <code>python3 -m http.server</code> で配信。',
+        skinnedOpt: (n) => `⚠ ${n}（スキン）`,
+        warn: (n) => `⚠ 「${n}」はスキンメッシュです — マーカーは絵ではなくルート付近に留まります。`,
+        skinnedTag: '（スキンメッシュ）',
+      },
+      en: {
+        title: 'ssplayer-wgpu — part following',
+        navBack: '← back to demo',
+        h1: 'ssplayer-wgpu — part following',
+        intro1:
+          'This player has no “follower object”. You <strong>read</strong> a part’s pose with ' +
+          '<code>partTransform(name)</code>, and the host (this page) places its own thing every frame. ' +
+          'Here a <strong>DOM marker</strong> over the canvas follows the part you pick.',
+        intro2:
+          'A part marked ⚠ is a <strong>skinned (bone-bound) mesh</strong>. Its vertices are drawn by the ' +
+          'bones, while the part’s own transform stays at its setup position (near the root) — so choosing ' +
+          'it as a target makes the <strong>marker snap to the root rather than onto the art</strong>. Try a ' +
+          'hand, leg, ear or the tail to see it. To follow correctly, pick a bone / joint / NULL part at that ' +
+          'spot (the default <code>bone_14</code>, for instance).',
+        labelAnim: 'Animation:',
+        labelPart: 'Follow target:',
+        serve:
+          'Needs a WebGPU browser (Chrome / Edge 113+, etc.) served over <code>http://localhost</code>. ' +
+          'Build: <code>../../scripts/build.sh platform=web</code>, then serve this directory with ' +
+          '<code>python3 -m http.server</code>.',
+        skinnedOpt: (n) => `⚠ ${n} (skinned)`,
+        warn: (n) => `⚠ “${n}” is a skinned mesh — the marker stays near the root, not on the art.`,
+        skinnedTag: ' (skinned mesh)',
+      },
+    };
+
+    // Remembered choice wins; otherwise follow the browser's language, default ja.
+    let stored = null;
+    try { stored = localStorage.getItem('ssPartFollowLang'); } catch { /* private mode */ }
+    let lang = (stored === 'ja' || stored === 'en')
+      ? stored
+      : ((navigator.language || 'ja').toLowerCase().startsWith('ja') ? 'ja' : 'en');
+
+    const animSel = document.getElementById('anim');
+    const partSel = document.getElementById('part');
+    const canvas = document.getElementById('canvas');
+    const marker = document.getElementById('marker');
+    const warnEl = document.getElementById('warn');
+    const statusEl = document.getElementById('status');
+
+    function applyLang(next) {
+      lang = next;
+      const t = I18N[lang];
+      document.documentElement.lang = lang;
+      document.title = t.title;
+      for (const el of document.querySelectorAll('[data-i18n]')) el.innerHTML = t[el.dataset.i18n];
+      for (const b of document.querySelectorAll('.lang button')) b.setAttribute('aria-pressed', String(b.dataset.lang === lang));
+      try { localStorage.setItem('ssPartFollowLang', lang); } catch { /* private mode: not remembered */ }
+      relabelParts();
+      refreshWarn();
+    }
+    for (const b of document.querySelectorAll('.lang button')) b.addEventListener('click', () => applyLang(b.dataset.lang));
+
+    // --- Player ----------------------------------------------------------------
+    // Ringo is the rig with skinned mesh parts — the point of this demo. bone_14 is
+    // a bone in the right-hand chain: a *good* follow target, so it is the default.
+    const SRC = 'assets/Ringo/Ringo.ssab';
+    const DEFAULT_PART = 'bone_14';
+    const DEFAULT_ANIM = 'run';
+
+    // The player's own placement (backing px): world == set_transform applied to the
+    // part's animation-local pose. Found once by `autofit`, and the marker uses the
+    // SAME numbers, so following stays correct whatever the fit turns out to be.
+    const dpr = window.devicePixelRatio || 1;
+    let scale = 0.5, offX = 0, offY = 0, fitted = false;
+
+    // Fixed CSS size -> stable clientWidth for the marker maths; backing store is
+    // that times the device pixel ratio, which is what the projection is set to.
+    canvas.width = Math.round(canvas.clientWidth * dpr);
+    canvas.height = Math.round(canvas.clientHeight * dpr);
+
+    let ctx, surface, player, parts = [];   // parts stays [] if the load fails, so a language switch is still safe
+    try {
+      ctx = await sharedContext();
+      surface = ctx.createSurface(canvas);
+      player = surface.createPlayer();
+      await player.load(SRC);
+    } catch (e) {
+      applyLang(lang);
+      statusEl.textContent = `⚠️ ${e}`;
+      throw e;
+    }
+
+    // Start it; the transform stays identity until `autofit` runs on the first
+    // posed frame (world matrices are zero until an update has happened).
+    player.setAnimation(player.animationNames().includes(DEFAULT_ANIM) ? DEFAULT_ANIM : player.animationNames()[0]);
+    player.play();
+
+    // --- Pickers ---------------------------------------------------------------
+    for (const a of player.animationNames()) {
+      const o = document.createElement('option');
+      o.value = o.textContent = a;
+      if (a === DEFAULT_ANIM) o.selected = true;
+      animSel.appendChild(o);
+    }
+    animSel.addEventListener('change', () => {
+      // set_animation rebuilds the tree; part names are stable within the pack, so
+      // the follow target survives the switch. Re-fit, since a new motion has a
+      // different extent, and keep the placement transport-independent.
+      player.setAnimation(animSel.value);
+      fitted = false;
+      player.play();
+    });
+
+    // Every part is offered; skinned ones are flagged (not hidden) so the trap can
+    // be seen. isPartSkinnedMesh is the query the flag comes from. Kept in a list so
+    // the labels can be re-localised on a language switch without a reload.
+    parts = player.partNames().filter(Boolean).map((name) => ({ name, skinned: player.isPartSkinnedMesh(name) === true }));
+    for (const { name, skinned } of parts) {
+      const o = document.createElement('option');
+      o.value = name;
+      if (skinned) o.className = 'skinned';
+      if (name === DEFAULT_PART) o.selected = true;
+      partSel.appendChild(o);
+    }
+    function relabelParts() {
+      const t = I18N[lang];
+      for (const o of partSel.options) {
+        const p = parts.find((x) => x.name === o.value);
+        o.textContent = p && p.skinned ? t.skinnedOpt(o.value) : o.value;
+      }
+    }
+    partSel.addEventListener('change', refreshWarn);
+
+    function refreshWarn() {
+      if (!player) { warnEl.textContent = ''; return; }
+      const name = partSel.value;
+      const skinned = player.isPartSkinnedMesh(name) === true;
+      marker.style.setProperty('--mk', skinned ? '#c0392b' : '#16a34a');
+      warnEl.textContent = skinned ? I18N[lang].warn(name) : '';
+    }
+
+    applyLang(lang);   // paint the prose, labels, warning and title once everything exists
+
+    // Frame the character from its posed parts: fit the pivots' bounding box into a
+    // fraction of the canvas (the art overhangs the pivots, so leave margin) and
+    // centre it. Returns false until an update has actually posed the parts.
+    function autofit() {
+      let minx = Infinity, miny = Infinity, maxx = -Infinity, maxy = -Infinity;
+      for (const { name } of parts) {
+        const m = player.partTransform(name);
+        if (!m || m.length !== 6) continue;
+        minx = Math.min(minx, m[4]); maxx = Math.max(maxx, m[4]);
+        miny = Math.min(miny, m[5]); maxy = Math.max(maxy, m[5]);
+      }
+      const w = maxx - minx, h = maxy - miny;
+      if (!(w > 1) && !(h > 1)) return false;          // still all-zero: not posed yet
+      const fill = 0.62;                                // pivots underestimate the art
+      scale = Math.min((canvas.width * fill) / Math.max(w, 1), (canvas.height * fill) / Math.max(h, 1));
+      offX = -scale * (minx + maxx) / 2;               // put the bbox centre at the canvas centre
+      offY = -scale * (miny + maxy) / 2;
+      player.setTransform(offX, offY, scale, scale, 0);
+      return true;
+    }
+
+    // --- Frame loop ------------------------------------------------------------
+    // Read the pose AFTER surface.frame (the update), compose the player placement,
+    // then map world -> canvas CSS pixels: centre of the box, plus the point, over
+    // dpr. Y-down, no flip (the surface's projection matches CSS pixel space).
+    let last = performance.now();
+    function loop(now) {
+      const dt = Math.min((now - last) / 1000, 0.05);
+      last = now;
+      if (!ctx.isDeviceLost()) {
+        surface.frame(dt);
+        if (!fitted) fitted = autofit();
+        const name = partSel.value;
+        const m = player.partTransform(name);
+        if (m && m.length === 6) {
+          const wx = scale * m[4] + offX;
+          const wy = scale * m[5] + offY;
+          const cx = canvas.clientWidth / 2 + wx / dpr;
+          const cy = canvas.clientHeight / 2 + wy / dpr;
+          marker.style.left = cx + 'px';
+          marker.style.top = cy + 'px';
+          const skinned = player.isPartSkinnedMesh(name) === true;
+          statusEl.textContent =
+            `part: ${name}${skinned ? I18N[lang].skinnedTag : ''}\n` +
+            `partTransform tx,ty = ${m[4].toFixed(1)}, ${m[5].toFixed(1)}  (animation-local, Y-down)\n` +
+            `marker (CSS px)      = ${cx.toFixed(1)}, ${cy.toFixed(1)}`;
+        }
+      }
+      requestAnimationFrame(loop);
+    }
+    requestAnimationFrame(loop);
+  </script>
+</body>
+</html>
