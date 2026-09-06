@@ -38,7 +38,7 @@ ffi = ["dep:pollster", "embedded"]
 wgpu = { workspace = true }
 ssruntime = { workspace = true }
 ssab = { workspace = true }
-bytemuck = { version = "1.25.0", features = ["derive"] }
+bytemuck = { version = "1.25.2", features = ["derive"] }
 image = { version = "0.25.10", optional = true, default-features = false, features = ["png"] }
 wasm-bindgen = { workspace = true, optional = true }
 wasm-bindgen-futures = { workspace = true, optional = true }
