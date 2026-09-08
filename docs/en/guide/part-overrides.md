@@ -256,6 +256,13 @@ screen  ←  projection  ←  the player's set_transform  ←  part_transform
 
 The part's pivot is the translation pair `(tx, ty)` — the last two of the six numbers.
 
+!!! note "The pose carries no skew"
+    A part's **skew** is a per-part vertex deform (SpriteStudio's shear), applied to the part's own
+    drawn geometry — not to its node transform — and it does not inherit to child parts. So
+    `part_transform` reports the part's position, rotation and scale but never its shear, and a
+    follower pinned to a part under a sheared parent is not itself sheared. This matches the
+    SpriteStudio editor, where skew does not propagate down the tree.
+
 ### On the WebGPU canvas — a DOM marker
 
 The built-in surface centres the animation and uses **1 world unit = 1 backing pixel, Y pointing
