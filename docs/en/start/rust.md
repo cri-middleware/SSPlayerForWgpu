@@ -1,3 +1,7 @@
+---
+title: Get started with Rust
+---
+
 # Get started with Rust
 
 **This page is for a Rust application that owns a `wgpu::Device`** — your own renderer, a `winit`
