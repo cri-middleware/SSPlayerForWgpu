@@ -1,3 +1,7 @@
+---
+title: Get started with Bevy
+---
+
 # Get started with Bevy
 
 Spawn a character as an entity, and Bevy draws it in its own 2D pass on the device it already owns.

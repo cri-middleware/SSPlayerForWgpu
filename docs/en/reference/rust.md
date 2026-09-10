@@ -1,3 +1,7 @@
+---
+title: Rust API reference
+---
+
 # Rust API reference
 
 The generated reference is published beside these pages:

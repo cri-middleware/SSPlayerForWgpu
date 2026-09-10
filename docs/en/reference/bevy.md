@@ -1,3 +1,7 @@
+---
+title: Bevy API reference
+---
+
 # Bevy API reference
 
 The whole authoring surface is one plugin, three components, one state component and three
