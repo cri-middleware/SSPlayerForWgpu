@@ -28,10 +28,10 @@ The element lives behind its own entry point, so a bundle that only wants the AP
 | | |
 |---|---|
 | `createSurface(canvas)` | One per `<canvas>` |
-| `addTexture(hash, rgba, width, height)` | Supply an atlas as raw RGBA8 |
-| `addTextureFromBytes(hash, bytes): Promise` | ... from encoded bytes, decoded by the browser |
-| `addTextureFromBitmap(hash, imageBitmap)` | ... from an `ImageBitmap` you already have |
-| `hasTexture(hash)` | Whether the cache already holds one |
+| `addTexture(key, rgba, width, height)` | Supply an atlas as raw RGBA8, under a `textureRefs` entry's `key` |
+| `addTextureFromBytes(key, bytes): Promise` | ... from encoded bytes, decoded by the browser |
+| `addTextureFromBitmap(key, imageBitmap)` | ... from an `ImageBitmap` you already have |
+| `hasTexture(key)` | Whether the cache already holds one |
 | `isDeviceLost()` / `restoreDevice()` | See [Device loss](../guide/device-loss.md) |
 | `surfaceCount()` | Diagnostic |
 

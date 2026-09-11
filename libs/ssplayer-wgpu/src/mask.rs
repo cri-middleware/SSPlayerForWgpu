@@ -174,6 +174,15 @@ impl std::ops::Deref for MaskWriters {
     }
 }
 
+/// So the draw walk can retarget each writer's cutout at the renderer key its
+/// node's pack resolved to — see `AtlasKeys`. Planning cannot do it: a writer
+/// takes its `texture_hash` from the batch, which speaks in cellmap hashes.
+impl std::ops::DerefMut for MaskWriters {
+    fn deref_mut(&mut self) -> &mut [MaskWriter] {
+        &mut self.writers[..self.len]
+    }
+}
+
 impl<'a> IntoIterator for &'a MaskWriters {
     type Item = &'a MaskWriter;
     type IntoIter = std::slice::Iter<'a, MaskWriter>;

@@ -25,9 +25,13 @@ use std::sync::Arc;
 /// engine that puts them in its own asset system declares
 /// [`crate::AlphaMode::Straight`] instead.
 pub struct EmbeddedTexture {
-    /// The cellmap's `name_hash` — what `DrawBatch.texture_hash` carries, and the
-    /// key [`crate::SSRenderer`] looks textures up by.
-    pub hash: u32,
+    /// The cellmap's `name_hash` — what `DrawBatch.texture_hash` carries.
+    ///
+    /// A slot **inside this pack**, not an identity for the image: hand it to
+    /// [`crate::SSPlayer::texture_key`] for what [`crate::SSRenderer`] is keyed
+    /// by. The two differ whenever two packs could name one atlas alike, which
+    /// every Adobe Animate export does with `spritemap1.png`.
+    pub slot: u32,
     /// Straight-alpha RGBA8, `width * height * 4` bytes.
     pub rgba: Vec<u8>,
     pub width: u32,
@@ -48,9 +52,13 @@ pub struct EmbeddedTexture {
 ///
 /// The bytes borrow the pack's `.ssab`, so nothing is copied to produce them.
 pub struct EmbeddedImage<'a> {
-    /// The cellmap's `name_hash` — what `DrawBatch.texture_hash` carries, and the
-    /// key [`crate::SSRenderer`] looks textures up by.
-    pub hash: u32,
+    /// The cellmap's `name_hash` — what `DrawBatch.texture_hash` carries.
+    ///
+    /// A slot **inside this pack**, not an identity for the image: hand it to
+    /// [`crate::SSPlayer::texture_key`] for what [`crate::SSRenderer`] is keyed
+    /// by. The two differ whenever two packs could name one atlas alike, which
+    /// every Adobe Animate export does with `spritemap1.png`.
+    pub slot: u32,
     /// The encoded image exactly as the exporter embedded it.
     pub bytes: &'a [u8],
 }
@@ -67,10 +75,15 @@ pub struct EmbeddedImage<'a> {
 /// pack.
 #[derive(Clone, Debug)]
 pub struct TextureRef {
-    /// What `DrawBatch.texture_hash` carries, and the key [`crate::SSRenderer`]
-    /// looks textures up by: a cellmap's `name_hash`, or a texture file name's
-    /// hash for a TextureChange target (see [`SSPack::textures`]).
-    pub hash: u32,
+    /// What `DrawBatch.texture_hash` carries: a cellmap's `name_hash`, or a
+    /// texture file name's hash for a TextureChange target (see
+    /// [`SSPack::textures`]).
+    ///
+    /// A slot **inside this pack**, not an identity for the image — two packs
+    /// from two Adobe Animate projects both name theirs `spritemap1`. Hand it to
+    /// [`crate::SSPlayer::texture_key`] for what [`crate::SSRenderer`] is keyed
+    /// by, which is what a host supplying its own pixels registers under.
+    pub slot: u32,
     /// The image path the exporter wrote, relative to the `.ssab`'s own location.
     pub path: String,
     /// Whether this image rides inside the `.ssab` (embedded mode).
@@ -136,7 +149,7 @@ impl SSPack {
             for cm in cellmaps {
                 let is_embedded = embedded.contains(&cm.image_path_hash());
                 has_embedded |= is_embedded;
-                textures.push(TextureRef { hash: cm.name_hash(), path: cm.image_path().to_string(), embedded: is_embedded });
+                textures.push(TextureRef { slot: cm.name_hash(), path: cm.image_path().to_string(), embedded: is_embedded });
             }
         }
         // The second table, and not optional: a `DrawBatch.texture_hash` is a
@@ -158,7 +171,7 @@ impl SSPack {
                 let Some(name) = et.name() else { continue };
                 let is_embedded = embedded.contains(&et.name_hash());
                 has_embedded |= is_embedded;
-                textures.push(TextureRef { hash: et.name_hash(), path: name.to_string(), embedded: is_embedded });
+                textures.push(TextureRef { slot: et.name_hash(), path: name.to_string(), embedded: is_embedded });
             }
         }
 
@@ -266,7 +279,7 @@ impl SSPack {
         if let Some(cellmaps) = ab.cellmaps() {
             for cm in cellmaps {
                 if let Some(&bytes) = bytes_by_hash.get(&cm.image_path_hash()) {
-                    out.push(EmbeddedImage { hash: cm.name_hash(), bytes });
+                    out.push(EmbeddedImage { slot: cm.name_hash(), bytes });
                 }
             }
         }
@@ -277,7 +290,7 @@ impl SSPack {
         if let Some(externals) = ab.external_textures() {
             for et in externals {
                 if let Some(&bytes) = bytes_by_hash.get(&et.name_hash()) {
-                    out.push(EmbeddedImage { hash: et.name_hash(), bytes });
+                    out.push(EmbeddedImage { slot: et.name_hash(), bytes });
                 }
             }
         }
@@ -304,9 +317,9 @@ impl SSPack {
     /// ones after it.
     #[cfg(feature = "embedded")]
     pub fn decode_embedded_where(&self, wanted: impl Fn(u32) -> bool) -> Vec<EmbeddedTexture> {
-        let images: Vec<EmbeddedImage<'_>> = self.embedded_images().into_iter().filter(|i| wanted(i.hash)).collect();
+        let images: Vec<EmbeddedImage<'_>> = self.embedded_images().into_iter().filter(|i| wanted(i.slot)).collect();
         let encoded: Vec<&[u8]> = images.iter().map(|i| i.bytes).collect();
-        crate::decode::decode_all(&encoded, false).into_iter().zip(&images).filter_map(|(decoded, image)| decoded.map(|d| EmbeddedTexture { hash: image.hash, rgba: d.rgba, width: d.width, height: d.height })).collect()
+        crate::decode::decode_all(&encoded, false).into_iter().zip(&images).filter_map(|(decoded, image)| decoded.map(|d| EmbeddedTexture { slot: image.slot, rgba: d.rgba, width: d.width, height: d.height })).collect()
     }
 
     /// Without the `embedded` feature the player carries no image decoder, so the

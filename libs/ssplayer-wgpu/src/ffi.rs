@@ -137,8 +137,17 @@ pub struct SsSceneStats {
 #[derive(Clone, Copy)]
 pub struct SsTextureRef {
     /// The key `ss_scene_add_texture` / `ss_scene_add_texture_png` expects for
-    /// this image — the cellmap's fnv1a hash, as `DrawBatch.texture_hash` reports it.
-    pub hash: u32,
+    /// this image.
+    ///
+    /// An identity for the **image**, not for the cellmap that names it: Adobe
+    /// Animate writes `spritemap1.png` for every project it exports, so two packs
+    /// name their atlas alike, and a key that was only the cellmap's hash left the
+    /// second drawing the first one's atlas. Two packs that really do share a file
+    /// still share this, and so still share one upload.
+    ///
+    /// Was `hash`, and renamed with the meaning: a field that silently stopped
+    /// being a cellmap hash is worse than one that stops compiling.
+    pub key: u32,
     /// `true` when the image rides inside the `.ssab` (embedded mode): the pack
     /// supplies it on the next `ss_scene_update` and the host loads nothing.
     pub embedded: bool,
@@ -157,8 +166,10 @@ pub struct SsTextureRef {
 pub struct SsMissingAsset {
     /// `SS_MISSING_TEXTURE` or `SS_MISSING_PACK`.
     pub kind: u32,
-    /// For a texture, the key a draw batch will ask for. Zero for a pack.
-    pub hash: u32,
+    /// For a texture, the slot a draw batch will ask for — an id inside the
+    /// pack, not the key `ss_scene_add_texture` takes. Zero for a pack, whose
+    /// identity is its name. Match a missing atlas by `name`; this is for logs.
+    pub slot: u32,
     /// The path asked for, or the pack's name.
     ///
     /// For a texture this is the path the exporter wrote, **relative to its
@@ -740,14 +751,18 @@ pub unsafe extern "C" fn ss_player_texture_at(handle: *mut SsPlayer, pack_name: 
 
     // Copied out before the scratch is touched: the borrow of the player ends
     // here, and `scene` is needed mutably to own the string handed back.
-    let Some(texture) = scene.host.player_mut(id).and_then(|p| p.textures(pack)).and_then(|textures| textures.get(index as usize)).cloned() else {
+    let Some((texture, key)) = scene.host.player_mut(id).and_then(|player| {
+        let texture = player.textures(pack)?.get(index as usize).cloned()?;
+        let key = player.texture_key(pack, texture.slot);
+        Some((texture, key))
+    }) else {
         return fail(SS_ERROR_INVALID_ARGUMENT, format!("no texture at index {index}"));
     };
     let Ok(path) = CString::new(texture.path) else {
         return fail(SS_ERROR_INVALID_ARGUMENT, "image path contains an interior NUL");
     };
     scene.path_scratch = path;
-    unsafe { out.write(SsTextureRef { hash: texture.hash, embedded: texture.embedded, path: scene.path_scratch.as_ptr() }) };
+    unsafe { out.write(SsTextureRef { key, embedded: texture.embedded, path: scene.path_scratch.as_ptr() }) };
     SS_OK
 }
 
@@ -806,7 +821,7 @@ pub unsafe extern "C" fn ss_player_missing_at(handle: *mut SsPlayer, index: u32,
         return fail(SS_ERROR_INVALID_ARGUMENT, "name contains an interior NUL");
     };
     scene.missing_scratch = name;
-    unsafe { out.write(SsMissingAsset { kind, hash: missing.hash, name: scene.missing_scratch.as_ptr() }) };
+    unsafe { out.write(SsMissingAsset { kind, slot: missing.slot, name: scene.missing_scratch.as_ptr() }) };
     SS_OK
 }
 

@@ -264,11 +264,36 @@ pub struct SSRenderer {
     /// are. Keeping straight pixels would cost a second full-size copy per atlas
     /// (16 MB at 2048²) to buy a form no caller asks for.
     texture_sources: HashMap<u32, (Vec<u8>, u32, u32)>,
+    /// A digest of the bytes behind each **player-loaded** atlas, for the one
+    /// question a key alone cannot answer: is what is registered still what the
+    /// loader means by it?
+    ///
+    /// The key says *which atlas*, so two players of one pack rightly find each
+    /// other's upload under it and neither re-uploads. But an authoring loop
+    /// re-exports the same file — same path, same key, new pixels — and
+    /// "already held" is how the viewer's convert / drop / look / convert again
+    /// round keeps showing the old atlas. Comparing digests separates the two.
+    ///
+    /// Absent for anything a **host** registered: it owns that entry, and a load
+    /// walk passing over the same key leaves it alone rather than claiming to
+    /// know better.
+    texture_digests: HashMap<u32, u32>,
     /// How many times [`SSRenderer::upload_texture`] has actually created a
     /// texture. A diagnostic: the point of a device-scoped texture map
     /// is that N players of one pack upload its atlas once between them, and only
     /// a counter — not the map's length — can tell that from N overwrites.
     texture_uploads: usize,
+}
+
+/// How a registration is remembered — the two things that outlive the upload
+/// itself, bundled because they are asked and answered together.
+pub(crate) struct Provenance {
+    /// Whether the renderer keeps the pixels for a device-loss rebuild.
+    pub retention: Retention,
+    /// What the bytes behind them hashed to, or `None` for an upload a **host**
+    /// made: that entry is the host's, and a load walk meeting the same key
+    /// leaves it alone. See `texture_digests`.
+    pub digest: Option<u32>,
 }
 
 /// Whether [`SSRenderer::upload_texture`] keeps a copy of the pixels for device
@@ -1379,6 +1404,7 @@ impl SSRenderer {
             white_ready: false,
             textures: HashMap::new(),
             texture_sources: HashMap::new(),
+            texture_digests: HashMap::new(),
             texture_uploads: 0,
         }
     }
@@ -1564,6 +1590,7 @@ impl SSRenderer {
         let size = (width as f32, height as f32);
         let info = tex_info_buffer(device, TexInfo::new(size, alpha));
         let bind_group = self.create_texture_bind_group(device, view, &info);
+        self.texture_digests.remove(&hash);
         self.textures.insert(hash, TextureEntry { bind_group, size, _info_buffer: info, alpha });
     }
 
@@ -1576,6 +1603,7 @@ impl SSRenderer {
     pub fn forget_texture(&mut self, hash: u32) {
         self.textures.remove(&hash);
         self.texture_sources.remove(&hash);
+        self.texture_digests.remove(&hash);
     }
 
     /// Which form [`SSRenderer::set_texture`] / [`SSRenderer::upload_texture`]
@@ -1610,17 +1638,32 @@ impl SSRenderer {
     /// are worth a second entry point.
     pub fn upload_texture_owned(&mut self, device: &wgpu::Device, queue: &wgpu::Queue, hash: u32, mut rgba: Vec<u8>, (width, height): (u32, u32), retention: Retention) {
         premultiply(&mut rgba);
-        self.register_premultiplied(device, queue, hash, rgba, (width, height), retention);
+        // No digest: a host owns what it uploads, and a load walk that meets
+        // this key leaves it alone rather than claiming to know better.
+        self.register_premultiplied(device, queue, hash, rgba, (width, height), Provenance { retention, digest: None });
     }
 
     /// [`SSRenderer::upload_texture_owned`] for pixels that are premultiplied
     /// already — what the loading path hands over, having premultiplied off the
     /// host's thread while it was decoding.
-    pub(crate) fn register_premultiplied(&mut self, device: &wgpu::Device, queue: &wgpu::Queue, hash: u32, premul: Vec<u8>, (width, height): (u32, u32), retention: Retention) {
+    pub(crate) fn register_premultiplied(&mut self, device: &wgpu::Device, queue: &wgpu::Queue, hash: u32, premul: Vec<u8>, (width, height): (u32, u32), how: Provenance) {
         self.write_and_register(device, queue, hash, &premul, (width, height));
-        if retention == Retention::Retain {
+        match how.digest {
+            Some(digest) => self.texture_digests.insert(hash, digest),
+            None => self.texture_digests.remove(&hash),
+        };
+        if how.retention == Retention::Retain {
             self.texture_sources.insert(hash, (premul, width, height));
         }
+    }
+
+    /// What the bytes behind a player-loaded atlas hashed to, or `None` when this
+    /// key holds nothing or holds something a host registered.
+    ///
+    /// The load walk asks so it can tell "somebody already uploaded exactly this"
+    /// from "this key holds a different picture now" — see `texture_digests`.
+    pub fn texture_digest(&self, hash: u32) -> Option<u32> {
+        self.texture_digests.get(&hash).copied()
     }
 
     /// Create the texture, write `premul` into it and register the bind group.

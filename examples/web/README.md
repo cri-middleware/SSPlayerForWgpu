@@ -159,11 +159,15 @@ the texture without passing through wasm memory. The *encoded* bytes are kept, s
 `ctx.restoreDevice()` rebuilds every texture after a device loss with no re-fetch.
 
 Three context-level paths remain for hosts that supply their own images:
-`ctx.addTextureFromBytes(hash, bytes)` (encoded — same route `loadSsab` takes),
-`ctx.addTextureFromBitmap(hash, bitmap)` for a host with its own asset pipeline
-(device loss is then yours to repair), and `ctx.addTexture(hash, rgba, w, h)` for
+`ctx.addTextureFromBytes(key, bytes)` (encoded — same route `loadSsab` takes),
+`ctx.addTextureFromBitmap(key, bitmap)` for a host with its own asset pipeline
+(device loss is then yours to repair), and `ctx.addTexture(key, rgba, w, h)` for
 raw straight-alpha RGBA. `player.textureRefs()` / `player.embeddedTextures()`
-answer what a pack needs, if you would rather load it yourself.
+answer what a pack needs, if you would rather load it yourself — each entry's
+`key` is what to register under. It is an identity for the *image*, which a cell
+map's name is not: every Adobe Animate export calls its atlas `spritemap1.png`,
+so two projects on one page would otherwise collide on one key and the second
+would draw the first one's atlas.
 
 **Ask for the context once.** A second `SsContextWeb.create()` builds a second
 `GPUDevice`, and nothing is shared across a device: the same character on two

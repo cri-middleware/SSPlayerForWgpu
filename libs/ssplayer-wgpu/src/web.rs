@@ -799,14 +799,34 @@ impl AssetLoader for WebAssetLoader {
         paths.iter().map(|path| fetched.get(path).map(|bytes| bytes.to_vec())).collect()
     }
 
-    async fn supply_texture(&mut self, hash: u32, encoded: &[u8]) {
-        if let Err(e) = upload_encoded(&self.ctx, hash, Rc::from(encoded)).await {
-            self.warn(&format!("an image for {hash:#010x} could not be decoded: {e:?}"));
+    /// The URL `path` resolves to, hashed — the same resolution `read` performs,
+    /// so two packs fetched from two directories that both name `spritemap1.png`
+    /// are two images and the sibling packs of one project are one.
+    ///
+    /// This is the URL-keying `ssplayer-core` settled on for the same reason: the
+    /// alias it cached under used to be the cellmap hash, which is global state,
+    /// and two players showing different projects on one page collided.
+    fn texture_key(&self, path: &str, cellmap_hash: u32) -> u32 {
+        match absolute_url(path, self.base_url.as_deref()) {
+            Some(url) => ssruntime::fnv1a_hash_str(&url),
+            // Unresolvable: `read` will fail too and the atlas be reported
+            // missing. Keying it as the slot keeps that path unchanged.
+            None => cellmap_hash,
         }
     }
 
-    fn has_texture(&self, hash: u32) -> bool {
-        self.ctx.borrow().renderer.texture_size(hash).is_some()
+    async fn supply_texture(&mut self, key: u32, encoded: &[u8]) {
+        if let Err(e) = upload_encoded(&self.ctx, key, Rc::from(encoded)).await {
+            self.warn(&format!("an image for {key:#010x} could not be decoded: {e:?}"));
+        }
+    }
+
+    /// What the renderer holds — and it is now safe to ask, because `key` names
+    /// the image rather than a slot inside one pack. Asking by cellmap hash was
+    /// the bug itself: a second project's `spritemap1` looked present, its PNG
+    /// was never fetched, and its parts drew the first project's atlas.
+    fn has_texture(&self, key: u32) -> bool {
+        self.ctx.borrow().renderer.texture_size(key).is_some()
     }
 
     fn warn(&self, message: &str) {
@@ -1007,8 +1027,14 @@ impl SsPlayerWeb {
     /// reference implementation exposes (`ssplayer-core`'s `extractTexturePaths`):
     /// only the `.ssab` knows where its atlases were exported to, so a page
     /// showing a reference-mode pack fetches `new URL(path, ssabUrl)` for every
-    /// entry whose `embedded` is false and registers the pixels by `hash`.
+    /// entry whose `embedded` is false and registers the pixels by **`key`**.
     /// Embedded entries need no fetch — they arrive with the pack.
+    ///
+    /// `hash` names the slot inside this pack; `key` is what the renderer is
+    /// keyed by. They differ whenever two packs could name one atlas alike, which
+    /// Adobe Animate's `spritemap1.png` does for every project it exports —
+    /// registering by `hash` is how a page ends up drawing another project's
+    /// atlas.
     #[wasm_bindgen(js_name = textureRefs)]
     pub fn texture_refs(&self, pack: Option<String>) -> Result<js_sys::Array, JsValue> {
         with_player!(self, |p| {
@@ -1018,7 +1044,7 @@ impl SsPlayerWeb {
                 let set = |key: &str, value: JsValue| {
                     let _ = js_sys::Reflect::set(&entry, &JsValue::from_str(key), &value);
                 };
-                set("hash", texture.hash.into());
+                set("key", p.texture_key(pack.as_deref(), texture.slot).into());
                 set("path", texture.path.as_str().into());
                 set("embedded", texture.embedded.into());
                 out.push(&entry);
@@ -1048,7 +1074,7 @@ impl SsPlayerWeb {
                 let set = |key: &str, value: JsValue| {
                     let _ = js_sys::Reflect::set(&entry, &JsValue::from_str(key), &value);
                 };
-                set("hash", image.hash.into());
+                set("key", p.texture_key(pack.as_deref(), image.slot).into());
                 set("bytes", js_sys::Uint8Array::from(image.bytes).into());
                 out.push(&entry);
             }
@@ -1080,7 +1106,7 @@ impl SsPlayerWeb {
                     }),
                 );
                 set("name", missing.name.as_str().into());
-                set("hash", missing.hash.into());
+                set("slot", missing.slot.into());
                 out.push(&entry);
             }
             out

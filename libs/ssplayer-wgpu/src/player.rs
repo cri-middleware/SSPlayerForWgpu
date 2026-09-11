@@ -19,6 +19,7 @@ use ssruntime::error::SSRuntimeError;
 use ssruntime::runtime::framedata::ss::runtime::{DrawBatchKind, root_as_frame_data_unchecked};
 use ssruntime::{Context, EffectSlot, InstanceSlot, TrackBlend};
 use std::collections::{HashMap, HashSet};
+use std::sync::Arc;
 
 /// The tint that changes nothing — white, in the `0xRRGGBB` order
 /// [`SSPlayer::set_tint`] takes. Deliberately not `pub`: cbindgen sweeps every
@@ -127,23 +128,148 @@ pub trait AssetLoader {
         None
     }
 
-    /// Decode `encoded` (a PNG, as the exporter wrote it) and register it under
-    /// `hash` — the key a draw batch will ask for.
-    async fn supply_texture(&mut self, hash: u32, encoded: &[u8]);
+    /// Which renderer key `path`'s image belongs under.
+    ///
+    /// **A cellmap hash names a slot inside one `.ssab`, not an image.** Adobe
+    /// Animate writes `spritemap1.png` for every project it exports, so two packs
+    /// from two projects ask for one hash and mean two different atlases; keyed by
+    /// the hash alone, the second registration is skipped as "already held" and
+    /// that pack silently draws the first one's atlas. Resolving `path` the way
+    /// [`AssetLoader::read`] would and hashing **that** is what tells them apart,
+    /// and it is the implementation that knows how — a path, a URL and an archive
+    /// key each resolve differently, which is the same reason
+    /// [`AssetLoader::set_base`] exists.
+    ///
+    /// Equal keys must mean the same pixels: that is what keeps the sibling packs
+    /// of one project — all naming the one atlas beside them — to a single upload.
+    /// Answering differently for two names of one file costs an upload, which is
+    /// the harmless direction; answering alike for two files draws the wrong
+    /// picture.
+    ///
+    /// The default answers `cellmap_hash`, which is what a loader rooted in one
+    /// place forever has always done.
+    fn texture_key(&self, _path: &str, cellmap_hash: u32) -> u32 {
+        cellmap_hash
+    }
 
-    /// Whether an atlas is already registered for `hash` — a hint, used to skip
-    /// reading a file nobody will need.
+    /// Decode `encoded` (a PNG, as the exporter wrote it) and register it under
+    /// `key` — what [`AssetLoader::texture_key`] answered for it, and what the
+    /// player will translate a draw batch's cellmap hash into.
+    async fn supply_texture(&mut self, key: u32, encoded: &[u8]);
+
+    /// Whether an atlas is already registered for `key` — a hint, used to skip
+    /// reading a file nobody will need. `key` is
+    /// [`AssetLoader::texture_key`]'s answer, not a cellmap hash.
     ///
     /// Best effort: a loader that cannot see the renderer answers `false` and
     /// lets the flush make the real decision. The texture map is device-scoped, so the authoritative check is the one that keeps N players of
     /// one pack to one decode and one upload between them.
-    fn has_texture(&self, hash: u32) -> bool;
+    fn has_texture(&self, key: u32) -> bool;
 
     /// Report a file that could not be loaded. One missing atlas or sub-pack
     /// costs you that one thing, not the character, so this is a diagnostic
     /// rather than an error — the same call `SS6PlayerForGodot` makes with
     /// `ERR_PRINT` and `ssplayer-core` with `console.warn`.
     fn warn(&self, message: &str);
+}
+
+/// Point every planned writer's cutout at the renderer key its node's pack
+/// resolved to. A writer's `texture_hash` comes from the batch it belongs to, so
+/// it arrives in cellmap-hash terms like every other one.
+fn retarget(writers: &mut MaskWriters, keys: &AtlasKeys) {
+    for writer in writers.iter_mut() {
+        writer.texture_hash = keys.resolve(writer.texture_hash);
+    }
+}
+
+/// Re-read every node's table from the player's, for the whole tree.
+///
+/// Recursive because an instance child is a node on its own pack: one `.ssab`
+/// learning where its atlas went says nothing about the sibling packs its
+/// instance parts play from, and those learn theirs on their own pass.
+fn refresh_atlas_keys(node: &mut PlaybackNode, atlas_keys: &HashMap<String, Arc<AtlasKeys>>) {
+    node.atlas_keys = node_atlas_keys(atlas_keys, &node.pack);
+    for child in node.instances.values_mut() {
+        refresh_atlas_keys(&mut child.node, atlas_keys);
+    }
+}
+
+/// The table for one pack, or an empty one when the player has never seen its
+/// atlases — in which case every slot resolves to itself and the renderer is
+/// keyed exactly as it was before there was a table.
+fn node_atlas_keys(atlas_keys: &HashMap<String, Arc<AtlasKeys>>, pack: &str) -> Arc<AtlasKeys> {
+    atlas_keys.get(pack).cloned().unwrap_or_default()
+}
+
+/// fnv1a over bytes — the construction `ssruntime::fnv1a_hash_str` applies to a
+/// `str`, which is the only form the runtime ever needs.
+fn fnv1a_bytes(bytes: &[u8]) -> u32 {
+    let mut hash: u32 = 2166136261;
+    for b in bytes {
+        hash ^= *b as u32;
+        hash = hash.wrapping_mul(16777619);
+    }
+    hash
+}
+
+/// The renderer key for one atlas slot.
+///
+/// **Embedded atlases are keyed by their own bytes.** They have no location to
+/// resolve — they are inside the `.ssab` — and hashing the pixels is what keeps
+/// two players that each read the same embedded pack from the disk to one
+/// upload between them, which keying by pack identity would lose.
+///
+/// A reference-mode atlas is keyed by where it resolves to, which is
+/// [`AssetLoader::texture_key`]'s answer: the bytes are not in hand yet, and the
+/// decision has to be made before [`AssetLoader::has_texture`] is asked.
+fn atlas_key(loader: &impl AssetLoader, texture: &TextureRef, embedded: Option<&[u8]>) -> u32 {
+    match embedded {
+        Some(bytes) => fnv1a_bytes(bytes),
+        None => loader.texture_key(&texture.path, texture.slot),
+    }
+}
+
+/// Which renderer key each of one pack's cellmaps resolves to.
+///
+/// The runtime speaks in cellmap hashes — `DrawBatch.texture_hash`, an effect
+/// command's `cellmap_hash`, a mask writer's cutout — and a cellmap hash is
+/// unique only *inside* its own `.ssab`. [`SSRenderer`]'s texture map is scoped
+/// to the device instead, because that is what lets N players of one pack share
+/// one upload. This is the join between the two: the player assigns a key that
+/// identifies the image (see [`AssetLoader::texture_key`]) and translates every
+/// hash through this table on the way to a draw call.
+///
+/// A slot with no entry resolves to itself, so a pack whose atlases the player
+/// never saw — the host registered them against [`SSRenderer`] directly — keeps
+/// behaving exactly as it did before there was a table.
+///
+/// A `Vec` rather than a map: packs have a handful of cellmaps (usually one), and
+/// this is read once per draw batch.
+#[derive(Clone, Debug, Default)]
+pub struct AtlasKeys(Vec<(u32, u32)>);
+
+impl AtlasKeys {
+    /// The renderer key for `cellmap_hash`, or `cellmap_hash` itself when this
+    /// table says nothing about it.
+    pub fn resolve(&self, cellmap_hash: u32) -> u32 {
+        self.0.iter().find(|(hash, _)| *hash == cellmap_hash).map(|(_, key)| *key).unwrap_or(cellmap_hash)
+    }
+
+    /// Record — or correct — where `cellmap_hash` points.
+    ///
+    /// Last writer wins, which is the same rule the load walk follows for the
+    /// bytes themselves: a reload that finds a different file behind one name is
+    /// re-registering it, not adding a second.
+    fn set(&mut self, cellmap_hash: u32, key: u32) {
+        match self.0.iter_mut().find(|(hash, _)| *hash == cellmap_hash) {
+            Some(entry) => entry.1 = key,
+            None => self.0.push((cellmap_hash, key)),
+        }
+    }
+
+    fn is_empty(&self) -> bool {
+        self.0.is_empty()
+    }
 }
 
 /// What kind of thing [`SSPlayer::load`] could not get.
@@ -170,9 +296,10 @@ pub struct MissingAsset {
     /// relative to its pack's directory, which is what the loader resolved it
     /// against and the only form the walk ever sees. For a pack, its name.
     pub name: String,
-    /// For a texture, the key a draw batch will ask for. Zero for a pack, whose
-    /// identity is its name.
-    pub hash: u32,
+    /// For a texture, the slot a draw batch will ask for — a cellmap's
+    /// `name_hash`, which [`SSPlayer::texture_key`] turns into the renderer's
+    /// key. Zero for a pack, whose identity is its name.
+    pub slot: u32,
 }
 
 /// Which way the playhead walks the animation.
@@ -384,6 +511,19 @@ struct PlaybackNode {
     /// Static per-part mask flags, indexed by part index. Read once from ssab
     /// `PartData` at build time. Empty when the pack has no ssab data.
     mask_flags: Vec<PartMaskFlags>,
+    /// Which pack this node plays from — the name `atlas_keys` is filed under.
+    /// `res` identifies the same thing but only by pointer, and a refresh needs
+    /// to look the table up by name.
+    pack: String,
+    /// Where this node's pack's cellmap hashes point in the renderer's texture
+    /// map. Read once at build time, for the same reason `mask_flags` is: the
+    /// draw walk needs it per batch and it cannot change under a live tree.
+    ///
+    /// Per node rather than per player because a node plays from *one* pack
+    /// while the tree spans several — an instance part's sub-animation is a
+    /// child node on its own pack, and that is exactly the case two projects'
+    /// `spritemap1` would be confused across.
+    atlas_keys: Arc<AtlasKeys>,
 }
 
 /// One instance part: its slot, the sub-animation it drives, and what the last
@@ -450,6 +590,18 @@ pub struct SSPlayer {
     /// because a 2048² atlas is a few hundred KB here against 16 MB of pixels,
     /// and because it puts both routes on one timeline.
     pending_images: Vec<(u32, Vec<u8>)>,
+    /// Per pack name, which renderer key each of its cellmaps resolves to.
+    ///
+    /// Filled as the atlases arrive — by the load walk for the ones it read, and
+    /// by the flush for embedded ones — and read by [`build_node`], which hands
+    /// each node the table for the pack it plays from. Per *pack* and not per
+    /// player because one player holds the sibling packs its instance parts
+    /// reference, and a host is free to [`SSPlayer::add_ssab`] packs from two
+    /// projects into one player, which is exactly where two `spritemap1`s meet.
+    ///
+    /// `Arc` because every node clones it, and because replacing a pack must not
+    /// disturb the tree still playing the old one.
+    atlas_keys: HashMap<String, Arc<AtlasKeys>>,
     /// What the last load could not get. Reset by each
     /// [`SSPlayer::load_with`], appended to as the walk gives up on a file.
     missing: Vec<MissingAsset>,
@@ -527,6 +679,7 @@ impl SSPlayer {
             current_animation: None,
             packs_awaiting_textures: Vec::new(),
             pending_images: Vec::new(),
+            atlas_keys: HashMap::new(),
             missing: Vec::new(),
             events: Vec::new(),
             looped: false,
@@ -702,7 +855,7 @@ impl SSPlayer {
             for (name, bytes) in wanted.iter().zip(fetched) {
                 let Some(bytes) = bytes else {
                     loader.warn(&format!("instance pack \"{name}\" did not load; parts that play it will not appear"));
-                    self.missing.push(MissingAsset { kind: MissingKind::Pack, name: name.clone(), hash: 0 });
+                    self.missing.push(MissingAsset { kind: MissingKind::Pack, name: name.clone(), slot: 0 });
                     continue;
                 };
                 // Never renamed: `ref_anime_pack` is matched against the name the
@@ -716,7 +869,7 @@ impl SSPlayer {
                     }
                     Err(e) => {
                         loader.warn(&format!("instance pack \"{name}\" is not a valid .ssab: {e:?}"));
-                        self.missing.push(MissingAsset { kind: MissingKind::Pack, name: name.clone(), hash: 0 });
+                        self.missing.push(MissingAsset { kind: MissingKind::Pack, name: name.clone(), slot: 0 });
                     }
                 }
             }
@@ -735,30 +888,64 @@ impl SSPlayer {
     /// [`SSPlayer::missing_assets`] is that same relative path, and the warning
     /// names the pack to say which directory it was relative to.
     async fn load_textures(&mut self, loader: &mut impl AssetLoader, pack: &SSPack) {
-        let wanted: Vec<TextureRef> = pack.textures().iter().filter(|t| !loader.has_texture(t.hash)).cloned().collect();
+        let refs = pack.textures();
+        if refs.is_empty() {
+            return;
+        }
+        let carried = pack.embedded_images();
+        let embedded = |hash: u32| carried.iter().find(|i| i.slot == hash).map(|i| i.bytes);
+
+        // Before anything is read, because `has_texture` is asked about the key
+        // and the table has to describe the atlases already held just as much as
+        // the ones about to arrive.
+        let keys: Vec<u32> = refs.iter().map(|t| atlas_key(loader, t, embedded(t.slot))).collect();
+        self.record_atlas_keys(pack.name(), refs.iter().map(|t| t.slot).zip(keys.iter().copied()));
+
+        let wanted: Vec<(&TextureRef, u32)> = refs.iter().zip(keys.iter().copied()).filter(|(_, key)| !loader.has_texture(*key)).collect();
         if wanted.is_empty() {
             return;
         }
 
-        let carried: HashMap<u32, Vec<u8>> = pack.embedded_images().into_iter().filter(|i| wanted.iter().any(|t| t.hash == i.hash)).map(|i| (i.hash, i.bytes.to_vec())).collect();
-        let mut paths: Vec<String> = wanted.iter().filter(|t| !carried.contains_key(&t.hash)).map(|t| t.path.clone()).collect();
+        let mut paths: Vec<String> = wanted.iter().filter(|(t, _)| embedded(t.slot).is_none()).map(|(t, _)| t.path.clone()).collect();
         paths.sort();
         paths.dedup();
         let fetched: HashMap<&String, Option<Vec<u8>>> = paths.iter().zip(loader.read(&paths).await).collect();
 
-        for texture in &wanted {
-            let bytes = match carried.get(&texture.hash) {
-                Some(bytes) => bytes.as_slice(),
+        for (texture, key) in &wanted {
+            let bytes = match embedded(texture.slot) {
+                Some(bytes) => bytes,
                 None => match fetched.get(&texture.path).and_then(|b| b.as_deref()) {
                     Some(bytes) => bytes,
                     None => {
                         loader.warn(&format!("atlas {} for pack \"{}\" did not load; parts that use it will draw white", texture.path, pack.name()));
-                        self.missing.push(MissingAsset { kind: MissingKind::Texture, name: texture.path.clone(), hash: texture.hash });
+                        self.missing.push(MissingAsset { kind: MissingKind::Texture, name: texture.path.clone(), slot: texture.slot });
                         continue;
                     }
                 },
             };
-            loader.supply_texture(texture.hash, bytes).await;
+            loader.supply_texture(*key, bytes).await;
+        }
+    }
+
+    /// Fold what a load or a flush learned into the pack's table, leaving the
+    /// slots it says nothing about alone.
+    fn record_atlas_keys(&mut self, pack: &str, entries: impl Iterator<Item = (u32, u32)>) {
+        let mut table = self.atlas_keys.get(pack).map(|keys| (**keys).clone()).unwrap_or_default();
+        for (cellmap_hash, key) in entries {
+            table.set(cellmap_hash, key);
+        }
+        if table.is_empty() {
+            return;
+        }
+        self.atlas_keys.insert(pack.to_string(), Arc::new(table));
+        // The tree may predate this. A host is free to register bytes, select an
+        // animation, and only then hand the walk a loader (`load_assets`), and
+        // selecting again cannot repair it — `set_animation` returns early for the
+        // name already selected. So the keys are pushed to the nodes here, where
+        // they are learned, rather than waited for at a selection that may never
+        // come.
+        if let Some(root) = &mut self.root {
+            refresh_atlas_keys(root, &self.atlas_keys);
         }
     }
 
@@ -812,6 +999,13 @@ impl SSPlayer {
         if pack.has_embedded_textures() {
             self.packs_awaiting_textures.push(name.clone());
         }
+        // Here rather than at the flush, so [`SSPlayer::texture_key`] can answer
+        // the moment a pack is registered: a host supplying its own pixels
+        // (Bevy lending a `GpuImage`'s view) asks between this call and the
+        // first update, and an answer that arrived later would be an answer it
+        // had already registered under something else.
+        let embedded: Vec<(u32, u32)> = pack.embedded_images().iter().map(|image| (image.slot, fnv1a_bytes(image.bytes))).collect();
+        self.record_atlas_keys(&name, embedded.into_iter());
         // Only while a tree exists is there anything pointing into the pack being
         // replaced; without one the old pack is free to go here and now.
         if let Some(previous) = self.packs.insert(name, pack.clone())
@@ -892,7 +1086,7 @@ impl SSPlayer {
         let reused = match &mut self.root {
             Some(root) if std::ptr::eq(root.res, static_res) => {
                 root.context.setup_animation(anim_name)?;
-                let (instances, effects, mask_flags) = build_rig(&root.context, static_res, &self.packs);
+                let (instances, effects, mask_flags) = build_rig(&root.context, static_res, &self.packs, &self.atlas_keys);
                 root.instances = instances;
                 root.effects = effects;
                 root.mask_flags = mask_flags;
@@ -901,7 +1095,7 @@ impl SSPlayer {
             _ => false,
         };
         if !reused {
-            let root = build_node(&self.packs, &main_pack, anim_name).ok_or(SSRuntimeError::NotLoaded)?;
+            let root = build_node(&self.packs, &self.atlas_keys, &main_pack, anim_name).ok_or(SSRuntimeError::NotLoaded)?;
             // Assigning drops the previous tree, and with it the last raw pointer
             // into any pack a re-registration retired.
             self.root = Some(root);
@@ -1783,9 +1977,39 @@ impl SSPlayer {
     /// straight after [`SSPlayer::add_ssab`] / [`SSPlayer::load_ssab`], loads
     /// every entry that is not [`TextureRef::embedded`] by resolving
     /// [`TextureRef::path`] against the directory the `.ssab` came from, and hands
-    /// the pixels to [`SSRenderer::upload_texture`]. The player never opens a
-    /// file itself — it has no filesystem on the web face, and on any face the
-    /// host's asset system is the one that should own the bytes.
+    /// the pixels to [`SSRenderer::upload_texture`] **under
+    /// [`SSPlayer::texture_key`]'s answer for that entry**, not under
+    /// [`TextureRef::slot`]. The player never opens a file itself — it has no
+    /// filesystem on the web face, and on any face the host's asset system is the
+    /// one that should own the bytes.
+    /// Where a pack's cellmap registers in the renderer's texture map.
+    ///
+    /// [`TextureRef::slot`] names a *slot inside one `.ssab`*, and two packs from
+    /// two Adobe Animate projects both call theirs `spritemap1`. The renderer's
+    /// map is device-scoped — that is what keeps N players of one pack to one
+    /// upload — so the player assigns each atlas a key that identifies the image
+    /// and translates every draw batch through it. This is that translation, and
+    /// it is what a host supplying its own pixels has to register under:
+    ///
+    /// ```no_run
+    /// # use ssplayer_wgpu::{Retention, SSPlayer, SSRenderer};
+    /// # fn go(player: &SSPlayer, renderer: &mut SSRenderer, device: &wgpu::Device, queue: &wgpu::Queue, rgba: &[u8]) {
+    /// for texture in player.textures(None).unwrap_or(&[]) {
+    ///     let key = player.texture_key(None, texture.slot);
+    ///     renderer.upload_texture(device, queue, key, rgba, (1024, 1024), Retention::Retain);
+    /// }
+    /// # }
+    /// ```
+    ///
+    /// Answers `cellmap_hash` itself for a pack whose atlases the player has
+    /// never seen, so a host that registered everything against the renderer
+    /// directly before this existed keeps working unchanged — and pays for it
+    /// with the collision this exists to remove.
+    pub fn texture_key(&self, pack_name: Option<&str>, slot: u32) -> u32 {
+        let Some(name) = pack_name.or(self.main_pack.as_deref()) else { return slot };
+        self.atlas_keys.get(name).map(|keys| keys.resolve(slot)).unwrap_or(slot)
+    }
+
     pub fn textures(&self, pack_name: Option<&str>) -> Option<&[TextureRef]> {
         let name = pack_name.or(self.main_pack.as_deref())?;
         Some(self.packs.get(name)?.textures())
@@ -1845,21 +2069,25 @@ impl SSPlayer {
         // keeps N players of one pack to one upload between them.
         let mut claimed: HashSet<u32> = HashSet::new();
         let mut jobs: Vec<(u32, &[u8], Retention)> = Vec::new();
-        for (hash, encoded) in &pending {
-            if renderer.texture_size(*hash).is_none() && claimed.insert(*hash) {
+        for (key, encoded) in &pending {
+            if wanted_now(renderer, *key, encoded) && claimed.insert(*key) {
                 // Retained: the bytes came from outside, so this player has nothing
                 // it could decode again after a device loss.
-                jobs.push((*hash, encoded, Retention::Retain));
+                jobs.push((*key, encoded, Retention::Retain));
             }
         }
         for name in &names {
             let Some(pack) = self.packs.get(name) else { continue };
+            // Registration decided these (see `add_pack`); reading them back is
+            // what keeps the tree's lookups and this upload on one key.
+            let keys = self.atlas_keys.get(name);
             for image in pack.embedded_images() {
-                if renderer.texture_size(image.hash).is_none() && claimed.insert(image.hash) {
+                let key = keys.map(|keys| keys.resolve(image.slot)).unwrap_or(image.slot);
+                if wanted_now(renderer, key, image.bytes) && claimed.insert(key) {
                     // Reproducible: this player still holds the `.ssab` and can
                     // decode the atlas again, so the renderer need not retain a
                     // second copy.
-                    jobs.push((image.hash, image.bytes, Retention::Reproducible));
+                    jobs.push((key, image.bytes, Retention::Reproducible));
                 }
             }
         }
@@ -1946,7 +2174,7 @@ impl SSPlayer {
 /// Recursively build a playback node: create a context bound to `pack`'s
 /// resource, set up `anime`, and build an instance child for every instance
 /// part found in the pack. Child failures are skipped (not fatal).
-fn build_node(packs: &HashMap<String, SSPack>, pack: &str, anime: &str) -> Option<PlaybackNode> {
+fn build_node(packs: &HashMap<String, SSPack>, atlas_keys: &HashMap<String, Arc<AtlasKeys>>, pack: &str, anime: &str) -> Option<PlaybackNode> {
     let resource = packs.get(pack)?.resource();
     let res_ptr = resource.resource_static_ptr();
     if res_ptr.is_null() {
@@ -1966,8 +2194,8 @@ fn build_node(packs: &HashMap<String, SSPack>, pack: &str, anime: &str) -> Optio
     // target's own sense is known.
     context.set_coordinate_system(ssruntime::SsCoordinateSystem::YDown);
     context.setup_animation(anime).ok()?;
-    let (instances, effects, mask_flags) = build_rig(&context, static_res, packs);
-    Some(PlaybackNode { context, instances, effects, mask_flags, res: static_res })
+    let (instances, effects, mask_flags) = build_rig(&context, static_res, packs, atlas_keys);
+    Some(PlaybackNode { context, instances, effects, mask_flags, pack: pack.to_string(), atlas_keys: node_atlas_keys(atlas_keys, pack), res: static_res })
 }
 
 /// The per-animation half of a node: which instance children it mounts, which
@@ -1978,7 +2206,12 @@ fn build_node(packs: &HashMap<String, SSPack>, pack: &str, anime: &str) -> Optio
 /// and handing it a new clip through `setup_animation` is what keeps the speed,
 /// the frame-rate override, the frame skip and the playback direction across the
 /// switch, exactly as every sibling Player gets them kept.
-fn build_rig(context: &Context<'static>, static_res: &'static ssruntime::AnimationResource<'static>, packs: &HashMap<String, SSPack>) -> (HashMap<usize, InstanceChild>, HashMap<usize, EffectPart>, Vec<PartMaskFlags>) {
+fn build_rig(
+    context: &Context<'static>,
+    static_res: &'static ssruntime::AnimationResource<'static>,
+    packs: &HashMap<String, SSPack>,
+    atlas_keys: &HashMap<String, Arc<AtlasKeys>>,
+) -> (HashMap<usize, InstanceChild>, HashMap<usize, EffectPart>, Vec<PartMaskFlags>) {
     let mut instances = HashMap::new();
     let mut effects = HashMap::new();
     let mut mask_flags = Vec::new();
@@ -2004,7 +2237,7 @@ fn build_rig(context: &Context<'static>, static_res: &'static ssruntime::Animati
             match part_type {
                 PartType::PartTypeInstance => {
                     if let Some(inst) = part.part_type_as_part_type_instance()
-                        && let Some(child) = build_node(packs, inst.ref_anime_pack(), inst.ref_anime_name())
+                        && let Some(child) = build_node(packs, atlas_keys, inst.ref_anime_pack(), inst.ref_anime_name())
                     {
                         let frame_no = child.context.get_frame_no();
                         instances.insert(i, InstanceChild { slot: InstanceSlot::new(), node: Box::new(child), frame_no, visible: false });
@@ -2345,7 +2578,8 @@ fn gather_bubbles<'r>(node: &mut PlaybackNode, frame: &FrameView<'r>) -> Vec<Bub
         // this is the same raw-slice decoupling the parent frame uses.
         let cfd: &'r [u8] = unsafe { std::slice::from_raw_parts(bytes.as_ptr(), bytes.len()) };
         let cframe = frame_view(&mut child.node.context, cfd);
-        let cwriters = plan_writers(&cframe, &child.node.mask_flags);
+        let mut cwriters = plan_writers(&cframe, &child.node.mask_flags);
+        retarget(&mut cwriters, &child.node.atlas_keys);
         let clip: Vec<MaskWriter> = cwriters.iter().filter(|w| w.is_clipping).copied().collect();
         if clip.is_empty() {
             continue;
@@ -2379,7 +2613,8 @@ fn render_node(node: &mut PlaybackNode, build: &mut FrameBuild<'_>, draw: NodeDr
     // (`gather_bubbles`). Backend-agnostic on purpose — only what a writer is
     // *appended as* differs, and that is the scene's business.
     let masking = build.scene.mask_backend() != crate::MaskBackend::None && !parent_driven;
-    let writers = if masking { plan_writers(&frame, &node.mask_flags) } else { MaskWriters::default() };
+    let mut writers = if masking { plan_writers(&frame, &node.mask_flags) } else { MaskWriters::default() };
+    retarget(&mut writers, &node.atlas_keys);
 
     // A sub-animation clipped by its parent's mask reads the parent's bitmap
     // rather than baking one: same layer, same writers, an affine composed with
@@ -2530,7 +2765,7 @@ fn render_node(node: &mut PlaybackNode, build: &mut FrameBuild<'_>, draw: NodeDr
                             continue;
                         }
                         let stencil = node.mask_flags.get(part_idx).map(|f| f.polarity()).unwrap_or(StencilTest::None);
-                        let info = BatchInfo { start_rank: rank, count: 1, texture_hash: batch.texture_hash(), blend_type: batch.blend_type(), kind, stencil, alpha, tint };
+                        let info = BatchInfo { start_rank: rank, count: 1, texture_hash: node.atlas_keys.resolve(batch.texture_hash()), blend_type: batch.blend_type(), kind, stencil, alpha, tint };
                         build.scene.append_batch(build.renderer, &frame, &node_slot, &info);
                     }
                 } else if inherited.active {
@@ -2547,7 +2782,7 @@ fn render_node(node: &mut PlaybackNode, build: &mut FrameBuild<'_>, draw: NodeDr
                         }
                         let f = node.mask_flags.get(part_idx).copied().unwrap_or_default();
                         let stencil = if inherited.targets(&f) { inherited.polarity(&f) } else { StencilTest::None };
-                        let info = BatchInfo { start_rank: rank, count: 1, texture_hash: batch.texture_hash(), blend_type: batch.blend_type(), kind, stencil, alpha, tint };
+                        let info = BatchInfo { start_rank: rank, count: 1, texture_hash: node.atlas_keys.resolve(batch.texture_hash()), blend_type: batch.blend_type(), kind, stencil, alpha, tint };
                         build.scene.append_batch(build.renderer, &frame, &node_slot, &info);
                     }
                 } else if has_pure {
@@ -2558,11 +2793,11 @@ fn render_node(node: &mut PlaybackNode, build: &mut FrameBuild<'_>, draw: NodeDr
                         if is_pure(part_idx) {
                             continue;
                         }
-                        let info = BatchInfo { start_rank: rank, count: 1, texture_hash: batch.texture_hash(), blend_type: batch.blend_type(), kind, stencil: StencilTest::None, alpha, tint };
+                        let info = BatchInfo { start_rank: rank, count: 1, texture_hash: node.atlas_keys.resolve(batch.texture_hash()), blend_type: batch.blend_type(), kind, stencil: StencilTest::None, alpha, tint };
                         build.scene.append_batch(build.renderer, &frame, &node_slot, &info);
                     }
                 } else {
-                    let info = BatchInfo { start_rank, count, texture_hash: batch.texture_hash(), blend_type: batch.blend_type(), kind, stencil: StencilTest::None, alpha, tint };
+                    let info = BatchInfo { start_rank, count, texture_hash: node.atlas_keys.resolve(batch.texture_hash()), blend_type: batch.blend_type(), kind, stencil: StencilTest::None, alpha, tint };
                     build.scene.append_batch(build.renderer, &frame, &node_slot, &info);
                 }
             }
@@ -2636,7 +2871,7 @@ fn render_node(node: &mut PlaybackNode, build: &mut FrameBuild<'_>, draw: NodeDr
                     // alpha scales every particle it draws (the particles carry their
                     // own per-vertex alpha on top).
                     let eff_alpha = alpha * fd.parts().get(part_idx).alpha();
-                    build.scene.append_effect(plan, &eff_slot, eff_stencil, eff_alpha, tint);
+                    build.scene.append_effect(plan, &eff_slot, eff_stencil, eff_alpha, tint, &node.atlas_keys);
                 }
             }
             // Mask batches emit no colour (coverage is handled by the writer
@@ -2743,17 +2978,35 @@ unsafe fn slice_i32<'a>(ptr: *const i32, len: usize) -> &'a [i32] {
 /// character with three 4096² atlases otherwise pays for them end to end on the
 /// host's thread, which is the load stall this exists to avoid. The registration
 /// order is still the caller's, not the order the decodes happened to finish in.
+/// Whether the renderer's entry for `key` still has to be built from `encoded`.
+///
+/// Three answers, and the middle one is the whole point:
+///
+/// - **Nothing there** — build it.
+/// - **Something there that a load put there, from different bytes** — build it.
+///   Same path, same key, re-exported pixels: the viewer's convert / drop / look
+///   / convert again round, which otherwise keeps showing the old atlas.
+/// - **Something there from these same bytes, or something a host registered** —
+///   leave it. The first is what keeps N players of one pack to one upload
+///   between them; the second is not ours to overwrite.
+fn wanted_now(renderer: &SSRenderer, key: u32, encoded: &[u8]) -> bool {
+    if renderer.texture_size(key).is_none() {
+        return true;
+    }
+    renderer.texture_digest(key).is_some_and(|held| held != fnv1a_bytes(encoded))
+}
+
 #[cfg(feature = "embedded")]
 fn decode_and_register(renderer: &mut SSRenderer, device: &wgpu::Device, queue: &wgpu::Queue, jobs: &[(u32, &[u8], Retention)]) {
     let encoded: Vec<&[u8]> = jobs.iter().map(|(_, bytes, _)| *bytes).collect();
     // Premultiplied on the worker, so all that is left for this thread
     // is creating the texture and writing it.
-    for (decoded, (hash, _, retention)) in crate::decode::decode_all(&encoded, true).into_iter().zip(jobs) {
+    for (decoded, (hash, bytes, retention)) in crate::decode::decode_all(&encoded, true).into_iter().zip(jobs) {
         let Some(decoded) = decoded else {
             eprintln!("[ssplayer-wgpu] an image for {hash:#010x} could not be decoded");
             continue;
         };
-        renderer.register_premultiplied(device, queue, *hash, decoded.rgba, (decoded.width, decoded.height), *retention);
+        renderer.register_premultiplied(device, queue, *hash, decoded.rgba, (decoded.width, decoded.height), crate::renderer::Provenance { retention: *retention, digest: Some(fnv1a_bytes(bytes)) });
     }
 }
 

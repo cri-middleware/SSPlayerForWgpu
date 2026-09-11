@@ -8,7 +8,7 @@
 //!
 //! Skips itself when no GPU adapter is present, like the other rendering tests.
 
-use ssplayer_wgpu::{MaskBackend, Retention, SSPlayer, SSRenderer, SSScene, SceneConfig};
+use ssplayer_wgpu::{MaskBackend, SSPlayer, SSRenderer, SSScene, SceneConfig};
 use std::path::Path;
 
 /// How much bigger than the pack's own canvas to render.
@@ -32,33 +32,14 @@ fn assets() -> &'static str {
     concat!(env!("CARGO_MANIFEST_DIR"), "/../../assets")
 }
 
-/// Upload every PNG beside the pack, keyed by fnv1a(stem) — reference-mode
-/// texture supply, as the viewer does it.
-fn load_textures(renderer: &mut SSRenderer, device: &wgpu::Device, queue: &wgpu::Queue, dir: &Path) {
-    let Ok(entries) = std::fs::read_dir(dir) else { return };
-    for entry in entries.flatten() {
-        let path = entry.path();
-        if path.extension().and_then(|s| s.to_str()) != Some("png") {
-            continue;
-        }
-        let stem = path.file_stem().and_then(|s| s.to_str()).unwrap_or_default();
-        let hash = ssruntime::fnv1a_hash_str(stem);
-        let img = image::open(&path).unwrap().to_rgba8();
-        let (w, h) = img.dimensions();
-        renderer.upload_texture(device, queue, hash, &img, (w, h), Retention::Retain);
-    }
-}
-
 /// Render one fixture with one backend and read the pixels back, along with the
 /// size it was rendered at.
 fn render(device: &wgpu::Device, queue: &wgpu::Queue, fixture: &str, frames: u32, mask: MaskBackend) -> (Vec<u8>, u32, u32) {
     let path = format!("{}/{fixture}.ssab", assets());
-    let dir = Path::new(&path).parent().unwrap().to_path_buf();
 
     let mut renderer = SSRenderer::new(device);
     let stencil_format = (mask == MaskBackend::Stencil).then_some(STENCIL_FORMAT);
     let mut scene = SSScene::new(device, &SceneConfig { color_format: COLOR_FORMAT, stencil_format, mask });
-    load_textures(&mut renderer, device, queue, &dir);
 
     let mut player = SSPlayer::new();
     player.load(&path).unwrap();

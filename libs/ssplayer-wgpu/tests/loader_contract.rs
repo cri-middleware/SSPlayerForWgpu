@@ -57,7 +57,7 @@ struct Recorder {
     /// happened — so the ordering rule 1-before-2 rests on is assertable and not
     /// just described.
     rebases: Vec<(usize, String)>,
-    /// Hashes offered, in order, and how many bytes each came with.
+    /// Renderer keys offered, in order, and how many bytes each came with.
     supplied: Vec<(u32, usize)>,
 }
 
@@ -87,11 +87,11 @@ impl AssetLoader for Recorder {
         paths.iter().map(|path| std::fs::read(self.root.join(path)).ok()).collect()
     }
 
-    async fn supply_texture(&mut self, hash: u32, encoded: &[u8]) {
-        self.supplied.push((hash, encoded.len()));
+    async fn supply_texture(&mut self, key: u32, encoded: &[u8]) {
+        self.supplied.push((key, encoded.len()));
     }
 
-    fn has_texture(&self, _hash: u32) -> bool {
+    fn has_texture(&self, _key: u32) -> bool {
         false
     }
 
@@ -248,12 +248,15 @@ fn a_file_named_twice_is_read_once() {
     let requests = recorder.requested().iter().filter(|p| **p == common).count();
     assert_eq!(requests, 1, "common.png was requested {requests} times: {:?}", recorder.requested());
 
-    // But both hashes that name it are still offered a texture — the dedup is on
-    // the file, never on the key a draw batch will ask for.
-    let named_by: Vec<u32> = player.textures(None).unwrap().iter().filter(|t| t.path == "common.png").map(|t| t.hash).collect();
+    // But both slots that name it are still served — the dedup is on the file,
+    // never on the slot a draw batch will ask for. Through `texture_key`,
+    // because what a loader is offered is the key it asked for: this one takes
+    // the default, so a slot keys as itself and the two stay apart.
+    let named_by: Vec<u32> = player.textures(None).unwrap().iter().filter(|t| t.path == "common.png").map(|t| t.slot).collect();
     assert_eq!(named_by.len(), 2, "the fixture no longer names one file under two hashes; this test would prove nothing");
     for hash in named_by {
-        assert!(recorder.supplied.iter().any(|(supplied, _)| *supplied == hash), "{hash:#010x} names common.png but was never offered its bytes");
+        let key = player.texture_key(None, hash);
+        assert!(recorder.supplied.iter().any(|(supplied, _)| *supplied == key), "{hash:#010x} names common.png but was never offered its bytes");
     }
 }
 
@@ -296,7 +299,8 @@ fn an_embedded_pack_asks_for_nothing_else() {
     assert!(recorder.requested().contains(&"Instance_SourceAnime.ssab"));
     for name in ["Instance", "Instance_SourceAnime"] {
         for texture in player.textures(Some(name)).unwrap() {
-            assert!(recorder.supplied.iter().any(|(hash, _)| *hash == texture.hash), "{name} needs {} ({:#010x}), which was never offered", texture.path, texture.hash);
+            let key = player.texture_key(Some(name), texture.slot);
+            assert!(recorder.supplied.iter().any(|(hash, _)| *hash == key), "{name} needs {} ({:#010x} -> {key:#010x}), which was never offered", texture.path, texture.slot);
         }
     }
 }
@@ -383,7 +387,7 @@ fn a_partial_load_is_reported_without_failing() {
     // ask for — so a caller can decide whether a silhouette is worth failing over.
     let missing = player.missing_assets();
     assert!(!missing.is_empty(), "every atlas was refused and nothing was reported missing");
-    assert!(missing.iter().all(|m| m.kind == MissingKind::Texture && m.name.ends_with(".png") && m.hash != 0), "{missing:?}");
+    assert!(missing.iter().all(|m| m.kind == MissingKind::Texture && m.name.ends_with(".png") && m.slot != 0), "{missing:?}");
 
     // The tally belongs to the last load, not to the player.
     let mut recorder = Recorder::new(asset_root());

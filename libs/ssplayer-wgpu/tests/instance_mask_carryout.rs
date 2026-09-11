@@ -14,7 +14,7 @@
 //!
 //! Skips itself when no GPU adapter is present, or when the fixture is absent.
 
-use ssplayer_wgpu::{MaskBackend, Retention, SSPlayer, SSRenderer, SSScene, SceneConfig};
+use ssplayer_wgpu::{MaskBackend, SSPlayer, SSRenderer, SSScene, SceneConfig};
 use std::path::Path;
 
 const FIXTURE: &str = "InstancePropagation";
@@ -33,29 +33,12 @@ fn adapter() -> Option<(wgpu::Device, wgpu::Queue)> {
     pollster::block_on(adapter.request_device(&wgpu::DeviceDescriptor::default())).ok()
 }
 
-fn load_textures(renderer: &mut SSRenderer, device: &wgpu::Device, queue: &wgpu::Queue, dir: &Path) {
-    let Ok(entries) = std::fs::read_dir(dir) else { return };
-    for entry in entries.flatten() {
-        let path = entry.path();
-        if path.extension().and_then(|s| s.to_str()) != Some("png") {
-            continue;
-        }
-        let stem = path.file_stem().and_then(|s| s.to_str()).unwrap_or_default();
-        let hash = ssruntime::fnv1a_hash_str(stem);
-        let img = image::open(&path).unwrap().to_rgba8();
-        let (w, h) = img.dimensions();
-        renderer.upload_texture(device, queue, hash, &img, (w, h), Retention::Retain);
-    }
-}
-
 /// Render the fixture after `frames` updates through `backend`, returning
 /// `(width, height, tightly-packed RGBA)`.
 fn render(device: &wgpu::Device, queue: &wgpu::Queue, path: &str, backend: MaskBackend, frames: u32) -> (u32, u32, Vec<u8>) {
-    let dir = Path::new(path).parent().unwrap().to_path_buf();
     let stencil_format = (backend == MaskBackend::Stencil).then_some(STENCIL_FORMAT);
     let mut renderer = SSRenderer::new(device);
     let mut scene = SSScene::new(device, &SceneConfig { color_format: COLOR_FORMAT, stencil_format, mask: backend });
-    load_textures(&mut renderer, device, queue, &dir);
 
     let mut player = SSPlayer::new();
     player.load(path).unwrap();
