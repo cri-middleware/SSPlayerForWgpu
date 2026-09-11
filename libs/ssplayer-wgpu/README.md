@@ -58,7 +58,7 @@ scene.draw(&renderer, &mut rpass);
 ```
 
 `set_animation` builds the instance tree and is the allocating step; `play` /
-`pause` / `stop` / `set_speed_scale` are allocation-free transport. Players are drawn
+`pause` / `resume` / `stop` / `set_speed_scale` are allocation-free transport. Players are drawn
 in ascending `set_order`, and `set_transform` / `set_visible` / `set_alpha` place
 each one in the scene.
 
@@ -72,10 +72,11 @@ upload; the player never takes ownership of a GPU texture.
 |---|---|---|
 | `embedded` | ✅ | Decodes embedded-mode `.ssab` atlases in-crate (the `image` crate). Turn off where the host decodes instead. |
 | `web` | | The WebGPU / JS face: `SsContextWeb` (page) / `SsSurfaceWeb` (canvas) / `SsPlayerWeb` (character), via wasm-bindgen. Deliberately does **not** pull `embedded` — the browser already ships a decoder, so atlases go out encoded and come back through `createImageBitmap`. |
-| `ffi` | | The C / C++ face: `ss_scene_*` + `ss_player_*` entry points and `NativeHost`, which builds wgpu from a raw window handle. `build.rs` runs cbindgen to emit `include/ssplayer_wgpu.h`. |
+| `ffi` | | The C / C++ face: `ss_scene_*` + `ss_player_*` entry points and `NativeHost`, which builds wgpu from a raw window handle. The companion `ssplayer-wgpu-ffi` crate compiles these into the binary library; its `build.rs` runs cbindgen to emit `ssplayer-wgpu-ffi/include/ssplayer_wgpu.h`. |
 
-The crate is built as `rlib` + `cdylib` + `staticlib`, so the same source serves
-a Rust dependency, a wasm module and a native shared library.
+This crate is a plain `rlib`; the companion `ssplayer-wgpu-ffi` crate is built as
+`cdylib` + `staticlib` and as the wasm module, so the same source still serves
+a Rust dependency, a browser and a native shared library.
 
 ## Modules
 

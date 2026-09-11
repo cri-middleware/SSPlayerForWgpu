@@ -101,7 +101,7 @@ the calls.
 | `setPartCellOverride(part, cellmap, cell, priority)` / `clearPartCellOverride(part)` | |
 | `clearAllPartOverrides()` | |
 | `partTransform(part)` / `partTransformByIndex(i)` | `[m00, m01, m10, m11, tx, ty]` |
-| `isPartHidden(part)` / `partCount()` | |
+| `isPartHidden(part)` / `isPartSkinnedMesh(part)` / `partCount()` | `isPartSkinnedMesh` → `true`/`false`, or `null` for an unknown part |
 | `events()` | Plain objects tagged by `kind`: `'userData'` / `'signal'` / `'audio'` |
 
 ## `<ss-player-webgpu>`

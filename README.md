@@ -187,10 +187,10 @@ a `.ssab`, and it does not need the SDK for anything but the checkout cargo alre
 |---|---|---|
 | `platform` | `host` (default), `web` | `host` builds the Rust library and the C face; `web` builds the wasm/js face with wasm-pack. It does not cross-compile, so `macos`/`windows`/`linux` are accepted only when they name the host |
 | `build` | `release` (default), `debug` | Cargo profile; `debug` also means `wasm-pack --dev`, which skips `wasm-opt` — never quote its size |
-| `ffi` | `yes` (default), `no` | `host` only: also build `--features ffi`, which regenerates `libs/ssplayer-wgpu/include/ssplayer_wgpu.h` with cbindgen |
+| `ffi` | `yes` (default), `no` | `host` only: also build the `ssplayer-wgpu-ffi` crate, which regenerates `libs/ssplayer-wgpu-ffi/include/ssplayer_wgpu.h` with cbindgen |
 | `deploy` | `yes` (default), `no` | `web` only: copy the built npm package into `examples/web/ssplayer-wgpu` |
 
-Cargo works directly too — `cargo build -p ssplayer-wgpu --features ffi` is the same thing without the
+Cargo works directly too — `cargo build -p ssplayer-wgpu-ffi` is the same thing without the
 collect step. Requirements are Rust 1.97+, a GPU backend supported by wgpu 29, and for the web face
 `wasm-pack`, `pnpm` and `rustup target add wasm32-unknown-unknown`.
 

@@ -65,8 +65,9 @@ pub use ssruntime::TrackBlend;
 | `web` | | wasm-bindgen 経由の `SsContextWeb` / `SsSurfaceWeb` / `SsPlayerWeb`。**意図的に `embedded` を引き込みません** — ブラウザが既にデコーダを持っているためです |
 | `ffi` | | C のエントリポイントと、生のウィンドウハンドルから wgpu を構築する `NativeHost` |
 
-クレートは `rlib` ＋ `cdylib` ＋ `staticlib` としてビルドされるので、1 つのソースが Rust の依存・wasm
-モジュール・ネイティブ共有ライブラリの 3 役を担います。
+クレートはただの `rlib` です。姉妹クレート `ssplayer-wgpu-ffi` がこのクレートの `ffi` / `web` モジュールを
+再エクスポートし、`cdylib` ＋ `staticlib`（ネイティブ C ライブラリ）と wasm モジュールとしてビルドされる
+側です。つまり 1 つのソースが Rust の依存・ブラウザ・ネイティブ共有ライブラリの 3 役を担います。
 
 !!! note "`SSPlayer::load` には `embedded` とファイルシステムが必要です"
     この簡便な経路は `#[cfg(all(feature = "embedded", not(target_arch = "wasm32")))]` です。それ以外
