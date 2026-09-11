@@ -65,8 +65,9 @@ one upload of a pack's atlases. See [The borrow model](../wgpu/borrow-model.md).
 | `web` | | `SsContextWeb` / `SsSurfaceWeb` / `SsPlayerWeb` via wasm-bindgen. Deliberately does **not** pull `embedded` — the browser already ships a decoder |
 | `ffi` | | The C entry points and `NativeHost`, which builds wgpu from a raw window handle |
 
-The crate is `rlib` + `cdylib` + `staticlib`, so one source serves a Rust dependency, a wasm module
-and a native shared library.
+The crate is a plain `rlib`. The companion `ssplayer-wgpu-ffi` crate re-exports its `ffi` and `web`
+modules and is the one built as `cdylib` + `staticlib` (the native C library) and as the wasm module
+— so one source still serves a Rust dependency, a browser and a native shared library.
 
 !!! note "`SSPlayer::load` needs `embedded` and a filesystem"
     The convenience path is `#[cfg(all(feature = "embedded", not(target_arch = "wasm32")))]`.

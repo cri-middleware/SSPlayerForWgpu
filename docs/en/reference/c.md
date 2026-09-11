@@ -129,6 +129,7 @@ Every override has a `_by_index` twin that skips the name lookup; resolve the in
 |---|---|
 | `ss_player_part_count` / `ss_player_find_part_index` | Enumerate and resolve |
 | `ss_player_part_transform(player, part, out)` (+ `_by_index`) | Six floats: `[m00, m01, m10, m11, tx, ty]`, animation-local Y-down |
+| `ss_player_is_part_skinned_mesh(player, part)` (+ `_by_index`) | `1` skinned, `0` not, `-1` for an unknown part or no pack bound |
 | `ss_player_set_part_visibility_override(player, part, hide, cascade)` (+ `_by_index`, + `clear_`) | A keyframe hide never cascades, so this is the only way to hide a sub-tree |
 | `ss_player_set_part_color_override(player, part, rgba, blend_op, priority)` (+ `_corners`, `_by_index`, `clear_`) | `blend_op` 0–3, `priority` 0–2 |
 | `ss_player_set_part_cell_override(player, part, cellmap, cell, priority)` (+ `_by_index`, `clear_`) | Draw a different image |

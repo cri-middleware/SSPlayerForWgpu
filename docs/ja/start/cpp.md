@@ -182,6 +182,6 @@ cd examples/viewer-vulkan-cpp  && cmake -B build && cmake --build build && ./bui
 
 ## 次に読む
 
-* [C API リファレンス](../reference/c.md) — 84 個のエントリポイントを用途別に
+* [C API リファレンス](../reference/c.md) — 全エントリポイントを用途別に
 * [再生と再生制御](../guide/playback.md) — `play` と `resume` の違い、ループ、区間
 * [ロードとアセット](../guide/loading.md) — 自前でテクスチャを供給する方法、`missing` の意味

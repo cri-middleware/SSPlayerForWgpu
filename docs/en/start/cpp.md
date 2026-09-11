@@ -183,6 +183,6 @@ They run `cargo` themselves, so there is no separate build step — and
 
 ## Next
 
-* [C API reference](../reference/c.md) — all 84 entry points, grouped
+* [C API reference](../reference/c.md) — every entry point, grouped
 * [Playback and transport](../guide/playback.md) — `play` vs `resume`, loops, sections
 * [Loading and assets](../guide/loading.md) — supplying textures yourself, and what `missing` means

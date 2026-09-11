@@ -61,8 +61,8 @@ cmake --build build --config Release
 With a single-config generator (`cmake -B build -G Ninja`) the executable lands
 in `build\ssviewer-dx12.exe` instead, and the build defaults to Release.
 
-CMake runs `cargo build -p ssplayer-wgpu --features ffi` for you, which also
-regenerates `libs\ssplayer-wgpu\include\ssplayer_wgpu.h` via cbindgen, and copies
+CMake runs `cargo build -p ssplayer-wgpu-ffi` for you, which also
+regenerates `libs\ssplayer-wgpu-ffi\include\ssplayer_wgpu.h` via cbindgen, and copies
 `ssplayer_wgpu.dll` next to the executable — Windows has no rpath, so the DLL has
 to sit beside the `.exe`. Use `--config Debug` (or `-DCMAKE_BUILD_TYPE=Debug`) to
 link the debug library instead; cargo's debug build of wgpu is slow but works.

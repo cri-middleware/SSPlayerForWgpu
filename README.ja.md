@@ -194,10 +194,10 @@ C++ ビューアは CMake 経由でライブラリを駆動し、その CMake �
 |---|---|---|
 | `platform` | `host`（既定）, `web` | `host` は Rust ライブラリと C フェイスをビルドし、`web` は wasm-pack で wasm/js フェイスをビルドします。クロスコンパイルはしないため、`macos`/`windows`/`linux` はホスト自身を指す場合にのみ受け付けます |
 | `build` | `release`（既定）, `debug` | cargo のプロファイル。`debug` は `wasm-pack --dev` も意味し、`wasm-opt` を飛ばします — そのサイズを数値として引用しないでください |
-| `ffi` | `yes`（既定）, `no` | `host` のみ。`--features ffi` でもビルドし、cbindgen で `libs/ssplayer-wgpu/include/ssplayer_wgpu.h` を再生成します |
+| `ffi` | `yes`（既定）, `no` | `host` のみ。`ssplayer-wgpu-ffi` クレートもビルドし、cbindgen で `libs/ssplayer-wgpu-ffi/include/ssplayer_wgpu.h` を再生成します |
 | `deploy` | `yes`（既定）, `no` | `web` のみ。ビルドした npm パッケージを `examples/web/ssplayer-wgpu` へコピーします |
 
-cargo を直接使っても構いません。`cargo build -p ssplayer-wgpu --features ffi` は収集ステップを除けば
+cargo を直接使っても構いません。`cargo build -p ssplayer-wgpu-ffi` は収集ステップを除けば
 同じものです。要件は Rust 1.97 以降、wgpu 29 が対応する GPU バックエンド、web フェイスの場合は加えて
 `wasm-pack`・`pnpm`・`rustup target add wasm32-unknown-unknown` です。
 

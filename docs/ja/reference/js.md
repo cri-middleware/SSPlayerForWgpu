@@ -101,7 +101,7 @@ import { defineSsPlayerWebGPUElement } from '@spritestudio/ssplayer-wgpu/element
 | `setPartCellOverride(part, cellmap, cell, priority)` / `clearPartCellOverride(part)` | |
 | `clearAllPartOverrides()` | |
 | `partTransform(part)` / `partTransformByIndex(i)` | `[m00, m01, m10, m11, tx, ty]` |
-| `isPartHidden(part)` / `partCount()` | |
+| `isPartHidden(part)` / `isPartSkinnedMesh(part)` / `partCount()` | `isPartSkinnedMesh` は `true`/`false`、不明なパーツなら `null` |
 | `events()` | `kind` で分類されたプレーンオブジェクト：`'userData'` / `'signal'` / `'audio'` |
 
 ## `<ss-player-webgpu>`

@@ -202,7 +202,7 @@ An exported Godot project keeps its files in a `.pck`, an Android build in an AP
 player.load_with(&mut my_loader, "res://characters/Ringo.ssab").await?;
 ```
 
-`AssetLoader` is six methods — `reset_base`, `set_base`, `read`, `supply`, `has_texture`, `warn` —
+`AssetLoader` is six methods — `reset_base`, `set_base`, `read`, `supply_texture`, `has_texture`, `warn` —
 and the walk's half of the contract is fixed and tested:
 
 1. `reset_base()` first, so one loader serves any number of loads;

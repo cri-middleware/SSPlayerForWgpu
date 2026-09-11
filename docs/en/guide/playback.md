@@ -204,8 +204,10 @@ a new owner, and nothing is carried across that.
 | **Edges** from the last tick | `just_looped()` / `just_finished()` | `ss_player_looped_last_update` / `_finished_last_update` | `justLooped()` / `justFinished()` |
 
 The last row is the one to reach for. `just_finished()` is an **edge**: true for exactly the tick
-that completed playback, and consumed by reading it — so a completion cannot fire twice, and a
-player that was culled and comes back does not re-announce a completion you already handled.
+that completed playback, and the next `update()` moves it on — so a completion cannot fire twice, and
+a player that was culled and comes back does not re-announce a completion you already handled. Reading
+it does not consume it; two reads in the same frame both see it. It is the *tick* that clears the edge,
+not the *read*.
 
 !!! note "A tick that did not run reports nothing"
     Hiding a character (`set_visible(false)`) skips the timeline advance, and the player clears its

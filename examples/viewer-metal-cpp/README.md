@@ -47,8 +47,8 @@ cmake --build build
 ./build/ssviewer-metal               # or: ./build/ssviewer-metal "" Mask
 ```
 
-CMake runs `cargo build -p ssplayer-wgpu --features ffi` for you, which also
-regenerates `libs/ssplayer-wgpu/include/ssplayer_wgpu.h` via cbindgen. Use
+CMake runs `cargo build -p ssplayer-wgpu-ffi` for you, which also
+regenerates `libs/ssplayer-wgpu-ffi/include/ssplayer_wgpu.h` via cbindgen. Use
 `-DCMAKE_BUILD_TYPE=Debug` to link the debug library instead.
 
 Arguments are optional: `ssviewer-metal [asset-dir] [pack-name]`. Pass `""` for

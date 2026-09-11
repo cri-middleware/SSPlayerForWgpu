@@ -93,9 +93,11 @@ box.
   `inline`** — an author who chose `inline-block`, a flex item, or `none` keeps that choice.
 * The canvas fills the element (`100%` × `100%`).
 * The backing store is **CSS size × `devicePixelRatio`**, so output is crisp on a HiDPI screen.
-* Both are computed **when the element connects**, and the element does not observe later size
-  changes. For a panel that resizes, either re-create the element or drive
-  [`SsSurfaceWeb.resize()`](./js.md) yourself through `element.surface`.
+* Both are computed **when the element connects**, and a `ResizeObserver` on the element keeps them
+  current: when the CSS box changes the element recomputes the backing store and calls
+  [`SsSurfaceWeb.resize()`](./js.md) itself, so a panel that resizes needs no extra code. (Where
+  `ResizeObserver` is unavailable the size stays at its connect-time value; `element.surface` still
+  lets you drive `resize()` by hand.)
 * Give the element a size. With none, it falls back to 360 × 360.
 
 ## Pausing when nobody is looking

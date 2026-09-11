@@ -127,6 +127,7 @@ title: C API リファレンス
 |---|---|
 | `ss_player_part_count` / `ss_player_find_part_index` | 列挙と解決 |
 | `ss_player_part_transform(player, part, out)`（＋ `_by_index`） | float 6 個：`[m00, m01, m10, m11, tx, ty]`、アニメーションローカルの Y-down |
+| `ss_player_is_part_skinned_mesh(player, part)`（＋ `_by_index`） | `1` skinned、`0` not、`-1` は不明なパーツかパック未バインド |
 | `ss_player_set_part_visibility_override(player, part, hide, cascade)`（＋ `_by_index` / `clear_`） | キーフレームの非表示はカスケードしないので、サブツリーを隠す唯一の方法です |
 | `ss_player_set_part_color_override(player, part, rgba, blend_op, priority)`（＋ `_corners` / `_by_index` / `clear_`） | `blend_op` 0–3、`priority` 0–2 |
 | `ss_player_set_part_cell_override(player, part, cellmap, cell, priority)`（＋ `_by_index` / `clear_`） | 別の画像を描く |
