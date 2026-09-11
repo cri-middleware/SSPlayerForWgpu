@@ -1,3 +1,7 @@
+---
+title: JavaScript API reference
+---
+
 # JavaScript API reference
 
 The package ships full type definitions (`dist/index.d.ts`), so an editor will complete everything

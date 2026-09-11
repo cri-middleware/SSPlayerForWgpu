@@ -1,3 +1,7 @@
+---
+title: Web ではじめる
+---
+
 # Web ではじめる
 
 Player を WebAssembly にコンパイルし、**WebGPU** で描画します。1 ページに `GPUDevice` は 1 つ、

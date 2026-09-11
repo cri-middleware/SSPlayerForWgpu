@@ -1,3 +1,7 @@
+---
+title: JavaScript API リファレンス
+---
+
 # JavaScript API リファレンス
 
 パッケージは型定義（`dist/index.d.ts`）を同梱しているので、以下はエディタが補完してくれます。

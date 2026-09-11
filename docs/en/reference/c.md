@@ -1,3 +1,7 @@
+---
+title: C API reference
+---
+
 # C API reference
 
 Every entry point in `ssplayer_wgpu.h`, grouped by what it is for. The header itself carries the

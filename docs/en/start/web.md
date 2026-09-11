@@ -1,3 +1,7 @@
+---
+title: Get started on the web
+---
+
 # Get started on the web
 
 The player compiled to WebAssembly, drawing through **WebGPU**. One `GPUDevice` per page, one

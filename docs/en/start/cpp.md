@@ -1,3 +1,7 @@
+---
+title: Get started with C / C++
+---
+
 # Get started with C / C++
 
 A static library and one header. You give it a window (or a layer, or a surface) and call two
