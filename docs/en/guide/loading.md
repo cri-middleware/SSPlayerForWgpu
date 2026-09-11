@@ -152,35 +152,47 @@ has.
 ## Supplying textures yourself
 
 Where the host owns the images — an engine with an asset system, a texture atlas you built, a CDN
-fetch you already made — hand them over keyed by the hash the pack asks for. The texture map is
-**device-scoped**, so a pack shown five times is uploaded once.
+fetch you already made — hand them over **keyed by the image, not by the cell map that names it**.
+The texture map is **device-scoped**, so a pack shown five times is uploaded once.
+
+!!! warning "A cell map's hash names a slot, not an image"
+    Adobe Animate writes `spritemap1.png` for every project it exports, so two packs from two
+    projects ask for the same cell map hash and mean two different atlases. Register by that hash
+    and the second pack looks already-supplied: its own pixels are dropped and its parts draw the
+    first pack's atlas. Ask the player for the key instead — it answers with an identity for the
+    image, so two packs that really do share a file still share one upload.
 
 === "Rust"
 
     ```rust
+    // `texture.hash` names the slot; this is what the renderer is keyed by.
+    let key = player.texture_key(pack, texture.hash);
+
     // A view you own. The player never takes ownership of a GPU texture.
-    renderer.set_texture(&device, hash, &view, (width, height), AlphaMode::Straight);
+    renderer.set_texture(&device, key, &view, (width, height), AlphaMode::Straight);
 
     // Or let it upload for you, from straight-alpha RGBA8.
-    renderer.upload_texture(&device, &queue, hash, &rgba, (width, height), Retention::Keep);
+    renderer.upload_texture(&device, &queue, key, &rgba, (width, height), Retention::Keep);
     ```
 
 === "C"
 
     ```c
+    /* `SsTextureRef::hash` is already the key: `ss_player_texture_at` resolves it. */
     /* Raw RGBA8, width * height * 4 bytes, straight alpha. */
-    ss_scene_add_texture(scene, hash, rgba, width, height);
+    ss_scene_add_texture(scene, ref.hash, rgba, width, height);
 
     /* Or hand over encoded PNG bytes and let the library decode. */
-    ss_scene_add_texture_png(scene, hash, png_bytes, png_len);
+    ss_scene_add_texture_png(scene, ref.hash, png_bytes, png_len);
     ```
 
 === "JavaScript"
 
     ```js
-    ctx.addTexture(hash, rgba, width, height);          // raw RGBA8
-    await ctx.addTextureFromBytes(hash, encodedBytes);  // PNG/WebP, decoded by the browser
-    ctx.addTextureFromBitmap(hash, imageBitmap);        // an ImageBitmap you already have
+    // Every textureRefs / embeddedTextures entry carries `key` beside `hash`.
+    ctx.addTexture(key, rgba, width, height);          // raw RGBA8
+    await ctx.addTextureFromBytes(key, encodedBytes);  // PNG/WebP, decoded by the browser
+    ctx.addTextureFromBitmap(key, imageBitmap);        // an ImageBitmap you already have
     ```
 
 To know *what* to supply, ask the pack. Each entry says whether the atlas rides inside the `.ssab`

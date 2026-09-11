@@ -29,7 +29,7 @@ every referenced pack has to be registered first.
 **Reference-mode packs work too, and that is the interesting part.** Their
 atlases stay as sibling files, and where those sit is the `.ssab`'s own business:
 `ss_player_texture_at` reports the path the exporter wrote — relative to the file
-— plus the hash to register it under and whether it is embedded at all. The
+— plus the `key` to register it under and whether it is embedded at all. The
 viewer joins that path with the directory the drop came from and hands the bytes
 to `ss_scene_add_texture_png`, which decodes with the PNG decoder the library
 already carries for embedded packs. So the pack answers *what it needs and from

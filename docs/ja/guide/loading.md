@@ -149,35 +149,47 @@
 ## テクスチャを自前で供給する { #supplying-textures-yourself }
 
 画像をホスト側が持っている場合（アセットシステムを備えたエンジン、自作アトラス、既に済ませたフェッチ）は、
-パックが要求するハッシュをキーにして渡します。テクスチャマップは**デバイススコープ**なので、同じパックを
+**セルマップではなく画像を指すキー**で渡します。テクスチャマップは**デバイススコープ**なので、同じパックを
 5 体で表示してもアップロードは 1 回です。
+
+!!! warning "セルマップのハッシュが指すのはスロットであって画像ではありません"
+    Adobe Animate はどのプロジェクトを書き出しても `spritemap1.png` という名前を付けるため、別プロジェクトの
+    2 つのパックが同じセルマップハッシュを要求しながら別のアトラスを意味します。そのハッシュで登録すると
+    2 つ目のパックは「もう供給済み」に見え、自分のピクセルは捨てられてパーツが 1 つ目のアトラスを描きます。
+    キーは Player に聞いてください。画像そのものを指す値が返るので、本当に同じファイルを共有している
+    2 パックは今まで通り 1 回のアップロードで済みます。
 
 === "Rust"
 
     ```rust
+    // `texture.hash` はスロットの名前。レンダラのキーはこちら。
+    let key = player.texture_key(pack, texture.hash);
+
     // あなたが所有する view。Player が GPU テクスチャを所有することはありません。
-    renderer.set_texture(&device, hash, &view, (width, height), AlphaMode::Straight);
+    renderer.set_texture(&device, key, &view, (width, height), AlphaMode::Straight);
 
     // ストレートアルファの RGBA8 からアップロードさせることもできます。
-    renderer.upload_texture(&device, &queue, hash, &rgba, (width, height), Retention::Keep);
+    renderer.upload_texture(&device, &queue, key, &rgba, (width, height), Retention::Keep);
     ```
 
 === "C"
 
     ```c
+    /* `SsTextureRef::hash` は既にキーです（`ss_player_texture_at` が解決して返します） */
     /* 生の RGBA8、width * height * 4 バイト、ストレートアルファ */
-    ss_scene_add_texture(scene, hash, rgba, width, height);
+    ss_scene_add_texture(scene, ref.hash, rgba, width, height);
 
     /* あるいはエンコード済み PNG を渡してデコードさせる */
-    ss_scene_add_texture_png(scene, hash, png_bytes, png_len);
+    ss_scene_add_texture_png(scene, ref.hash, png_bytes, png_len);
     ```
 
 === "JavaScript"
 
     ```js
-    ctx.addTexture(hash, rgba, width, height);          // 生の RGBA8
-    await ctx.addTextureFromBytes(hash, encodedBytes);  // PNG/WebP。ブラウザがデコード
-    ctx.addTextureFromBitmap(hash, imageBitmap);        // 既にある ImageBitmap
+    // textureRefs / embeddedTextures の各エントリは `hash` の隣に `key` を持ちます。
+    ctx.addTexture(key, rgba, width, height);          // 生の RGBA8
+    await ctx.addTextureFromBytes(key, encodedBytes);  // PNG/WebP。ブラウザがデコード
+    ctx.addTextureFromBitmap(key, imageBitmap);        // 既にある ImageBitmap
     ```
 
 *何を*供給すべきかはパックに聞きます。各エントリは、アトラスが `.ssab` の中にあるか（embedded — 何もしなくて

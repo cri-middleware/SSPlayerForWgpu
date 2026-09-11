@@ -52,8 +52,8 @@ whichever character took its slot.
 | `ss_player_add_ssab(player, name, data, len)` | Register bytes only, for instance parts to find |
 | `ss_player_missing_count(player)` / `ss_player_missing_at(player, i, out)` | What did not arrive. **Not an error** |
 | `ss_player_texture_count(player, pack)` / `ss_player_texture_at(player, pack, i, out)` | What atlases a pack asks for, and where the exporter put them |
-| `ss_scene_add_texture(scene, hash, rgba, w, h)` | Supply an atlas as straight-alpha RGBA8 |
-| `ss_scene_add_texture_png(scene, hash, data, len)` | ... or as encoded PNG bytes, decoded by the library |
+| `ss_scene_add_texture(scene, key, rgba, w, h)` | Supply an atlas as straight-alpha RGBA8, under `SsTextureRef::key` |
+| `ss_scene_add_texture_png(scene, key, data, len)` | ... or as encoded PNG bytes, decoded by the library |
 
 Textures register on the **scene**, because the texture map is device-scoped: every player in the
 window sees it, and a pack shown five times is uploaded once.

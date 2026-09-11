@@ -1516,7 +1516,7 @@ impl FrameChunk {
     /// (inherited from a parent mask); `None` for ordinary effects. `alpha` and
     /// `tint` are the player-level fade and colour (see [`BatchInfo::alpha`] and
     /// [`BatchInfo::tint`]).
-    pub fn append_effect(&mut self, plan_buf: &[u8], node: &NodeSlot, stencil: StencilTest, alpha: f32, tint: u32) {
+    pub fn append_effect(&mut self, plan_buf: &[u8], node: &NodeSlot, stencil: StencilTest, alpha: f32, tint: u32, keys: &crate::AtlasKeys) {
         if plan_buf.is_empty() {
             return;
         }
@@ -1531,7 +1531,9 @@ impl FrameChunk {
             if quad_count == 0 {
                 continue;
             }
-            let texture_hash = cmd.cellmap_hash();
+            // Cellmap-hash terms, like a draw batch's: translated to the key the
+            // owning pack's atlas actually registered under.
+            let texture_hash = keys.resolve(cmd.cellmap_hash());
             let particle_offset = cmd.particle_offset() as usize;
             // 0 = Mix pipeline, 1 = Add pipeline (per-command, not per-batch).
             let blend = if cmd.blend() == 1 { BlendType::Add } else { BlendType::Mix };

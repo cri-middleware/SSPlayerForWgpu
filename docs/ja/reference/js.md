@@ -28,10 +28,10 @@ import { defineSsPlayerWebGPUElement } from '@spritestudio/ssplayer-wgpu/element
 | | |
 |---|---|
 | `createSurface(canvas)` | `<canvas>` ごとに 1 つ |
-| `addTexture(hash, rgba, width, height)` | 生の RGBA8 でアトラスを供給 |
-| `addTextureFromBytes(hash, bytes): Promise` | エンコード済みバイト列から（ブラウザがデコード） |
-| `addTextureFromBitmap(hash, imageBitmap)` | 既にある `ImageBitmap` から |
-| `hasTexture(hash)` | キャッシュに既にあるか |
+| `addTexture(key, rgba, width, height)` | 生の RGBA8 でアトラスを供給（`textureRefs` の `key` で） |
+| `addTextureFromBytes(key, bytes): Promise` | エンコード済みバイト列から（ブラウザがデコード） |
+| `addTextureFromBitmap(key, imageBitmap)` | 既にある `ImageBitmap` から |
+| `hasTexture(key)` | キャッシュに既にあるか |
 | `isDeviceLost()` / `restoreDevice()` | [デバイスロスト](../guide/device-loss.md)を参照 |
 | `surfaceCount()` | 診断用 |
 

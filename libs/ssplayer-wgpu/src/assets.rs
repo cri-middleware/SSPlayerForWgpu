@@ -29,10 +29,12 @@ pub(crate) struct FsLoader {
     /// exactly as the caller named it, and only then does its directory become
     /// the base for everything the pack points at.
     root: std::path::PathBuf,
-    /// What was read, in the order the walk asked for it; the player takes it.
+    /// What was read, keyed by renderer key, in the order the walk asked for it;
+    /// the player takes it.
     pub(crate) images: Vec<(u32, Vec<u8>)>,
-    /// Hashes already read during *this* load, so the walk does not re-read an
-    /// atlas two sibling packs both name (see [`FsLoader::has_texture`]).
+    /// Renderer keys already read during *this* load, so the walk does not
+    /// re-read an atlas two sibling packs both name (see
+    /// [`FsLoader::has_texture`]).
     supplied: std::collections::HashSet<u32>,
 }
 
@@ -69,9 +71,22 @@ impl AssetLoader for FsLoader {
         paths.iter().map(|path| std::fs::read(self.root.join(path)).ok()).collect()
     }
 
-    async fn supply_texture(&mut self, hash: u32, encoded: &[u8]) {
-        self.supplied.insert(hash);
-        self.images.push((hash, encoded.to_vec()));
+    /// The file `path` resolves to, hashed — `read`'s own join, so two packs in
+    /// two directories that both name `spritemap1.png` are two images and the
+    /// sibling packs of one project are one.
+    ///
+    /// Not canonicalised: the atlas need not exist yet (a missing one is
+    /// reported, not fatal), and `canonicalize` fails on what is not there. So
+    /// one file reached by two different paths — a relative load and an absolute
+    /// one — is keyed twice and uploaded twice. That is the direction to err in:
+    /// a wasted upload, never the wrong picture.
+    fn texture_key(&self, path: &str, _cellmap_hash: u32) -> u32 {
+        ssruntime::fnv1a_hash_str(&self.root.join(path).to_string_lossy())
+    }
+
+    async fn supply_texture(&mut self, key: u32, encoded: &[u8]) {
+        self.supplied.insert(key);
+        self.images.push((key, encoded.to_vec()));
     }
 
     /// Only what this load has already read.
@@ -85,8 +100,8 @@ impl AssetLoader for FsLoader {
     /// or decodes.
     ///
     /// [`SSPlayer::load`]: crate::SSPlayer::load
-    fn has_texture(&self, hash: u32) -> bool {
-        self.supplied.contains(&hash)
+    fn has_texture(&self, key: u32) -> bool {
+        self.supplied.contains(&key)
     }
 
     fn warn(&self, message: &str) {

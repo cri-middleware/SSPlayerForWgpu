@@ -73,7 +73,7 @@ fn atlases(pack: &SSPack) -> Vec<(u32, Vec<u8>, u32, u32)> {
         }
         let img = image::open(std::path::Path::new(asset_dir()).join(&texture.path)).unwrap().to_rgba8();
         let (w, h) = img.dimensions();
-        out.push((texture.hash, img.into_raw(), w, h));
+        out.push((texture.slot, img.into_raw(), w, h));
     }
     out
 }
@@ -249,8 +249,8 @@ fn a_pack_names_the_atlases_it_needs() {
     // must be able to ask what the pack it just registered needs.
     let mut player = SSPlayer::new();
     player.load_ssab("Basic", &bytes).unwrap();
-    let by_player: Vec<u32> = player.textures(None).unwrap().iter().map(|t| t.hash).collect();
-    assert_eq!(by_player, reference.textures().iter().map(|t| t.hash).collect::<Vec<_>>(), "the main pack's textures did not come back through the player");
+    let by_player: Vec<u32> = player.textures(None).unwrap().iter().map(|t| t.slot).collect();
+    assert_eq!(by_player, reference.textures().iter().map(|t| t.slot).collect::<Vec<_>>(), "the main pack's textures did not come back through the player");
     assert_eq!(player.textures(Some("Basic")).unwrap().len(), by_player.len(), "naming the pack explicitly found a different list");
     assert!(player.textures(Some("nope")).is_none(), "an unregistered pack name reported textures");
 
@@ -259,8 +259,8 @@ fn a_pack_names_the_atlases_it_needs() {
         return;
     };
     let embedded = SSPack::load(&emb_bytes).unwrap();
-    let keys: Vec<u32> = reference.textures().iter().map(|t| t.hash).collect();
-    let emb_keys: Vec<u32> = embedded.textures().iter().map(|t| t.hash).collect();
+    let keys: Vec<u32> = reference.textures().iter().map(|t| t.slot).collect();
+    let emb_keys: Vec<u32> = embedded.textures().iter().map(|t| t.slot).collect();
     assert_eq!(keys, emb_keys, "the two export modes disagree about the texture keys a draw batch will ask for");
     assert!(embedded.textures().iter().all(|t| t.embedded), "an embedded pack reported an atlas the host would have to load");
 }
@@ -286,8 +286,8 @@ fn an_embedded_pack_hands_out_its_atlases_undecoded() {
     // The keys must be the ones a draw batch asks for (`name_hash`), not the ones
     // the blobs are stored under (`image_path_hash`) — swapping the two is the
     // classic way to break embedded loading (SPEC §8.1).
-    let undecoded: Vec<u32> = images.iter().map(|i| i.hash).collect();
-    let decoded: Vec<u32> = pack.decode_embedded().iter().map(|t| t.hash).collect();
+    let undecoded: Vec<u32> = images.iter().map(|i| i.slot).collect();
+    let decoded: Vec<u32> = pack.decode_embedded().iter().map(|t| t.slot).collect();
     assert_eq!(undecoded, decoded, "the encoded and decoded routes disagree about which atlas is which");
 
     for image in &images {
@@ -301,7 +301,7 @@ fn an_embedded_pack_hands_out_its_atlases_undecoded() {
     // Through a player, which is the route the js face takes (`embeddedTextures`).
     let mut player = SSPlayer::new();
     player.load_ssab("Basic", &bytes).unwrap();
-    assert_eq!(player.embedded_images(None).unwrap().iter().map(|i| i.hash).collect::<Vec<_>>(), undecoded, "the main pack's embedded images did not come back through the player");
+    assert_eq!(player.embedded_images(None).unwrap().iter().map(|i| i.slot).collect::<Vec<_>>(), undecoded, "the main pack's embedded images did not come back through the player");
     assert!(player.embedded_images(Some("nope")).is_none(), "an unregistered pack name reported embedded images");
 
     // A reference-mode pack carries none: there is nothing to hand out, and the
@@ -330,7 +330,7 @@ fn a_pack_names_its_texture_change_targets() {
     // three *is* the cellmap's own image — reachable under a second hash, because
     // an `ExternalTexture` is keyed by its file name rather than by a cellmap
     // name. A host fetching per entry therefore has to expect a repeated path.
-    let common: Vec<u32> = pack.textures().iter().filter(|t| t.path == "common.png").map(|t| t.hash).collect();
+    let common: Vec<u32> = pack.textures().iter().filter(|t| t.path == "common.png").map(|t| t.slot).collect();
     assert_eq!(common.len(), 2, "common.png should be named twice — as the cellmap's image and as a TextureChange target — got {:?}", pack.textures());
     assert_ne!(common[0], common[1], "the two entries for one file carry the same hash; one of the two tables was keyed wrongly");
     assert!(pack.textures().iter().any(|t| t.path == "box_00_00.png"), "an external texture the cellmaps never mention is missing — external_textures() is not being read");
@@ -338,9 +338,9 @@ fn a_pack_names_its_texture_change_targets() {
     // Embedded export carries the external textures too, under those same keys.
     if let Ok(emb_bytes) = std::fs::read(format!("{}/TextureChange.ssab", embedded_dir())) {
         let emb = SSPack::load(&emb_bytes).unwrap();
-        let carried: Vec<u32> = emb.embedded_images().iter().map(|i| i.hash).collect();
+        let carried: Vec<u32> = emb.embedded_images().iter().map(|i| i.slot).collect();
         for texture in emb.textures() {
-            assert!(carried.contains(&texture.hash), "embedded pack does not carry {} ({:#010x}) — the TCHG target would render white", texture.path, texture.hash);
+            assert!(carried.contains(&texture.slot), "embedded pack does not carry {} ({:#010x}) — the TCHG target would render white", texture.path, texture.slot);
         }
     }
 
@@ -352,7 +352,7 @@ fn a_pack_names_its_texture_change_targets() {
         return;
     };
     let all = atlases(&pack);
-    let box_hash = pack.textures().iter().find(|t| t.path == "box_00_00.png").unwrap().hash;
+    let box_hash = pack.textures().iter().find(|t| t.path == "box_00_00.png").unwrap().slot;
     let minus_box: Vec<_> = all.iter().filter(|(hash, ..)| *hash != box_hash).cloned().collect();
     assert_eq!(minus_box.len() + 1, all.len(), "the atlas to drop was not in the supplied set");
 
@@ -616,16 +616,21 @@ fn embedded_pixels_can_be_routed_through_the_borrowed_channel() {
     assert_eq!(decoded.len(), pack.textures().len(), "decode_embedded did not produce one image per cellmap");
 
     let mut renderer = SSRenderer::new(&device);
+    // Before the views, because the key to register under is the player's answer
+    // and it can only answer for a pack it holds.
+    let mut player = play(&pack);
     let _views: Vec<wgpu::TextureView> = decoded
         .iter()
         .map(|tex| {
             let view = supplier_texture(&device, &queue, &premultiply(&tex.rgba), tex.width, tex.height);
-            renderer.set_texture(&device, tex.hash, &view, (tex.width, tex.height), AlphaMode::Premultiplied);
+            // Under the player's key, not the cellmap hash: the hash names a slot
+            // inside this pack and two packs can share one, so what the renderer
+            // is keyed by is the image the player resolved that slot to.
+            renderer.set_texture(&device, player.texture_key(None, tex.slot), &view, (tex.width, tex.height), AlphaMode::Premultiplied);
             view
         })
         .collect();
     let mut scene = scene_for(&device, &queue);
-    let mut player = play(&pack);
     let by_supplier = render(&device, &queue, &mut renderer, &mut scene, &mut [&mut player], 10);
 
     assert_eq!(renderer.texture_upload_count(), 0, "the player uploaded the embedded atlas even though it was already registered");

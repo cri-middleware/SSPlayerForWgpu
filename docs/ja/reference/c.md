@@ -51,8 +51,8 @@ title: C API リファレンス
 | `ss_player_add_ssab(player, name, data, len)` | 登録のみ（インスタンスパーツ用） |
 | `ss_player_missing_count(player)` / `ss_player_missing_at(player, i, out)` | 届かなかったもの。**エラーではありません** |
 | `ss_player_texture_count(player, pack)` / `ss_player_texture_at(player, pack, i, out)` | パックが要求するアトラスと、エクスポータが書いた位置 |
-| `ss_scene_add_texture(scene, hash, rgba, w, h)` | ストレートアルファ RGBA8 でアトラスを供給 |
-| `ss_scene_add_texture_png(scene, hash, data, len)` | エンコード済み PNG を渡してライブラリにデコードさせる |
+| `ss_scene_add_texture(scene, key, rgba, w, h)` | ストレートアルファ RGBA8 でアトラスを供給（`SsTextureRef::key` で） |
+| `ss_scene_add_texture_png(scene, key, data, len)` | エンコード済み PNG を渡してライブラリにデコードさせる |
 
 テクスチャは**シーン**に登録します。テクスチャマップがデバイススコープだからです。ウィンドウ内の全
 プレイヤーから見え、同じパックを 5 体で表示してもアップロードは 1 回です。

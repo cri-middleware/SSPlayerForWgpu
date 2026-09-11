@@ -212,9 +212,18 @@ typedef struct {
 typedef struct {
     /*
      The key `ss_scene_add_texture` / `ss_scene_add_texture_png` expects for
-     this image — the cellmap's fnv1a hash, as `DrawBatch.texture_hash` reports it.
+     this image.
+
+     An identity for the **image**, not for the cellmap that names it: Adobe
+     Animate writes `spritemap1.png` for every project it exports, so two packs
+     name their atlas alike, and a key that was only the cellmap's hash left the
+     second drawing the first one's atlas. Two packs that really do share a file
+     still share this, and so still share one upload.
+
+     Was `hash`, and renamed with the meaning: a field that silently stopped
+     being a cellmap hash is worse than one that stops compiling.
      */
-    uint32_t hash;
+    uint32_t key;
     /*
      `true` when the image rides inside the `.ssab` (embedded mode): the pack
      supplies it on the next `ss_scene_update` and the host loads nothing.
@@ -240,9 +249,11 @@ typedef struct {
      */
     uint32_t kind;
     /*
-     For a texture, the key a draw batch will ask for. Zero for a pack.
+     For a texture, the slot a draw batch will ask for — an id inside the
+     pack, not the key `ss_scene_add_texture` takes. Zero for a pack, whose
+     identity is its name. Match a missing atlas by `name`; this is for logs.
      */
-    uint32_t hash;
+    uint32_t slot;
     /*
      The path asked for, or the pack's name.
 
