@@ -26,7 +26,7 @@ of its own.
 - [**Migrating from SS6Player for CPP**](./docs/en/migration/from-ss6-cpp.md)
 - [**ROADMAP**](./ROADMAP.md) — what is implemented, what is planned, and what was deliberately declined
 - [**SpriteStudio Docs (portal)**](https://cri-middleware.github.io/SpriteStudio-Docs/) — the SDK and every
-  official player in one place (live with the first release)
+  official player in one place — 🚧 live after the first release
 
 ## 📦 Installation
 
