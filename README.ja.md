@@ -27,7 +27,7 @@
 - [**SS6Player for CPP からの移行**](./docs/ja/migration/from-ss6-cpp.md)
 - [**ROADMAP**](./ROADMAP.md) — 実装済みのもの、予定しているもの、意図的に見送ったもの
 - [**SpriteStudio Docs（ポータル）**](https://cri-middleware.github.io/SpriteStudio-Docs/ja/) — SDK と
-  全公式 Player の入口（初回リリースと同時に公開）
+  全公式 Player の入口 — 🚧 初回リリース後に公開
 
 ## 📦 インストール
 
