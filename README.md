@@ -22,12 +22,19 @@ of its own.
   locally with `./scripts/build-pages.sh serve=yes`, or read [`docs/en/`](./docs/en/index.md)
 - [**日本語ドキュメント**](https://cri-middleware.github.io/SSPlayerForWgpu/ja/) — the same site
   ([`docs/ja/`](./docs/ja/index.md) in the repository)
+- [**Limitations & Scope**](./docs/en/limitations.md) — what this player draws today, and what it leaves to the host
 - [**Migrating from SS6Player for CPP**](./docs/en/migration/from-ss6-cpp.md)
 - [**ROADMAP**](./ROADMAP.md) — what is implemented, what is planned, and what was deliberately declined
 - [**SpriteStudio Docs (portal)**](https://cri-middleware.github.io/SpriteStudio-Docs/) — the SDK and every
   official player in one place (live with the first release)
 
 ## 📦 Installation
+
+**Using it in your application?** Read on — pick your host, then [Usage](#-usage).
+Everything after the first character (events, per-part overrides, motion blending,
+device-loss recovery) is the same path further in, in the [crate README](./libs/ssplayer-wgpu)
+and the [documentation](./docs/en/index.md).
+**Working on the player itself?** [Contributing](#-contributing).
 
 > **While the `SpriteStudio-SDK` repository is private, every route below needs access to it.** The
 > player links `ssruntime` and `ssab` as Rust crates rather than through a released C-API, so the SDK
@@ -60,7 +67,7 @@ surprise.
 
 ### C and C++
 
-The C face is a cdylib / staticlib plus a generated header. Build it from this repository:
+The C face is a cdylib / staticlib plus a generated header. 🚧 **Until there are prebuilt downloads** (see the note below this block), building it from a checkout is the install route for this host:
 
 ```bash
 git clone --recursive https://github.com/cri-middleware/SSPlayerForWgpu.git
@@ -74,6 +81,7 @@ That collects everything a C or C++ project needs into `bin/`:
 bin/include/ssplayer_wgpu.h                              # the C header (cbindgen)
 bin/LICENSE.md
 bin/LICENSE.ja.md
+bin/THIRD_PARTY_NOTICES.md                               # what to carry into your acknowledgements
 bin/libs/<platform>/<arch>/libssplayer_wgpu.{a,dylib}    # .lib/.dll on Windows
 ```
 
@@ -134,14 +142,21 @@ scene.update(&mut renderer, &device, &queue, delta_secs, &mut [&mut player]);
 scene.draw(&renderer, &mut rpass);           // into a pass the host opened
 ```
 
-The full API — the three scopes, loading, transport, per-part overrides, events, device-loss recovery —
-is in the [crate README](./libs/ssplayer-wgpu). The C and JavaScript faces are the same shape under
-different names, and each sample below documents its own.
+The full API — the three scopes, loading, transport, per-part overrides, events, motion blending,
+device-loss recovery — is in the [crate README](./libs/ssplayer-wgpu). The C and JavaScript faces are
+the same shape under different names, and each sample below documents its own.
+
+**Several animations on one character.** A stack of tracks folds onto the setup pose: `set_animation`
+establishes track 0 and carries the structure, and `set_track_animation` / `set_track_alpha` /
+`set_track_blend` lay overlays above it — a walk underneath, an aim on top — with `crossfade` moving
+between two without a cut. This is on the **Rust API only** today: not the C or JavaScript faces, and
+not the Bevy adapter's components. The model and the calls are in
+[Motion blending](./docs/en/guide/motion-blending.md).
 
 ### Where that `.ssab` comes from
 
-Animations are authored in SpriteStudio and converted ahead of time — this player converts nothing at
-runtime and bundles no converter. Use the desktop
+Animations are authored in SpriteStudio — **7.5 or later** — and converted ahead of time; this player
+converts nothing at runtime and bundles no converter. Use the desktop
 [SSConverterGUI](https://github.com/cri-middleware/SSConverterGUI), or the SDK's `ssconverter-cli`;
 [Converting with a standalone tool](https://cri-middleware.github.io/SpriteStudio-Docs/overview/convert-with-a-standalone-tool/)
 covers picking one and putting it in a build pipeline. Nothing of your own is needed to try the player
@@ -275,3 +290,8 @@ a submodule bump here.
 ## 📄 License
 
 BSD-3-Clause. See [LICENSE.md](./LICENSE.md).
+
+The library also links Rust crates of its own — wgpu and its backends, FlatBuffers, the `image`
+decoder — whose licences carry attribution obligations onto whatever you ship. What to include is in
+[THIRD_PARTY_NOTICES.md](./THIRD_PARTY_NOTICES.md), which `scripts/generate-licenses.sh` regenerates
+from the dependency tree.
