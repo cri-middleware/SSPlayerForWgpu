@@ -31,6 +31,7 @@ A wgpu renderer for SpriteStudio animations, split out of the SpriteStudio-SDK m
 | `examples/viewer-vulkan-cpp/` | Linux/C++ host that drives the C API on Vulkan, carrying **both** window paths in one binary — raw Xlib and `wayland-client` + xdg-shell — because Xwayland means an X11 window never reaches the `SS_WINDOW_WAYLAND` arm. Written on macOS and never yet built or run; the first Linux run is the check it exists for. | [README](./examples/viewer-vulkan-cpp/README.md) |
 | `scripts/build.sh` / `.ps1` | Builds the **library** and collects it: `platform=host\|web`, `build=release\|debug`, plus `ffi` / `deploy`. Same `key=value` shape and collect-phase as the sibling players' `build-runtime.*`. | — |
 | `scripts/deploy-examples.sh` / `.ps1` | Builds `ssconverter-cli` from the submodule, converts the SDK's test projects into `assets/`, and deploys **both** export modes to `examples/web` (`assets/` reference + atlases, `assets_emb/` embedded). | — |
+| `scripts/generate-licenses.sh` / `.ps1` | Regenerates the **committed** `THIRD_PARTY_NOTICES.md` with cargo-about, over `ssplayer-wgpu --features embedded,ffi,web` — the union of the three shipped faces. Unlike the SDK's script of the same name, the output is committed, because that is what the README links and what `build.*` copies into `bin/`. | — |
 | `bin/` | Where `build.sh platform=host` collects what it built: `include/ssplayer_wgpu.h`, `LICENSE.md`, `libs/<platform>/<arch>/`. Gitignored. `platform=web` has no collect directory: it fills `packages/ssplayer-wgpu/{wasm,dist}` in place, because for that face the package directory *is* the artifact. | — |
 | `SpriteStudio-SDK/` | The SDK, as a git submodule. `ssruntime` / `ssab` are path dependencies into it. | [SDK AGENTS](./SpriteStudio-SDK/AGENTS.md) |
 | `assets/` | Generated playback data. Gitignored — never commit it, never hand-edit it. | — |
@@ -79,6 +80,7 @@ A wgpu renderer for SpriteStudio animations, split out of the SpriteStudio-SDK m
 | Web demo | `./scripts/build.sh platform=web && (cd examples/web && python3 -m http.server)` |
 | Documentation site | `./scripts/prepare-docs.sh` once, then `./scripts/build-docs.sh` — both locales, `--strict` |
 | Everything Pages publishes | `./scripts/build-pages.sh serve=yes` — docs + rustdoc at `/api/` + the WebGPU demo at `/demo/` |
+| Third-party notices current | `./scripts/generate-licenses.sh` then `git diff --exit-code THIRD_PARTY_NOTICES.md` — run it after any dependency change; `about.toml`'s `accepted` list is what fails the run on a licence the family has not cleared |
 
 The tests read `assets/`, so `deploy-examples.sh` is a prerequisite, not an optional step.
 

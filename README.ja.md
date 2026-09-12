@@ -23,12 +23,18 @@
   [`docs/ja/`](./docs/ja/index.md) を直接お読みください
 - [**English documentation**](https://cri-middleware.github.io/SSPlayerForWgpu/) — 同じサイトの英語版
   （リポジトリ内では [`docs/en/`](./docs/en/index.md)）
+- [**制限事項と対応範囲**](./docs/ja/limitations.md) — 現在描けるもの、ホスト側に委ねているもの
 - [**SS6Player for CPP からの移行**](./docs/ja/migration/from-ss6-cpp.md)
 - [**ROADMAP**](./ROADMAP.md) — 実装済みのもの、予定しているもの、意図的に見送ったもの
 - [**SpriteStudio Docs（ポータル）**](https://cri-middleware.github.io/SpriteStudio-Docs/ja/) — SDK と
   全公式 Player の入口（初回リリースと同時に公開）
 
 ## 📦 インストール
+
+**アプリケーションで使う場合**はこのまま下へ。ホストを選んで、[使い方](#-使い方)へ。
+最初の 1 体から先（イベント、パーツ単位の上書き、モーションブレンディング、デバイスロストからの
+復帰）も同じ道の続きで、[クレートの README](./libs/ssplayer-wgpu) と[ドキュメント](./docs/ja/index.md)にあります。
+**プレイヤー自体を開発する場合**は[コントリビュート](#-コントリビュート)へ。
 
 > **`SpriteStudio-SDK` リポジトリが private である間は、以下のどの経路でもそのアクセス権が必要です。**
 > このプレイヤーは公開済みの C-API 経由ではなく `ssruntime` と `ssab` を Rust クレートとして直接
@@ -63,7 +69,7 @@ ssplayer-bevy = { git = "https://github.com/cri-middleware/SSPlayerForWgpu" }
 
 ### C と C++
 
-C フェイスは cdylib / staticlib と、生成されたヘッダです。このリポジトリからビルドします:
+C フェイスは cdylib / staticlib と、生成されたヘッダです。🚧 **ビルド済みの配布が用意されるまでは**（このブロックの下の注記を参照）、チェックアウトからのビルドがこのホストでの導入経路になります:
 
 ```bash
 git clone --recursive https://github.com/cri-middleware/SSPlayerForWgpu.git
@@ -77,6 +83,7 @@ cd SSPlayerForWgpu
 bin/include/ssplayer_wgpu.h                              # C ヘッダ (cbindgen)
 bin/LICENSE.md
 bin/LICENSE.ja.md
+bin/THIRD_PARTY_NOTICES.md                               # 謝辞に載せるべきもの
 bin/libs/<platform>/<arch>/libssplayer_wgpu.{a,dylib}    # Windows では .lib/.dll
 ```
 
@@ -140,13 +147,21 @@ scene.update(&mut renderer, &device, &queue, delta_secs, &mut [&mut player]);
 scene.draw(&renderer, &mut rpass);           // into a pass the host opened
 ```
 
-API の全体 — 3 つのスコープ、ロード、トランスポート、パーツ単位の上書き、イベント、デバイスロストからの
-復帰 — は[クレートの README](./libs/ssplayer-wgpu) にあります。C と JavaScript のフェイスは名前が違う
-だけで同じ形をしており、以下の各サンプルがそれぞれの環境について自分で説明しています。
+API の全体 — 3 つのスコープ、ロード、トランスポート、パーツ単位の上書き、イベント、モーション
+ブレンディング、デバイスロストからの復帰 — は[クレートの README](./libs/ssplayer-wgpu) にあります。
+C と JavaScript のフェイスは名前が違うだけで同じ形をしており、以下の各サンプルがそれぞれの環境に
+ついて自分で説明しています。
+
+**1 体のキャラクターに複数のアニメーションを重ねられます。** トラックのスタックがセットアップポーズへ
+順に畳み込まれます。`set_animation` がトラック 0 を決めて構造を担い、その上に `set_track_animation` /
+`set_track_alpha` / `set_track_blend` でオーバーレイを重ねます（下に歩き、上に照準）。`crossfade` を
+使えばカットなしで別のアニメーションへ移れます。現時点では **Rust API のみ**で、C・JavaScript の
+フェイスと Bevy アダプタのコンポーネントからは扱えません。モデルと各 API は
+[モーションブレンディング](./docs/ja/guide/motion-blending.md)にあります。
 
 ### その `.ssab` はどこから来るのか
 
-アニメーションは SpriteStudio で制作し、事前に変換します。このプレイヤーは実行時には何も変換せず、
+アニメーションは SpriteStudio（**7.5 以上**）で制作し、事前に変換します。このプレイヤーは実行時には何も変換せず、
 コンバータも同梱しません。デスクトップの
 [SSConverterGUI](https://github.com/cri-middleware/SSConverterGUI) か、SDK の `ssconverter-cli` を
 使ってください。ツールの選び方とビルドパイプラインへの組み込み方は
@@ -279,4 +294,10 @@ SDK は submodule なので、`ssruntime` や `ssab` に手を入れる必要の
 
 ## 📄 ライセンス
 
-BSD-3-Clause です。[LICENSE.ja.md](./LICENSE.ja.md) を参照してください。
+BSD-3-Clause です。[LICENSE.md](./LICENSE.md)（正文）を参照してください。参考訳は
+[LICENSE.ja.md](./LICENSE.ja.md) にあります。
+
+本ライブラリは自身も Rust クレート（wgpu とそのバックエンド、FlatBuffers、`image` デコーダなど）を
+リンクしており、それらのライセンスは皆さんが配布する成果物にも義務を課します。謝辞に何を含めるべきかは
+[THIRD_PARTY_NOTICES.md](./THIRD_PARTY_NOTICES.md) にあります。依存関係が変わったときは
+`scripts/generate-licenses.sh` で再生成してください。

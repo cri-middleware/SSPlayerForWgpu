@@ -1,0 +1,38 @@
+# Third-Party Notices
+
+This file contains the license notices for third-party libraries used in **SSPlayerForWgpu**.
+
+We would like to thank the authors and contributors of these open-source projects.
+
+> **Generated — do not edit by hand.** `scripts/generate-licenses.sh` (cargo-about) produces this
+> file from `ssplayer-wgpu` built with `--features embedded,ffi,web`: the union of what the Rust
+> library, the C face (`bin/libssplayer_wgpu.*`) and the npm package (`@spritestudio/ssplayer-wgpu`)
+> link. Regenerate it whenever the dependency tree moves.
+>
+> `SpriteStudio-SDK` itself is BSD-3-Clause and covered by [`LICENSE.md`](./LICENSE.md), not listed
+> here.
+
+---
+
+## Overview of Licenses
+
+{{#each overview}}
+- [{{name}}](#{{id}}) ({{count}})
+{{/each}}
+
+## Detail of Licenses
+
+{{#each licenses}}
+### <a id="{{id}}"></a>{{name}}
+
+Used by:
+{{#each used_by}}
+- **{{crate.name}} {{crate.version}}**{{#if crate.repository}} ({{crate.repository}}){{/if}}
+{{/each}}
+
+```text
+{{{text}}}
+```
+
+---
+{{/each}}
