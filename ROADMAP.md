@@ -155,17 +155,14 @@ respect are in [`AGENTS.md`](./AGENTS.md) under *Hard constraints*.
 - [ ] **`CHANGELOG.md`** — with the first release, not before it. Entries written
       now would describe a version nobody can install, and the shape of the
       first one is decided by what actually ships.
-- [ ] **`THIRD_PARTY_NOTICES.md`.** The other repository asset the sibling players
-      carry and this one does not, and the only one that is not just prose:
-      `cargo about` generates it, which means adding `about.toml` and
-      `about-markdown.hbs` here. **The SDK's `accepted` list does not cover this
-      dependency tree** — a run against it stops on 12 crates, over four
-      licences the SDK never meets: `MPL-2.0` ×4 (the symphonia family, pulled in
-      through Bevy's audio), `BSD-2-Clause` ×4, `MIT-0` ×3 and one
-      `(MIT OR Apache-2.0) AND NCSA`. Each is a decision to accept rather than a
-      config line, MPL-2.0 most of all, so this wants its own review.
-      `build-release.sh` already copies the file into every archive when it
-      exists, so nothing else has to change once it does.
+- [x] **`THIRD_PARTY_NOTICES.md`.** `scripts/generate-licenses.sh` runs `cargo about`
+      over `libs/ssplayer-wgpu` with `--features embedded,ffi,web` — the union of what
+      the Rust library, the C face and the npm package link, which is exactly what the
+      archives carry. `libs/ssplayer-bevy` sits outside that set, so the `accepted`
+      list stays the SDK's own: Bevy's tree pulls `MPL-2.0` (the symphonia family),
+      `BSD-2-Clause`, `MIT-0` and one `(MIT OR Apache-2.0) AND NCSA`. The adapter is
+      consumed as source, so that tree is the host's to account for; putting it in an
+      archive would need the review first.
 - [ ] ⛔ **crates.io.** `ssruntime` and `ssab` are path dependencies into the
       submodule; cargo will not publish a crate that depends on paths only.
 - [ ] **Browser-side measurement.** `surface.stats()` is wired through to
