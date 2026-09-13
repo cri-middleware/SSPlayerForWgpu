@@ -115,6 +115,27 @@ respect are in [`AGENTS.md`](./AGENTS.md) under *Hard constraints*.
       Bevy line at a time, because Bevy and the player must resolve to a single
       `wgpu`.
 
+## UI integration
+
+wgpu is a GPU API, not a UI toolkit, so this splits in two: the portable half belongs in the
+player, where every host and the C ABI reach it, and the host half belongs in an adapter crate.
+
+- [ ] **Part rect read-out and hit testing.** `part_transform` reports where a part is;
+      nothing reports how big it is, so a host cannot turn a part into a clickable region.
+      The `PartState` the runtime already delivers every frame carries `size_x` / `size_y`,
+      `anchor` and `pivot` — `part_rect` over those and the part transform, then
+      `hit_test_part(x, y)` over that, in player-local coordinates. Portable: it is C-ABI
+      shaped, needs no GPU work, and every adapter crate inherits it.
+- [ ] **`fit` / `align`.** The player draws at authored scale into whatever target it is
+      given. A host that lays out a box — any UI host does — needs the animation fitted into
+      it: `fit` (`contain` / `cover` / `none`) plus `align`, the family's vocabulary, with
+      `SSPlayerForReactNative`'s `src/core/fit.ts` as the reference implementation.
+- [ ] **Bevy UI (`Node`).** `ssplayer-bevy` gives Bevy a player in the world; a player inside
+      Bevy's UI tree is a different thing — it has to size from `ComputedNode`, respect the UI
+      camera's stacking and clipping, and answer `Interaction` picking. The two primitives
+      above are what it would be built on, and it is the only Rust UI target that costs
+      nothing new to reach.
+
 ## Resource management
 
 - [ ] **Pack and texture eviction.** A player only accumulates packs, and the
@@ -194,5 +215,9 @@ respect are in [`AGENTS.md`](./AGENTS.md) under *Hard constraints*.
   all. No GL adapter is selected or verified anywhere: the instance takes
   `Backends::PRIMARY` (Vulkan / Metal / DX12 / WebGPU), and the C API's backend
   selector offers DX12, Metal and Vulkan.
+- **An egui or iced adapter.** Both are immediate-mode-shaped hosts whose
+  integration point is a texture, so the route is the one already documented for C:
+  render offscreen and hand over the texture. A first-class adapter crate waits on a
+  concrete request; Bevy UI above is the Rust UI target that is actually asked for.
 - **A WebGL fallback.** `ssplayer-webgl` is maintained and is the answer for
   environments without WebGPU.
