@@ -73,7 +73,7 @@ to whoever reads it next.
 ## Development Environment
 
 ### Prerequisites
-- **Rust 1.97+** and a GPU backend wgpu 29 supports (Vulkan / Metal / DX12 /
+- **Rust 1.98+** and a GPU backend wgpu 29 supports (Vulkan / Metal / DX12 /
   WebGPU).
 - **The SDK submodule.** `ssruntime` and `ssab` are path dependencies into
   `SpriteStudio-SDK/`, so clone with `--recursive` (or run
@@ -190,7 +190,7 @@ SSPlayerForWgpu にご関心をお寄せいただき、ありがとうござい�
 ## 開発環境のセットアップ
 
 ### 前提条件
-- **Rust 1.97 以降**と、wgpu 29 が対応する GPU バックエンド（Vulkan / Metal / DX12 / WebGPU）
+- **Rust 1.98 以降**と、wgpu 29 が対応する GPU バックエンド（Vulkan / Metal / DX12 / WebGPU）
 - **SDK submodule。** `ssruntime` と `ssab` は `SpriteStudio-SDK/` への path 依存なので、`--recursive` 付きで clone する（または `git submodule update --init` を実行する）必要があります
 - web フェイスの場合のみ: `wasm-pack`、`pnpm`（`corepack enable`）、`rustup target add wasm32-unknown-unknown`
 
