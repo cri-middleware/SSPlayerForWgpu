@@ -14,7 +14,7 @@ title: Rust ではじめる
 
 | | |
 |---|---|
-| Rust | 1.97 以降、edition 2024 |
+| Rust | 1.98 以降、edition 2024 |
 | wgpu | **29** 系 — アプリと Player は 1 つの `wgpu` に解決される必要があるため、メジャーが違うとコンパイルエラーになります |
 | SDK へのアクセス | [SpriteStudio-SDK](https://github.com/cri-middleware/SpriteStudio-SDK) が private の間は、ビルドする人にアクセス権が必要です |
 

@@ -116,7 +116,7 @@ A load reports `Err` only for an unreadable `.ssab`, so **whatever else did not 
 
 ## Workspace conventions
 
-*   Single Cargo workspace, Rust edition 2024, MSRV 1.97.
+*   Single Cargo workspace, Rust edition 2024, MSRV 1.98.
 *   `[workspace.dependencies]` is the single source of truth for `wgpu`, the SDK crates and the wasm-bindgen family, so the player crate, the viewer and the wasm build never drift.
 *   Rendering parity is judged against the WebGL player (`../SSPlayerForWeb/packages/ssplayer-webgl/`), which the drawing code was ported from; consult it before inventing new behaviour.
 *   CI enforces `cargo fmt --check`, `cargo clippy -D warnings`, the test suite (on Linux against a Mesa lavapipe software adapter, so the offscreen-rendering tests actually execute), the wasm32 build, and the MSVC + DX12-viewer build on Windows.
