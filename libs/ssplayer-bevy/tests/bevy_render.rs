@@ -115,7 +115,7 @@ fn run(mut app: App, handle: Handle<Image>, captured: Captured, setup: impl FnOn
 }
 
 fn drawn_pixels(rgba: &[u8]) -> usize {
-    rgba.chunks_exact(4).filter(|p| p[0] > 8 || p[1] > 8 || p[2] > 8).count()
+    rgba.as_chunks::<4>().0.iter().filter(|p| p[0] > 8 || p[1] > 8 || p[2] > 8).count()
 }
 
 /// Write a readback out, so what these assert about can be looked at:
@@ -182,7 +182,7 @@ fn the_mask_clips_and_is_not_a_no_op() {
 
     dump("02-masked", &masked);
     dump("02-unmasked-reference", &unmasked);
-    let differing = masked.chunks_exact(4).zip(unmasked.chunks_exact(4)).filter(|(a, b)| a.iter().zip(*b).any(|(x, y)| x.abs_diff(*y) > 8)).count();
+    let differing = masked.as_chunks::<4>().0.iter().zip(unmasked.as_chunks::<4>().0.iter()).filter(|(a, b)| a.iter().zip(*b).any(|(x, y)| x.abs_diff(*y) > 8)).count();
     assert!(differing > (SIZE * SIZE / 200) as usize, "masked and unmasked renders are nearly identical ({differing} pixels differ) — the mask is not clipping anything");
 }
 
@@ -211,7 +211,7 @@ fn characters_draw_over_bevy_sprites() {
     });
 
     dump("03-over-a-bevy-sprite", &pixels);
-    let pure_green = pixels.chunks_exact(4).filter(|p| p[1] > 200 && p[0] < 60 && p[2] < 60).count();
+    let pure_green = pixels.as_chunks::<4>().0.iter().filter(|p| p[1] > 200 && p[0] < 60 && p[2] < 60).count();
     let total = (SIZE * SIZE) as usize;
     assert!(pure_green > 0, "the Bevy sprite did not draw at all — this test would pass vacuously");
     assert!(pure_green < total - total / 50, "the sprite covers the whole target: the character drew under it, so the ordering against main_transparent_pass_2d is not holding");

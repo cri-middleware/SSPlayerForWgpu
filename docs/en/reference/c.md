@@ -94,10 +94,9 @@ See [Playback and transport](../guide/playback.md) — in particular why `play` 
 |---|---|
 | `ss_player_is_playing` / `ss_player_is_pausing` / `ss_player_is_playing_forward` | State |
 | `ss_player_is_finished` | **Sticky**: every configured loop has played. Never true under an infinite loop |
-| `ss_player_finished_last_update` | **Edge**: true for exactly the update that completed. Not raised by `stop` |
+| `ss_player_just_finished` | **Edge**: true for exactly the update that completed. Not raised by `stop` |
 | `ss_player_frame_no` | Where the playhead is |
-| `ss_player_looped_last_update` | Edge: the last update crossed a loop boundary. One report however many cycles it crossed |
-| `ss_player_just_looped` | The same answer under the family's other name — the two call one implementation |
+| `ss_player_just_looped` | **Edge**: the last update crossed a loop boundary. One report however many cycles it crossed |
 
 ## Events
 

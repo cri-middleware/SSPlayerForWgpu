@@ -971,7 +971,7 @@ impl FrameChunk {
         // coverage-masked never reads it.
         self.prims.extend(other.prims.iter().map(|p| Prim { aux_base: p.aux_base + arena_base, pos_base: p.pos_base + arena_base, uv_base: p.uv_base + arena_base, node_base: p.node_base + arena_base, cov_base: p.cov_base + arena_base, ..*p }));
         // Pairs of (primitive, vertex); only the primitive moves.
-        self.mesh_stream.extend(other.mesh_stream.chunks_exact(2).flat_map(|pair| [pair[0] + prim_base, pair[1]]));
+        self.mesh_stream.extend(other.mesh_stream.as_chunks::<2>().0.iter().flat_map(|pair| [pair[0] + prim_base, pair[1]]));
 
         let rebase = |call: &BatchDrawCall| {
             let shift = match call.key.kind.geom_class() {

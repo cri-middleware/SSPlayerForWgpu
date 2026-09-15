@@ -134,7 +134,7 @@ fn render_to_rgba(device: &wgpu::Device, queue: &wgpu::Queue, renderer: &mut SSR
 
 /// Count pixels whose RGB is not (near) black — i.e. something was drawn.
 fn drawn_pixels(rgba: &[u8]) -> usize {
-    rgba.chunks_exact(4).filter(|p| p[0] > 8 || p[1] > 8 || p[2] > 8).count()
+    rgba.as_chunks::<4>().0.iter().filter(|p| p[0] > 8 || p[1] > 8 || p[2] > 8).count()
 }
 
 #[test]
@@ -250,10 +250,10 @@ fn a_player_tint_multiplies_the_finished_colour() {
         assert!(drawn > 0, "{pack}.ssab drew nothing — fixture/texture problem");
         assert_eq!(plain, white, "a white tint changed {pack}.ssab — the identity tint is not identity");
 
-        let green_or_blue = red.chunks_exact(4).filter(|p| p[1] > 0 || p[2] > 0).count();
+        let green_or_blue = red.as_chunks::<4>().0.iter().filter(|p| p[1] > 0 || p[2] > 0).count();
         assert_eq!(green_or_blue, 0, "{pack}.ssab kept green/blue under a red tint — the tint is not reaching every fragment path");
 
-        let red_kept = plain.chunks_exact(4).zip(red.chunks_exact(4)).all(|(a, b)| a[0] == b[0]);
+        let red_kept = plain.as_chunks::<4>().0.iter().zip(red.as_chunks::<4>().0.iter()).all(|(a, b)| a[0] == b[0]);
         assert!(red_kept, "{pack}.ssab changed its red channel under a red tint — the tint is not a plain multiply");
         assert!(drawn_pixels(&red) > 0, "{pack}.ssab drew nothing under a red tint");
     }

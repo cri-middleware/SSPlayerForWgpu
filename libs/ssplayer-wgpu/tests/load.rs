@@ -336,9 +336,9 @@ fn keys_learned_after_the_tree_was_built_reach_the_tree() {
 
     let late = shoot(true);
     let fresh = shoot(false);
-    let drawn = |px: &[u8]| px.chunks_exact(4).filter(|p| p[0] != 0 || p[1] != 0 || p[2] != 0).count();
+    let drawn = |px: &[u8]| px.as_chunks::<4>().0.iter().filter(|p| p[0] != 0 || p[1] != 0 || p[2] != 0).count();
     assert!(drawn(&fresh) > 0, "the fixture drew nothing at all; this test would prove nothing");
-    let differing = late.chunks_exact(4).zip(fresh.chunks_exact(4)).filter(|(a, b)| a != b).count();
+    let differing = late.as_chunks::<4>().0.iter().zip(fresh.as_chunks::<4>().0.iter()).filter(|(a, b)| a != b).count();
     assert_eq!(differing, 0, "the tree built before the atlases arrived drew differently in {differing} px — it kept the keys it was built with, and its parts fell back to the white texture");
 }
 

@@ -172,12 +172,12 @@ fn render_scenes(device: &wgpu::Device, queue: &wgpu::Queue, renderer: &SSRender
 
 /// Count pixels whose RGB is not (near) black — i.e. something was drawn.
 fn drawn_pixels(rgba: &[u8]) -> usize {
-    rgba.chunks_exact(4).filter(|p| p[0] > 8 || p[1] > 8 || p[2] > 8).count()
+    rgba.as_chunks::<4>().0.iter().filter(|p| p[0] > 8 || p[1] > 8 || p[2] > 8).count()
 }
 
 /// Total RGB energy, for comparing fades.
 fn luminance_sum(rgba: &[u8]) -> u64 {
-    rgba.chunks_exact(4).map(|p| p[0] as u64 + p[1] as u64 + p[2] as u64).sum()
+    rgba.as_chunks::<4>().0.iter().map(|p| p[0] as u64 + p[1] as u64 + p[2] as u64).sum()
 }
 
 /// SPEC §6: a player restores the stencil buffer before it returns, so stacking
@@ -226,7 +226,7 @@ fn stencil_unwind_isolates_players() {
     eprintln!("two masked players: shared scene drew {drawn} px, reference drew {}", drawn_pixels(&split));
     assert!(drawn > 0, "nothing was drawn — fixture or texture problem, the comparison below would be vacuous");
 
-    let differing = one_scene.chunks_exact(4).zip(split.chunks_exact(4)).filter(|(x, y)| x != y).count();
+    let differing = one_scene.as_chunks::<4>().0.iter().zip(split.as_chunks::<4>().0.iter()).filter(|(x, y)| x != y).count();
     assert_eq!(differing, 0, "{differing} px differ: sharing a scene is not equivalent to one scene each — stencil coverage leaked between players (SPEC §6)");
 }
 

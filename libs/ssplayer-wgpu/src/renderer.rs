@@ -1795,7 +1795,7 @@ impl SSRenderer {
 /// WebGL player's `UNPACK_PREMULTIPLY_ALPHA_WEBGL` produces, and the fixtures that
 /// compare an uploaded atlas against a host-premultiplied one are byte-for-byte.
 pub(crate) fn premultiply(rgba: &mut [u8]) {
-    for px in rgba.chunks_exact_mut(4) {
+    for px in rgba.as_chunks_mut::<4>().0 {
         let a = px[3] as u32;
         px[0] = ((px[0] as u32 * a + 127) / 255) as u8;
         px[1] = ((px[1] as u32 * a + 127) / 255) as u8;

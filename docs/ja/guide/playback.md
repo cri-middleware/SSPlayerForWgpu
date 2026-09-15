@@ -198,7 +198,7 @@
 | 範囲 | `start_frame()` / `end_frame()` / `total_frames()` | `ss_player_start_frame` / `_end_frame` / `_total_frames` | `startFrame()` / `endFrame()` / `totalFrames()` |
 | 動いているか | `is_playing()` / `is_pausing()` | `ss_player_is_playing` / `_is_pausing` | `isPlaying()` / `isPausing()` |
 | 終了したか | `is_finished()` | `ss_player_is_finished` | `isFinished()` |
-| **直前 tick のエッジ** | `just_looped()` / `just_finished()` | `ss_player_looped_last_update` / `_finished_last_update` | `justLooped()` / `justFinished()` |
+| **直前 tick のエッジ** | `just_looped()` / `just_finished()` | `ss_player_just_looped` / `_just_finished` | `justLooped()` / `justFinished()` |
 
 実務で使うのは最後の行です。`just_finished()` は**エッジ**で、再生を完了させた tick でだけ true になり、
 次の `update()` で進みます。したがって完了が 2 度発火することはなく、非表示にして戻したキャラクターが

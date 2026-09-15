@@ -170,8 +170,8 @@ mid-update would risk a conflict over the very resources it lent.
 |---|---|---|
 | `CallBackUserData` | `events()` → `SsEvent::UserData` | `ss_player_event_at`, `kind == SS_EVENT_USER_DATA` |
 | `CallBackSignal` | `events()` → `SsEvent::Signal` | the same, plus `ss_player_event_signal_param_at` |
-| `CallBackPlayEnd` | `just_finished()` | `ss_player_finished_last_update` |
-| *(new)* | `just_looped()` | `ss_player_looped_last_update` |
+| `CallBackPlayEnd` | `just_finished()` | `ss_player_just_finished` |
+| *(new)* | `just_looped()` | `ss_player_just_looped` |
 | *(new)* | `events()` → `SsEvent::Audio` | `ss_player_event_at`, `kind == SS_EVENT_AUDIO` |
 
 === "Rust"
@@ -206,7 +206,7 @@ mid-update would risk a conflict over the very resources it lent.
         }
     }
 
-    if (ss_player_finished_last_update(player)) { /* ... */ }
+    if (ss_player_just_finished(player)) { /* ... */ }
     ```
 
 Events belong to the update that produced them and are cleared by the next one. **Frames skipped

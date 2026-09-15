@@ -1436,7 +1436,7 @@ pub unsafe extern "C" fn ss_player_set_part_color_override_corners_by_index(hand
     }
     let mut rgba = [[0u8; 4]; 4];
     let bytes = unsafe { std::slice::from_raw_parts(corners, 16) };
-    for (corner, chunk) in rgba.iter_mut().zip(bytes.chunks_exact(4)) {
+    for (corner, chunk) in rgba.iter_mut().zip(bytes.as_chunks::<4>().0) {
         corner.copy_from_slice(chunk);
     }
     let Some(player) = (unsafe { player(handle) }) else { return fail(SS_ERROR_INVALID_ARGUMENT, "player handle is null or destroyed") };
@@ -1562,16 +1562,6 @@ pub unsafe extern "C" fn ss_player_is_part_skinned_mesh_by_index(handle: *mut Ss
 // The strings are borrowed from the player and stay valid until the next
 // `ss_scene_update` on it — the same rule `ss_player_texture_at` follows.
 
-/// Whether the last `ss_scene_update` crossed a loop boundary. One report per
-/// update however many cycles it crossed.
-///
-/// # Safety
-/// `handle` must be a live handle or null.
-#[unsafe(no_mangle)]
-pub unsafe extern "C" fn ss_player_looped_last_update(handle: *mut SsPlayer) -> bool {
-    unsafe { player(handle) }.map(|p| p.just_looped()).unwrap_or(false)
-}
-
 /// Whether the last `ss_scene_update` **completed** playback: true for exactly
 /// one update, unlike the sticky `ss_player_is_finished`. Never true under an
 /// infinite loop, and not raised by `ss_player_stop`.
@@ -1579,7 +1569,7 @@ pub unsafe extern "C" fn ss_player_looped_last_update(handle: *mut SsPlayer) -> 
 /// # Safety
 /// `handle` must be a live handle or null.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn ss_player_finished_last_update(handle: *mut SsPlayer) -> bool {
+pub unsafe extern "C" fn ss_player_just_finished(handle: *mut SsPlayer) -> bool {
     unsafe { player(handle) }.map(|p| p.just_finished()).unwrap_or(false)
 }
 

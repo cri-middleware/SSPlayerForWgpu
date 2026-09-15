@@ -92,10 +92,9 @@ title: C API リファレンス
 |---|---|
 | `ss_player_is_playing` / `ss_player_is_pausing` / `ss_player_is_playing_forward` | 状態 |
 | `ss_player_is_finished` | **持続的**：設定されたループをすべて再生し終えた。無限ループでは常に false |
-| `ss_player_finished_last_update` | **エッジ**：再生を完了させた update でだけ true。`stop` では立ちません |
+| `ss_player_just_finished` | **エッジ**：再生を完了させた update でだけ true。`stop` では立ちません |
 | `ss_player_frame_no` | 再生ヘッドの位置 |
-| `ss_player_looped_last_update` | エッジ：直前の update がループ境界を跨いだ。何周跨いでも 1 回の報告 |
-| `ss_player_just_looped` | ファミリー側の別名で同じ答え — 実装は 1 つを共有しています |
+| `ss_player_just_looped` | **エッジ**：直前の update がループ境界を跨いだ。何周跨いでも 1 回の報告 |
 
 ## イベント
 

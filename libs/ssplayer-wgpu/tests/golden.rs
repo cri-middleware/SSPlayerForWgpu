@@ -131,7 +131,7 @@ impl Golden {
         let Some(reference) = &self.reference else { return };
         match std::fs::read(format!("{reference}/{name}.raw")) {
             Ok(before) if before.len() == rgba.len() => {
-                let differing = before.chunks_exact(4).zip(rgba.chunks_exact(4)).filter(|(a, b)| a != b).count();
+                let differing = before.as_chunks::<4>().0.iter().zip(rgba.as_chunks::<4>().0.iter()).filter(|(a, b)| a != b).count();
                 if differing > 0 {
                     self.changed.push((name.to_string(), differing));
                 }

@@ -1123,7 +1123,7 @@ impl SSPlayer {
     fn reapply_loop_count(&mut self) {
         let Some(count) = self.loop_count else { return };
         if let Some(root) = &mut self.root {
-            root.context.set_loop(count);
+            root.context.set_loop_count(count);
         }
     }
 
@@ -1189,7 +1189,7 @@ impl SSPlayer {
     /// Survives [`SSPlayer::set_animation`], and may be set before the first one.
     pub fn set_speed_scale(&mut self, speed: f32) {
         if let Some(root) = &mut self.root {
-            root.context.set_animation_speed(speed);
+            root.context.set_speed_scale(speed);
         }
     }
 
@@ -1197,7 +1197,7 @@ impl SSPlayer {
     /// runtime, so a rate that clamped to a stop reads back as `0.0` rather than
     /// as the negative that was asked for.
     pub fn speed_scale(&self) -> f32 {
-        self.root.as_ref().map(|r| r.context.get_animation_speed()).unwrap_or(1.0)
+        self.root.as_ref().map(|r| r.context.get_speed_scale()).unwrap_or(1.0)
     }
 
     pub fn is_playing(&self) -> bool {
@@ -1295,18 +1295,18 @@ impl SSPlayer {
     pub fn set_loop_count(&mut self, count: i32) {
         self.loop_count = Some(count);
         if let Some(root) = &mut self.root {
-            root.context.set_loop(count);
+            root.context.set_loop_count(count);
         }
     }
 
     /// The configured count, and how many cycles are left of it.
     pub fn loop_count(&self) -> i32 {
-        self.root.as_ref().map(|r| r.context.get_loops()).unwrap_or(0)
+        self.root.as_ref().map(|r| r.context.get_loop_count()).unwrap_or(0)
     }
 
     /// See [`SSPlayer::loop_count`].
     pub fn remaining_loops(&self) -> i32 {
-        self.root.as_ref().map(|r| r.context.get_remain_loops()).unwrap_or(0)
+        self.root.as_ref().map(|r| r.context.get_remaining_loops()).unwrap_or(0)
     }
 
     /// Override the advance rate. The pack's authored rate otherwise — prefer
@@ -1319,7 +1319,7 @@ impl SSPlayer {
 
     /// See [`SSPlayer::set_frame_rate`]. Zero before an animation is set.
     pub fn frame_rate(&self) -> i32 {
-        self.root.as_ref().map(|r| r.context.get_fps()).unwrap_or(0)
+        self.root.as_ref().map(|r| r.context.get_frame_rate()).unwrap_or(0)
     }
 
     /// Restrict playback to `start..=end` of the current animation, so looping
@@ -1361,7 +1361,7 @@ impl SSPlayer {
     }
 
     pub fn track_alpha(&self, track: u32) -> Option<f32> {
-        self.root.as_ref()?.context.track_alpha(track)
+        self.root.as_ref()?.context.get_track_alpha(track)
     }
 
     /// [`TrackBlend::Mix`] lerps toward the track's pose; [`TrackBlend::Additive`]
@@ -1372,11 +1372,11 @@ impl SSPlayer {
     }
 
     pub fn track_blend(&self, track: u32) -> Option<TrackBlend> {
-        self.root.as_ref()?.context.track_blend(track)
+        self.root.as_ref()?.context.get_track_blend(track)
     }
 
     pub fn track_count(&self) -> u32 {
-        self.root.as_ref().map(|r| r.context.track_count()).unwrap_or(0)
+        self.root.as_ref().map(|r| r.context.get_track_count()).unwrap_or(0)
     }
 
     /// Silence a track. Track 0 is refused — fade it to alpha 0 instead.
@@ -1407,7 +1407,7 @@ impl SSPlayer {
     }
 
     pub fn track_fade_progress(&self, track: u32) -> Option<f32> {
-        self.root.as_ref()?.context.track_fade_progress(track)
+        self.root.as_ref()?.context.get_track_fade_progress(track)
     }
 
     pub fn cancel_track_fade(&mut self, track: u32) -> Result<(), SSRuntimeError> {
@@ -1423,7 +1423,7 @@ impl SSPlayer {
     }
 
     pub fn track_frame(&self, track: u32) -> Option<f32> {
-        self.root.as_ref()?.context.track_frame(track)
+        self.root.as_ref()?.context.get_track_frame(track)
     }
 
     pub fn set_track_speed(&mut self, track: u32, speed: f32) -> Result<(), SSRuntimeError> {
@@ -2124,7 +2124,7 @@ impl SSPlayer {
         // to be read here, right after the one that raised it. Deriving it from
         // "the frame went backwards" instead is wrong under reverse and
         // ping-pong playback, where the frame goes backwards every tick.
-        let looped = root.context.is_looped();
+        let looped = root.context.just_looped();
 
         // Collect what the host reacts to before anything that could skip work:
         // events must fire whenever the runtime reports them, whether or not
@@ -2276,7 +2276,7 @@ fn build_rig(
 /// What the draw walk needs afterwards is left on each slot: the child's frame
 /// and visibility, and the effect's draw plan.
 fn step_slots(node: &mut PlaybackNode, frame_no: f32, delta_secs: f32, node_looped: bool) {
-    let fps = node.context.get_fps() as f32;
+    let fps = node.context.get_frame_rate() as f32;
     for (&part_idx, effect) in node.effects.iter_mut() {
         let ev = node.context.get_active_effect_event(part_idx as u32);
         // vert_stride=2 (packed XY), y_flip=true: the context runs Y-down, so the

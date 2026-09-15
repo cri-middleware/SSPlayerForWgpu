@@ -43,8 +43,8 @@ respect are in [`AGENTS.md`](./AGENTS.md) under *Hard constraints*.
       make `animationStarted` one of six required events, and it is the only one
       with no counterpart here on any face: `SsEvent` carries `UserData` /
       `Signal` / `Audio`, and the two lifecycle edges are `just_looped()` /
-      `just_finished()` (`ss_player_looped_last_update` /
-      `ss_player_finished_last_update`, `justLooped()` / `justFinished()`,
+      `just_finished()` (`ss_player_just_looped` /
+      `ss_player_just_finished`, `justLooped()` / `justFinished()`,
       `SsLooped` / `SsFinished`). There is no `just_started()`. Every one of the
       other six Players publishes the event.
       **Low priority because the caller usually already knows**: `set_animation`
@@ -54,7 +54,7 @@ respect are in [`AGENTS.md`](./AGENTS.md) under *Hard constraints*.
       initiate — an instance slot heading out, or a declarative binding that
       swapped the animation — which is the case that would justify doing it.
       The shape if it lands: `just_started()` beside the other two, cleared by
-      the same `build_frame` path that clears them, `ss_player_started_last_update`
+      the same `build_frame` path that clears them, `ss_player_just_started`
       on the C face, `justStarted()` on the js face, `SsStarted` on Bevy, and a
       row in the *Completion and loop edges* table in
       [`docs/{en,ja}/guide/events.md`](./docs/en/guide/events.md). Until then the

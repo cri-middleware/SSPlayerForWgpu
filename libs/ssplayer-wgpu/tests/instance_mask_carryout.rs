@@ -145,12 +145,12 @@ fn scratch_png(name: &str, w: u32, h: u32, rgba: &[u8]) {
 /// Total brightness composited over the black clear: sum of each pixel's
 /// brightest channel. A part the carried mask clips away removes its contribution.
 fn brightness(rgba: &[u8]) -> u64 {
-    rgba.chunks_exact(4).map(|p| p[0].max(p[1]).max(p[2]) as u64).sum()
+    rgba.as_chunks::<4>().0.iter().map(|p| p[0].max(p[1]).max(p[2]) as u64).sum()
 }
 
 /// Pixels drawn over the black clear (any channel non-zero).
 fn drawn(rgba: &[u8]) -> usize {
-    rgba.chunks_exact(4).filter(|p| p[0] | p[1] | p[2] != 0).count()
+    rgba.as_chunks::<4>().0.iter().filter(|p| p[0] | p[1] | p[2] != 0).count()
 }
 
 /// Pixels whose worst channel differs by more than `tolerance`, and a diff mask.
@@ -160,7 +160,7 @@ fn drawn(rgba: &[u8]) -> usize {
 fn differing(a: &[u8], b: &[u8], tolerance: u8) -> (usize, Vec<u8>) {
     let mut count = 0;
     let mut mask = Vec::with_capacity(a.len());
-    for (pa, pb) in a.chunks_exact(4).zip(b.chunks_exact(4)) {
+    for (pa, pb) in a.as_chunks::<4>().0.iter().zip(b.as_chunks::<4>().0.iter()) {
         let delta = pa.iter().zip(pb).map(|(x, y)| x.abs_diff(*y)).max().unwrap_or(0);
         let hit = delta > tolerance;
         count += hit as usize;
