@@ -135,7 +135,7 @@ fn render(device: &wgpu::Device, queue: &wgpu::Queue, fixture: &str, frames: u32
 }
 
 fn drawn_pixels(rgba: &[u8]) -> usize {
-    rgba.chunks_exact(4).filter(|p| p[0] > 8 || p[1] > 8 || p[2] > 8).count()
+    rgba.as_chunks::<4>().0.iter().filter(|p| p[0] > 8 || p[1] > 8 || p[2] > 8).count()
 }
 
 /// Pixels differing beyond `tolerance`, and the worst channel delta seen.
@@ -147,7 +147,7 @@ fn drawn_pixels(rgba: &[u8]) -> usize {
 fn differing(a: &[u8], b: &[u8], tolerance: u8) -> (usize, u8) {
     let mut count = 0;
     let mut worst = 0u8;
-    for (pa, pb) in a.chunks_exact(4).zip(b.chunks_exact(4)) {
+    for (pa, pb) in a.as_chunks::<4>().0.iter().zip(b.as_chunks::<4>().0.iter()) {
         let delta = pa.iter().zip(pb).map(|(x, y)| x.abs_diff(*y)).max().unwrap_or(0);
         worst = worst.max(delta);
         if delta > tolerance {

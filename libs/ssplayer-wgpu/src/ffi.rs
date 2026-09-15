@@ -1436,7 +1436,7 @@ pub unsafe extern "C" fn ss_player_set_part_color_override_corners_by_index(hand
     }
     let mut rgba = [[0u8; 4]; 4];
     let bytes = unsafe { std::slice::from_raw_parts(corners, 16) };
-    for (corner, chunk) in rgba.iter_mut().zip(bytes.chunks_exact(4)) {
+    for (corner, chunk) in rgba.iter_mut().zip(bytes.as_chunks::<4>().0) {
         corner.copy_from_slice(chunk);
     }
     let Some(player) = (unsafe { player(handle) }) else { return fail(SS_ERROR_INVALID_ARGUMENT, "player handle is null or destroyed") };

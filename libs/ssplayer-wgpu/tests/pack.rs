@@ -38,7 +38,7 @@ fn gpu() -> Option<(wgpu::Device, wgpu::Queue)> {
 /// Straight-alpha RGBA -> premultiplied, the same rounding `upload_texture` uses.
 fn premultiply(rgba: &[u8]) -> Vec<u8> {
     let mut out = rgba.to_vec();
-    for px in out.chunks_exact_mut(4) {
+    for px in out.as_chunks_mut::<4>().0 {
         let a = px[3] as u32;
         px[0] = ((px[0] as u32 * a + 127) / 255) as u8;
         px[1] = ((px[1] as u32 * a + 127) / 255) as u8;
@@ -172,7 +172,7 @@ fn render_to(device: &wgpu::Device, queue: &wgpu::Queue, renderer: &mut SSRender
 }
 
 fn drawn_pixels(rgba: &[u8]) -> usize {
-    rgba.chunks_exact(4).filter(|p| p[0] > 8 || p[1] > 8 || p[2] > 8).count()
+    rgba.as_chunks::<4>().0.iter().filter(|p| p[0] > 8 || p[1] > 8 || p[2] > 8).count()
 }
 
 /// Mean absolute channel difference, in 0..255 units.
