@@ -201,7 +201,7 @@ a new owner, and nothing is carried across that.
 | Range | `start_frame()` / `end_frame()` / `total_frames()` | `ss_player_start_frame` / `_end_frame` / `_total_frames` | `startFrame()` / `endFrame()` / `totalFrames()` |
 | Is it running | `is_playing()` / `is_pausing()` | `ss_player_is_playing` / `_is_pausing` | `isPlaying()` / `isPausing()` |
 | Did it complete | `is_finished()` | `ss_player_is_finished` | `isFinished()` |
-| **Edges** from the last tick | `just_looped()` / `just_finished()` | `ss_player_looped_last_update` / `_finished_last_update` | `justLooped()` / `justFinished()` |
+| **Edges** from the last tick | `just_looped()` / `just_finished()` | `ss_player_just_looped` / `_just_finished` | `justLooped()` / `justFinished()` |
 
 The last row is the one to reach for. `just_finished()` is an **edge**: true for exactly the tick
 that completed playback, and the next `update()` moves it on — so a completion cannot fire twice, and

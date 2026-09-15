@@ -141,8 +141,8 @@ Rust では `SignalValue` enum、JavaScript ではそのままの値です。
 
 | | Rust | C | JavaScript | Bevy |
 |---|---|---|---|---|
-| この tick で完了した | `just_finished()` | `ss_player_finished_last_update` | `justFinished()` | `SsFinished` メッセージ |
-| ループ境界を跨いだ | `just_looped()` | `ss_player_looped_last_update` | `justLooped()` | `SsLooped` メッセージ |
+| この tick で完了した | `just_finished()` | `ss_player_just_finished` | `justFinished()` | `SsFinished` メッセージ |
+| ループ境界を跨いだ | `just_looped()` | `ss_player_just_looped` | `justLooped()` | `SsLooped` メッセージ |
 
 どちらも**エッジ**で、それを行った tick でだけ true になり、次の `update()` で進みます。したがって
 完了したワンショットが 2 度発火することはありません（非表示にして戻した場合も含めて）。エッジは読んでも

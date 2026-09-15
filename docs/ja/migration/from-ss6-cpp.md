@@ -170,8 +170,8 @@ SSScene -> update(&renderer, &device, &queue, dt, &mut [a, b])
 |---|---|---|
 | `CallBackUserData` | `events()` の `SsEvent::UserData` | `ss_player_event_at`（`kind == SS_EVENT_USER_DATA`） |
 | `CallBackSignal` | `events()` の `SsEvent::Signal` | 同上 ＋ `ss_player_event_signal_param_at` |
-| `CallBackPlayEnd` | `just_finished()` | `ss_player_finished_last_update` |
-| *(新規)* | `just_looped()` | `ss_player_looped_last_update` |
+| `CallBackPlayEnd` | `just_finished()` | `ss_player_just_finished` |
+| *(新規)* | `just_looped()` | `ss_player_just_looped` |
 | *(新規)* | `events()` の `SsEvent::Audio` | `ss_player_event_at`（`kind == SS_EVENT_AUDIO`） |
 
 === "Rust"
@@ -206,7 +206,7 @@ SSScene -> update(&renderer, &device, &queue, dt, &mut [a, b])
         }
     }
 
-    if (ss_player_finished_last_update(player)) { /* ... */ }
+    if (ss_player_just_finished(player)) { /* ... */ }
     ```
 
 イベントはそれを生成した update のもので、次の update でクリアされます。**長い tick で跨いだフレームの

@@ -141,8 +141,8 @@ Events tell you what the timeline said. Two other signals tell you what playback
 
 | | Rust | C | JavaScript | Bevy |
 |---|---|---|---|---|
-| Completed on this tick | `just_finished()` | `ss_player_finished_last_update` | `justFinished()` | `SsFinished` message |
-| Crossed a loop boundary | `just_looped()` | `ss_player_looped_last_update` | `justLooped()` | `SsLooped` message |
+| Completed on this tick | `just_finished()` | `ss_player_just_finished` | `justFinished()` | `SsFinished` message |
+| Crossed a loop boundary | `just_looped()` | `ss_player_just_looped` | `justLooped()` | `SsLooped` message |
 
 Both are **edges**, true for exactly the tick that did it, and the next `update()` moves them on — so
 a completed one-shot cannot fire twice, including after the character is hidden and shown again.

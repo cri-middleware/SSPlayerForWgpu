@@ -58,7 +58,7 @@ fn probe(anim: &str, frames: usize) {
         // The controller's own pulse, read right after the `update` that raised
         // it — the same rule `SSPlayer::build_frame` follows. It is cleared on
         // entry to every `update`, so it cannot be polled later.
-        let parent_looped = parent.is_looped();
+        let parent_looped = parent.just_looped();
         let _ = parent.get_frame_data(pf);
         let ev = parent.get_active_event_instance(part_idx as u32);
         let r = slot.step(ev, &mut child, pf, dt, parent_looped);
@@ -137,7 +137,7 @@ fn probe_effect() {
 
     let mut slot = EffectSlot::new(unsafe { &*res.resource_static_ptr() }, eff_hash, part_idx as u32).unwrap();
     let dt = 1.0 / 60.0;
-    let fps = ctx.get_fps() as f32;
+    let fps = ctx.get_frame_rate() as f32;
     for f in 0..40 {
         ctx.update(dt * 1000.0);
         let pf = ctx.get_frame_no();

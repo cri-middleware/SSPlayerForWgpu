@@ -1122,15 +1122,6 @@ int32_t ss_player_is_part_skinned_mesh(ss_player_t *handle, const char *part);
 int32_t ss_player_is_part_skinned_mesh_by_index(ss_player_t *handle, uint32_t part);
 
 /*
- Whether the last `ss_scene_update` crossed a loop boundary. One report per
- update however many cycles it crossed.
-
- # Safety
- `handle` must be a live handle or null.
- */
-bool ss_player_looped_last_update(ss_player_t *handle);
-
-/*
  Whether the last `ss_scene_update` **completed** playback: true for exactly
  one update, unlike the sticky `ss_player_is_finished`. Never true under an
  infinite loop, and not raised by `ss_player_stop`.
@@ -1138,7 +1129,7 @@ bool ss_player_looped_last_update(ss_player_t *handle);
  # Safety
  `handle` must be a live handle or null.
  */
-bool ss_player_finished_last_update(ss_player_t *handle);
+bool ss_player_just_finished(ss_player_t *handle);
 
 /*
  How many timeline events the last `ss_scene_update` crossed.
