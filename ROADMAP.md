@@ -26,6 +26,16 @@ respect are in [`AGENTS.md`](./AGENTS.md) under *Hard constraints*.
 - [x] Playback control — play / pause / stop, seek, section, reverse, ping-pong,
       speed, frame rate, loop counts.
 - [x] Per-part runtime overrides — colour, cell, visibility.
+- [x] Runtime texture replacement — swap the texture a cellmap binds from the
+      program (SDK `70_external_resources.md`), `set_cellmap_texture` /
+      `ss_player_set_cellmap_texture` / `setCellmapTexture`, plus the Bevy
+      `SsCellmapTextures` component. A Player-side override, distinct from the
+      per-part Override Layer. Where the sibling Players overwrite an entry in a
+      per-player texture map, this one keeps that map in the device-scoped
+      renderer, so an override is a *redirect* of the player's own atlas-key table
+      to a private key — per player, an instance child (its own pack) does not
+      inherit it, and a restore points back at the untouched atlas rather than
+      reloading it.
 - [x] Events — user data, signal, audio, animation finished / looped.
 - [x] Many players per render target, drawn in one pass in ascending `order`.
 - [ ] **9-slice parts.** The runtime already emits the batches and the geometry

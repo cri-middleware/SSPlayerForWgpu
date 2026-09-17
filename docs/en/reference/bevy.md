@@ -65,6 +65,19 @@ with nothing to clear afterwards, and so two restarts in a row are two restarts.
 | `frame_no: f32` | the frame the timeline last landed on |
 | `finished: bool` | whether the animation has reached its end |
 
+### `SsCellmapTextures` — runtime texture replacement (optional)
+
+Swap the whole texture a cell map binds — a costume or palette change — for a Bevy image.
+
+| Field | |
+|---|---|
+| `overrides: HashMap<String, Handle<Image>>` | cell map (or TextureChange-target) name → the image to bind for it |
+
+Insert an entry to override, remove it (or the whole component) to restore. An image still loading
+is applied the frame it becomes ready, so a freshly-requested handle is fine. The swap is
+per-character; a straight-alpha Bevy image is assumed. Only characters that swap textures need spawn
+it. See [Texture replacement](../guide/texture-replacement.md).
+
 ## Messages (reactive)
 
 | Message | Carries |

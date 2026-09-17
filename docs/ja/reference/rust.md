@@ -38,7 +38,7 @@ pub use ssruntime::TrackBlend;
 |---|---|---|
 | `SSRenderer` | デバイス | `new`, `set_texture`, `upload_texture`, `texture_size`, `restore_device` |
 | `SSScene` | 描画ターゲット | `new`, `set_viewport`, `update`, `encode_mask_coverage`, `draw`, `stats`, `restore_device` |
-| `SSPlayer` | キャラクター | `load`, `set_animation`, 再生制御, オーバーライド, `events`, `set_transform`, `restore_textures` |
+| `SSPlayer` | キャラクター | `load`, `set_animation`, 再生制御, オーバーライド, `set_cellmap_texture`, `events`, `set_transform`, `restore_textures` |
 
 `SSPlayer` は **wgpu の型のフィールドを一切持ちません**。だから 1 つのシーンに何体でも載り、パックの
 アトラスのアップロードを共有します。[借用モデル](../wgpu/borrow-model.md)を参照。

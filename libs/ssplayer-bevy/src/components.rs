@@ -4,6 +4,7 @@
 //! playback tree itself never appears here, because it is owned by the render
 //! world (see [`crate::render`]) and reached only through these components.
 
+use bevy::platform::collections::HashMap;
 use bevy::prelude::*;
 
 /// A SpriteStudio character.
@@ -69,6 +70,28 @@ impl Default for SsPlayback {
     fn default() -> Self {
         Self { playing: true, speed: 1.0, order: 0, alpha: 1.0, visible: true, restart: 0 }
     }
+}
+
+/// Runtime texture replacement: swap the texture a cellmap binds for a Bevy
+/// image, live, from gameplay code (SDK `70_external_resources.md` §"Runtime
+/// texture replacement" — costume changes, dynamic expressions).
+///
+/// Keyed by cellmap name, or by a TextureChange target's file name — whatever the
+/// character's pack lists. Insert an entry to override, remove it to restore the
+/// original atlas; the render world reconciles the map against what it has applied
+/// each frame. An image that is not yet loaded is applied the frame it becomes
+/// ready, so binding a freshly-spawned `Handle<Image>` is fine.
+///
+/// The replacement should match the original atlas's size and cell layout — the
+/// runtime's UVs stay in the original cellmap's pixel space. The override is this
+/// character's alone: another entity playing the same pack is unaffected, and an
+/// instance child (its own pack) does not inherit it.
+///
+/// Optional — only characters that swap textures need spawn it.
+#[derive(Component, Clone, Debug, Default)]
+pub struct SsCellmapTextures {
+    /// Cellmap (or TextureChange-target) name -> the image to bind for it.
+    pub overrides: HashMap<String, Handle<Image>>,
 }
 
 /// Playback state read back from the render world, refreshed every frame.

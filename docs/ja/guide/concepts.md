@@ -104,6 +104,7 @@ flowchart TD
 | [ループ回数・区間・再生方向・サブフレーム](./playback.md) | ✅ | ✅ | ✅ | — |
 | [イベント：ユーザーデータ・シグナル・オーディオ](./events.md) | ✅ | ✅ | ✅ | ✅ |
 | [パーツオーバーライド：表示・セル・カラー](./part-overrides.md) | ✅ | ✅ | ✅ | — |
+| [テクスチャ差し替え：セルマップ丸ごと](./texture-replacement.md) | ✅ | ✅ | ✅ | ✅ |
 | [パーツのトランスフォーム取得](./part-overrides.md#reading-a-parts-transform) | ✅ | ✅ | ✅ | — |
 | [モーションブレンディング：トラック・クロスフェード](./motion-blending.md) | ✅ | — | — | — |
 | [マスク — ステンシル](./masks.md) | ✅ | ✅ | ✅ | — |

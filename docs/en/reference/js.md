@@ -104,6 +104,17 @@ the calls.
 | `isPartHidden(part)` / `isPartSkinnedMesh(part)` / `partCount()` | `isPartSkinnedMesh` → `true`/`false`, or `null` for an unknown part |
 | `events()` | Plain objects tagged by `kind`: `'userData'` / `'signal'` / `'audio'` |
 
+**Texture replacement** — swap the whole texture a cell map binds (a costume or palette change).
+`pack` null selects the main pack. See [Texture replacement](../guide/texture-replacement.md).
+
+| | |
+|---|---|
+| `replaceableCellmapNames(pack?)` | The replaceable names: cell maps and TextureChange targets both |
+| `setCellmapTexture(pack, name, imageBitmap)` | Replace from a **premultiplied** `ImageBitmap` |
+| `setCellmapTextureFromBytes(pack, name, bytes): Promise` | …or from encoded bytes, decoded by the browser |
+| `restoreCellmapTexture(pack, name)` | Put the original atlas back |
+| `isCellmapOverridden(pack, name)` | Whether one is currently overridden |
+
 ## `<ss-player-webgpu>`
 
 Documented in full on [its own page](./web-component.md); the attributes, in short:

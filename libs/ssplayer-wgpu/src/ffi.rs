@@ -766,6 +766,118 @@ pub unsafe extern "C" fn ss_player_texture_at(handle: *mut SsPlayer, pack_name: 
     SS_OK
 }
 
+/// Replace the texture a cellmap binds, on one player, from straight-alpha RGBA8
+/// pixels — a costume change or dynamic expression, driven from the program
+/// rather than the authoring data (SDK `70_external_resources.md` §"Runtime
+/// texture replacement").
+///
+/// `pack_name` null selects the main pack. `cellmap_name` is a cellmap name or a
+/// TextureChange target — one of the strings `ss_player_cellmap_texture_name`
+/// lists. `rgba` is `width * height * 4` bytes and is premultiplied on the way to
+/// the GPU; **passing `rgba` null restores** the cellmap to its original atlas
+/// (`width` / `height` are then ignored). The swap is per player — another player
+/// of the same pack is unaffected — and reaches the GPU on the next scene update.
+///
+/// The replacement should match the original atlas's size and cell layout: the
+/// runtime's UVs stay in the original cellmap's pixel space, so a different
+/// resolution samples a different region.
+///
+/// # Safety
+/// `pack_name` must be null or NUL-terminated UTF-8; `cellmap_name` must be
+/// NUL-terminated UTF-8. When `rgba` is non-null it must point at
+/// `width * height * 4` readable bytes; it is not retained.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn ss_player_set_cellmap_texture(handle: *mut SsPlayer, pack_name: *const c_char, cellmap_name: *const c_char, rgba: *const u8, width: u32, height: u32) -> i32 {
+    let Some(player) = (unsafe { player(handle) }) else { return fail(SS_ERROR_INVALID_ARGUMENT, "player handle is null or destroyed") };
+    let pack = match unsafe { optional_c_str(pack_name) } {
+        Ok(pack) => pack,
+        Err(msg) => return fail(SS_ERROR_INVALID_ARGUMENT, msg),
+    };
+    let Some(name) = (unsafe { c_str(cellmap_name) }) else { return fail(SS_ERROR_INVALID_ARGUMENT, "cellmap_name is null or not UTF-8") };
+
+    if rgba.is_null() {
+        player.restore_cellmap_texture(pack, name);
+        return SS_OK;
+    }
+    let len = (width as usize) * (height as usize) * 4;
+    if len == 0 {
+        return fail(SS_ERROR_INVALID_ARGUMENT, "texture is empty");
+    }
+    match player.set_cellmap_texture(pack, name, unsafe { std::slice::from_raw_parts(rgba, len) }, width, height) {
+        Ok(()) => SS_OK,
+        Err(e) => fail(e.as_code(), format!("{name}: {e}")),
+    }
+}
+
+/// Whether a cellmap currently carries a runtime override on this player.
+/// `pack_name` null selects the main pack; a null/destroyed handle reads false.
+///
+/// # Safety
+/// `pack_name` must be null or NUL-terminated UTF-8; `cellmap_name` must be
+/// NUL-terminated UTF-8.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn ss_player_is_cellmap_overridden(handle: *mut SsPlayer, pack_name: *const c_char, cellmap_name: *const c_char) -> bool {
+    let Some(player) = (unsafe { player(handle) }) else { return false };
+    let Ok(pack) = (unsafe { optional_c_str(pack_name) }) else { return false };
+    let Some(name) = (unsafe { c_str(cellmap_name) }) else { return false };
+    player.is_cellmap_overridden(pack, name)
+}
+
+/// How many cellmap and TextureChange-target names a pack offers for replacement.
+/// `pack_name` null selects the main pack; 0 if nothing is loaded.
+///
+/// # Safety
+/// `pack_name` must be null or a NUL-terminated UTF-8 string.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn ss_player_cellmap_texture_count(handle: *mut SsPlayer, pack_name: *const c_char) -> u32 {
+    let Some(player) = (unsafe { player(handle) }) else {
+        set_last_error("player handle is null or destroyed");
+        return 0;
+    };
+    let pack = match unsafe { optional_c_str(pack_name) } {
+        Ok(pack) => pack,
+        Err(msg) => {
+            set_last_error(msg);
+            return 0;
+        }
+    };
+    player.replaceable_cellmap_names(pack).map(|names| names.len() as u32).unwrap_or(0)
+}
+
+/// The `index`-th replaceable name of a pack — what to pass
+/// `ss_player_set_cellmap_texture`. `pack_name` null selects the main pack.
+///
+/// The string is owned by the player and stays valid until the next call that
+/// borrows the same scratch (this function or `ss_player_animation_name`) on the
+/// same scene. Copy it if you need to keep it. Null if out of range.
+///
+/// # Safety
+/// `pack_name` must be null or a NUL-terminated UTF-8 string.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn ss_player_cellmap_texture_name(handle: *mut SsPlayer, pack_name: *const c_char, index: u32) -> *const c_char {
+    let Some((scene, id)) = (unsafe { scene_of(handle) }) else {
+        set_last_error("player handle is null or destroyed");
+        return std::ptr::null();
+    };
+    let pack = match unsafe { optional_c_str(pack_name) } {
+        Ok(pack) => pack,
+        Err(msg) => {
+            set_last_error(msg);
+            return std::ptr::null();
+        }
+    };
+    let Some(name) = scene.host.player_mut(id).and_then(|p| p.replaceable_cellmap_names(pack)).and_then(|names| names.into_iter().nth(index as usize)) else {
+        set_last_error(format!("no replaceable texture at index {index}"));
+        return std::ptr::null();
+    };
+    let Ok(name) = CString::new(name) else {
+        set_last_error("texture name contains an interior NUL");
+        return std::ptr::null();
+    };
+    scene.name_scratch = name;
+    scene.name_scratch.as_ptr()
+}
+
 /// How many things the player's last load could not get.
 ///
 /// `ss_player_load` reports an error only when the `.ssab` itself is unreadable —

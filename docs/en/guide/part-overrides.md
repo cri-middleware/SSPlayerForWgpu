@@ -78,6 +78,9 @@ Swap the image a part draws for another cell of any cell map the pack has:
 `cellmap_names()` and `cell_names(cellmap)` list what is available, so a UI can offer the choices
 rather than hard-coding them.
 
+To swap the whole *texture* a cell map binds — a costume or palette change across every part that
+uses it, rather than one part's cell — see [Texture replacement](./texture-replacement.md).
+
 ## Colour
 
 A colour override is an RGBA value, a **blend operation** and a **priority**. There are two shapes:

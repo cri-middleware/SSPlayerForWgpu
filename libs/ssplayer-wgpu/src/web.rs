@@ -1113,6 +1113,88 @@ impl SsPlayerWeb {
         })
     }
 
+    // --- Runtime texture replacement ---------------------------
+    //
+    // Swap the texture a cellmap binds, from the page rather than the authoring
+    // data — costume changes, dynamic expressions (SDK `70_external_resources.md`
+    // §"Runtime texture replacement"). Per player: the redirect lives in this
+    // player's atlas-key table, so another player of the same pack is unaffected,
+    // and an instance child (its own pack) does not inherit it.
+    //
+    // The replacement is registered in the page's one shared renderer under a
+    // private key and this player's cellmap is pointed at it — the same
+    // `set_texture`/`copyExternalImageToTexture` path `addTextureFromBitmap` uses,
+    // so device loss is the page's to repair (re-apply the override), exactly as
+    // for a page-supplied atlas.
+
+    /// Every replaceable name in a pack — cellmap names and TextureChange targets
+    /// both, the namespace [`SsPlayerWeb::set_cellmap_texture`] takes. `pack` null
+    /// selects the main pack.
+    #[wasm_bindgen(js_name = replaceableCellmapNames)]
+    pub fn replaceable_cellmap_names(&self, pack: Option<String>) -> Result<Vec<String>, JsValue> {
+        with_player!(self, |p| p.replaceable_cellmap_names(pack.as_deref()).unwrap_or_default())
+    }
+
+    /// Replace the texture a cellmap binds, from a premultiplied `ImageBitmap` the
+    /// page decoded (`createImageBitmap(blob, { premultiplyAlpha: 'premultiply' })`).
+    ///
+    /// `pack` null selects the main pack. `name` is one of
+    /// [`SsPlayerWeb::replaceable_cellmap_names`]. The replacement should match the
+    /// original atlas's size and cell layout — the runtime's UVs stay in the
+    /// original cellmap's pixel space. Rejects only when the player is unbound.
+    #[wasm_bindgen(js_name = setCellmapTexture)]
+    pub fn set_cellmap_texture(&self, pack: Option<String>, name: &str, bitmap: &web_sys::ImageBitmap) -> Result<(), JsValue> {
+        let ctx = &mut *self.ctx.borrow_mut();
+        let key = {
+            let entry = ctx.surfaces.get_mut(self.surface).ok_or_else(|| gone("surface"))?;
+            let player = entry.players.get_mut(self.id).ok_or_else(|| gone("player"))?;
+            player.override_cellmap_texture_key(pack.as_deref(), name).ok_or_else(|| JsValue::from_str("no pack is loaded"))?
+        };
+        ctx.set_texture_from_bitmap(key, bitmap);
+        Ok(())
+    }
+
+    /// [`SsPlayerWeb::set_cellmap_texture`] from **encoded image bytes** (PNG); the
+    /// library runs them through `createImageBitmap`. Decoded before anything
+    /// changes, so a bad image leaves the cellmap as it was.
+    #[wasm_bindgen(js_name = setCellmapTextureFromBytes)]
+    pub async fn set_cellmap_texture_from_bytes(&self, pack: Option<String>, name: String, bytes: Vec<u8>) -> Result<(), JsValue> {
+        // Decoded first — and off any RefCell borrow, since `createImageBitmap` is
+        // a yield point JS re-enters through.
+        let bitmap = decode_image(&bytes).await?;
+        let ctx = &mut *self.ctx.borrow_mut();
+        let key = {
+            let entry = ctx.surfaces.get_mut(self.surface).ok_or_else(|| gone("surface"))?;
+            let player = entry.players.get_mut(self.id).ok_or_else(|| gone("player"))?;
+            player.override_cellmap_texture_key(pack.as_deref(), &name).ok_or_else(|| JsValue::from_str("no pack is loaded"))?
+        };
+        ctx.set_texture_from_bitmap(key, &bitmap);
+        Ok(())
+    }
+
+    /// Undo a runtime override: point the cellmap back at its original atlas and
+    /// drop the replacement from the renderer. A no-op if it was not overridden.
+    #[wasm_bindgen(js_name = restoreCellmapTexture)]
+    pub fn restore_cellmap_texture(&self, pack: Option<String>, name: &str) -> Result<(), JsValue> {
+        let ctx = &mut *self.ctx.borrow_mut();
+        let freed = {
+            let entry = ctx.surfaces.get_mut(self.surface).ok_or_else(|| gone("surface"))?;
+            let player = entry.players.get_mut(self.id).ok_or_else(|| gone("player"))?;
+            player.restore_cellmap_texture(pack.as_deref(), name)
+        };
+        if let Some(key) = freed {
+            ctx.renderer.forget_texture(key);
+        }
+        Ok(())
+    }
+
+    /// Whether a cellmap currently carries a runtime override. `pack` null selects
+    /// the main pack.
+    #[wasm_bindgen(js_name = isCellmapOverridden)]
+    pub fn is_cellmap_overridden(&self, pack: Option<String>, name: &str) -> Result<bool, JsValue> {
+        with_player!(self, |p| p.is_cellmap_overridden(pack.as_deref(), name))
+    }
+
     /// Select an animation: builds the instance tree, and the only call here that
     /// allocates. Starting playback is [`SsPlayerWeb::play`], a separate call.
     #[wasm_bindgen(js_name = setAnimation)]
