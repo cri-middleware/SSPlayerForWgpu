@@ -20,6 +20,7 @@ use ssruntime::runtime::framedata::ss::runtime::{DrawBatchKind, root_as_frame_da
 use ssruntime::{Context, EffectSlot, InstanceSlot, TrackBlend};
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicU32, Ordering};
 
 /// The tint that changes nothing — white, in the `0xRRGGBB` order
 /// [`SSPlayer::set_tint`] takes. Deliberately not `pub`: cbindgen sweeps every
@@ -658,6 +659,62 @@ pub struct SSPlayer {
     /// Whether the *display* frame keeps its fraction (see
     /// [`SSPlayer::set_sub_frame_enabled`]). The playhead is an `f32` either way.
     sub_frame: bool,
+    /// This player's identity, drawn once from [`NEXT_PLAYER_ID`]. It exists for
+    /// one reason: a runtime texture override ([`SSPlayer::set_cellmap_texture`])
+    /// registers its replacement in the device-scoped renderer under a *private*
+    /// key, and two players overriding the same cellmap must not collide on it.
+    /// Mixing this id into that key is what keeps the override per player, the way
+    /// each sibling Player's own texture map is (SDK `70_external_resources.md`
+    /// §"Runtime texture replacement").
+    id: u32,
+    /// Active runtime texture overrides, per pack name. Each entry redirects one
+    /// cellmap's draws to a private renderer key; the map here is the source of
+    /// truth a reload re-applies against (`record_atlas_keys`), so the redirect
+    /// survives the atlas being re-registered under a new base key.
+    overrides: HashMap<String, Vec<CellmapOverride>>,
+    /// Override pixels a `set_cellmap_texture` accepted but has not handed to a
+    /// renderer yet — the same borrow-model deferral as [`pending_images`](Self::pending_images):
+    /// the player is lent no `Device`/`Queue` until `update`, so the upload waits
+    /// for the same flush. `(private key, straight-alpha RGBA8, width, height)`.
+    pending_overrides: Vec<(u32, Vec<u8>, u32, u32)>,
+    /// Private override keys a restore has retired, dropped from the renderer on
+    /// the next flush. Deferred for the same reason as the uploads.
+    pending_forgets: Vec<u32>,
+}
+
+/// One active runtime texture override: a cellmap redirected to a private
+/// renderer key. The `original` key is what a restore points back at — captured
+/// when the override is first set, and kept current across reloads by
+/// [`SSPlayer::record_atlas_keys`], since the atlas may re-register under a new
+/// base key while the override is live.
+#[derive(Clone, Copy, Debug)]
+struct CellmapOverride {
+    /// The cellmap's `name_hash` — what a draw batch and the runtime speak in.
+    cellmap_hash: u32,
+    /// The private renderer key the override texture is registered under, unique
+    /// to this player and this cellmap.
+    key: u32,
+    /// The base key a restore redirects back to (the shared atlas, untouched).
+    original: u32,
+}
+
+/// Hands each [`SSPlayer`] a distinct [`SSPlayer::id`]. Starts at 1 so 0 stays
+/// free as "no player".
+static NEXT_PLAYER_ID: AtomicU32 = AtomicU32::new(1);
+
+/// The private renderer key a runtime override registers its texture under.
+///
+/// Derived rather than allocated so re-overriding one cellmap reuses the key
+/// (overwriting the texture, not leaking a new entry), and mixed with the
+/// player's id so two players overriding the same cellmap stay independent. It is
+/// an fnv1a like every other renderer key, so it shares that keyspace's
+/// already-trusted assumption that distinct inputs do not collide.
+fn override_key(id: u32, cellmap_hash: u32) -> u32 {
+    let mut buf = [0u8; 20];
+    buf[..12].copy_from_slice(b"\0ssoverride\0");
+    buf[12..16].copy_from_slice(&id.to_le_bytes());
+    buf[16..20].copy_from_slice(&cellmap_hash.to_le_bytes());
+    fnv1a_bytes(&buf)
 }
 
 impl Default for SSPlayer {
@@ -696,6 +753,10 @@ impl SSPlayer {
             // where interpolating between authored frames is the point. The game
             // engines default it off.
             sub_frame: true,
+            id: NEXT_PLAYER_ID.fetch_add(1, Ordering::Relaxed),
+            overrides: HashMap::new(),
+            pending_overrides: Vec::new(),
+            pending_forgets: Vec::new(),
         }
     }
 
@@ -929,7 +990,33 @@ impl SSPlayer {
 
     /// Fold what a load or a flush learned into the pack's table, leaving the
     /// slots it says nothing about alone.
+    ///
+    /// A base key an atlas registers under is also the key a *restore* returns to,
+    /// so a cellmap that is actively overridden takes the newly-learned key as its
+    /// new `original` — and the override's redirect is re-applied on top, so a
+    /// reload never quietly cancels a live override (SDK
+    /// `70_external_resources.md` §"Runtime texture replacement"; the same
+    /// name-over-hash follow-through the reference Godot Player does on a resource
+    /// swap).
     fn record_atlas_keys(&mut self, pack: &str, entries: impl Iterator<Item = (u32, u32)>) {
+        let mut entries: Vec<(u32, u32)> = entries.collect();
+        if let Some(overrides) = self.overrides.get_mut(pack) {
+            for over in overrides.iter_mut() {
+                if let Some((_, key)) = entries.iter().find(|(hash, _)| *hash == over.cellmap_hash) {
+                    over.original = *key;
+                }
+            }
+            // The overrides win: their redirects go on last.
+            entries.extend(overrides.iter().map(|over| (over.cellmap_hash, over.key)));
+        }
+        self.apply_atlas_entries(pack, entries);
+    }
+
+    /// Set exactly these `cellmap_hash -> renderer key` entries on a pack's table
+    /// and push the result to the live tree. The mechanical core shared by
+    /// [`SSPlayer::record_atlas_keys`] and the override redirects, which speak the
+    /// same table but decide its contents differently.
+    fn apply_atlas_entries(&mut self, pack: &str, entries: Vec<(u32, u32)>) {
         let mut table = self.atlas_keys.get(pack).map(|keys| (**keys).clone()).unwrap_or_default();
         for (cellmap_hash, key) in entries {
             table.set(cellmap_hash, key);
@@ -2028,6 +2115,150 @@ impl SSPlayer {
         Some(self.packs.get(name)?.embedded_images())
     }
 
+    // --- Runtime texture replacement ---------------------------
+    //
+    // Swapping the texture a cellmap binds *from your program* — costume changes,
+    // dynamic expressions — rather than from the authoring data. The SDK defines
+    // it as a Player-side responsibility, distinct from the Override Layer API
+    // (`70_external_resources.md` §"Runtime texture replacement").
+    //
+    // Where the sibling Players keep a per-player texture map and overwrite an
+    // entry in it, this player's texture map is the device-scoped [`SSRenderer`]'s,
+    // shared so N players of one character upload it once. So an override here is
+    // a *redirect*: the replacement is registered under a private key (unique to
+    // this player and this cellmap), and the player's own atlas-key table — which
+    // every draw already resolves through — is pointed at it. That keeps the
+    // override per player without giving `SSPlayer` a wgpu-typed field, and makes
+    // a restore a redirect back to the shared atlas rather than a reload of it.
+    //
+    // An instance child plays from its own pack and so its own table, so a parent
+    // override does not reach it — the same "override is per player instance" the
+    // reference Godot Player has, for the same structural reason.
+
+    /// Every cellmap name and external-texture name in a pack, the namespace
+    /// [`SSPlayer::set_cellmap_texture`] takes. `None` selects the main pack;
+    /// `None` return means no such pack is bound.
+    ///
+    /// Both tables, deliberately: a `DrawBatch.texture_hash` is a cellmap's
+    /// `name_hash` for an ordinary part but a texture *file name*'s hash for one
+    /// under an authored TextureChange, so the file names a `TCHG` can select
+    /// (`common.png` and the like, including a cellmap's own image) are listed
+    /// too — all of them legitimately replaceable (SDK §"Texture resolution").
+    pub fn replaceable_cellmap_names(&self, pack_name: Option<&str>) -> Option<Vec<String>> {
+        let name = pack_name.or(self.main_pack.as_deref())?;
+        let pack = self.packs.get(name)?;
+        let bytes = pack.resource().data();
+        // SAFETY: the pack verified the buffer when it adopted it.
+        let ab = unsafe { root_as_ss_anime_binary_unchecked(bytes.as_slice()) };
+        let mut names: Vec<String> = Vec::new();
+        if let Some(cellmaps) = ab.cellmaps() {
+            names.extend(cellmaps.iter().map(|c| c.name().to_string()));
+        }
+        if let Some(externals) = ab.external_textures() {
+            for et in externals {
+                if let Some(tex) = et.name()
+                    && !names.iter().any(|held| held == tex)
+                {
+                    names.push(tex.to_string());
+                }
+            }
+        }
+        Some(names)
+    }
+
+    /// Replace the texture a cellmap binds, from straight-alpha RGBA8 pixels.
+    ///
+    /// `name` is a cellmap name (no `.ssce`) or a texture file name — one of the
+    /// strings [`SSPlayer::replaceable_cellmap_names`] lists; it is hashed here.
+    /// `None` selects the main pack. `rgba` is `width * height * 4` bytes and is
+    /// premultiplied on the way to the GPU, exactly like a loaded atlas.
+    ///
+    /// The replacement should share the original atlas's size and cell layout: the
+    /// runtime's UVs stay in the *original* cellmap's pixel space, so a different
+    /// resolution samples a different region (SDK §"The size of the replacement
+    /// texture"). Pass a part under a TextureChange its authored file name to
+    /// affect the frames the change is active on — the cellmap name will not,
+    /// because those frames bind through a different hash.
+    ///
+    /// The pixels reach the GPU on the next `update` (the borrow model lends no
+    /// device before then), so the swap is visible from the following frame.
+    pub fn set_cellmap_texture(&mut self, pack_name: Option<&str>, name: &str, rgba: &[u8], width: u32, height: u32) -> Result<(), SSRuntimeError> {
+        if width == 0 || height == 0 || rgba.len() != (width as usize) * (height as usize) * 4 {
+            return Err(SSRuntimeError::InvalidParameter);
+        }
+        let key = self.override_cellmap_texture_key(pack_name, name).ok_or(SSRuntimeError::NotLoaded)?;
+        // Last write wins, and never leaves a stale copy queued for one key.
+        self.pending_overrides.retain(|(queued, ..)| *queued != key);
+        self.pending_overrides.push((key, rgba.to_vec(), width, height));
+        Ok(())
+    }
+
+    /// Redirect a cellmap to its private override key and return that key, without
+    /// supplying any pixels — for a host that owns the GPU texture itself (an
+    /// engine adapter, or the web face registering an `ImageBitmap`). The caller
+    /// registers a texture under the returned key against the [`SSRenderer`]; every
+    /// draw of this player's cellmap then resolves to it.
+    ///
+    /// `None` on an unbound player (no pack to attach the override to). The lower
+    /// half of [`SSPlayer::set_cellmap_texture`], and the seam
+    /// `SSPlayer::restore_cellmap_texture` reverses.
+    pub fn override_cellmap_texture_key(&mut self, pack_name: Option<&str>, name: &str) -> Option<u32> {
+        let pack = self.resolve_pack_name(pack_name)?;
+        let cellmap_hash = ssruntime::fnv1a_hash_str(name);
+        let key = override_key(self.id, cellmap_hash);
+        // The key a restore returns to is whatever the cellmap resolves to *now*,
+        // before this redirect — captured only when the override is first set, so
+        // re-overriding does not overwrite it with the override's own key.
+        let original = self.atlas_keys.get(&pack).map(|keys| keys.resolve(cellmap_hash)).unwrap_or(cellmap_hash);
+        let entry = self.overrides.entry(pack.clone()).or_default();
+        if !entry.iter().any(|over| over.cellmap_hash == cellmap_hash) {
+            entry.push(CellmapOverride { cellmap_hash, key, original });
+        }
+        // A pending drop of this key is now stale — the override is live again.
+        self.pending_forgets.retain(|queued| *queued != key);
+        self.apply_atlas_entries(&pack, vec![(cellmap_hash, key)]);
+        Some(key)
+    }
+
+    /// Undo a runtime override: point the cellmap back at the shared atlas and
+    /// retire the private key. Returns the retired key (so a host that registered
+    /// its own texture under it can drop that too), or `None` if the cellmap was
+    /// not overridden. `None` pack selects the main pack.
+    ///
+    /// The original atlas was never touched, so there is nothing to reload — the
+    /// redirect back is the whole of it. The private key's texture is dropped from
+    /// the renderer on the next `update`.
+    pub fn restore_cellmap_texture(&mut self, pack_name: Option<&str>, name: &str) -> Option<u32> {
+        let pack = self.resolve_pack_name(pack_name)?;
+        let cellmap_hash = ssruntime::fnv1a_hash_str(name);
+        let (over, now_empty) = {
+            let overrides = self.overrides.get_mut(&pack)?;
+            let pos = overrides.iter().position(|over| over.cellmap_hash == cellmap_hash)?;
+            (overrides.remove(pos), overrides.is_empty())
+        };
+        if now_empty {
+            self.overrides.remove(&pack);
+        }
+        // Drop any queued upload for the key; schedule the renderer entry's drop.
+        self.pending_overrides.retain(|(queued, ..)| *queued != over.key);
+        self.pending_forgets.push(over.key);
+        self.apply_atlas_entries(&pack, vec![(cellmap_hash, over.original)]);
+        Some(over.key)
+    }
+
+    /// Whether a cellmap currently carries a runtime override. `None` pack selects
+    /// the main pack.
+    pub fn is_cellmap_overridden(&self, pack_name: Option<&str>, name: &str) -> bool {
+        let Some(pack) = self.resolve_pack_name(pack_name) else { return false };
+        let cellmap_hash = ssruntime::fnv1a_hash_str(name);
+        self.overrides.get(&pack).is_some_and(|overrides| overrides.iter().any(|over| over.cellmap_hash == cellmap_hash))
+    }
+
+    /// The pack a texture-override call names, or the main pack for `None`.
+    fn resolve_pack_name(&self, pack_name: Option<&str>) -> Option<String> {
+        pack_name.map(str::to_string).or_else(|| self.main_pack.clone())
+    }
+
     /// Canvas size of the currently playing animation.
     pub fn canvas_size(&self) -> Option<(f32, f32)> {
         let name = self.current_animation.as_ref()?;
@@ -2048,6 +2279,18 @@ impl SSPlayer {
     /// image for a hash keeps it. A host that wants the embedded pixels instead
     /// calls [`SSRenderer::forget_texture`] first.
     pub(crate) fn flush_textures(&mut self, renderer: &mut SSRenderer, device: &wgpu::Device, queue: &wgpu::Queue) {
+        // Runtime overrides first, and unconditionally: they are host-supplied
+        // pixels the renderer must retain (nothing can reproduce them after a
+        // device loss), and a restore's drop rides the same flush. A key is in at
+        // most one of the two lists — an override clears its pending drop, a
+        // restore clears its pending upload.
+        for (key, rgba, width, height) in std::mem::take(&mut self.pending_overrides) {
+            renderer.upload_texture_owned(device, queue, key, rgba, (width, height), Retention::Retain);
+        }
+        for key in std::mem::take(&mut self.pending_forgets) {
+            renderer.forget_texture(key);
+        }
+
         let pending = std::mem::take(&mut self.pending_images);
         let mut names = std::mem::take(&mut self.packs_awaiting_textures);
         if pending.is_empty() && names.is_empty() {

@@ -104,6 +104,17 @@ import { defineSsPlayerWebGPUElement } from '@spritestudio/ssplayer-wgpu/element
 | `isPartHidden(part)` / `isPartSkinnedMesh(part)` / `partCount()` | `isPartSkinnedMesh` は `true`/`false`、不明なパーツなら `null` |
 | `events()` | `kind` で分類されたプレーンオブジェクト：`'userData'` / `'signal'` / `'audio'` |
 
+**テクスチャ差し替え** — セルマップがバインドするテクスチャ丸ごとを差し替えます（衣装・パレット
+変更）。`pack` に null でメインパック。[テクスチャ差し替え](../guide/texture-replacement.md)を参照。
+
+| | |
+|---|---|
+| `replaceableCellmapNames(pack?)` | 差し替え可能な名前：セルマップと TextureChange の差し先の両方 |
+| `setCellmapTexture(pack, name, imageBitmap)` | **premultiplied** な `ImageBitmap` から差し替え |
+| `setCellmapTextureFromBytes(pack, name, bytes): Promise` | …またはエンコード済みバイト列から（ブラウザがデコード） |
+| `restoreCellmapTexture(pack, name)` | 元のアトラスに戻す |
+| `isCellmapOverridden(pack, name)` | 現在オーバーライドされているか |
+
 ## `<ss-player-webgpu>`
 
 詳細は[専用ページ](./web-component.md)にあります。属性だけ再掲すると：

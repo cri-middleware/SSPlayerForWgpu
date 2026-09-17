@@ -5,13 +5,19 @@
 //! never own the `Device` / `Queue` / target, Bevy does, and lends them per
 //! frame exactly as the winit and C++ hosts do.
 
+use bevy::asset::AssetId;
 use bevy::prelude::*;
 use bevy::render::camera::ExtractedCamera;
+use bevy::render::render_asset::RenderAssets;
 use bevy::render::render_resource::RenderPassDescriptor;
 use bevy::render::renderer::{RenderContext, RenderDevice, RenderQueue, ViewQuery};
 use bevy::render::sync_world::MainEntity;
+use bevy::render::texture::GpuImage;
 use bevy::render::view::ViewTarget;
-use ssplayer_wgpu::{MaskBackend, SSPlayer, SSRenderer, SSScene, SceneConfig};
+// `AlphaMode` is aliased: `bevy::prelude` has one of its own, and a Bevy image is
+// straight-alpha, which is the form the player must be told about.
+use ssplayer_wgpu::{AlphaMode as SsAlphaMode, MaskBackend, SSPlayer, SSRenderer, SSScene, SceneConfig};
+use std::collections::{HashMap, HashSet};
 
 use crate::extract::ExtractedPlayers;
 use crate::feedback::{FeedbackChannel, PlaybackFeedback};
@@ -36,6 +42,12 @@ struct PlayerSlot {
     started: bool,
     playing: bool,
     restart: u32,
+    /// Runtime texture overrides currently bound, cellmap name -> (the image
+    /// applied, the private renderer key it went in under). Diffed against the
+    /// character's `SsCellmapTextures` each frame: a new or changed image is
+    /// registered, a removed one is restored, and the whole set is dropped when
+    /// the pack changes (its cellmaps do).
+    applied_overrides: HashMap<String, (AssetId<Image>, u32)>,
 }
 
 /// Everything the render world owns on this crate's behalf.
@@ -81,7 +93,7 @@ pub(crate) fn init_state(mut commands: Commands, device: Res<RenderDevice>) {
 /// Runs before anything touches the GPU: loading reads files and builds the
 /// tree, and the borrow model lends no device until `update`, so what a load
 /// reads waits in the player until the first frame that draws it.
-pub(crate) fn sync_players(mut state: Option<ResMut<SsRenderState>>, extracted: Res<ExtractedPlayers>) {
+pub(crate) fn sync_players(mut state: Option<ResMut<SsRenderState>>, extracted: Res<ExtractedPlayers>, device: Res<RenderDevice>, images: Res<RenderAssets<GpuImage>>) {
     let Some(state) = state.as_deref_mut() else {
         return;
     };
@@ -95,24 +107,31 @@ pub(crate) fn sync_players(mut state: Option<ResMut<SsRenderState>>, extracted: 
     // frame's whole truth, so anything absent from it is gone.
     state.slots.retain(|slot| extracted.players.iter().any(|player| player.entity == slot.entity));
 
+    // Split the borrow: the override reconcile needs the device-scoped renderer
+    // and one slot at once, which are disjoint fields.
+    let SsRenderState { renderer, slots, .. } = state;
+    let device = device.wgpu_device();
+
     for extracted_player in &extracted.players {
-        let position = state.slots.iter().position(|slot| slot.entity == extracted_player.entity);
+        let position = slots.iter().position(|slot| slot.entity == extracted_player.entity);
         let index = match position {
             Some(index) => index,
             None => {
-                state.slots.push(PlayerSlot { entity: extracted_player.entity, player: SSPlayer::new(), src: String::new(), animation: String::new(), started: false, playing: false, restart: 0 });
-                state.slots.len() - 1
+                slots.push(PlayerSlot { entity: extracted_player.entity, player: SSPlayer::new(), src: String::new(), animation: String::new(), started: false, playing: false, restart: 0, applied_overrides: HashMap::new() });
+                slots.len() - 1
             }
         };
-        let slot = &mut state.slots[index];
+        let slot = &mut slots[index];
 
         // The two allocating steps, each guarded by what it was last given.
+        let mut pack_changed = false;
         if slot.src != extracted_player.src {
             slot.src.clone_from(&extracted_player.src);
             slot.animation.clear();
             // A different pack means a different tree; transport starts over.
             slot.started = false;
             slot.playing = false;
+            pack_changed = true;
             if let Err(err) = slot.player.load(&extracted_player.src) {
                 error!("ssplayer-bevy: could not load {:?}: {err:?}", extracted_player.src);
                 continue;
@@ -172,6 +191,51 @@ pub(crate) fn sync_players(mut state: Option<ResMut<SsRenderState>>, extracted: 
             }
         }
         slot.playing = want;
+
+        reconcile_overrides(slot, renderer, device, &images, &extracted_player.overrides, pack_changed);
+    }
+}
+
+/// Bring one character's bound texture overrides in line with what it asks for
+/// this frame.
+///
+/// The character names its overrides by cellmap name in [`crate::SsCellmapTextures`];
+/// this registers each new or changed image in the device-scoped renderer under
+/// the player's own private key, restores the ones it dropped, and — when the
+/// pack changed under it — clears the lot, because the new pack's cellmaps are not
+/// the old one's. An image Bevy has not finished preparing is left for a later
+/// frame, so binding a freshly-loaded handle is safe.
+fn reconcile_overrides(slot: &mut PlayerSlot, renderer: &mut SSRenderer, device: &wgpu::Device, images: &RenderAssets<GpuImage>, wanted: &[(String, Handle<Image>)], pack_changed: bool) {
+    if pack_changed && !slot.applied_overrides.is_empty() {
+        for (name, (_, key)) in std::mem::take(&mut slot.applied_overrides) {
+            slot.player.restore_cellmap_texture(None, &name);
+            renderer.forget_texture(key);
+        }
+    }
+
+    // Apply or refresh each wanted override whose image is ready. A straight-alpha
+    // Bevy image, borrowed through `set_texture` — so device loss is Bevy's to
+    // repair (it re-prepares the image and this re-binds it next frame).
+    for (name, handle) in wanted {
+        let id = handle.id();
+        if slot.applied_overrides.get(name).is_some_and(|(applied, _)| *applied == id) {
+            continue;
+        }
+        let Some(gpu) = images.get(id) else { continue };
+        let Some(key) = slot.player.override_cellmap_texture_key(None, name) else { continue };
+        let size = gpu.texture.size();
+        renderer.set_texture(device, key, &gpu.texture_view, (size.width, size.height), SsAlphaMode::Straight);
+        slot.applied_overrides.insert(name.clone(), (id, key));
+    }
+
+    // Restore any override the character dropped from its component.
+    let wanted_names: HashSet<&str> = wanted.iter().map(|(name, _)| name.as_str()).collect();
+    let stale: Vec<String> = slot.applied_overrides.keys().filter(|name| !wanted_names.contains(name.as_str())).cloned().collect();
+    for name in stale {
+        if let Some((_, key)) = slot.applied_overrides.remove(&name) {
+            slot.player.restore_cellmap_texture(None, &name);
+            renderer.forget_texture(key);
+        }
     }
 }
 

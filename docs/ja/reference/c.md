@@ -134,6 +134,20 @@ title: C API リファレンス
 
 `blend_op` と `priority` の意味は[パーツオーバーライド](../guide/part-overrides.md)を参照。
 
+## ランタイムテクスチャ差し替え
+
+セルマップがバインドするテクスチャ丸ごとを、プログラムから差し替えます（衣装・パレット変更）。
+`pack` に null でメインパックが選ばれます。
+
+| | |
+|---|---|
+| `ss_player_cellmap_texture_count(player, pack)` / `ss_player_cellmap_texture_name(player, pack, i)` | 差し替え可能な名前：セルマップと TextureChange の差し先の両方 |
+| `ss_player_set_cellmap_texture(player, pack, name, rgba, w, h)` | straight-alpha RGBA8 で差し替え。**`rgba` に NULL で元に戻す** |
+| `ss_player_is_cellmap_overridden(player, pack, name)` | 現在オーバーライドされているか |
+
+差し替えテクスチャは元アトラスとサイズ・セルレイアウトを合わせてください。次のシーン更新で
+GPU に届きます。[テクスチャ差し替え](../guide/texture-replacement.md)を参照。
+
 ## この Face に無いもの
 
 **モーションブレンディング**（トラックスタック）は Rust だけです。自分が持つレンダーパスへの描画も同様で、

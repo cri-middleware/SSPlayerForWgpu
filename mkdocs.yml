@@ -69,6 +69,7 @@ nav:
       - Loading and assets: guide/loading.md
       - Events and user data: guide/events.md
       - Part overrides: guide/part-overrides.md
+      - Texture replacement: guide/texture-replacement.md
       - Motion blending: guide/motion-blending.md
       - Masks: guide/masks.md
       - Device loss: guide/device-loss.md

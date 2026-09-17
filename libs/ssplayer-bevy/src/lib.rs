@@ -51,7 +51,7 @@ mod extract;
 mod feedback;
 mod render;
 
-pub use components::{SsPlayback, SsPlaybackState, SsPlayer, SsTransform};
+pub use components::{SsCellmapTextures, SsPlayback, SsPlaybackState, SsPlayer, SsTransform};
 pub use feedback::{SsEventMessage, SsFinished, SsLooped};
 // The event payloads a host matches on, re-exported so it need not also depend
 // on `ssplayer-wgpu` just to name them.

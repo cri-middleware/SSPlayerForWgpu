@@ -58,6 +58,7 @@ nav:
       - ロードとアセット: guide/loading.md
       - イベントとユーザーデータ: guide/events.md
       - パーツオーバーライド: guide/part-overrides.md
+      - テクスチャ差し替え: guide/texture-replacement.md
       - モーションブレンディング: guide/motion-blending.md
       - マスク: guide/masks.md
       - デバイスロスト: guide/device-loss.md

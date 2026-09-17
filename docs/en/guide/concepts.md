@@ -106,6 +106,7 @@ for what is planned.
 | [Loop count, sections, direction, sub-frame](./playback.md) | ✅ | ✅ | ✅ | — |
 | [Events: user data, signal, audio](./events.md) | ✅ | ✅ | ✅ | ✅ |
 | [Part overrides: visibility, cell, colour](./part-overrides.md) | ✅ | ✅ | ✅ | — |
+| [Texture replacement: a whole cell map](./texture-replacement.md) | ✅ | ✅ | ✅ | ✅ |
 | [Part transform lookup](./part-overrides.md#reading-a-parts-transform) | ✅ | ✅ | ✅ | — |
 | [Motion blending: tracks, crossfade](./motion-blending.md) | ✅ | — | — | — |
 | [Masks — stencil](./masks.md) | ✅ | ✅ | ✅ | — |

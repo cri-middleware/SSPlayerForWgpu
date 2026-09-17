@@ -136,6 +136,20 @@ Every override has a `_by_index` twin that skips the name lookup; resolve the in
 
 See [Part overrides](../guide/part-overrides.md) for what `blend_op` and `priority` mean.
 
+## Runtime texture replacement
+
+Swap the whole texture a cell map binds — a costume or palette change — from your program. `pack`
+null selects the main pack.
+
+| | |
+|---|---|
+| `ss_player_cellmap_texture_count(player, pack)` / `ss_player_cellmap_texture_name(player, pack, i)` | The replaceable names: cell maps and TextureChange targets both |
+| `ss_player_set_cellmap_texture(player, pack, name, rgba, w, h)` | Replace with straight-alpha RGBA8; **`rgba` NULL restores** the original |
+| `ss_player_is_cellmap_overridden(player, pack, name)` | Whether one is currently overridden |
+
+The replacement should match the original atlas's size and cell layout, and reaches the GPU on the
+next scene update. See [Texture replacement](../guide/texture-replacement.md).
+
 ## Not on this face
 
 **Motion blending** (the track stack) is Rust-only, and so is drawing into a render pass you own —
