@@ -25,6 +25,7 @@
 //! alive until [`ss_scene_destroy`].
 
 use crate::events::{SignalValue, SsEvent};
+use crate::fit::{Align, Fit, Placement, Rect};
 use crate::host::{NativeHost, NativeHostConfig, PlayerId};
 use crate::player::{BlendOp, MissingKind, OverridePriority, PlaybackDirection, PlaybackStyle, SSPlayer};
 use std::cell::RefCell;
@@ -273,6 +274,81 @@ pub struct SsSignalParamData {
 pub const SS_MISSING_TEXTURE: u32 = 0;
 /// An animation pack that did not load. The instance parts playing it do not appear.
 pub const SS_MISSING_PACK: u32 = 1;
+
+/// Scale the content box until it fits entirely inside the view.
+pub const SS_FIT_CONTAIN: u32 = 0;
+/// Scale until the content box covers the view. The spill is not clipped — the
+/// player has no scissor of its own.
+pub const SS_FIT_COVER: u32 = 1;
+/// No fit: scale 1, centred, and `scale` / `offset_x` / `offset_y` are the whole
+/// placement.
+pub const SS_FIT_NONE: u32 = 2;
+
+/// Which point of the content box lands on the matching point of the view. On
+/// the vertical axis, "top" is the top of the **screen**.
+pub const SS_ALIGN_CENTER: u32 = 0;
+pub const SS_ALIGN_TOP: u32 = 1;
+pub const SS_ALIGN_BOTTOM: u32 = 2;
+pub const SS_ALIGN_LEFT: u32 = 3;
+pub const SS_ALIGN_RIGHT: u32 = 4;
+pub const SS_ALIGN_TOP_LEFT: u32 = 5;
+pub const SS_ALIGN_TOP_RIGHT: u32 = 6;
+pub const SS_ALIGN_BOTTOM_LEFT: u32 = 7;
+pub const SS_ALIGN_BOTTOM_RIGHT: u32 = 8;
+
+/// A box in player-local units — the space `ss_player_part_transform` reports
+/// in, with `y` downward.
+#[repr(C)]
+#[derive(Clone, Copy, Default)]
+pub struct SsRect {
+    pub x: f32,
+    /// Low edge on y, which is the **top** edge on screen.
+    pub y: f32,
+    pub width: f32,
+    pub height: f32,
+}
+
+/// Everything `ss_player_fit_into` needs.
+///
+/// **Zero-initialising this is not the default placement** — it would ask for
+/// scale 0, which draws nothing. Call `ss_placement_default` first and change
+/// what you mean to change.
+#[repr(C)]
+#[derive(Clone, Copy)]
+pub struct SsPlacement {
+    /// One of the `SS_FIT_*` constants.
+    pub fit: u32,
+    /// One of the `SS_ALIGN_*` constants.
+    pub align: u32,
+    /// The box to fit. Read only when `has_frame` is true; otherwise the
+    /// animation's authored canvas is used (`ss_player_canvas_rect`).
+    pub frame: SsRect,
+    pub has_frame: bool,
+    /// Pixels from the aligned position, applied **after** the fit.
+    pub offset_x: f32,
+    /// See `offset_x`.
+    pub offset_y: f32,
+    /// A multiplier **on top of** the fit's scale, not a replacement for it.
+    pub scale: f32,
+    /// Mirror horizontally. The alignment follows the flip.
+    pub flip_x: bool,
+    /// Mirror vertically.
+    pub flip_y: bool,
+    /// Passed through to the placement untouched; rotation has no part in the
+    /// fit itself.
+    pub rotation: f32,
+}
+
+/// What `ss_player_fit_into` wrote, in `ss_player_set_transform` terms: pixels
+/// from the **view centre**, `y` downward.
+#[repr(C)]
+#[derive(Clone, Copy, Default)]
+pub struct SsPlaced {
+    pub x: f32,
+    pub y: f32,
+    pub scale_x: f32,
+    pub scale_y: f32,
+}
 
 /// Opaque scene handle: one window's [`NativeHost`], the player handles it has
 /// issued, and the buffer backing the string `ss_player_animation_name` hands
@@ -1921,6 +1997,132 @@ pub unsafe extern "C" fn ss_player_animation_name(handle: *mut SsPlayer, index: 
 pub unsafe extern "C" fn ss_player_set_transform(handle: *mut SsPlayer, x: f32, y: f32, scale_x: f32, scale_y: f32, rotation: f32) {
     if let Some(player) = unsafe { player(handle) } {
         player.set_transform(x, y, scale_x, scale_y, rotation);
+    }
+}
+
+/// Fill `out` with the default placement: contain, centred, unscaled,
+/// unflipped, unrotated, and the animation's own canvas as the box.
+///
+/// Start every `SsPlacement` here. A zeroed struct asks for `scale = 0`, which
+/// is a placement that draws nothing.
+///
+/// # Safety
+/// `out` must point at a writable `SsPlacement`.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn ss_placement_default(out: *mut SsPlacement) -> i32 {
+    if out.is_null() {
+        return SS_ERROR_INVALID_ARGUMENT;
+    }
+    let default = Placement::default();
+    unsafe {
+        out.write(SsPlacement {
+            fit: SS_FIT_CONTAIN,
+            align: SS_ALIGN_CENTER,
+            frame: SsRect::default(),
+            has_frame: false,
+            offset_x: default.offset.0,
+            offset_y: default.offset.1,
+            scale: default.scale,
+            flip_x: default.flip_x,
+            flip_y: default.flip_y,
+            rotation: default.rotation,
+        })
+    };
+    SS_OK
+}
+
+/// Write the authored canvas of the animation now playing into `out`, as a box
+/// in player-local units — what `ss_player_fit_into` fits when `has_frame` is
+/// false.
+///
+/// Returns `SS_OK`, or `SS_ERROR_INVALID_ARGUMENT` when the handle or `out` is
+/// null or no animation is set up — `out` is untouched in that case.
+///
+/// The box is the frame the artist composed in, placed against the origin by the
+/// animation's pivot, not a measured bounding box: it costs nothing to read and
+/// does not change when the animation does.
+///
+/// # Safety
+/// `handle` must be a live handle or null; `out` must point at a writable
+/// `SsRect`.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn ss_player_canvas_rect(handle: *mut SsPlayer, out: *mut SsRect) -> i32 {
+    if out.is_null() {
+        return SS_ERROR_INVALID_ARGUMENT;
+    }
+    let Some(player) = (unsafe { player(handle) }) else {
+        return SS_ERROR_INVALID_ARGUMENT;
+    };
+    let Some(rect) = player.canvas_rect() else {
+        return SS_ERROR_INVALID_ARGUMENT;
+    };
+    unsafe { out.write(SsRect { x: rect.x, y: rect.y, width: rect.width, height: rect.height }) };
+    SS_OK
+}
+
+/// Fit the animation into a `width` x `height` box and place it there, as
+/// `ss_player_set_transform` would.
+///
+/// `out` may be null; when it is not, it receives the transform that was
+/// written, so a host can read back the scale it got.
+///
+/// Returns `SS_OK`, or `SS_ERROR_INVALID_ARGUMENT` when the handle or
+/// `placement` is null or `fit` / `align` is not one of the constants. A
+/// collapsed box and an animation that is not set up are **not** errors: both
+/// place the player centred and unscaled, which is what a host laying out a box
+/// that has not been measured yet should get.
+///
+/// The size is in pixels of the render target, so call this again when that box
+/// changes — on a resize, and after `ss_player_set_animation` when the canvas
+/// differs.
+///
+/// # Safety
+/// `handle` must be a live handle or null; `placement` must point at a readable
+/// `SsPlacement`; `out` must be null or point at a writable `SsPlaced`.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn ss_player_fit_into(handle: *mut SsPlayer, width: f32, height: f32, placement: *const SsPlacement, out: *mut SsPlaced) -> i32 {
+    if placement.is_null() {
+        return SS_ERROR_INVALID_ARGUMENT;
+    }
+    let desc = unsafe { *placement };
+    let (Some(fit), Some(align)) = (fit_from_wire(desc.fit), align_from_wire(desc.align)) else {
+        return SS_ERROR_INVALID_ARGUMENT;
+    };
+    let Some(player) = (unsafe { player(handle) }) else {
+        return SS_ERROR_INVALID_ARGUMENT;
+    };
+    let frame = desc.has_frame.then_some(Rect { x: desc.frame.x, y: desc.frame.y, width: desc.frame.width, height: desc.frame.height });
+    let placed = player.fit_into(width, height, &Placement { fit, align, frame, offset: (desc.offset_x, desc.offset_y), scale: desc.scale, flip_x: desc.flip_x, flip_y: desc.flip_y, rotation: desc.rotation });
+    if !out.is_null() {
+        unsafe { out.write(SsPlaced { x: placed.x, y: placed.y, scale_x: placed.scale_x, scale_y: placed.scale_y }) };
+    }
+    SS_OK
+}
+
+/// `SS_FIT_*` to the Rust enum. `None` for anything else, which the caller turns
+/// into `SS_ERROR_INVALID_ARGUMENT` rather than guessing at a default.
+fn fit_from_wire(fit: u32) -> Option<Fit> {
+    match fit {
+        SS_FIT_CONTAIN => Some(Fit::Contain),
+        SS_FIT_COVER => Some(Fit::Cover),
+        SS_FIT_NONE => Some(Fit::None),
+        _ => None,
+    }
+}
+
+/// `SS_ALIGN_*` to the Rust enum. See [`fit_from_wire`] on the `None`.
+fn align_from_wire(align: u32) -> Option<Align> {
+    match align {
+        SS_ALIGN_CENTER => Some(Align::Center),
+        SS_ALIGN_TOP => Some(Align::Top),
+        SS_ALIGN_BOTTOM => Some(Align::Bottom),
+        SS_ALIGN_LEFT => Some(Align::Left),
+        SS_ALIGN_RIGHT => Some(Align::Right),
+        SS_ALIGN_TOP_LEFT => Some(Align::TopLeft),
+        SS_ALIGN_TOP_RIGHT => Some(Align::TopRight),
+        SS_ALIGN_BOTTOM_LEFT => Some(Align::BottomLeft),
+        SS_ALIGN_BOTTOM_RIGHT => Some(Align::BottomRight),
+        _ => None,
     }
 }
 

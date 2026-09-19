@@ -185,32 +185,32 @@ of them as missing while drawing perfectly. Filter it against what was actually 
 and then it is worth showing — a pack whose atlas really did not arrive should name it
 rather than draw blank.
 
-## Blocked on fit/align
+## Fitting the canvas into the element
 
-The pack's canvas and the `<canvas>` element are different sizes and nothing maps between
-them yet, so the drawing is cropped: Ringo is 800×600 rendered into a 512×512 element.
-**The preview cannot ship without fit/align.**
+The pack's canvas and the `<canvas>` element are different sizes — Ringo is 800×600 in a
+512×512 element — so the preview fits rather than crops:
 
-It is a port rather than a design — the vocabulary is settled and the reference
-implementation lives in a repository this one cannot see, so the contract is written out
-in [`FIT_ALIGN.md`](./FIT_ALIGN.md).
+```js
+player.fitInto(canvas.width, canvas.height);
+```
 
-What the preview asks of it: **supply the authored canvas as the box** (`canvas_size`
-plus the pivot) rather than a measured one. It costs no measurement, it does not resize
-when the picker changes animation, and it shows the character standing in the frame it
-was composed in — which is what makes the preview comparable to an engine's canvas.
-`contain` and `center` are the defaults and are what the preview wants.
+The defaults are what it wants: `contain`, `center`, and the **authored canvas** as the
+box, which is what the player fits when no `frame` is supplied. That is the choice worth
+keeping — it costs no measurement, it does not resize when the picker changes animation,
+and it shows the character standing in the frame it was composed in, which is what makes
+the preview comparable to an engine's canvas.
+
+Call it again when the element resizes and after the picker changes animation. See
+[the guide](./docs/en/guide/placement.md); the contract it ports is
+[`FIT_ALIGN.md`](./FIT_ALIGN.md).
 
 ## Work order
 
-1. **`fit`/`align` in `libs/ssplayer-wgpu`** — [`FIT_ALIGN.md`](./FIT_ALIGN.md). Everything
-   else here waits on it, and it is worth more than the preview: it is the portable half
-   of *UI integration* in the roadmap, so every face and the C ABI inherit it.
-2. **The shell, built by `scripts/build.sh`** — a `--target no-modules` wasm inlined into
+1. **The shell, built by `scripts/build.sh`** — a `--target no-modules` wasm inlined into
    one page, the `<script id="ssab">` hole, the drop receiver, the animation picker, the
    version stamp. Finishing this is what unblocks every host with no editor, because they
    need nothing else.
-3. **The generator** — fills the hole from a pack and an optional animation name. The
+2. **The generator** — fills the hole from a pack and an optional animation name. The
    thing a host calls; also the CLI, once there is somewhere to publish it from.
 
 Confirm on the first drop that a dropped `File` reads through `FileReader` at `file://`,

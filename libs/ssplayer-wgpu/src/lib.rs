@@ -26,6 +26,9 @@ mod events;
 /// generated `ssplayer_wgpu.h`. The work it delegates to lives in [`host`].
 #[cfg(feature = "ffi")]
 pub mod ffi;
+/// `fit` / `align` — placing an animation inside a box the host laid out. Pure
+/// arithmetic, so every face inherits it.
+pub mod fit;
 mod frame;
 /// A window-owning wgpu host (`ffi` feature), used by [`ffi`] and available to
 /// Rust callers that have a raw window handle rather than a winit `Window`.
@@ -44,6 +47,7 @@ mod scene;
 mod web;
 
 pub use events::{AudioEvent, SignalEvent, SignalParam, SignalValue, SsEvent, UserDataEvent};
+pub use fit::{Align, Fit, Placed, Placement, Rect};
 pub use frame::FrameView;
 pub use mask::{GeomKind, MaskOp, MaskWriter, MaskWriters, PartMaskFlags, StencilTest, plan_writers};
 pub use metrics::SceneStats;

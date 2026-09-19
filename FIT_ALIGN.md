@@ -71,7 +71,7 @@ at the view's centre — rather than dividing by zero. `fit: 'none'` takes the s
 `ROADMAP.md`'s *UI integration* section sets the split: the portable half belongs in the
 player, where every host and the C ABI reach it, and only the host-shaped half belongs in
 an adapter. `fit`/`align` is entirely the portable half — it is arithmetic over a box and
-a target size, with no GPU work in it — so it goes in `libs/ssplayer-wgpu` and every face
+a target size, with no GPU work in it — so it lives in `libs/ssplayer-wgpu` and every face
 inherits it.
 
 **The seam already exists, and its coordinates differ from the reference's.**
@@ -88,27 +88,36 @@ Two further notes on the seam:
   `flipX`/`flipY` alongside the scale only because its draw applies them.
 - `rotation` has no part in this contract. Pass whatever the caller already had.
 
-## What this repository still has to decide
+## Where the box comes from
 
-**Where the box comes from.** Nothing here measures one. `SSPlayer::canvas_size()`
-(`player.rs:2263`) reports the pack's *authored* canvas, which is not the same thing as a
-measured bounding box. The reference's own comment is the warning: measuring means baking
-every frame of the animation at load, which is why `frame` exists as the supply-it-
-yourself fast path that a build-time manifest fills in.
-
-So there are three sources, and only the first costs nothing:
+Nothing here measures one, and nothing needs to. There are three possible sources and only
+the first costs nothing:
 
 1. **The authored canvas** — `canvas_size`, with the pivot placing the origin inside it.
-   Free, stable across animations, and it is the frame the artist composed in.
+   Free, stable across animations, and the frame the artist composed in.
 2. **The playing animation's box** — `frameScope: 'animation'`. Needs measurement.
 3. **The pack's union** — `frameScope: 'pack'`. Needs more measurement, and draws small.
 
-**For the preview, supply the authored canvas as `frame`.** It costs nothing, it does not
-resize when the picker changes animation, and it shows the character standing in the frame
-it was composed in, which is what makes the preview comparable to an engine's canvas. The
-measured scopes stay in the vocabulary for hosts that lay out a box and want the art to
-fill it; they are not what a preview wants, and nothing blocks on them.
+**The first is what `SSPlayer::canvas_rect` reports and what `fit_into` uses** when the caller
+supplies no `frame`. The measured scopes are **not built**: measuring means baking every frame
+of the animation at load, `pack` additionally draws the character small — on `Ringo`, `attack1`
+spans 383×527 player-local units while the pack's union spans about 1030×878, because `dead`
+slides the character most of a screen to the right — and supplying `frame` buys the same scale
+stability for free. `frameScope` is therefore absent from the vocabulary here rather than
+present and half-honoured; adding it later is additive.
 
-(This supersedes an earlier suggestion of `frameScope: 'pack'` as the preview default.
-`pack` buys scale stability, but the Ringo numbers above show what it costs to get it, and
-supplying `frame` buys the same stability for free.)
+The pivot is normalised from the canvas centre and the runtime does not apply it (it carries
+no pivot in its metadata), so `canvas_rect` reads it out of the `.ssab` itself and flips it into
+the player's Y-down space. `pivot (0, -0.5)` — the editor's bottom edge, which is how a
+character standing on the ground is authored — reports a box entirely above the origin.
+
+## What landed
+
+`libs/ssplayer-wgpu/src/fit.rs` holds the whole of the arithmetic above: `Fit`, `Align`,
+`Rect`, `Placement`, `Placed` and `solve`. `SSPlayer::fit_into` is the one line of policy on
+top of it — the caller's `frame` or `canvas_rect` — and the faces are translation only:
+`ss_player_fit_into` / `ss_placement_default` / `ss_player_canvas_rect` on C, `fitInto` /
+`canvasRect` on JS. `ssplayer-bevy` has no component for it; that is the first half of
+*Bevy UI* in the roadmap.
+
+The guide is [`docs/en/guide/placement.md`](./docs/en/guide/placement.md).
