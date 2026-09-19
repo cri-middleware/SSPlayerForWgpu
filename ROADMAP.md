@@ -170,6 +170,12 @@ respect are in [`AGENTS.md`](./AGENTS.md) under *Hard constraints*.
       depends on Bevy and the adapter can follow its own wgpu major; it tracks one
       Bevy line at a time, because Bevy and the player must resolve to a single
       `wgpu`.
+- [ ] **Self-contained HTML preview** — a per-animation button in a host writes one
+      fully inlined HTML file and opens it in the browser, so every host shows the same
+      preview without an in-editor renderer. `file://` is enough — WebGPU and a
+      vertex-stage `var<storage, read>` both work there — so no local HTTP server. Needs
+      its own `--target no-modules` wasm, and is blocked on fit/align. Design and the
+      verified findings: [`PREVIEW.md`](./PREVIEW.md).
 
 ## UI integration
 
