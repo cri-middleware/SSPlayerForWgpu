@@ -71,16 +71,25 @@ one would have to be written twice, in C++ for Godot and C# for Unity, on top of
 allocation, lifecycle, firewall prompts and a token to keep the local filesystem from
 being readable by anything that can reach the port.
 
+Measured again on the assembled shell, opened as a file with a fresh profile:
+`isSecureContext` and `navigator.gpu` both true, the inlined wasm instantiates, the pack
+in the hole plays (`frameNo` advancing, 1 prim / 1 draw), and the event strip fills.
+
+**A dropped `File` reads at `file://`** — `File.arrayBuffer()` returns the whole file and
+the drop handler loads it (`Sound.ssab`, 3 events found). That was the one item here
+taken on reasoning rather than measurement; it no longer is.
+
 Unverified: Chrome and Edge on Windows and Linux, Safari 26, Firefox 141.
 
 ## Build
 
 ```sh
-wasm-pack build libs/ssplayer-wgpu-ffi \
-  --target no-modules --release \
-  --out-name ssplayer_wgpu --out-dir <out-dir> \
-  -- --no-default-features --features web
+./scripts/build-preview.sh            # -> bin/ssplayer-preview.html
 ```
+
+It runs wasm-pack over `libs/ssplayer-wgpu-ffi` with `--target no-modules --release
+--no-default-features --features web`, and substitutes the glue, the wasm and two stamps
+into `examples/preview/shell.html`.
 
 `scripts/build.sh platform=web` builds the same crate with `--target web`, which emits
 an ES module and therefore cannot load from `file://`. **The preview needs its own
@@ -93,8 +102,8 @@ cost of every generated page. Whole-file sizes: 1,332,615 B for
 
 ## Distribution
 
-The shell is a **release artifact of this repository**, produced by `scripts/build.sh`
-alongside the npm package, and it carries the SDK version it was built from.
+The shell is a **release artifact of this repository**, produced by
+`scripts/build-preview.sh`, and it carries the SDK commit it was built from.
 
 It is not committed into the Players. It is generated content of about 1.1 MB, and a
 copy in each Player is a copy that drifts; the native binaries are already built rather
@@ -118,9 +127,8 @@ Inline, in this order, with no external `src` and no `import` anywhere:
 3. the `.ssab` as base64 → `loadSsab(bytes, undefined, undefined)`.
 
 (3) arrives either already in the `<script id="ssab">` hole or from a dropped file. A
-dropped `File` is read through `FileReader` / `File.arrayBuffer`, which is user-initiated
-and so is not the `fetch` path that `file://` blocks — confirm that on the first drop
-rather than taking it on trust, the way the rest of this list was confirmed.
+dropped `File` is read through `File.arrayBuffer`, which is user-initiated and so is not
+the `fetch` path that `file://` blocks — measured, see *Verified*.
 
 ### Both pack forms, because the editors produce the reference one
 
@@ -185,6 +193,38 @@ of them as missing while drawing perfectly. Filter it against what was actually 
 and then it is worth showing — a pack whose atlas really did not arrive should name it
 rather than draw blank.
 
+## The timeline, and why the player grew no event table
+
+The page has a seek bar and, under it, a strip of markers — one per event, coloured by
+kind, aligned to the same coordinate space as the thumb — plus a list of frame, kind,
+part and payload. Clicking either seeks. The marker for a frame the playhead just
+crossed flashes, so the static picture and the live pulse are visibly the same thing.
+
+The seek bar needed no new Rust: `seek`, `frameNo`, `startFrame`, `endFrame`,
+`setSpeedScale`, `setSubFrame` and the four transport verbs are all on the js face
+already, and a paused player still draws, so scrubbing while stopped updates the picture.
+
+**The strip fills itself from playback**, and the player deliberately did not gain a
+"list every event this animation authors" read-out to serve it. Such an API is ten lines
+— `decode_events` already takes the frame indices to decode and "all of them" is the
+whole table — and it would cost nothing at runtime (measured: ~150–300 ns per authored
+event, once, against the 240 µs `set_animation` that precedes it). It was still the wrong
+trade: no sibling Player has one (ForWeb exposes events only as `onUserData` /
+`onSignal` / `onAudio` subscriptions), so the only caller would be this page, and a
+viewer-shaped API in the player is a cost every face pays forever.
+
+What the pulse gives instead is complete for this purpose: the runtime reports **every**
+frame a tick stepped across, not merely the one it landed on, so one pass over the
+section is the whole table at any frame rate. The honest cost is that a marker does not
+exist until the playhead has been past it once — and the preview plays on open, so that
+is one loop.
+
+The one thing the faces did have to gain is **`frameNo` and `partName` on the event
+objects**. The Rust structs have carried both from the start, with a doc comment
+explaining that the authored frame is not the frame the tick landed on, and both wrapper
+faces were dropping them on the floor — so a js or C host could not tell which frame a
+key belonged to when one tick crossed several. That is a plain gap, not a viewer feature.
+
 ## Fitting the canvas into the element
 
 The pack's canvas and the `<canvas>` element are different sizes — Ringo is 800×600 in a
@@ -206,15 +246,14 @@ Call it again when the element resizes and after the picker changes animation. S
 
 ## Work order
 
-1. **The shell, built by `scripts/build.sh`** — a `--target no-modules` wasm inlined into
-   one page, the `<script id="ssab">` hole, the drop receiver, the animation picker, the
-   version stamp. Finishing this is what unblocks every host with no editor, because they
-   need nothing else.
-2. **The generator** — fills the hole from a pack and an optional animation name. The
-   thing a host calls; also the CLI, once there is somewhere to publish it from.
+1. **The generator** — fills the two holes from a pack and an optional animation name.
+   The thing a host calls; also the CLI, once there is somewhere to publish it from.
+   Everything it needs is in *Page composition*: the pack goes in base64 in the `ssab`
+   hole, and `textureRefs()` names exactly which sibling `.png` files to inline beside it.
+2. **A release job**, so a plugin can fetch a pinned shell rather than build one.
 
-Confirm on the first drop that a dropped `File` reads through `FileReader` at `file://`,
-which is the one item in this document taken on reasoning rather than measurement.
+The shell itself is built: `examples/preview/shell.html` plus `scripts/build-preview.sh`.
+Its own notes are [`examples/preview/README.md`](./examples/preview/README.md).
 
 ## Out of scope
 
