@@ -8,13 +8,17 @@
 #   assets/overall_emb/    <- tests/overall, textures embedded in the .ssab
 #   assets/Ringo/          <- tests/Ringo, reference textures
 #   assets/Ringo_emb/      <- tests/Ringo, textures embedded in the .ssab
+#   assets/Doll/           <- tests/Doll, reference textures
+#   assets/Doll_emb/       <- tests/Doll, textures embedded in the .ssab
 #
 # and then deploys them to the examples that cannot read assets/ in place:
 #
 #   examples/web/assets/       <- assets/overall (reference mode, + its .png atlases)
 #   examples/web/assets/Ringo/ <- assets/Ringo   (reference mode, + Ringo.png)
+#   examples/web/assets/Doll/  <- assets/Doll    (reference mode, + Doll.png)
 #   examples/web/assets_emb/   <- assets/overall_emb (embedded mode)
 #   examples/web/assets_emb/Ringo/ <- assets/Ringo_emb (embedded mode)
+#   examples/web/assets_emb/Doll/  <- assets/Doll_emb  (embedded mode)
 #
 # Both modes go out because the demo page has a selector for the two: an embedded
 # pack carries its atlas, a reference pack names sibling files that `loadSsab`
@@ -38,7 +42,7 @@ MODE="release"
 for arg in "$@"; do
   case "$arg" in
     release|debug) MODE="$arg" ;;
-    -h|--help) sed -n '2,28p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
+    -h|--help) sed -n '2,32p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
     *) echo "deploy-examples.sh: unknown arg '$arg'" >&2; exit 2 ;;
   esac
 done
@@ -80,6 +84,8 @@ convert "tests/overall/overall.sspj" "overall"
 convert "tests/overall/overall.sspj" "overall_emb" --embedded
 convert "tests/Ringo/Ringo.sspj"     "Ringo"
 convert "tests/Ringo/Ringo.sspj"     "Ringo_emb" --embedded
+convert "tests/Doll/Doll.sspj"       "Doll"
+convert "tests/Doll/Doll.sspj"       "Doll_emb" --embedded
 
 # --- deploy to the examples ----------------------------------------------
 # A page can only fetch what it serves, so the web demo gets its own copy. The
@@ -98,6 +104,9 @@ cp "$ASSET_DIR/overall/"*.png  "$WEB_DIR/assets/"
 mkdir -p "$WEB_DIR/assets/Ringo"
 cp "$ASSET_DIR/Ringo/"*.ssab "$WEB_DIR/assets/Ringo/"
 cp "$ASSET_DIR/Ringo/"*.png  "$WEB_DIR/assets/Ringo/"
+mkdir -p "$WEB_DIR/assets/Doll"
+cp "$ASSET_DIR/Doll/"*.ssab "$WEB_DIR/assets/Doll/"
+cp "$ASSET_DIR/Doll/"*.png  "$WEB_DIR/assets/Doll/"
 
 # Embedded mode: the atlas is baked in, so these need no sibling files.
 echo ">> deploying embedded .ssab -> examples/web/assets_emb"
@@ -105,6 +114,8 @@ rm -rf "$WEB_DIR/assets_emb"; mkdir -p "$WEB_DIR/assets_emb"
 cp "$ASSET_DIR/overall_emb/"*.ssab "$WEB_DIR/assets_emb/"
 mkdir -p "$WEB_DIR/assets_emb/Ringo"
 cp "$ASSET_DIR/Ringo_emb/"*.ssab "$WEB_DIR/assets_emb/Ringo/"
+mkdir -p "$WEB_DIR/assets_emb/Doll"
+cp "$ASSET_DIR/Doll_emb/"*.ssab "$WEB_DIR/assets_emb/Doll/"
 
-echo "deploy-examples.sh: done -> assets/{overall,overall_emb,Ringo,Ringo_emb}/"
-echo "deploy-examples.sh:      -> examples/web/{assets,assets_emb}/{,Ringo/}"
+echo "deploy-examples.sh: done -> assets/{overall,overall_emb,Ringo,Ringo_emb,Doll,Doll_emb}/"
+echo "deploy-examples.sh:      -> examples/web/{assets,assets_emb}/{,Ringo/,Doll/}"
