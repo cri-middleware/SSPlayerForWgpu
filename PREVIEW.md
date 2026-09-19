@@ -10,9 +10,10 @@ roadmap entry.
 ## Shape
 
 What ships is a **shell**: one HTML file with the wasm and the glue already inlined and
-a hole where a pack goes. The hole is the content of a
+holes where a pack and its atlases go. The pack's hole is the content of a
 `<script id="ssab" type="application/base64">` element, so the shell is a valid page as
-it stands and opens to "no pack loaded" rather than to an error.
+it stands and opens to "no pack loaded" rather than to an error; a reference pack fills a
+second hole with its atlases (see *Page composition*).
 
 It has two entrances and one interior:
 
@@ -121,10 +122,43 @@ dropped `File` is read through `FileReader` / `File.arrayBuffer`, which is user-
 and so is not the `fetch` path that `file://` blocks — confirm that on the first drop
 rather than taking it on trust, the way the rest of this list was confirmed.
 
-Feed it an **embedded-mode** `.ssab`. Then `missingAssets` comes back empty and the page
-supplies no textures at all: the `web` face decodes the atlases itself through
-`createImageBitmap`, which is why the feature deliberately does not pull `embedded`.
-One input file, no atlas plumbing.
+### Both pack forms, because the editors produce the reference one
+
+An **embedded-mode** pack is one input file: `missingAssets` is empty and the page
+supplies no textures at all, the `web` face having decoded the atlases itself through
+`createImageBitmap`.
+
+That is not what the hosts we are integrating produce. Godot converts with
+`embedded = false` (`ss_importer.cpp`) and so does Unity
+(`SpriteStudioConversionRunner.cs`), so what an editor has on disk is a **reference**
+pack plus sibling `.png` files, and the `.ssab` alone draws nothing. **The shell needs a
+second hole**, holding the atlases as base64 keyed by file name.
+
+The supply path is the documented one, and it is the page's work, not the host's:
+
+```js
+await player.loadSsab(ssabBytes, undefined, undefined);
+for (const r of player.textureRefs(undefined)) {    // {key, path, embedded}
+  if (r.embedded) continue;
+  await ctx.addTextureFromBytes(r.key, atlasBytesFor(r.path));   // on the CONTEXT
+}
+```
+
+`textureRefs` names the files, so a generator knows exactly which siblings to inline and
+**a host never computes a hash**. Measured: the reference `Basic.ssab` supplied this way
+draws identically to the embedded one — 58,784 non-transparent pixels, 19 prims, 1 draw
+call, 9,204 bytes uploaded, the same figures on both.
+
+`setCellmapTextureFromBytes` also works and takes a name instead of a key, but it is the
+runtime *override* mechanism: it leaves `isCellmapOverridden` true, claiming the viewer
+replaced an atlas when it only supplied one. `addTextureFromBytes` leaves it false, keeps
+the encoded bytes so `restoreDevice` can rebuild on its own, and is what the doc comment
+on that method describes as the reference pack's route. Prefer it.
+
+**`missingAssets` does not clear when the textures arrive.** It is a record of what failed
+to resolve at load, not a live list, and after a successful supply it still names both
+atlases. Do not put it on screen unfiltered — on a reference pack it would report missing
+textures over a picture that is drawing correctly.
 
 ## Call sequence
 
@@ -145,8 +179,11 @@ player.play();
 `partNames`, `cellmapNames`, `missingAssets`, and the surface's `stats`. UserData and
 Signal arrive as events shaped `{ kind: 'userData' | 'signal', partIndex, … }`.
 
-`missingAssets` is worth putting on screen rather than keeping for diagnostics: a pack
-whose atlas did not arrive should say which one, not draw blank.
+`missingAssets` needs the qualification in *Page composition* before it reaches the
+screen: it does not clear once the atlases are supplied, so a reference pack reports both
+of them as missing while drawing perfectly. Filter it against what was actually supplied,
+and then it is worth showing — a pack whose atlas really did not arrive should name it
+rather than draw blank.
 
 ## Blocked on fit/align
 
