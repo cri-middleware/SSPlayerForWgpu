@@ -69,7 +69,10 @@ usage () {
   echo "  verify=<yes|no>         Re-open the finished zips and check them (default:"
   echo "                          $VERIFY)."
   echo "  clean=<yes|no>          Delete <out> before assembling (default: $CLEAN)."
-  echo "  -h | --help             Show this help"
+    echo "  sdk= skip=              Accepted and ignored here. The family's build-release"
+  echo "                          scripts share out= clean= verify= in= sdk= skip=,"
+  echo "                          so one command line drives all of them."
+echo "  -h | --help             Show this help"
   echo ""
   echo "Output, in <out>:"
   echo "  ssplayer-wgpu-<platform>-<arch>.zip   include/, lib/, LICENSE.md, LICENSE.ja.md"
@@ -94,6 +97,9 @@ while [ $# -gt 0 ]; do
         out)    OUT="$value" ;;
         verify) VERIFY="$(printf '%s' "$value" | tr '[:upper:]' '[:lower:]')" ;;
         clean)  CLEAN="$(printf '%s' "$value" | tr '[:upper:]' '[:lower:]')" ;;
+        # Accepted so one command line drives build-release in every repository
+        # of the family; this one has no use for them (AGENTS.md).
+        sdk|skip) echo "$APP: ${key}= does not apply here; ignored" >&2 ;;
         *) echo "$APP: unknown option '$key' (see $APP --help)" >&2; exit 2 ;;
       esac
       ;;
