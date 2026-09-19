@@ -53,8 +53,8 @@ struct PlayerSlot {
 /// Everything the render world owns on this crate's behalf.
 ///
 /// `SSRenderer` is device-scoped and `SSScene` is target-scoped, so there is one
-/// renderer for the whole app and — once multi-view lands — one scene per view.
-/// For now there is one scene, and a second view is refused rather than silently
+/// renderer for the whole app and one scene per view it draws into.
+/// There is one scene here, and a second view is refused rather than silently
 /// double-advancing every timeline: `SSScene::update` fuses the timeline advance
 /// with the geometry build, so running it twice a frame would play every
 /// animation at double speed.

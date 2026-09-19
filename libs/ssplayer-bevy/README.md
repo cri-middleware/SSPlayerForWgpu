@@ -184,10 +184,12 @@ crate deliberately does not do.
 
 ## What this version does not do yet
 
-* **One view.** `SSScene::update` fuses the timeline advance with the geometry
-  build, so drawing a second view would advance every animation twice per frame.
-  Later views are skipped, with a warning. Lifting this needs the advance split
-  off from the build in `ssplayer-wgpu` itself.
+* **One view.** The adapter holds one `SSScene` and binds it to the first view
+  that renders; later views are skipped, with a warning, because one scene holding
+  every player would run `SSScene::update` twice a frame and advance every
+  animation twice. So a second camera of any kind — a UI camera, a
+  render-to-texture portrait, a minimap, a split screen — leaves every character
+  in whichever view came first.
 * **MSAA must be off** — the player's pipelines are single-sampled. Bevy's
   default camera has MSAA on, so give it `Msaa::Off`; the adapter warns once and
   skips (rather than crashing) if it finds a multisampled target.

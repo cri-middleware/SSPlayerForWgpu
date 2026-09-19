@@ -38,52 +38,6 @@ respect are in [`AGENTS.md`](./AGENTS.md) under *Hard constraints*.
       reloading it.
 - [x] Events — user data, signal, audio, animation finished / looped.
 - [x] Many players per render target, drawn in one pass in ascending `order`.
-- [ ] **One player, several views.** The dual of the line above, and missing:
-      `SSScene::update` fuses the timeline advance with the geometry build
-      (`scene.rs`, `update` → `build_chunks` → `SSPlayer::build_frame`), so a
-      player handed to two scenes in one frame advances twice and plays at
-      double speed. A cast cannot be in a main view and a minimap, in a split
-      screen, or in a portal. The Bevy adapter is where it shows first: it holds
-      one `SSScene`, binds it to a view and refuses later ones with a warning
-      (`ssplayer-bevy/src/render.rs`, `bound_view`).
-      **The split is already half made.** `build_frame` advances
-      (`context.update`, event collection, `step_slots`) and then draws
-      (`render_node`), and those are deliberately separate walks. The draw half
-      re-runs for a fixed display frame: `Context::get_frame_data(frame_no)`
-      recomputes the pose from runtime state without moving the playhead, and
-      `render_node` writes into the chunk rather than into the player. The shape
-      is therefore `advance(dt)` once per player per frame, `build(chunk)` once
-      per player per scene.
-      **Verification**: `tests/pack.rs::scenes_share_one_renderer` already fixes
-      two scenes sharing one renderer. This needs one player in two scenes
-      landing on the same `frame_no` after N ticks, and both scenes' geometry
-      matching byte for byte where their configs do.
-      **Undecided**:
-      - **Who advances.** A public `SSPlayer::advance` is the smallest change and
-        matches the borrow model, but it breaks every face's call shape and adds a
-        new way to be wrong — skip it and everything freezes, call it twice and
-        the bug is back by hand. The alternative is a frame stamp the player
-        checks, so a second `update` skips the advance and today's call shape
-        survives, at the cost of someone owning a frame counter.
-      - **Rebuild or reuse.** `FrameChunk` carries the `SceneConfig` it was built
-        for and coverage layers are assigned as chunks merge, so a chunk is
-        reusable in a second scene only when the configs match. Decide between
-        always rebuilding (simple; a second `get_frame_data` and geometry walk per
-        extra view) and caching the chunk for matching configs. Rebuilding also
-        bounds the parallelism `build_chunks` documents: `get_frame_data` writes
-        the context's own buffer, so one player cannot be built into two scenes
-        at once without copying the frame out first.
-      - **What belongs to a view.** `transform`, `alpha`, `tint`, `order`,
-        `visible` and `sub_frame` are all player state today. A minimap usually
-        wants its own placement and its own visibility, so this is either a
-        per-view override set or the reason those hosts keep using two players.
-      - **Which faces.** Drawing into a pass the host owns is already Rust and
-        Bevy only: the C face builds its own device, and the browser face creates
-        players *from* a surface (`web.rs`, `createPlayer`), so 1:N needs an
-        ownership change there. `ssplayer-webgl`'s `SSOverlay.ts` is the sibling
-        precedent for lifting players above the surface they draw on.
-      - **Bevy.** One scene per view keyed by the view `Entity`, plus what decides
-        whether an `SsPlayer` appears in a given view (`RenderLayers`?).
 - [ ] **9-slice parts.** The runtime already emits the batches and the geometry
       (`get_nines_*`), so this is one WGSL vertex entry, one `GeomClass`, one
       `GeomKind` — which also gives Nines mask coverage — and the `FrameView`
@@ -151,7 +105,12 @@ respect are in [`AGENTS.md`](./AGENTS.md) under *Hard constraints*.
       Members cannot then differ in playback position or interleave front-to-back,
       and masks and effects are shared. **Undecided**: the API shape
       (`SSPlayer::set_instances` or a separate `SSCrowd`), which attributes vary
-      per member, and how the js and C faces expose it.
+      per member, and how the js and C faces expose it. Members at *different*
+      playback positions are not this design; they belong to the SDK's
+      [Animation Instancing](https://github.com/cri-middleware/SpriteStudio-SDK/blob/main/ROADMAP.md#phase-3-feature-expansion-post-release),
+      one evaluation driving many instances. That item has two possible faces —
+      one playhead drawn at N placements (this) and N members at N phases (not
+      this) — and which of them it covers decides how much of this is local.
 
 ## Hosts & platforms
 
@@ -170,6 +129,19 @@ respect are in [`AGENTS.md`](./AGENTS.md) under *Hard constraints*.
       depends on Bevy and the adapter can follow its own wgpu major; it tracks one
       Bevy line at a time, because Bevy and the player must resolve to a single
       `wgpu`.
+- [ ] **Bevy: more than one camera.** The adapter holds one `SSScene`, binds it to
+      the first view that renders and skips the rest with a warning
+      (`ssplayer-bevy/src/render.rs`, `bound_view`), so a UI camera, a
+      render-to-texture portrait, a minimap or a split screen leaves every
+      character in whichever view happened to come first. A scene per view, keyed
+      by the view `Entity`, closes it **with no change to the player**: each player
+      still belongs to one view, so nothing is advanced twice, and
+      `tests/pack.rs::scenes_share_one_renderer` already pins N scenes on one
+      renderer. What the adapter has to settle: which view a player draws into
+      (`RenderLayers`), what a player no view draws does (it never advances, so it
+      freezes), and moving the feedback store off the per-view path —
+      `FeedbackChannel::store` replaces the batch wholesale, so today the last view
+      to run would be the only one the main world hears about.
 - [ ] **Self-contained HTML preview** — a per-animation button in a host writes one
       fully inlined HTML file and opens it in the browser, so every host shows the same
       preview without an in-editor renderer. `file://` is enough — WebGPU and a
@@ -267,6 +239,17 @@ player, where every host and the C ABI reach it, and the host half belongs in an
   bind-group dedup, render bundles, threading the player walk, indirect draws for
   Shape. Measured against a 256-player frame and not worth their complexity;
   bindless is additionally unavailable on WebGPU.
+- **One player drawn into several views** — a minimap, a split screen, a portal, a
+  Vtuber tool's preview beside its output. `SSScene::update` fuses the timeline
+  advance with the geometry build, so handing one player to two scenes plays it at
+  double speed, and splitting the two here would build half of the SDK's
+  [Animation Instancing](https://github.com/cri-middleware/SpriteStudio-SDK/blob/main/ROADMAP.md#phase-3-feature-expansion-post-release)
+  — one evaluation driving many instances — a second time. Two players over one
+  `.ssab` is what serves it meanwhile: `SSPack` is three `Arc`s, the renderer
+  uploads an atlas once, and two trees fed the same `dt` stay identical down to
+  the effect particles, whose seed is the part index. A tool whose preview must
+  *be* its output wants neither — render once into a texture it owns and present
+  that texture in both places.
 - **A counter for dropped mask writers.** Player safety stays minimal here, and
   the cap it would report on goes away with the coverage bitmap above.
 - **Discarding transparent texels instead of writing zero.** Parity with the
