@@ -38,6 +38,52 @@ respect are in [`AGENTS.md`](./AGENTS.md) under *Hard constraints*.
       reloading it.
 - [x] Events — user data, signal, audio, animation finished / looped.
 - [x] Many players per render target, drawn in one pass in ascending `order`.
+- [ ] **One player, several views.** The dual of the line above, and missing:
+      `SSScene::update` fuses the timeline advance with the geometry build
+      (`scene.rs`, `update` → `build_chunks` → `SSPlayer::build_frame`), so a
+      player handed to two scenes in one frame advances twice and plays at
+      double speed. A cast cannot be in a main view and a minimap, in a split
+      screen, or in a portal. The Bevy adapter is where it shows first: it holds
+      one `SSScene`, binds it to a view and refuses later ones with a warning
+      (`ssplayer-bevy/src/render.rs`, `bound_view`).
+      **The split is already half made.** `build_frame` advances
+      (`context.update`, event collection, `step_slots`) and then draws
+      (`render_node`), and those are deliberately separate walks. The draw half
+      re-runs for a fixed display frame: `Context::get_frame_data(frame_no)`
+      recomputes the pose from runtime state without moving the playhead, and
+      `render_node` writes into the chunk rather than into the player. The shape
+      is therefore `advance(dt)` once per player per frame, `build(chunk)` once
+      per player per scene.
+      **Verification**: `tests/pack.rs::scenes_share_one_renderer` already fixes
+      two scenes sharing one renderer. This needs one player in two scenes
+      landing on the same `frame_no` after N ticks, and both scenes' geometry
+      matching byte for byte where their configs do.
+      **Undecided**:
+      - **Who advances.** A public `SSPlayer::advance` is the smallest change and
+        matches the borrow model, but it breaks every face's call shape and adds a
+        new way to be wrong — skip it and everything freezes, call it twice and
+        the bug is back by hand. The alternative is a frame stamp the player
+        checks, so a second `update` skips the advance and today's call shape
+        survives, at the cost of someone owning a frame counter.
+      - **Rebuild or reuse.** `FrameChunk` carries the `SceneConfig` it was built
+        for and coverage layers are assigned as chunks merge, so a chunk is
+        reusable in a second scene only when the configs match. Decide between
+        always rebuilding (simple; a second `get_frame_data` and geometry walk per
+        extra view) and caching the chunk for matching configs. Rebuilding also
+        bounds the parallelism `build_chunks` documents: `get_frame_data` writes
+        the context's own buffer, so one player cannot be built into two scenes
+        at once without copying the frame out first.
+      - **What belongs to a view.** `transform`, `alpha`, `tint`, `order`,
+        `visible` and `sub_frame` are all player state today. A minimap usually
+        wants its own placement and its own visibility, so this is either a
+        per-view override set or the reason those hosts keep using two players.
+      - **Which faces.** Drawing into a pass the host owns is already Rust and
+        Bevy only: the C face builds its own device, and the browser face creates
+        players *from* a surface (`web.rs`, `createPlayer`), so 1:N needs an
+        ownership change there. `ssplayer-webgl`'s `SSOverlay.ts` is the sibling
+        precedent for lifting players above the surface they draw on.
+      - **Bevy.** One scene per view keyed by the view `Entity`, plus what decides
+        whether an `SsPlayer` appears in a given view (`RenderLayers`?).
 - [ ] **9-slice parts.** The runtime already emits the batches and the geometry
       (`get_nines_*`), so this is one WGSL vertex entry, one `GeomClass`, one
       `GeomKind` — which also gives Nines mask coverage — and the `FrameView`
