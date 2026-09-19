@@ -29,7 +29,7 @@
 # assets/overall_emb; examples/viewer and examples/viewer-metal-cpp play
 # assets/overall from the repository, so only the browser needs a copy.
 #
-# Usage: scripts/deploy-examples.ps1 [release|debug]   (ssconverter-cli build mode; default release)
+# Usage: scripts/deploy-examples.ps1 [build=release|debug]   (ssconverter-cli build mode; default release)
 #
 # SDK location: $env:SSSDK, else ./SpriteStudio-SDK (submodule), else ../SpriteStudio-SDK.
 $ErrorActionPreference = "Stop"
@@ -50,7 +50,8 @@ function Fail {
 $MODE = "release"
 foreach ($arg in $args) {
     switch ($arg) {
-        { $_ -in "release", "debug" } { $MODE = $_ }
+        { $_ -in "build=release", "build=debug" } { $MODE = $_ -replace '^build='; break }
+        { $_ -like "build=*" } { Fail "build= takes release or debug, not '$($_ -replace '^build=')'" 2 }
         { $_ -in "-h", "--help" } {
             Get-Content $PSCommandPath | Select-Object -Skip 1 -First 31 |
                 ForEach-Object { $_ -replace '^# ?', '' }

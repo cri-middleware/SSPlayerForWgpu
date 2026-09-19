@@ -29,7 +29,7 @@
 # assets/overall_emb; examples/viewer and examples/viewer-metal-cpp play
 # assets/overall from the repository, so only the browser needs a copy.
 #
-# Usage: scripts/deploy-examples.sh [release|debug]   (ssconverter-cli build mode; default release)
+# Usage: scripts/deploy-examples.sh [build=release|debug]   (ssconverter-cli build mode; default release)
 #
 # SDK location: $SSSDK, else ./SpriteStudio-SDK (submodule), else ../SpriteStudio-SDK.
 set -euo pipefail
@@ -41,7 +41,8 @@ WEB_DIR="$ROOT_DIR/examples/web"
 MODE="release"
 for arg in "$@"; do
   case "$arg" in
-    release|debug) MODE="$arg" ;;
+    build=release|build=debug) MODE="${arg#*=}" ;;
+    build=*) echo "deploy-examples.sh: build= takes release or debug, not '${arg#*=}'" >&2; exit 2 ;;
     -h|--help) sed -n '2,32p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
     *) echo "deploy-examples.sh: unknown arg '$arg'" >&2; exit 2 ;;
   esac
