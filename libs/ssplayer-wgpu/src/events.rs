@@ -47,7 +47,7 @@ pub struct UserDataEvent {
     /// key in between.
     pub frame_no: u32,
     pub integer: Option<i32>,
-    /// `[x1, y1, x2, y2]` as authored — two corners, not origin+size.
+    /// `[left, top, right, bottom]` as authored — four edges, not origin+size.
     pub rect: Option<[f32; 4]>,
     pub point: Option<[f32; 2]>,
     pub text: Option<String>,
@@ -142,7 +142,7 @@ pub(crate) fn decode_events(ab: &SsAnimeBinary<'_>, anim: &AnimationData<'_>, in
                     part_name: part_name(user.part_index() as u32),
                     frame_no,
                     integer: value.integer().map(|v| v.value()),
-                    rect: value.rect().map(|r| [r.x1(), r.y1(), r.x2(), r.y2()]),
+                    rect: value.rect().map(|r| [r.left(), r.top(), r.right(), r.bottom()]),
                     point: value.point().map(|p| [p.v1(), p.v2()]),
                     text: value.str().map(str::to_owned),
                 }));

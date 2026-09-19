@@ -300,7 +300,7 @@ typedef struct {
      */
     int32_t integer;
     /*
-     UserData, when `has_rect`: `[x1, y1, x2, y2]` — two corners, not origin+size.
+     UserData, when `has_rect`: `[left, top, right, bottom]` — four edges, not origin+size.
      */
     float rect[4];
     /*

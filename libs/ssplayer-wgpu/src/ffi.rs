@@ -213,7 +213,7 @@ pub struct SsEventData {
     pub has_text: bool,
     /// UserData, when `has_integer`.
     pub integer: i32,
-    /// UserData, when `has_rect`: `[x1, y1, x2, y2]` — two corners, not origin+size.
+    /// UserData, when `has_rect`: `[left, top, right, bottom]` — four edges, not origin+size.
     pub rect: [f32; 4],
     /// UserData, when `has_point`.
     pub point: [f32; 2],
