@@ -8,13 +8,17 @@
 #   assets/overall_emb/    <- tests/overall, textures embedded in the .ssab
 #   assets/Ringo/          <- tests/Ringo, reference textures
 #   assets/Ringo_emb/      <- tests/Ringo, textures embedded in the .ssab
+#   assets/Doll/           <- tests/Doll, reference textures
+#   assets/Doll_emb/       <- tests/Doll, textures embedded in the .ssab
 #
 # and then deploys them to the examples that cannot read assets/ in place:
 #
 #   examples/web/assets/       <- assets/overall (reference mode, + its .png atlases)
 #   examples/web/assets/Ringo/ <- assets/Ringo   (reference mode, + Ringo.png)
+#   examples/web/assets/Doll/  <- assets/Doll    (reference mode, + Doll.png)
 #   examples/web/assets_emb/   <- assets/overall_emb (embedded mode)
 #   examples/web/assets_emb/Ringo/ <- assets/Ringo_emb (embedded mode)
+#   examples/web/assets_emb/Doll/  <- assets/Doll_emb  (embedded mode)
 #
 # Both modes go out because the demo page has a selector for the two: an embedded
 # pack carries its atlas, a reference pack names sibling files that `loadSsab`
@@ -48,7 +52,7 @@ foreach ($arg in $args) {
     switch ($arg) {
         { $_ -in "release", "debug" } { $MODE = $_ }
         { $_ -in "-h", "--help" } {
-            Get-Content $PSCommandPath | Select-Object -Skip 1 -First 27 |
+            Get-Content $PSCommandPath | Select-Object -Skip 1 -First 31 |
                 ForEach-Object { $_ -replace '^# ?', '' }
             exit 0
         }
@@ -107,6 +111,8 @@ Convert-Project "tests/overall/overall.sspj" "overall"
 Convert-Project "tests/overall/overall.sspj" "overall_emb" @("--embedded")
 Convert-Project "tests/Ringo/Ringo.sspj"     "Ringo"
 Convert-Project "tests/Ringo/Ringo.sspj"     "Ringo_emb" @("--embedded")
+Convert-Project "tests/Doll/Doll.sspj"       "Doll"
+Convert-Project "tests/Doll/Doll.sspj"       "Doll_emb" @("--embedded")
 
 # --- deploy to the examples ----------------------------------------------
 # A page can only fetch what it serves, so the web demo gets its own copy. The
@@ -133,6 +139,10 @@ $ringo = Join-Path $dest "Ringo"
 New-Item -ItemType Directory -Force -Path $ringo | Out-Null
 Copy-Item -Force (Join-Path $ASSET_DIR "Ringo/*.ssab") $ringo
 Copy-Item -Force (Join-Path $ASSET_DIR "Ringo/*.png") $ringo
+$doll = Join-Path $dest "Doll"
+New-Item -ItemType Directory -Force -Path $doll | Out-Null
+Copy-Item -Force (Join-Path $ASSET_DIR "Doll/*.ssab") $doll
+Copy-Item -Force (Join-Path $ASSET_DIR "Doll/*.png") $doll
 
 # Embedded mode: the atlas is baked in, so these need no sibling files.
 Write-Host ">> deploying embedded .ssab -> examples/web/assets_emb"
@@ -142,6 +152,9 @@ Copy-Item -Force (Join-Path $ASSET_DIR "overall_emb/*.ssab") $dest
 $ringo = Join-Path $dest "Ringo"
 New-Item -ItemType Directory -Force -Path $ringo | Out-Null
 Copy-Item -Force (Join-Path $ASSET_DIR "Ringo_emb/*.ssab") $ringo
+$doll = Join-Path $dest "Doll"
+New-Item -ItemType Directory -Force -Path $doll | Out-Null
+Copy-Item -Force (Join-Path $ASSET_DIR "Doll_emb/*.ssab") $doll
 
-Write-Host "${APP}: done -> assets/{overall,overall_emb,Ringo,Ringo_emb}/"
-Write-Host "${APP}:      -> examples/web/{assets,assets_emb}/{,Ringo/}"
+Write-Host "${APP}: done -> assets/{overall,overall_emb,Ringo,Ringo_emb,Doll,Doll_emb}/"
+Write-Host "${APP}:      -> examples/web/{assets,assets_emb}/{,Ringo/,Doll/}"
