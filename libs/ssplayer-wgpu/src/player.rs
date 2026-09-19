@@ -2259,6 +2259,66 @@ impl SSPlayer {
         pack_name.map(str::to_string).or_else(|| self.main_pack.clone())
     }
 
+    /// The authored canvas of the currently playing animation, as a box in
+    /// player-local units — what [`SSPlayer::fit_into`] fits when the caller
+    /// supplies no frame of its own.
+    ///
+    /// This is the frame the artist composed in, not a measured bounding box, and
+    /// the difference is the point: it costs nothing to read, it is the same box
+    /// for every animation in the pack, so a character does not resize when its
+    /// animation changes, and it is where the author decided the empty space
+    /// belongs. A tighter box is the host's to supply through
+    /// [`Placement::frame`] — measuring one here would mean baking every frame of
+    /// the animation at load.
+    ///
+    /// The canvas is placed against the origin by the animation's **pivot**,
+    /// which the runtime does not apply (it carries no pivot in its metadata) and
+    /// which is normalised from the canvas centre: `(0, -0.5)` is the bottom edge,
+    /// so a character authored standing on the ground reports a box entirely above
+    /// the origin — negative `y`, because player-local `y` runs downward.
+    pub fn canvas_rect(&self) -> Option<crate::fit::Rect> {
+        let name = self.current_animation.as_ref()?;
+        let pack = self.packs.get(self.main_pack.as_ref()?)?;
+        let index = pack.resource().resource()?.find_animation_index(name)?;
+        let bytes = pack.resource().data();
+        // SAFETY: the pack verified the buffer when it adopted it.
+        let ab = unsafe { root_as_ss_anime_binary_unchecked(bytes.as_slice()) };
+        let animations = ab.animations();
+        // The runtime built its metadata by walking this same vector in order, so
+        // the index is in range — checked rather than trusted, as the other reads
+        // straight out of the buffer are.
+        if index >= animations.len() {
+            return None;
+        }
+        let animation = animations.get(index);
+        let (width, height) = (animation.canvas_size().v1(), animation.canvas_size().v2());
+        let (pivot_x, pivot_y) = (animation.pivot().v1(), animation.pivot().v2());
+        // The pivot is where the origin sits inside the canvas, in editor space
+        // (Y-up); the box is reported in player-local space (Y-down), which is
+        // the one flip in this arithmetic.
+        Some(crate::fit::Rect { x: -pivot_x * width - width / 2.0, y: pivot_y * height - height / 2.0, width, height })
+    }
+
+    /// Fit the animation into a `width` x `height` box and place it there,
+    /// writing the result through [`SSPlayer::set_transform`].
+    ///
+    /// The box the host lays out is in **pixels of the render target**, so call
+    /// this again when that box changes — on a resize, and after
+    /// [`SSPlayer::set_animation`] if the packs differ in canvas. It is pure
+    /// arithmetic over [`Placement::frame`] or [`SSPlayer::canvas_rect`]; nothing
+    /// is measured and no GPU state is touched.
+    ///
+    /// The returned [`Placed`] is what was written, so a host can read back the
+    /// scale it got rather than recomputing it — and can tell the fit from the
+    /// no-fit answer, which a collapsed box or an animation that is not set up
+    /// both produce (see [`solve`](crate::fit::solve)).
+    pub fn fit_into(&mut self, width: f32, height: f32, placement: &crate::fit::Placement) -> crate::fit::Placed {
+        let content = placement.frame.or_else(|| self.canvas_rect());
+        let placed = crate::fit::solve(width, height, content, placement);
+        self.set_transform(placed.x, placed.y, placed.scale_x, placed.scale_y, placement.rotation);
+        placed
+    }
+
     /// Canvas size of the currently playing animation.
     pub fn canvas_size(&self) -> Option<(f32, f32)> {
         let name = self.current_animation.as_ref()?;

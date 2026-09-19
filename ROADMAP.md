@@ -146,8 +146,8 @@ respect are in [`AGENTS.md`](./AGENTS.md) under *Hard constraints*.
       fully inlined HTML file and opens it in the browser, so every host shows the same
       preview without an in-editor renderer. `file://` is enough — WebGPU and a
       vertex-stage `var<storage, read>` both work there — so no local HTTP server. Needs
-      its own `--target no-modules` wasm, and is blocked on fit/align. Design and the
-      verified findings: [`PREVIEW.md`](./PREVIEW.md).
+      its own `--target no-modules` wasm. Design and the verified findings:
+      [`PREVIEW.md`](./PREVIEW.md); the fit/align it waited on is in.
 
 ## UI integration
 
@@ -160,12 +160,14 @@ player, where every host and the C ABI reach it, and the host half belongs in an
       `anchor` and `pivot` — `part_rect` over those and the part transform, then
       `hit_test_part(x, y)` over that, in player-local coordinates. Portable: it is C-ABI
       shaped, needs no GPU work, and every adapter crate inherits it.
-- [ ] **`fit` / `align`.** The player draws at authored scale into whatever target it is
-      given. A host that lays out a box — any UI host does — needs the animation fitted into
-      it: `fit` (`contain` / `cover` / `none`) plus `align`, the family's vocabulary. The
-      contract is settled, so this is a port rather than a design; it is written out in
-      [`FIT_ALIGN.md`](./FIT_ALIGN.md), because the reference implementation
-      (`SSPlayerForReactNative`'s `src/core/fit.ts`) is not reachable from this repository.
+- [x] **`fit` / `align`** — `SSPlayer::fit_into` / `ss_player_fit_into` / `fitInto`, over the
+      family's vocabulary (`contain` / `cover` / `none` and nine alignments). Pure arithmetic in
+      `fit.rs`, so the three faces are translation only and an adapter inherits it; the contract
+      it ports is [`FIT_ALIGN.md`](./FIT_ALIGN.md). The box is the animation's authored canvas
+      (`canvas_rect`, the canvas placed against the origin by its pivot) unless the caller supplies
+      one — **measured boxes are not built**: `frameScope: animation | pack` would mean baking every
+      frame at load, and nothing needs it yet. Not wired into `ssplayer-bevy`, which is the first
+      half of *Bevy UI* below.
 - [ ] **Bevy UI (`Node`).** `ssplayer-bevy` gives Bevy a player in the world; a player inside
       Bevy's UI tree is a different thing — it has to size from `ComputedNode`, respect the UI
       camera's stacking and clipping, and answer `Interaction` picking. The two primitives

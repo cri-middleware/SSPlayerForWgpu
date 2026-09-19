@@ -55,6 +55,7 @@ nav:
   - 🎬 ガイド:
       - スコープと名前の対応: guide/concepts.md
       - 再生と再生制御: guide/playback.md
+      - ボックスへのフィット: guide/placement.md
       - ロードとアセット: guide/loading.md
       - イベントとユーザーデータ: guide/events.md
       - パーツオーバーライド: guide/part-overrides.md

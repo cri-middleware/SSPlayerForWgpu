@@ -129,6 +129,45 @@
 #define SS_MISSING_PACK 1
 
 /*
+ Scale the content box until it fits entirely inside the view.
+ */
+#define SS_FIT_CONTAIN 0
+
+/*
+ Scale until the content box covers the view. The spill is not clipped — the
+ player has no scissor of its own.
+ */
+#define SS_FIT_COVER 1
+
+/*
+ No fit: scale 1, centred, and `scale` / `offset_x` / `offset_y` are the whole
+ placement.
+ */
+#define SS_FIT_NONE 2
+
+/*
+ Which point of the content box lands on the matching point of the view. On
+ the vertical axis, "top" is the top of the **screen**.
+ */
+#define SS_ALIGN_CENTER 0
+
+#define SS_ALIGN_TOP 1
+
+#define SS_ALIGN_BOTTOM 2
+
+#define SS_ALIGN_LEFT 3
+
+#define SS_ALIGN_RIGHT 4
+
+#define SS_ALIGN_TOP_LEFT 5
+
+#define SS_ALIGN_TOP_RIGHT 6
+
+#define SS_ALIGN_BOTTOM_LEFT 7
+
+#define SS_ALIGN_BOTTOM_RIGHT 8
+
+/*
  Opaque player handle: which scene, and which player within it.
 
  Not a pointer into the scene's player list. That list moves as it grows, and
@@ -359,6 +398,80 @@ typedef struct {
      */
     const char *text;
 } SsSignalParamData;
+
+/*
+ A box in player-local units — the space `ss_player_part_transform` reports
+ in, with `y` downward.
+ */
+typedef struct {
+    float x;
+    /*
+     Low edge on y, which is the **top** edge on screen.
+     */
+    float y;
+    float width;
+    float height;
+} SsRect;
+
+/*
+ Everything `ss_player_fit_into` needs.
+
+ **Zero-initialising this is not the default placement** — it would ask for
+ scale 0, which draws nothing. Call `ss_placement_default` first and change
+ what you mean to change.
+ */
+typedef struct {
+    /*
+     One of the `SS_FIT_*` constants.
+     */
+    uint32_t fit;
+    /*
+     One of the `SS_ALIGN_*` constants.
+     */
+    uint32_t align;
+    /*
+     The box to fit. Read only when `has_frame` is true; otherwise the
+     animation's authored canvas is used (`ss_player_canvas_rect`).
+     */
+    SsRect frame;
+    bool has_frame;
+    /*
+     Pixels from the aligned position, applied **after** the fit.
+     */
+    float offset_x;
+    /*
+     See `offset_x`.
+     */
+    float offset_y;
+    /*
+     A multiplier **on top of** the fit's scale, not a replacement for it.
+     */
+    float scale;
+    /*
+     Mirror horizontally. The alignment follows the flip.
+     */
+    bool flip_x;
+    /*
+     Mirror vertically.
+     */
+    bool flip_y;
+    /*
+     Passed through to the placement untouched; rotation has no part in the
+     fit itself.
+     */
+    float rotation;
+} SsPlacement;
+
+/*
+ What `ss_player_fit_into` wrote, in `ss_player_set_transform` terms: pixels
+ from the **view centre**, `y` downward.
+ */
+typedef struct {
+    float x;
+    float y;
+    float scale_x;
+    float scale_y;
+} SsPlaced;
 
 /*
  What the last frame cost, flattened for the ABI.
@@ -1300,6 +1413,63 @@ void ss_player_set_transform(ss_player_t *handle,
                              float scale_x,
                              float scale_y,
                              float rotation);
+
+/*
+ Fill `out` with the default placement: contain, centred, unscaled,
+ unflipped, unrotated, and the animation's own canvas as the box.
+
+ Start every `SsPlacement` here. A zeroed struct asks for `scale = 0`, which
+ is a placement that draws nothing.
+
+ # Safety
+ `out` must point at a writable `SsPlacement`.
+ */
+int32_t ss_placement_default(SsPlacement *out);
+
+/*
+ Write the authored canvas of the animation now playing into `out`, as a box
+ in player-local units — what `ss_player_fit_into` fits when `has_frame` is
+ false.
+
+ Returns `SS_OK`, or `SS_ERROR_INVALID_ARGUMENT` when the handle or `out` is
+ null or no animation is set up — `out` is untouched in that case.
+
+ The box is the frame the artist composed in, placed against the origin by the
+ animation's pivot, not a measured bounding box: it costs nothing to read and
+ does not change when the animation does.
+
+ # Safety
+ `handle` must be a live handle or null; `out` must point at a writable
+ `SsRect`.
+ */
+int32_t ss_player_canvas_rect(ss_player_t *handle, SsRect *out);
+
+/*
+ Fit the animation into a `width` x `height` box and place it there, as
+ `ss_player_set_transform` would.
+
+ `out` may be null; when it is not, it receives the transform that was
+ written, so a host can read back the scale it got.
+
+ Returns `SS_OK`, or `SS_ERROR_INVALID_ARGUMENT` when the handle or
+ `placement` is null or `fit` / `align` is not one of the constants. A
+ collapsed box and an animation that is not set up are **not** errors: both
+ place the player centred and unscaled, which is what a host laying out a box
+ that has not been measured yet should get.
+
+ The size is in pixels of the render target, so call this again when that box
+ changes — on a resize, and after `ss_player_set_animation` when the canvas
+ differs.
+
+ # Safety
+ `handle` must be a live handle or null; `placement` must point at a readable
+ `SsPlacement`; `out` must be null or point at a writable `SsPlaced`.
+ */
+int32_t ss_player_fit_into(ss_player_t *handle,
+                           float width,
+                           float height,
+                           const SsPlacement *placement,
+                           SsPlaced *out);
 
 /*
  Draw order within the scene; lower draws first. Ties keep the order the

@@ -34,6 +34,7 @@
 //! reason this face is ~30% smaller over the wire than one that bundles `image`.
 
 use crate::events::{SignalValue, SsEvent};
+use crate::fit::{Align, Fit, Placement, Rect};
 use crate::pack::SSPack;
 use crate::player::{AssetLoader, BlendOp, MissingKind, OverridePriority, PlaybackDirection, PlaybackStyle, SSPlayer};
 use crate::renderer::{AlphaMode, Retention, SSRenderer};
@@ -728,6 +729,71 @@ pub struct SsPlayerWeb {
 ///
 /// A macro rather than a helper method because the closure would have to borrow
 /// the `RefCell` for the caller, and every one of these is a one-liner.
+/// Read one field off an options object. A missing object and a missing field
+/// are the same thing here: the default.
+fn field(options: Option<&js_sys::Object>, key: &str) -> JsValue {
+    match options {
+        Some(object) => js_sys::Reflect::get(object, &JsValue::from_str(key)).unwrap_or(JsValue::UNDEFINED),
+        None => JsValue::UNDEFINED,
+    }
+}
+
+fn number_field(options: Option<&js_sys::Object>, key: &str, default: f32) -> f32 {
+    field(options, key).as_f64().map(|value| value as f32).unwrap_or(default)
+}
+
+fn set_number(out: &js_sys::Object, key: &str, value: f32) {
+    let _ = js_sys::Reflect::set(out, &JsValue::from_str(key), &JsValue::from_f64(value as f64));
+}
+
+/// The options object [`SsPlayerWeb::fit_into`] takes, as a [`Placement`].
+///
+/// Unrecognised `fit` / `align` strings throw rather than falling back to the
+/// default: a typo that silently centres is a bug the page cannot see, and the
+/// message lists what is accepted.
+fn read_placement(options: Option<&js_sys::Object>) -> Result<Placement, JsValue> {
+    let fit = match field(options, "fit").as_string() {
+        None => Fit::default(),
+        Some(name) => match name.as_str() {
+            "contain" => Fit::Contain,
+            "cover" => Fit::Cover,
+            "none" => Fit::None,
+            other => return Err(JsValue::from_str(&format!("unknown fit {other:?}; expected \"contain\", \"cover\" or \"none\""))),
+        },
+    };
+    let align = match field(options, "align").as_string() {
+        None => Align::default(),
+        Some(name) => match name.as_str() {
+            "center" => Align::Center,
+            "top" => Align::Top,
+            "bottom" => Align::Bottom,
+            "left" => Align::Left,
+            "right" => Align::Right,
+            "top-left" => Align::TopLeft,
+            "top-right" => Align::TopRight,
+            "bottom-left" => Align::BottomLeft,
+            "bottom-right" => Align::BottomRight,
+            other => {
+                return Err(JsValue::from_str(&format!("unknown align {other:?}; expected \"center\", \"top\", \"bottom\", \"left\", \"right\", \"top-left\", \"top-right\", \"bottom-left\" or \"bottom-right\"")));
+            }
+        },
+    };
+    let frame = field(options, "frame").dyn_into::<js_sys::Object>().ok().map(|rect| {
+        let rect = Some(&rect);
+        Rect { x: number_field(rect, "x", 0.0), y: number_field(rect, "y", 0.0), width: number_field(rect, "width", 0.0), height: number_field(rect, "height", 0.0) }
+    });
+    Ok(Placement {
+        fit,
+        align,
+        frame,
+        offset: (number_field(options, "offsetX", 0.0), number_field(options, "offsetY", 0.0)),
+        scale: number_field(options, "scale", 1.0),
+        flip_x: field(options, "flipX").is_truthy(),
+        flip_y: field(options, "flipY").is_truthy(),
+        rotation: number_field(options, "rotation", 0.0),
+    })
+}
+
 macro_rules! with_player {
     ($self:ident, |$player:ident| $body:expr) => {{
         let ctx = &mut *$self.ctx.borrow_mut();
@@ -1656,6 +1722,67 @@ impl SsPlayerWeb {
     #[wasm_bindgen(js_name = resetTransform)]
     pub fn reset_transform(&self) -> Result<(), JsValue> {
         with_player!(self, |p| p.reset_transform())
+    }
+
+    /// The authored canvas of the animation now playing, as
+    /// `{ x, y, width, height }` in player-local units — the box
+    /// [`SsPlayerWeb::fit_into`] fits when you pass no `frame` of your own.
+    ///
+    /// `undefined` when no animation is set up. It is the frame the artist
+    /// composed in, placed against the origin by the animation's pivot, not a
+    /// measured bounding box.
+    #[wasm_bindgen(js_name = canvasRect)]
+    pub fn canvas_rect(&self) -> Result<JsValue, JsValue> {
+        with_player!(self, |p| match p.canvas_rect() {
+            Some(rect) => {
+                let out = js_sys::Object::new();
+                set_number(&out, "x", rect.x);
+                set_number(&out, "y", rect.y);
+                set_number(&out, "width", rect.width);
+                set_number(&out, "height", rect.height);
+                out.into()
+            }
+            None => JsValue::UNDEFINED,
+        })
+    }
+
+    /// Fit the animation into a `width` x `height` box and place it there, as
+    /// `setTransform` would. Returns what was written, as
+    /// `{ x, y, scaleX, scaleY }`.
+    ///
+    /// ```js
+    /// player.fitInto(canvas.width, canvas.height, { fit: 'contain', align: 'bottom' });
+    /// ```
+    ///
+    /// Every field of the options object is optional:
+    ///
+    /// * `fit` — `'contain'` (default) | `'cover'` | `'none'`
+    /// * `align` — `'center'` (default), `'top'`, `'bottom'`, `'left'`,
+    ///   `'right'`, `'top-left'`, `'top-right'`, `'bottom-left'`,
+    ///   `'bottom-right'`
+    /// * `frame` — `{ x, y, width, height }` in player-local units. Supply it and
+    ///   nothing is read from the pack
+    /// * `offsetX` / `offsetY` — pixels, applied **after** the fit
+    /// * `scale` — a multiplier **on top of** the fit's scale (default 1)
+    /// * `flipX` / `flipY` — mirrors; the alignment follows them
+    /// * `rotation` — radians, passed straight through
+    ///
+    /// The size is in **canvas pixels**, so call it again on resize and after
+    /// `setAnimation` when the canvas differs. A collapsed box, or no animation,
+    /// places the player centred and unscaled rather than throwing. An
+    /// unrecognised `fit` or `align` does throw, naming what it accepts.
+    #[wasm_bindgen(js_name = fitInto)]
+    pub fn fit_into(&self, width: f32, height: f32, options: Option<js_sys::Object>) -> Result<js_sys::Object, JsValue> {
+        let placement = read_placement(options.as_ref())?;
+        with_player!(self, |p| {
+            let placed = p.fit_into(width, height, &placement);
+            let out = js_sys::Object::new();
+            set_number(&out, "x", placed.x);
+            set_number(&out, "y", placed.y);
+            set_number(&out, "scaleX", placed.scale_x);
+            set_number(&out, "scaleY", placed.scale_y);
+            out
+        })
     }
 
     /// Draw order within the canvas; lower draws first.

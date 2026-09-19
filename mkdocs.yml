@@ -66,6 +66,7 @@ nav:
   - 🎬 Guide:
       - Scopes and names: guide/concepts.md
       - Playback and transport: guide/playback.md
+      - Fitting into a box: guide/placement.md
       - Loading and assets: guide/loading.md
       - Events and user data: guide/events.md
       - Part overrides: guide/part-overrides.md
