@@ -82,7 +82,14 @@
     // white silhouettes if only the cellmaps get loaded. Instance is here for the
     // other resolution `load` performs: its parts play an animation out of a
     // sibling `Instance_SourceAnime.ssab`, fetched by name (SPEC §7.1).
-    const PACKS = ['Basic', 'PartsColor', 'BlendMode', 'Mask', 'Shape', 'Mesh', 'Effect', 'Shader', 'TextureChange', 'Instance'];
+    //
+    // tests/Doll is a project of its own, so its packs sit in a subdirectory and
+    // name it in their value -- `${mode}/Doll/Action01_Body.ssab`, which the
+    // same template already builds. Action01_Body and Action02_Body carry
+    // instance parts playing the sibling `Eye` pack AND effect parts at once,
+    // which no single overall fixture puts together.
+    const PACKS = ['Basic', 'PartsColor', 'BlendMode', 'Mask', 'Shape', 'Mesh', 'Effect', 'Shader', 'TextureChange', 'Instance',
+      'Doll/Action01_Body', 'Doll/Action02_Body', 'Doll/Eye'];
     const pick = document.getElementById('pick');
     const mode = document.getElementById('mode');
     const player = document.getElementById('player');
