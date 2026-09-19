@@ -190,8 +190,10 @@ player, where every host and the C ABI reach it, and the host half belongs in an
       shaped, needs no GPU work, and every adapter crate inherits it.
 - [ ] **`fit` / `align`.** The player draws at authored scale into whatever target it is
       given. A host that lays out a box — any UI host does — needs the animation fitted into
-      it: `fit` (`contain` / `cover` / `none`) plus `align`, the family's vocabulary, with
-      `SSPlayerForReactNative`'s `src/core/fit.ts` as the reference implementation.
+      it: `fit` (`contain` / `cover` / `none`) plus `align`, the family's vocabulary. The
+      contract is settled, so this is a port rather than a design; it is written out in
+      [`FIT_ALIGN.md`](./FIT_ALIGN.md), because the reference implementation
+      (`SSPlayerForReactNative`'s `src/core/fit.ts`) is not reachable from this repository.
 - [ ] **Bevy UI (`Node`).** `ssplayer-bevy` gives Bevy a player in the world; a player inside
       Bevy's UI tree is a different thing — it has to size from `ComputedNode`, respect the UI
       camera's stacking and clipping, and answer `Interaction` picking. The two primitives

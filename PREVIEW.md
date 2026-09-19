@@ -148,12 +148,36 @@ Signal arrive as events shaped `{ kind: 'userData' | 'signal', partIndex, … }`
 `missingAssets` is worth putting on screen rather than keeping for diagnostics: a pack
 whose atlas did not arrive should say which one, not draw blank.
 
-## Open — fit/align
+## Blocked on fit/align
 
-The pack's canvas and the `<canvas>` element are different sizes and nothing maps
-between them yet, so the drawing is cropped: Ringo is 800×600 rendered into a 512×512
-element. **The preview cannot ship without fit/align**, which makes it the first thing to
-settle rather than a detail to discover later.
+The pack's canvas and the `<canvas>` element are different sizes and nothing maps between
+them yet, so the drawing is cropped: Ringo is 800×600 rendered into a 512×512 element.
+**The preview cannot ship without fit/align.**
+
+It is a port rather than a design — the vocabulary is settled and the reference
+implementation lives in a repository this one cannot see, so the contract is written out
+in [`FIT_ALIGN.md`](./FIT_ALIGN.md).
+
+What the preview asks of it: **supply the authored canvas as the box** (`canvas_size`
+plus the pivot) rather than a measured one. It costs no measurement, it does not resize
+when the picker changes animation, and it shows the character standing in the frame it
+was composed in — which is what makes the preview comparable to an engine's canvas.
+`contain` and `center` are the defaults and are what the preview wants.
+
+## Work order
+
+1. **`fit`/`align` in `libs/ssplayer-wgpu`** — [`FIT_ALIGN.md`](./FIT_ALIGN.md). Everything
+   else here waits on it, and it is worth more than the preview: it is the portable half
+   of *UI integration* in the roadmap, so every face and the C ABI inherit it.
+2. **The shell, built by `scripts/build.sh`** — a `--target no-modules` wasm inlined into
+   one page, the `<script id="ssab">` hole, the drop receiver, the animation picker, the
+   version stamp. Finishing this is what unblocks every host with no editor, because they
+   need nothing else.
+3. **The generator** — fills the hole from a pack and an optional animation name. The
+   thing a host calls; also the CLI, once there is somewhere to publish it from.
+
+Confirm on the first drop that a dropped `File` reads through `FileReader` at `file://`,
+which is the one item in this document taken on reasoning rather than measurement.
 
 ## Out of scope
 
