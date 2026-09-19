@@ -9,16 +9,34 @@ roadmap entry.
 
 ## Shape
 
-- A host adds a **per-animation** "Preview" button. Pressing it writes a self-contained
-  HTML file to a temp directory and opens it in the browser.
+What ships is a **shell**: one HTML file with the wasm and the glue already inlined and
+a hole where a pack goes. The hole is the content of a
+`<script id="ssab" type="application/base64">` element, so the shell is a valid page as
+it stands and opens to "no pack loaded" rather than to an error.
+
+It has two entrances and one interior:
+
+- **From a host** — a "Preview" button fills the hole, writes the file to a temp
+  directory, and opens it in the browser.
+- **By hand** — the shell is opened as it ships and a `.ssab` is dropped on it. Nothing
+  else has to be fetched or installed, which is what serves the hosts with no editor to
+  put a button in. `examples/viewer` already plays a dropped pack, so the gesture is not
+  a new one to teach.
+
+What follows from that shape:
+
+- **One button per pack, not per animation.** The page holds the whole pack and
+  `animationNames` returns all of it, so the animation picker belongs in the page. A
+  host that has one selected passes it as the initial value; otherwise it passes
+  nothing. No host ever needs to know the animation list.
 - It is a **one-shot dump, not a live view**: no file watching, no following a
   reconvert, no IPC back to the editor. To see new bytes, press the button again.
   Converting is a build step, not a preview's job.
-- The generator also runs as a CLI, so hosts with no editor (Flutter, React Native,
-  Ren'Py, Web) and tools outside any engine (VS Code, SSConverterGUI, the docs site)
-  produce the same artifact from the same code.
 - Because the artifact is one ordinary file, it works offline and **attaches to a bug
   report**: "renders here, not in my engine" becomes a repro the reporter can send.
+
+A CLI that fills the hole from a command line is a convenience on top, worth adding once
+the npm package ships. Nothing else waits on it.
 
 ## Why the preview is not drawn in the inspector
 
@@ -72,6 +90,24 @@ cost of every generated page. Whole-file sizes: 1,332,615 B for
 `examples/web/assets_emb/Basic.ssab`, 1,648,832 B for
 `examples/web/assets_emb/Ringo/Ringo.ssab`.
 
+## Distribution
+
+The shell is a **release artifact of this repository**, produced by `scripts/build.sh`
+alongside the npm package, and it carries the SDK version it was built from.
+
+It is not committed into the Players. It is generated content of about 1.1 MB, and a
+copy in each Player is a copy that drifts; the native binaries are already built rather
+than committed, and the shell travels the same way — each plugin's packaging script
+fetches a pinned release. `MAINTAINING_PLAYERS.md` §4.1 is the constraint that decides
+this: nothing behind a Player's first door may need a clone, so the shell has to arrive
+with the plugin rather than from a sibling checkout.
+
+**The version stamp is load-bearing.** The `.ssab` schema is still moving at version 1,
+so a stale shell does not fail — it quietly draws something else. The page shows the
+version it was built from, and a host compares it against the version it converted with
+and says so when they differ. Without that, every "the preview disagrees with my engine"
+report has to be re-diagnosed from scratch.
+
 ## Page composition
 
 Inline, in this order, with no external `src` and no `import` anywhere:
@@ -79,6 +115,11 @@ Inline, in this order, with no external `src` and no `import` anywhere:
 1. the `no-modules` glue verbatim,
 2. the wasm as base64 → `wasm_bindgen({ module_or_path: bytes })`,
 3. the `.ssab` as base64 → `loadSsab(bytes, undefined, undefined)`.
+
+(3) arrives either already in the `<script id="ssab">` hole or from a dropped file. A
+dropped `File` is read through `FileReader` / `File.arrayBuffer`, which is user-initiated
+and so is not the `fetch` path that `file://` blocks — confirm that on the first drop
+rather than taking it on trust, the way the rest of this list was confirmed.
 
 Feed it an **embedded-mode** `.ssab`. Then `missingAssets` comes back empty and the page
 supplies no textures at all: the `web` face decodes the atlases itself through
