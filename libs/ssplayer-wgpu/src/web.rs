@@ -1841,6 +1841,11 @@ fn event_to_js(event: &SsEvent) -> JsValue {
     let set = |key: &str, value: JsValue| {
         let _ = js_sys::Reflect::set(&out, &JsValue::from_str(key), &value);
     };
+    // On every kind, because both answer "where did this come from": the frame
+    // is the one the key is **authored** on, which is not the frame the tick
+    // landed on when several were crossed at once.
+    set("frameNo", event.frame_no().into());
+    set("partName", JsValue::from_str(event.part_name()));
     match event {
         SsEvent::UserData(u) => {
             set("kind", JsValue::from_str("userData"));

@@ -327,6 +327,12 @@ typedef struct {
      */
     uint32_t part_index;
     /*
+     The frame the key is **authored** on, which is not necessarily the frame
+     the tick landed on: one update can step across several frames and reports
+     every key in between, so this is the only way to tell them apart.
+     */
+    uint32_t frame_no;
+    /*
      UserData: whether the animator filled each optional field in. Unset is
      not the same as zero, which is what these distinguish.
      */

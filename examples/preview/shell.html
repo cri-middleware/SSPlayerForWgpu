@@ -1,0 +1,474 @@
+<!doctype html>
+<!--
+  The self-contained `.ssab` preview shell.
+
+  This file is the SOURCE. `scripts/build-preview.sh` substitutes four markers
+  and writes the artifact that actually ships: the wasm-bindgen `no-modules`
+  glue verbatim, the wasm as base64, and the version and date stamps. Each
+  marker is spelled `__SS_<NAME>__` and the build refuses a source that carries
+  one of them twice -- a second mention, here in this comment for instance,
+  would be substituted as well, and a page carrying two copies of the wasm
+  still works, so nothing downstream would catch it.
+
+  Everything else — this markup, this CSS, this script — ships as written. There
+  is no `src`, no `import` and no `fetch` anywhere in the result, because at
+  `file://` an external module script and `fetch` are both blocked and an inline
+  module script is not. See PREVIEW.md.
+-->
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>SpriteStudio preview</title>
+<style>
+  :root {
+    color-scheme: light dark;
+    --bg: #f6f7f9;
+    --panel: #ffffff;
+    --ink: #1a1d21;
+    --dim: #6b7280;
+    --line: #e2e5ea;
+    --accent: #3b82f6;
+    /* One colour per event kind, used by both the strip and the list so a
+       marker and its row are recognisably the same thing. */
+    --user-data: #8b5cf6;
+    --signal: #0ea5e9;
+    --audio: #f59e0b;
+    --thumb: 14px;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --bg: #14171c; --panel: #1b1f26; --ink: #e8eaed; --dim: #9aa3af; --line: #2b313a;
+    }
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; background: var(--bg); color: var(--ink);
+    font: 13px/1.5 ui-sans-serif, -apple-system, "Segoe UI", system-ui, sans-serif;
+    display: flex; flex-direction: column; min-height: 100vh;
+  }
+  header, footer { display: flex; gap: 12px; align-items: center; flex-wrap: wrap; padding: 8px 16px; }
+  header { border-bottom: 1px solid var(--line); }
+  footer { border-top: 1px solid var(--line); color: var(--dim); font-size: 12px; margin-top: auto; }
+  .grow { flex: 1 1 auto; }
+  .stamp { font-variant-numeric: tabular-nums; color: var(--dim); font-size: 12px; }
+  select, button {
+    font: inherit; color: inherit; background: var(--panel);
+    border: 1px solid var(--line); border-radius: 6px; padding: 4px 8px;
+  }
+  button { cursor: pointer; min-width: 36px; }
+  button:hover { border-color: var(--accent); }
+
+  main { flex: 1 1 auto; display: flex; flex-direction: column; gap: 12px; padding: 16px; min-height: 0; min-width: 0; }
+  #stage {
+    position: relative; flex: 1 1 auto; min-height: 220px;
+    border: 1px solid var(--line); border-radius: 10px; overflow: hidden;
+    /* A checkerboard, so a transparent background is visibly transparent and a
+       black-on-black animation is not mistaken for nothing drawn. */
+    background-color: var(--panel);
+    background-image:
+      linear-gradient(45deg, rgba(128,128,128,.18) 25%, transparent 25%, transparent 75%, rgba(128,128,128,.18) 75%),
+      linear-gradient(45deg, rgba(128,128,128,.18) 25%, transparent 25%, transparent 75%, rgba(128,128,128,.18) 75%);
+    background-size: 16px 16px; background-position: 0 0, 8px 8px;
+  }
+  /* Absolutely positioned, so the canvas cannot size the box that sizes the
+     canvas: with `width: 100%` in the flex flow, its intrinsic size (the
+     backing-store attributes this script writes) feeds back into the stage and
+     the pair inflate each other a little more every resize. */
+  canvas { position: absolute; inset: 0; display: block; width: 100%; height: 100%; }
+  #drop {
+    position: absolute; inset: 0; display: grid; place-content: center; gap: 6px; text-align: center;
+    background: color-mix(in srgb, var(--panel) 88%, transparent); color: var(--dim);
+  }
+  #drop.over { outline: 2px dashed var(--accent); outline-offset: -8px; color: var(--ink); }
+  #drop strong { display: block; color: var(--ink); font-size: 15px; }
+  #drop.hidden { display: none; }
+
+  .transport { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
+  .transport label { color: var(--dim); display: flex; gap: 6px; align-items: center; }
+  #frame { font-variant-numeric: tabular-nums; min-width: 92px; text-align: right; }
+
+  /* The seek bar and the marker strip share one coordinate space: both are
+     inset by half a thumb at each end, so a marker sits exactly under the thumb
+     for the frame it names. */
+  .track { position: relative; flex: 1 1 260px; min-width: 200px; }
+  #seek { width: 100%; margin: 0; }
+  #markers { position: relative; height: 14px; margin-top: 2px; }
+  .marker {
+    position: absolute; top: 0; width: 8px; height: 10px; margin-left: -4px;
+    border-radius: 2px; cursor: pointer; opacity: .85;
+    transition: transform .12s ease, opacity .12s ease;
+  }
+  .marker:hover { transform: scaleY(1.35); opacity: 1; }
+  .marker.fired { transform: scaleY(1.6); opacity: 1; box-shadow: 0 0 0 3px color-mix(in srgb, currentColor 35%, transparent); }
+  .kind-userData { background: var(--user-data); color: var(--user-data); }
+  .kind-signal   { background: var(--signal);    color: var(--signal); }
+  .kind-audio    { background: var(--audio);     color: var(--audio); }
+
+  #events { border: 1px solid var(--line); border-radius: 10px; background: var(--panel); max-height: 34vh; overflow: auto; }
+  /* Fixed layout and a wrapping payload cell, because the alternative is a
+     page wider than the window: one long user-data string widens the table,
+     which widens the flex column, which stretches the stage the canvas sizes
+     itself from -- and the animation ends up rendered into a box that is off
+     screen. */
+  #events table { border-collapse: collapse; width: 100%; table-layout: fixed; font-size: 12px; }
+  #events td { overflow-wrap: anywhere; }
+  #events td:nth-child(1), #events th:nth-child(1) { width: 4.5em; }
+  #events td:nth-child(2), #events th:nth-child(2) { width: 6em; }
+  #events td:nth-child(3), #events th:nth-child(3) { width: 9em; }
+  #events th { text-align: left; font-weight: 600; color: var(--dim); padding: 6px 10px; position: sticky; top: 0; background: var(--panel); border-bottom: 1px solid var(--line); }
+  #events td { padding: 4px 10px; border-bottom: 1px solid var(--line); vertical-align: top; }
+  #events tr { cursor: pointer; }
+  #events tr:hover td { background: color-mix(in srgb, var(--accent) 10%, transparent); }
+  #events tr.fired td { background: color-mix(in srgb, var(--accent) 18%, transparent); }
+  .dot { display: inline-block; width: 8px; height: 8px; border-radius: 2px; margin-right: 6px; vertical-align: baseline; }
+  .empty { padding: 10px; color: var(--dim); }
+  .warn { color: #b45309; }
+  code { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
+</style>
+</head>
+<body>
+
+<header>
+  <strong id="pack">no pack loaded</strong>
+  <label class="grow" style="flex:0 1 auto">
+    <select id="anim" disabled></select>
+  </label>
+  <span class="grow"></span>
+  <span class="stamp" id="stamp">__SS_VERSION__ · __SS_BUILT__</span>
+</header>
+
+<main>
+  <div id="stage">
+    <canvas id="c"></canvas>
+    <div id="drop">
+      <strong>Drop a <code>.ssab</code> here</strong>
+      <span>Reference packs: drop the <code>.png</code> atlases with it, in one go.</span>
+    </div>
+  </div>
+
+  <div class="transport">
+    <button id="playPause" title="Play / pause" disabled>⏸</button>
+    <button id="restart" title="Back to the start" disabled>↺</button>
+    <div class="track">
+      <input id="seek" type="range" min="0" max="100" value="0" step="0.1" disabled>
+      <div id="markers"></div>
+    </div>
+    <span id="frame">0.0 / 0</span>
+    <label>speed <input id="speed" type="range" min="0.1" max="3" step="0.1" value="1" style="width:90px"><span id="speedOut">1.0</span></label>
+    <label><input id="sub" type="checkbox" checked> sub-frame</label>
+  </div>
+
+  <div id="events"><div class="empty">Events appear here as the animation plays them.</div></div>
+</main>
+
+<footer>
+  <span id="stats">—</span>
+  <span class="grow"></span>
+  <span id="note"></span>
+</footer>
+
+<script id="ssab" type="application/base64"></script>
+<script id="atlases" type="application/json">{}</script>
+
+<script>__SS_GLUE__</script>
+<script id="wasm" type="application/base64">__SS_WASM__</script>
+
+<script type="module">
+const $ = (id) => document.getElementById(id);
+const note = (message, warn) => { $('note').textContent = message; $('note').className = warn ? 'warn' : ''; };
+
+/** base64 → bytes, without `fetch`, which `file://` blocks. */
+function bytes(base64) {
+  const clean = (base64 || '').trim();
+  if (!clean) return null;
+  const binary = atob(clean);
+  const out = new Uint8Array(binary.length);
+  for (let i = 0; i < binary.length; i++) out[i] = binary.charCodeAt(i);
+  return out;
+}
+
+let ctx, surface, player;
+let playing = false, dragging = false;
+let start = 0, end = 0;
+
+// --- the event table, discovered by watching playback --------------------
+//
+// The player reports events as a pulse: what the tick just crossed. There is no
+// authored-table read-out and deliberately so — it would be an API with one
+// caller, this page. So the strip fills itself: one play-through visits every
+// frame of the section, and the runtime reports every frame a tick stepped
+// across (not merely the one it landed on), so nothing is missed at any frame
+// rate. What that costs is honest: before the first pass over a frame, its
+// marker is not there yet.
+let table = new Map();   // key → { frameNo, kind, partName, text, el, row }
+
+const describe = (event) => {
+  if (event.kind === 'userData') {
+    const parts = [];
+    if (event.text !== undefined) parts.push(JSON.stringify(event.text));
+    if (event.integer !== undefined) parts.push(`int=${event.integer}`);
+    if (event.point) parts.push(`point(${[...event.point].join(', ')})`);
+    if (event.rect) parts.push(`rect(${[...event.rect].join(', ')})`);
+    return parts.join('  ') || '(empty)';
+  }
+  if (event.kind === 'signal') {
+    const args = (event.params || []).map((p) => `${p.id}=${p.value}`).join(', ');
+    return `${event.commandId}(${args})`;
+  }
+  return `${event.soundName} ×${event.loopNum}`;
+};
+
+const keyOf = (event) => `${event.frameNo}|${event.kind}|${event.partName}|${describe(event)}`;
+
+/** Where a frame sits along the seek bar, in the same space as the thumb. */
+function positionOf(frame) {
+  const span = Math.max(1, end - start);
+  const ratio = Math.min(1, Math.max(0, (frame - start) / span));
+  return `calc(var(--thumb) / 2 + ${ratio} * (100% - var(--thumb)))`;
+}
+
+function resetTable() {
+  table = new Map();
+  $('markers').replaceChildren();
+  $('events').replaceChildren(Object.assign(document.createElement('div'), {
+    className: 'empty',
+    textContent: 'Events appear here as the animation plays them.',
+  }));
+}
+
+function remember(event) {
+  const key = keyOf(event);
+  if (table.has(key)) return table.get(key);
+
+  const entry = { frameNo: event.frameNo, kind: event.kind, partName: event.partName, text: describe(event) };
+
+  const marker = document.createElement('div');
+  marker.className = `marker kind-${event.kind}`;
+  marker.style.left = positionOf(event.frameNo);
+  marker.title = `frame ${event.frameNo} · ${event.kind} · ${event.partName}\n${entry.text}`;
+  marker.addEventListener('click', () => seekTo(event.frameNo));
+  $('markers').append(marker);
+  entry.el = marker;
+
+  table.set(key, entry);
+  redrawList();
+  return entry;
+}
+
+function redrawList() {
+  const rows = [...table.values()].sort((a, b) => a.frameNo - b.frameNo || a.kind.localeCompare(b.kind));
+  const body = document.createElement('tbody');
+  for (const entry of rows) {
+    const tr = document.createElement('tr');
+    tr.innerHTML =
+      `<td><span class="dot kind-${entry.kind}"></span>${entry.frameNo}</td>` +
+      `<td>${entry.kind}</td><td>${escapeHtml(entry.partName)}</td><td>${escapeHtml(entry.text)}</td>`;
+    tr.addEventListener('click', () => seekTo(entry.frameNo));
+    body.append(tr);
+    entry.row = tr;
+  }
+  const table_ = document.createElement('table');
+  table_.innerHTML = '<thead><tr><th>frame</th><th>kind</th><th>part</th><th>payload</th></tr></thead>';
+  table_.append(body);
+  $('events').replaceChildren(table_);
+}
+
+const escapeHtml = (text) => String(text).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+
+function flash(entry) {
+  for (const element of [entry.el, entry.row]) {
+    if (!element) continue;
+    element.classList.remove('fired');
+    void element.offsetWidth;   // restart the transition
+    element.classList.add('fired');
+    setTimeout(() => element.classList.remove('fired'), 320);
+  }
+}
+
+// --- transport -----------------------------------------------------------
+
+function seekTo(frame) {
+  if (!player) return;
+  player.seek(frame);
+  $('seek').value = String(frame);
+  showFrame(frame);
+}
+
+function showFrame(frame) {
+  $('frame').textContent = `${Number(frame).toFixed(1)} / ${end}`;
+}
+
+function setPlaying(next) {
+  playing = next;
+  $('playPause').textContent = next ? '⏸' : '▶';
+  if (!player) return;
+  // `play()` is a head-out, not a resume — `resume()` is what carries on in
+  // place, and it is a no-op on a stopped animation, so the two are not
+  // interchangeable here.
+  if (next) player.resume(); else player.pause();
+}
+
+// --- loading -------------------------------------------------------------
+
+function fitCanvas() {
+  const canvas = $('c');
+  const dpr = window.devicePixelRatio || 1;
+  const width = Math.max(1, Math.round(canvas.clientWidth * dpr));
+  const height = Math.max(1, Math.round(canvas.clientHeight * dpr));
+  if (canvas.width !== width || canvas.height !== height) {
+    canvas.width = width;
+    canvas.height = height;
+    surface?.resize(width, height);
+  }
+  player?.fitInto(width, height);
+}
+
+async function show(name) {
+  player.setAnimation(name);
+  start = player.startFrame();
+  end = player.endFrame();
+  $('seek').min = String(start);
+  $('seek').max = String(end);
+  $('seek').value = String(start);
+  $('seek').disabled = false;
+  $('playPause').disabled = false;
+  $('restart').disabled = false;
+  resetTable();
+  fitCanvas();
+  player.play();
+  setPlaying(true);
+  showFrame(start);
+}
+
+/**
+ * Load a pack and whatever atlases came with it.
+ *
+ * `textureRefs` names the files a reference pack wants, so the page supplies
+ * them by name and never computes a hash. They go in on the CONTEXT with
+ * `addTextureFromBytes`, not through `setCellmapTexture`: that one is the
+ * runtime *override* and would leave the pack claiming an atlas was replaced
+ * when it was only supplied.
+ */
+async function load(ssab, atlases, label) {
+  await player.loadSsab(ssab, undefined, undefined);
+
+  const missing = [];
+  for (const ref of player.textureRefs(undefined)) {
+    if (ref.embedded) continue;
+    const supplied = atlases[ref.path] ?? atlases[ref.path.split(/[\\/]/).pop()];
+    if (supplied) ctx.addTextureFromBytes(ref.key, supplied);
+    else missing.push(ref.path);
+  }
+
+  $('pack').textContent = label;
+  const names = player.animationNames();
+  $('anim').replaceChildren(...names.map((name) => new Option(name, name)));
+  $('anim').disabled = names.length === 0;
+  $('drop').classList.add('hidden');
+
+  // `missingAssets()` is a record of what failed at load, not a live list: it
+  // still names atlases that were supplied afterwards. What is actually absent
+  // is what the loop above could not find.
+  note(missing.length ? `no atlas for ${missing.join(', ')} — those parts draw as white silhouettes` : '', missing.length > 0);
+
+  if (names.length) await show(names[0]);
+}
+
+async function loadDropped(files) {
+  const atlases = {};
+  let ssab = null, label = '';
+  for (const file of files) {
+    const data = new Uint8Array(await file.arrayBuffer());
+    if (file.name.endsWith('.ssab')) { ssab = data; label = file.name; }
+    else atlases[file.name] = data;
+  }
+  if (!ssab) { note('no .ssab among the dropped files', true); return; }
+  await load(ssab, atlases, label);
+}
+
+// --- boot ----------------------------------------------------------------
+
+(async () => {
+  try {
+    await wasm_bindgen({ module_or_path: bytes($('wasm').textContent) });
+  } catch (error) {
+    $('drop').innerHTML = `<strong>Could not start the player</strong><span>${escapeHtml(error)}</span>`;
+    return;
+  }
+  try {
+    ctx = await wasm_bindgen.SsContextWeb.create();
+  } catch (error) {
+    $('drop').innerHTML =
+      '<strong>No WebGPU here</strong>' +
+      '<span>This page needs a browser with WebGPU. Chrome and Edge have it; ' +
+      'Safari and Firefox depend on the version.</span>';
+    return;
+  }
+  surface = ctx.createSurface($('c'));
+  player = surface.createPlayer();
+  // A diagnostic artifact should be pokeable: this page exists so someone can
+  // say "renders here, not in my engine", and the next question is always a
+  // number the console can answer.
+  window.ssPreview = { ctx, surface, player };
+
+  $('playPause').addEventListener('click', () => setPlaying(!playing));
+  $('restart').addEventListener('click', () => { player.play(); setPlaying(true); });
+  $('anim').addEventListener('change', (e) => show(e.target.value));
+  $('seek').addEventListener('pointerdown', () => { dragging = true; });
+  window.addEventListener('pointerup', () => { dragging = false; });
+  $('seek').addEventListener('input', (e) => seekTo(parseFloat(e.target.value)));
+  $('speed').addEventListener('input', (e) => {
+    player.setSpeedScale(parseFloat(e.target.value));
+    $('speedOut').textContent = parseFloat(e.target.value).toFixed(1);
+  });
+  $('sub').addEventListener('change', (e) => player.setSubFrame(e.target.checked));
+
+  const stage = $('stage');
+  for (const type of ['dragenter', 'dragover']) {
+    stage.addEventListener(type, (e) => { e.preventDefault(); $('drop').classList.add('over'); });
+  }
+  stage.addEventListener('dragleave', () => $('drop').classList.remove('over'));
+  stage.addEventListener('drop', async (e) => {
+    e.preventDefault();
+    $('drop').classList.remove('over');
+    $('drop').classList.remove('hidden');
+    try { await loadDropped([...e.dataTransfer.files]); }
+    catch (error) { note(String(error), true); }
+  });
+
+  new ResizeObserver(() => fitCanvas()).observe(stage);
+  fitCanvas();
+
+  // The pack the generator inlined, if any. Its atlases arrive in the second
+  // hole, keyed by the file name `textureRefs` reports.
+  const inlined = bytes($('ssab').textContent);
+  if (inlined) {
+    const holed = JSON.parse($('atlases').textContent || '{}');
+    const atlases = Object.fromEntries(Object.entries(holed).map(([name, b64]) => [name, bytes(b64)]));
+    await load(inlined, atlases, $('ssab').dataset.name || 'inlined pack');
+  }
+
+  let previous = performance.now();
+  const tick = (now) => {
+    const dt = Math.min(0.1, (now - previous) / 1000);
+    previous = now;
+    if (player && !$('anim').disabled) {
+      surface.frame(dt);
+      for (const event of player.events()) flash(remember(event));
+      if (!dragging) {
+        const frame = player.frameNo();
+        $('seek').value = String(frame);
+        showFrame(frame);
+      }
+      if (playing && !player.isPlaying()) setPlaying(false);   // a one-shot that ended
+      const stats = surface.stats();
+      $('stats').textContent = `${stats.prims} prims · ${stats.drawCalls} draws · ${(stats.uploadedBytes / 1024).toFixed(1)} KiB/frame`;
+    }
+    requestAnimationFrame(tick);
+  };
+  requestAnimationFrame(tick);
+})();
+</script>
+</body>
+</html>

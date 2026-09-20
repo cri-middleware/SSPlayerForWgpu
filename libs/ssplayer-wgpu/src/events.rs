@@ -108,6 +108,25 @@ impl SsEvent {
             Self::Audio(e) => e.part_index,
         }
     }
+
+    /// The frame the key is **authored** on — not necessarily the frame it was
+    /// noticed on, since one update can step across several.
+    pub fn frame_no(&self) -> u32 {
+        match self {
+            Self::UserData(e) => e.frame_no,
+            Self::Signal(e) => e.frame_no,
+            Self::Audio(e) => e.frame_no,
+        }
+    }
+
+    /// The raising part's name as authored, or empty when the pack has none.
+    pub fn part_name(&self) -> &str {
+        match self {
+            Self::UserData(e) => &e.part_name,
+            Self::Signal(e) => &e.part_name,
+            Self::Audio(e) => &e.part_name,
+        }
+    }
 }
 
 /// Append every event on the frames `indices` names to `out`.
