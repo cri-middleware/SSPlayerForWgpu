@@ -1,128 +1,99 @@
-# ssplayer-wgpu — AI Agent Guide
+# SSPlayerForWgpu — AI Agent Guide
 
 ## Operating rules
 
-*   Keep changes scoped to the requested task.
-*   Do not commit unless the user explicitly asks.
-*   Before editing, read enough surrounding context to understand callers and invariants; if the read tool truncated the file, read the remaining ranges before making non-trivial changes.
-*   Follow existing code style in touched files (naming, type usage, control flow, error handling).
-*   Run formatting and linting after editing Rust code (see [Verification](#verification)). If you use `cargo clippy --fix`, first `git add` your own edits, then run with `--allow-staged` only (not `--allow-dirty`) so clippy's auto-fixes appear as unstaged changes and can be reviewed separately from your work.
-*   **Where the canon lives:** the invariants are the *Hard constraints* below; planned and rejected work is [`ROADMAP.md`](./ROADMAP.md), except where a piece of it outgrew a roadmap entry and took a file of its own — [`PREVIEW.md`](./PREVIEW.md) and [`FIT_ALIGN.md`](./FIT_ALIGN.md), each pointed at from the entry it belongs to; everything else is the code and its comments. Update this file when an invariant changes, and the roadmap when the plan does.
-*   **SDK Alignment:** playback semantics (the "Brain") are canonically documented in the SDK, not here. See [`SpriteStudio-SDK/AGENTS.md`](./SpriteStudio-SDK/AGENTS.md) for runtime constraints and [`SpriteStudio-SDK/libs/ssruntime/docs/`](./SpriteStudio-SDK/libs/ssruntime/docs/) for the Player porting guide. Do not duplicate that material into this repository.
-*   **Never commit inside the submodule.** A change that needs `ssruntime` / `ssab` is a pull request in the SDK repository, followed by a submodule bump here.
+*   Keep changes scoped to the requested task. Unrequested hardening is a suggestion, not a commit; a defect
+    you actually hit in the code you touched is not — fix it, or say plainly why you did not.
+*   Do not commit, push, or open PRs unless the user explicitly asks.
+*   Before editing, read enough surrounding context to understand callers and invariants, the ones below
+    included. If the read tool truncated a file, read the remaining ranges first.
+*   Follow the existing style of the file you touch (naming, type usage, control flow, error handling).
+*   **Anything that exists twice changes twice** — a page and its translation, a `.sh` and its `.ps1`. A
+    change that lands in one half is the defect this family produces most.
+*   **Finish by running this repository's checks**: the matrix in [CONTRIBUTING.md](./CONTRIBUTING.md). For
+    `clippy --fix`, `git add` your own edits first and pass `--allow-staged`, never `--allow-dirty`. Read
+    what a run says it verified rather than its exit code — several checks here pass, or skip themselves,
+    when a prerequisite is missing.
+*   **Do not restate here what another file owns.** The table below says which file that is; a fact that
+    belongs to none of them goes where it will be seen to go stale.
+*   **Never commit inside the `SpriteStudio-SDK` submodule.** A change the core needs is a pull request in
+    the SDK repository, followed by a submodule bump here.
+*   **Playback semantics are the SDK's** — see [its AGENTS.md](./SpriteStudio-SDK/AGENTS.md) and [the Player
+    porting guide](./SpriteStudio-SDK/libs/ssruntime/docs/); do not duplicate them here.
 
-## Architecture in one paragraph
+## What this repo is
 
-A wgpu renderer for SpriteStudio animations, split out of the SpriteStudio-SDK monorepo. It is first and foremost a **Rust** player: a clean Rust API over `ssruntime`, with WebGPU (`wasm-bindgen`) and C/C++ (`cbindgen`) as thin wrappers on top. Three layers — `ssruntime` (computation, from the SDK) / drawing / `SSPlayer` (control) — live in one crate. The load-bearing decision is the **borrow model**: the player never owns the wgpu `Device` / `Queue` / `Surface`; the host owns them and lends them per frame, so the player rides along inside any wgpu application without engine lock-in. The drawing layer splits by resource scope: `SSRenderer` (device-scoped — pipelines, sampler, texture map) and `SSScene` (render-target-scoped — projection, frame vertex arena, the players drawn into it), so **one target carries any number of players**. What is left is expressiveness, not speed. Unlike the other Players, this one links `ssruntime` and `ssab` as Rust crates rather than through the C-API, which is why the SDK is a submodule here.
+A wgpu renderer for SpriteStudio, and first of all a **Rust** player: a clean Rust API over
+`ssruntime`, with WebGPU (`wasm-bindgen`) and C/C++ (`cbindgen`) as thin wrappers on top. Unlike
+the other Players it links `ssruntime` and `ssab` as Rust crates rather than through the C-API,
+which is why the SDK is a submodule. The repository layout is in the README; below is only what
+an agent would otherwise break silently.
 
-## Key components
+## Where each answer is written
 
-| Path | Role | Docs |
-|---|---|---|
-| `libs/ssplayer-wgpu/` | Crate `ssplayer-wgpu`. `lib` / `frame` / `renderer` (device-scoped: pipelines, shaders, texture map) / `scene` (target-scoped: projection, frame arena, draw calls) / `player` (playback node tree) / `pack` (the shared `.ssab`) / `assets` (the loader seam) / `decode` (bulk atlas decoding, `embedded` feature) / `mask` (stencil planner) / `events` / `metrics` (frame counters + GPU timing) / `roster` (generation-tagged handles, shared by the web and C faces) / `web` (`web` feature) / `host` + `ffi` (`ffi` feature). | — |
-| `libs/ssplayer-wgpu-ffi/` | Crate `ssplayer-wgpu-ffi`. The **binary** faces: `staticlib` + `cdylib` named `ssplayer_wgpu`, re-exporting `ssplayer-wgpu`'s `ffi` and `web` modules so the published `ssplayer-wgpu` can stay a plain `rlib`. Its `build.rs` is what runs cbindgen, into `include/ssplayer_wgpu.h` **here** — not in the player crate. `publish = false`. | — |
-| `libs/ssplayer-bevy/` | Crate `ssplayer-bevy`. The Bevy adapter — its own crate so the player never depends on an engine, tracking one Bevy line at a time. | [README](./libs/ssplayer-bevy/README.md) |
-| `docs/` | The documentation site, built by zensical: `docs/en` (source of truth) + `docs/ja` (mirror, same paths), `mkdocs.base.yml` + `mkdocs.yml` + `mkdocs.ja.yml`, `overrides/` shared with the portal. Published by `.github/workflows/pages.yml` with the workspace rustdoc grafted at `/api/` and `examples/web` at `/demo/`. | [contributing](./docs/en/contributing/index.md) |
-| `examples/viewer/` | Crate `ssplayer-wgpu-viewer`. Native winit host used for development and visual checks. | — |
-| `packages/ssplayer-wgpu/` | The npm package `@spritestudio/ssplayer-wgpu`: `src/index.ts` (the page's single `SsContextWeb`, the wasm-URL escape hatch) and `src/element.ts` (the `<ss-player-webgpu>` convenience element), built by tsdown into `dist/`, over the wasm-pack output in `wasm/`. Published from where it sits — both build outputs are gitignored. | [README](./packages/ssplayer-wgpu/README.md) |
-| `examples/web/` | The demo pages: `index.html` (both shapes of the API, both export modes), `element.html` (the custom element and its panel), `multi.html` (many elements in article flow, overlapping other content, measuring the one shared device). They carry no build script and no player code of their own — `scripts/build.sh platform=web` stages the built package into `examples/web/ssplayer-wgpu/`, which is what they import. | [README](./examples/web/README.md) |
-| `examples/viewer-metal-cpp/` | Cocoa/Objective-C++ host that drives the C API on Metal. CMake builds the library through cargo. | [README](./examples/viewer-metal-cpp/README.md) |
-| `examples/viewer-dx12-cpp/` | Win32/C++ host that drives the C API on DX12 — the Windows twin of the Metal one, deliberately duplicated rather than shared. Run on Windows hardware and working; what the first run covered beyond "it draws" is not recorded yet. | [README](./examples/viewer-dx12-cpp/README.md) |
-| `examples/viewer-vulkan-cpp/` | Linux/C++ host that drives the C API on Vulkan, carrying **both** window paths in one binary — raw Xlib and `wayland-client` + xdg-shell — because Xwayland means an X11 window never reaches the `SS_WINDOW_WAYLAND` arm. Written on macOS and never yet built or run; the first Linux run is the check it exists for. | [README](./examples/viewer-vulkan-cpp/README.md) |
-| `examples/preview/` | The self-contained `.ssab` preview: `shell.html` is the source page, `scripts/build-preview.sh` inlines the wasm and the glue into one file that opens from `file://` with no server. | [README](./examples/preview/README.md) |
-| `examples/preview-gen/` | Crate `ssplayer-preview-gen`. Fills the shell's two holes with a pack, its atlases and the sibling packs its instance parts play from — the step behind a host's "Preview" button, and the walk a host in another language ports. `publish = false`. | [README](./examples/preview-gen/README.md) |
-| `scripts/build.sh` / `.ps1` | Builds the **library** and collects it: `platform=host\|web`, `build=release\|debug`, plus `ffi` / `deploy`. Same `key=value` shape and collect-phase as the sibling players' `build-runtime.*`. | — |
-| `scripts/build-preview.sh` | Assembles `bin/ssplayer-preview.html` from `examples/preview/shell.html` plus its own `wasm-pack --target no-modules` build — a different wasm target from the npm package's, because an ES module cannot load from `file://`. Refuses a source page that reaches outside the file. | — |
-| `scripts/deploy-examples.sh` / `.ps1` | Builds `ssconverter-cli` from the submodule, converts the SDK's test projects into `assets/`, and deploys **both** export modes to `examples/web` (`assets/` reference + atlases, `assets_emb/` embedded). | — |
-| `scripts/generate-licenses.sh` / `.ps1` | Regenerates the **committed** `THIRD_PARTY_NOTICES.md` with cargo-about, over `ssplayer-wgpu --features embedded,ffi,web` — the union of the three shipped faces. Unlike the SDK's script of the same name, the output is committed, because that is what the README links and what `build.*` copies into `bin/`. | — |
-| `bin/` | Where `build.sh platform=host` collects what it built: `include/ssplayer_wgpu.h`, `LICENSE.md`, `libs/<platform>/<arch>/`. Gitignored. `platform=web` has no collect directory: it fills `packages/ssplayer-wgpu/{wasm,dist}` in place, because for that face the package directory *is* the artifact. | — |
-| `SpriteStudio-SDK/` | The SDK, as a git submodule. `ssruntime` / `ssab` are path dependencies into it. | [SDK AGENTS](./SpriteStudio-SDK/AGENTS.md) |
-| `assets/` | Generated playback data. Gitignored — never commit it, never hand-edit it. | — |
-
-## Hard constraints
-
-*   **Borrow model:** the player must not own or store `Device` / `Queue` / `Surface` / `SSRenderer`. Any API that takes ownership of wgpu state is wrong. Data ownership is equally fixed: `.ssab` is owned by the player and borrowed by `ssruntime`; FrameData / SoA buffers are owned by `ssruntime` and borrowed by the player, never held across frames.
-*   **GPU resources live at their widest scope.** Pipelines, samplers and the texture map are device-scoped (`SSRenderer`, host-owned); the projection uniform and the frame geometry arena are render-target-scoped (`SSScene`); only the playback tree, transform and order are per player. **`SSPlayer` must not gain a wgpu-typed field** — that rule is what keeps "1 canvas = 1 player" from coming back. One device per host/page: never `request_device` per canvas or per window.
-*   **There is no vertex buffer.** The runtime's SoA arrays are memcpy'd into the scene's arena and expanded by `vs_quad` / `vs_mesh` / `vs_shape` / `vs_effect` from `@builtin(vertex_index)`; the CPU writes one 80-byte `Prim` per part and nothing per vertex. Do not reintroduce per-vertex CPU work to add a feature — put it on the `Prim` (that is where the player's alpha and tint live). The vertex stage's position maths is deliberately scalar accumulation rather than `mat4 * vec4`: rewriting it "cleanly" invites FMA contraction and costs the bit-exact golden comparison.
-*   **Textures are borrowed, not owned.** `SSRenderer::set_texture` takes a `TextureView` the supplier owns and only builds a bind group from it; `upload_texture` is a convenience path that happens to create the texture itself. `SSPack` holds CPU data only. Owning GPU textures would put a second lifecycle in competition with an engine's asset system (Bevy's `Assets<Image>` / `RenderAssets<GpuImage>`). Per-texture facts that vary (`AlphaMode`, texel size) go in the group(1) `TexInfo` uniform, never into the pipeline key — mixing straight and premultiplied atlases must not double the pipeline count.
-*   **wgpu is pinned to the 29 line.** Slint's `unstable-wgpu-NN` requires an exact wgpu major and the Vtuber application composes a Slint UI with this player on one device. A Cargo workspace resolves exactly one wgpu, so this is a repository-wide constraint — check Slint's supported major before bumping.
-*   **`[workspace] exclude = ["SpriteStudio-SDK"]` is load-bearing.** Without it cargo claims the SDK crates as members of *this* workspace and fails to resolve their inherited dependencies (`flatbuffers was not found in workspace.dependencies`).
-*   **No engine dependencies in `ssplayer-wgpu`.** Slint and Bevy must not appear in the player crate; adapters are separate crates under `libs/`. This keeps the OSS adoption path open and lets an adapter move to its own release line if its engine's wgpu major ever diverges from ours.
-*   **Crate versions are independent.** There is deliberately no `workspace.package.version`: the library and the development viewer are different products.
-*   **`ffi.rs` holds no logic.** The C face is argument validation, type conversion and error-code mapping — nothing else. Anything it would need lives in `host.rs` (wgpu) or `player.rs` (playback), so the Rust API gets it too.
-*   **Selecting an animation and starting it are separate calls.** `SSPlayer::set_animation` builds the instance tree (the allocating step); `play` / `pause` / `resume` / `stop` / `set_speed` are allocation-free transport. **`play()` is a head-out, not a resume** — it rewinds to the section start and re-arms the loop count, so using it to lift a `pause()` silently sends the playhead back to the start; `resume()` is what carries on in place (and is a no-op on a stopped animation, which only `play` starts). The four verbs stay distinct on every face, as the SDK's transport contract requires, and match `ssplayer-webgl`'s `setAnimation` + `play`.
-*   **Slots step from the part list, never from the draw order.** `step_slots` advances every instance and effect slot the pack declares; `render_node` only draws. They are separate walks because the runtime drops `Hide`-ed parts from `draw_order` / `draw_batches` entirely, so stepping from the draw walk would stop a slot the moment its part is hidden, and an independently-played child would resume late by exactly the time it spent hidden. `tests/slots.rs` pins it. The loop pulse those slots re-arm on is `Context::is_looped()`, read immediately after `update`; "the frame went backwards" is not the same thing.
-*   **A pack outlives every tree built from it.** `build_node` binds each `Context` to its pack's resource by *raw pointer*, and the only `Arc` keeping that resource alive is the one in the player's pack map, so re-registering a name the live tree plays from must not drop the pack it replaces — `add_pack` retires it until `set_animation` rebuilds the tree. The contract that falls out of it: **re-registering never changes what is already playing**, the replacement is what the next tree is built from. Any new API that removes or replaces a pack (`remove_pack`, an eviction policy) has to answer this question too.
-*   **A tick that did not run reports nothing.** `set_visible(false)` skips the timeline advance, so `build_frame` clears `events` / `looped` / `finished_edge` before returning — otherwise a culled player keeps answering `events()` with its last visible tick, and a host that plays a sound per event repeats it. `prev_finished` is deliberately *not* cleared: it is the latch that keeps a consumed completion edge from firing again when the player comes back.
-*   **Each player leaves the stencil buffer as it found it.** `render_node` unwinds every mask writer it applied (`unwind_masks`); without that, stacking two players in one render pass lets the first one's mask clip the second. The regression test compares "N players, one pass" against "one pass each" pixel for pixel, because one player per pass with `LoadOp::Clear(0)` cannot show the bug.
-*   **There are two mask backends and they must agree.** `MaskBackend::Stencil` is the mask doc's §3-1; `MaskBackend::Coverage` is its §3-2, for a host whose render pass has no stencil to lend — Bevy's 2d depth is `Depth32Float`, and an engine composing its own passes may expose no depth at all. Which one a scene uses is a property of the *host*, never of the animation, so the same `.ssab` has to look the same either way: `tests/coverage.rs` renders the mask fixtures through both and compares. Keep the coverage path inside the mask doc's numbers — RGBA8, one bit per writer, 24 writers, the same replay rules — because deviating forks a spec the Godot Player implements too. **Coverage costs one render pass per masking player per frame**, which is why it is not the default where a stencil exists; `SceneStats::coverage_layers` is that cost.
-*   **Coverage is baked and sampled in one encoder, never across frames.** `SSScene::encode_mask_coverage` records the bake passes; the host's content pass follows on the *same* `CommandEncoder`, and passes in one encoder run in order. That is the whole reason this player has none of the one-frame mask lag the reference Godot Player works around (mask doc §3-2-3): the bitmap and the affine that samples it are both this frame's, so they cannot disagree. Splitting the two across encoders, systems or frames puts that bug back — and §3-2-3's double-buffer workaround is for engines with the lag, not for this one.
-*   **Device loss is recoverable on every face, in one order:** `SSRenderer::restore_device` (device scope), then `SSScene::restore_device` (per target), then `SSPlayer::restore_textures` (per player). A player registers its atlases into the renderer, so the renderer has to exist on the new device first. `NativeHost::restore_device()` and `SsContextWeb::restoreDevice()` wrap the sequence; a format change is not recoverable, because the scene's pipelines are baked against it.
-
-## Verification
-
-| Check | Command |
+| Question | File |
 |---|---|
-| Fetch the SDK | `git submodule update --init` |
-| Generate demo assets (required once) | `./scripts/deploy-examples.sh` |
-| Build the library for this host | `./scripts/build.sh` — `platform=host build=release`, C face included, collected into `bin/` |
-| Lint (check) | `cargo clippy --workspace --all-targets -- -D warnings` |
-| Lint (auto-fix) | **After `git add` your edits**: `cargo clippy --workspace --all-targets --fix --allow-staged -- -D warnings` |
-| Format check / apply | `cargo fmt --all -- --check` / `cargo fmt --all` |
-| Tests | `cargo test --workspace` |
-| WebGPU / js face (wasm32) | `cargo build -p ssplayer-wgpu --target wasm32-unknown-unknown --no-default-features --features web` |
-| C / ffi face (+ header regen) | `cargo build -p ssplayer-wgpu-ffi` — the header is emitted by **that** crate's `build.rs`; `-p ssplayer-wgpu --features ffi` compiles the module but regenerates nothing |
-| C / ffi handle lifetimes | `cargo test -p ssplayer-wgpu --features ffi --lib` |
-| Native viewer | `cargo run -p ssplayer-wgpu-viewer` |
-| Metal C++ viewer (macOS) | `cd examples/viewer-metal-cpp && cmake -B build && cmake --build build && ./build/ssviewer-metal` |
-| DX12 C++ viewer (Windows) | `cd examples\viewer-dx12-cpp; cmake -B build; cmake --build build --config Release; .\build\Release\ssviewer-dx12.exe` |
-| Vulkan C++ viewer (Linux) | `cd examples/viewer-vulkan-cpp && cmake -B build && cmake --build build && ./build/ssviewer-vulkan` — add `--x11` / `--wayland` to pick the window path |
-| Preview shell | `./scripts/build-preview.sh` then open `bin/ssplayer-preview.html` — as a file, not over a server |
-| Preview with a pack in it | `cargo run -p ssplayer-preview-gen -- pack=assets/Ringo/Ringo.ssab open=yes` |
-| npm package (wasm + ts layer) | `./scripts/build.sh platform=web` — needs `pnpm` (`corepack enable`) as well as `wasm-pack` |
-| js layer typecheck | `cd packages/ssplayer-wgpu && pnpm run typecheck` — after a `platform=web` build, which writes the `.d.ts` it types against |
-| npm tarball contents | `cd packages/ssplayer-wgpu && pnpm pack` — `prepack` refuses a package whose advertised `dist/` or `wasm/` is missing |
-| Web demo | `./scripts/build.sh platform=web && (cd examples/web && python3 -m http.server)` |
-| Documentation site | `./scripts/prepare-docs.sh` once, then `./scripts/build-docs.sh` — both locales, `--strict` |
-| Everything Pages publishes | `./scripts/build-pages.sh serve=yes` — docs + rustdoc at `/api/` + the WebGPU demo at `/demo/` |
-| Third-party notices current | `./scripts/generate-licenses.sh` then `git diff --exit-code THIRD_PARTY_NOTICES.md` — run it after any dependency change; `about.toml`'s `accepted` list is what fails the run on a licence the family has not cleared |
+| What the player does, and how to use each face | [README.md](./README.md), the [docs site](./docs/en/) |
+| How to build, run and verify, and what each script takes | [CONTRIBUTING.md](./CONTRIBUTING.md), each script's `--help` |
+| How the site and the shipped artifacts are built | [RELEASING.md](./RELEASING.md), maintainers only |
+| What to build next, and what was measured and declined | [ROADMAP.md](./ROADMAP.md), plus the two entries that outgrew it: [PREVIEW.md](./PREVIEW.md), [FIT_ALIGN.md](./FIT_ALIGN.md) |
 
-The tests read `assets/`, so `deploy-examples.sh` is a prerequisite, not an optional step.
+## Invariants
 
-**`build.*` builds the library, `deploy-examples.*` produces the data.** The split is by *product*: `build.sh` compiles `ssplayer-wgpu` (host: the Rust library + the C face, collected under `bin/`; web: the wasm *and* the TypeScript layer over it, assembled in place under `packages/ssplayer-wgpu/`); it never converts a `.ssab` and never builds `ssconverter-cli` — that whole chain, and the deploy of both export modes into `examples/web`, is `deploy-examples.sh`. So there is exactly one script to change when a fixture moves, and one when the library layout does. The cargo commands above stay valid — `build.sh` is a front door, never the only way in, and CI deliberately calls cargo/clippy directly so a script bug cannot mask a compile error.
-
-**The wasm build is not optional.** `libs/ssplayer-wgpu/src/web.rs` sits behind the `web` feature and is compiled by *no* native command — not `build`, not `clippy --all-targets`, not `test`. Breakage there is invisible until the wasm target is built. Nothing in `web.rs` is covered by a test either, so the invariants it rests on are pinned natively instead: one device-scoped `SSRenderer` serving several render targets (`tests/pack.rs::scenes_share_one_renderer`), and an embedded pack handing out its atlases undecoded (`tests/pack.rs::an_embedded_pack_hands_out_its_atlases_undecoded`).
-
-**The npm package has the same blind spot, one layer up.** `packages/ssplayer-wgpu/src/*.ts` types itself against wasm-pack's generated `.d.ts`, so renaming or re-signing a `#[wasm_bindgen]` method breaks the TypeScript layer while cargo still compiles the wasm happily. Nothing in the Rust build sees it. CI's wasm job therefore builds the package and runs `pnpm run typecheck` after the cargo build, and that is the check to run by hand after touching `web.rs`'s public surface.
-
-**The web face has no image decoder, on purpose.** `web` does not pull the `embedded` feature: the browser already ships a decoder, so embedded atlases go out as encoded bytes (`SSPack::embedded_images`) and come back through `createImageBitmap` + `copy_external_image_to_texture`. That split is `ssplayer-core`'s (`extractEmbeddedTextures`) and `SS6PlayerForCPP`'s (decoding lives in `Platform/`, never in `Common/`); bundling `image` on top of it would pay a significant share of the payload to duplicate what is already there. The asynchrony that follows is confined to the loading call, which is `async` on this face and nowhere else.
-
-**Loading is one call on every face, and the walk behind it is written once.** `SSPlayer::load(path)` (Rust), `player.load(src)` (js), `ss_player_load` (C) each resolve everything a pack depends on: its atlases from **both** texture tables, in either export mode, and transitively the sibling `.ssab`s its instance parts play from. `setAnimation` stays synchronous everywhere, because switching motions is frequent and must not carry a promise. Do not add an API that makes a host collect textures by hand; hosts avoid players that demand it.
-
-The only per-platform part is `AssetLoader` (six methods: reset_base, set_base, read, supply_texture, has_texture, warn), and `SSPlayer::load_with` is how an engine plugs one in. **The contract between the walk and a loader is pinned by `tests/loader_contract.rs`**: `reset_base()` first, then `read` gets `src` verbatim, *then* `set_base(src)` is called once, and every path after that is a **bare name** relative to it. **The walk builds no paths and never looks inside `src`** — resolving is the loader's whole job, because only it knows whether it holds a filesystem path, a URL or an archive key. The read-then-rebase order is the safety property: `src` is read before any base derived from it exists, so "resolve `src` against itself" is not expressible. `reset_base` is the other half: `set_base` derives from the root the loader was **built** with rather than folding into its own last answer, so it is idempotent and one loader serves any number of loads (`::one_loader_serves_a_second_load`). `load_assets` calls **neither**, so a caller reaching for it (the js `loadSsab`) roots the loader itself.
-
-A load reports `Err` only for an unreadable `.ssab`, so **whatever else did not arrive comes back from `missing_assets()`** (`ss_player_missing_count`/`_at`, `missingAssets()`) — `warn` is the human-facing half, that list is the half a program branches on. A sub-pack that `<dir>/<name>.ssab` cannot reach is answered by `AssetLoader::read_pack(name)`, tried before the path and defaulting to `None`; registering it with `add_ssab` beforehand also works, since the walk skips a pack the player already has. **`load` must never take `Device`/`Queue`/`SSRenderer`** — the borrow model lends none of them until `update`, so what a load reads waits in `pending_images` and reaches the GPU on the first frame, exactly as an embedded atlas always has. A consequence worth remembering: right after `load`, `texture_size(hash)` is still `None`. And **do not replace the loader seam with direct `std::fs`**: it compiles on wasm32 and fails at runtime, and an exported Godot project keeps its files in a `.pck`, Unity's Android build in an APK, Unreal's in a `.pak`.
-
-**Every texture list must read both `cellmaps()` and `external_textures()`.** `DrawBatch.texture_hash` is a cellmap's `name_hash` for an ordinary part but a texture *file name*'s hash for one the author gave a TextureChange (`TCHG`). Missing the second table fails quietly: the hash falls back to the 1x1 white texture, so the part draws as a white silhouette and no counter, error or panic moves. `assets/overall/TextureChange.ssab` is the fixture and `tests/pack.rs::a_pack_names_its_texture_change_targets` is the guard. A pack may name one file twice under two hashes — that is correct, so dedupe fetches by path, never by hash.
-
-**`host.rs` / `ffi.rs` have the same blind spot**, behind the `ffi` feature: build with `--features ffi` after touching the player's public API, or the C face silently rots. Building `ssplayer-wgpu-ffi` also regenerates `libs/ssplayer-wgpu-ffi/include/ssplayer_wgpu.h` through cbindgen — commit the regenerated header with the change that moved it, and read the diff: cbindgen sweeps up every module-level `pub const` in the crate, so a new one lands in the public C header. Keep such constants `pub(crate)`/`pub(super)`, or add them to `cbindgen.toml`'s exclude list.
-
-**The C and JS faces are the same shape, and neither may fuse its handles.** C is `ss_scene_t` (the window) + `ss_player_t` (one character); JS is `SsContextWeb` (the page's device + renderer) + `SsSurfaceWeb` (one canvas) + `SsPlayerWeb` (one character). Fusing them is what makes two characters in one window structurally impossible, and what makes a page of N elements build N `GPUDevice`s. Both faces name their children through `roster.rs`'s generation-tagged slots for the same reason: a handle is not a pointer into the owner's list, so a stale one resolves to "destroyed" instead of to its successor. On the C side `ss_player_destroy` additionally leaves the handle box allocated until the scene goes, so a double destroy is a safe no-op; on the JS side `destroy()` is explicit and idempotent, because the surface and player live in the shared context and dropping the JS wrapper would otherwise leak a swapchain.
-
-**The documentation site has a shape, and it is not the sibling players' shape.** Four audiences share one library — a Rust/wgpu app, a Bevy app, a C or C++ app, and a browser — and only the first wants to hear the word "wgpu". So `docs/*/start/` is the **only** place a reader picks a face (one self-contained page each, install → load → play → frame loop), `docs/*/guide/` is face-neutral prose with per-face code tabs (`content.tabs.link` makes the choice stick site-wide), and `docs/*/wgpu/` is the deep end that assumes the reader owns a device — a C++ or browser reader must never be routed through it. Keep new material in the section that matches that split. English is the source and `docs/ja` mirrors it path for path; `nav` lives in **both** locale configs, so adding or renaming a page means editing both. Build with `--strict`: nothing checks links on a pull request.
-
-**Beware green rendering tests.** `libs/ssplayer-wgpu/tests/render.rs` renders offscreen and asserts on drawn-pixel counts, but skips itself when no GPU adapter is present — a pass on a machine without one may have verified nothing. CI no longer has that hole: the Linux job installs Mesa lavapipe (a software Vulkan device) and fails hard if `vulkaninfo` finds no adapter, so the readback tests really run there. Speed cannot be judged on it, which is why `scale.rs` stays `#[ignore]`d. When changing rasterisation, dump the readback to a PNG in the scratch directory and look at it; pixel counts alone have hidden real regressions.
-
-**Measure before and after any performance change, and drive a real frame loop while doing it.** `SSScene::stats()` reports primitives, draw calls, bytes uploaded, how much of the draw list is mergeable or re-binds the same texture, and — when the device was created with `Features::TIMESTAMP_QUERY` — GPU pass time; both viewers print it. `tests/scale.rs` interleaves `update` with the render pass because timing them in separate loops makes anything that caches across frames look far better than it is. GPU time is read back a frame or two late by design; do not add a stall to make it current. Assume there is no performance problem until a number says otherwise — the throughput ideas that have already been measured and declined are listed in [`ROADMAP.md`](./ROADMAP.md) under *Deliberate non-goals*.
-
-**Atlas decoding at load time (`decode.rs`) is threaded; the per-frame player walk is not.** Anything threaded here uses a `std::thread::scope` that is gone before the call returns — never a pool the player owns beside the host's — and adds no dependency. It must also keep registration order off the completion order: `flush_textures` settles which hash wins *before* dispatching, because "first registered wins" must not be decided by a race.
-
-**For anything that touches how geometry reaches the GPU, take a golden dump first.** `tests/golden.rs::golden_corpus` (`#[ignore]`d) renders all 134 fixture/animation/frame/stencil combinations and byte-compares them against a previous run — `SS_GOLDEN_DIR=/tmp/before cargo test --test golden -- --ignored`, then re-run with `SS_GOLDEN_COMPARE=/tmp/before`. The reference must come from the same machine (GPU-specific), so it is a before/after tool, not a checked-in golden set.
-
-## Workspace conventions
-
-*   Single Cargo workspace, Rust edition 2024, MSRV 1.98.
-*   `[workspace.dependencies]` is the single source of truth for `wgpu`, the SDK crates and the wasm-bindgen family, so the player crate, the viewer and the wasm build never drift.
-*   Rendering parity is judged against the WebGL player (`../SSPlayerForWeb/packages/ssplayer-webgl/`), which the drawing code was ported from; consult it before inventing new behaviour.
-*   CI enforces `cargo fmt --check`, `cargo clippy -D warnings`, the test suite (on Linux against a Mesa lavapipe software adapter, so the offscreen-rendering tests actually execute), the wasm32 build, and the MSVC + DX12-viewer build on Windows.
-*   Documentation is English.
+*   **Borrow model, and resources at their widest scope.** The player never owns or stores `Device` /
+    `Queue` / `Surface` / `SSRenderer`. Pipelines, samplers and the texture map are device-scoped
+    (`SSRenderer`), the projection uniform and frame arena target-scoped (`SSScene`), and only the playback
+    tree, transform and order are per player — so **`SSPlayer` must not gain a wgpu-typed field**, which
+    keeps "1 canvas = 1 player" from coming back. One device per host or page. `.ssab` is the player's and
+    borrowed by `ssruntime`; FrameData and SoA are `ssruntime`'s, never held across frames.
+*   **There is no vertex buffer.** The SoA arrays are memcpy'd into the scene's arena and expanded in the
+    vertex stage from `@builtin(vertex_index)`; the CPU writes one 80-byte `Prim` per part and nothing per
+    vertex. Put a new feature on the `Prim`. The scalar position accumulation is deliberate — `mat4 * vec4`
+    invites FMA contraction and costs the bit-exact golden comparison.
+*   **Textures are borrowed, not owned**, and **every texture list must read both `cellmaps()` and
+    `external_textures()`**. `set_texture` takes a `TextureView` the supplier owns and `SSPack` holds CPU
+    data only; per-texture facts that vary (`AlphaMode`, texel size) go in the group(1) `TexInfo` uniform,
+    never the pipeline key. `DrawBatch.texture_hash` is a cellmap's `name_hash` for an ordinary part but a
+    texture *file name*'s for one carrying a TextureChange, and missing that second table fails quietly: the
+    hash falls back to the 1x1 white texture and the part draws as a white silhouette. One file may be named
+    twice, so dedupe by path, never by hash.
+*   **The workspace has two fixed points, and one exclusion.** wgpu is pinned to the 29 line, because
+    Slint's `unstable-wgpu-NN` wants an exact major and one workspace resolves exactly one wgpu;
+    `[workspace] exclude = ["SpriteStudio-SDK"]` stops cargo claiming the SDK crates as members here; and no
+    engine may appear in `ssplayer-wgpu`, adapters being separate crates under `libs/`. **`ffi.rs` holds no
+    logic** either — validation, conversion and error-code mapping only, so anything more lives in `host.rs`
+    or `player.rs`, where the Rust API gets it too.
+*   **The playback contract, in four parts.** Selecting an animation and starting it are separate calls, and
+    **`play()` is a head-out, not a resume** — it rewinds to the section start and re-arms the loop count,
+    while `resume()` carries on in place; the four transport verbs stay distinct on every face. **Slots step
+    from the part list, never from the draw order**, because the runtime drops hidden parts from
+    `draw_order` and a slot would stall the moment its part is hidden; the pulse they re-arm on is
+    `Context::is_looped()`. **A pack outlives every tree built from it** — `build_node` binds each `Context`
+    to its pack's resource by raw pointer, so re-registering a name never changes what is already playing.
+    And **a tick that did not run reports nothing**: `set_visible(false)` skips the advance, so
+    `build_frame` clears `events` / `looped` / `finished_edge`, while `prev_finished` stays, being the latch
+    that stops a consumed completion edge firing twice.
+*   **Each player leaves the stencil buffer as it found it** (`unwind_masks`), or the first player's mask
+    clips the second in a shared pass. **The two mask backends must agree**: which one a scene uses is the
+    host's property, never the animation's, so keep the coverage path inside the mask doc's numbers —
+    deviating forks a spec the Godot Player implements too. It **bakes and samples in one encoder, never
+    across frames**, hence no mask lag here.
+*   **Device loss recovers in one order:** `SSRenderer::restore_device`, `SSScene::restore_device`,
+    `SSPlayer::restore_textures`. A format change does not — the pipelines are baked against it.
+*   **Loading is one call on every face**, written once — never add an API that makes a host collect
+    textures by hand. The only per-platform part is `AssetLoader`, whose contract `tests/loader_contract.rs`
+    pins: `reset_base()`, then `read` gets `src` verbatim, *then* `set_base(src)`, and every path after that
+    is a bare name. **The walk builds no paths and never looks inside `src`.** `load` takes no `Device` /
+    `Queue` / `SSRenderer`, so right after it `texture_size(hash)` is still `None`; and `std::fs` cannot
+    replace the loader seam, since it compiles on wasm32 and fails at runtime. A load reports `Err` only for
+    an unreadable `.ssab`; everything else comes back from `missing_assets()`.
+*   **Three faces compile under no default command**: `web.rs` behind `web`, the C face behind `ffi`, and
+    the npm layer typed against wasm-pack's `.d.ts`. Build all three after touching public API. Building
+    `ssplayer-wgpu-ffi` regenerates the committed C header; read that diff, because cbindgen sweeps up every
+    module-level `pub const`.
+*   **Atlas decoding at load time is threaded; the per-frame walk is not.** It is a `std::thread::scope`
+    gone before the call returns, never a pool beside the host's, and `flush_textures` settles which hash
+    wins before dispatching.
+*   **Beware green rendering tests.** `tests/render.rs` skips itself when no GPU adapter is present, so a
+    pass there verified nothing. When changing rasterisation, dump the readback to a PNG and look at it —
+    pixel counts alone have hidden real regressions.
