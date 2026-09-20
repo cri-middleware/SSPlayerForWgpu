@@ -4733,6 +4733,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "ssplayer-preview-gen"
+version = "0.1.0"
+dependencies = [
+ "ssplayer-wgpu",
+]
+
+[[package]]
 name = "ssplayer-wgpu"
 version = "7.0.0-beta.1"
 dependencies = [

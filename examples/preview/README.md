@@ -4,6 +4,9 @@
 
 ```sh
 ./scripts/build-preview.sh            # -> bin/ssplayer-preview.html (~1.3 MB)
+
+# ... and to ship a pack inside one:
+cargo run -p ssplayer-preview-gen -- pack=assets/Ringo/Ringo.ssab open=yes
 ```
 
 Then open that file. Not serve it — **open it**, from the Finder, from a terminal, from a
@@ -30,18 +33,26 @@ The wasm is its own build (`wasm-pack --target no-modules`), not the npm package
 
 ## The two holes
 
-A generator fills these to ship a pack inside the page; the shell as built has both empty
-and opens to "drop a `.ssab` here".
+The shell as built has both empty and opens to "drop a `.ssab` here". A generator fills
+them to ship a pack inside the page:
 
 ```html
-<script id="ssab" type="application/base64" data-name="Ringo.ssab">…</script>
-<script id="atlases" type="application/json">{"Ringo.png": "…base64…"}</script>
+<script id="ssab" type="application/base64" data-name="Ringo.ssab" data-animation="wait1">…</script>
+<script id="files" type="application/json">{"Ringo.png": "…", "Ringo_sub.ssab": "…"}</script>
 ```
 
-`textureRefs()` names the atlas files a reference pack wants, so a generator inlines
-exactly those and never computes a hash. Dropping by hand works the same way: drop the
-`.ssab` **together with** its `.png` siblings, in one gesture, and they are matched by
-file name.
+The second hole is **everything the pack depends on**, keyed by file name: its atlases and
+the sibling `.ssab` packs its instance parts play from. `textureRefs()` and
+`instancePacks()` are what name them, so nobody computes a hash or guesses a path;
+`examples/preview-gen` is the reference walk.
+
+Dropping by hand works the same way: drop the `.ssab` **together with** its `.png` files
+and any sibling packs, in one gesture. The first `.ssab` is what plays and the rest are
+registered beside it.
+
+Registering a sibling pack makes the player try to fetch that pack's own atlases, which
+`file://` refuses — those console warnings are expected, and the supply step right after
+is what actually feeds them.
 
 ## The event strip fills itself
 

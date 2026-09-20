@@ -1,0 +1,13 @@
+[package]
+name = "ssplayer-preview-gen"
+version = "0.1.0"
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+description = "Fills the self-contained preview shell with a pack and everything it depends on"
+publish = false
+
+[dependencies]
+ssplayer-wgpu = { workspace = true }
