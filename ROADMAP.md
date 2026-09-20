@@ -144,12 +144,14 @@ respect are in [`AGENTS.md`](./AGENTS.md) under *Hard constraints*.
       to run would be the only one the main world hears about.
 - [ ] **Self-contained HTML preview** — a per-animation button in a host writes one
       fully inlined HTML file and opens it in the browser, so every host shows the same
-      preview without an in-editor renderer. **The shell is built**
-      (`examples/preview/shell.html` + `scripts/build-preview.sh`, 1.3 MB): it opens from
+      preview without an in-editor renderer. **Both halves are built**: the shell
+      (`examples/preview/shell.html` + `scripts/build-preview.sh`, 1.3 MB) opens from
       `file://` with no server, plays a pack dropped on it, fits it into the element,
-      seeks, and shows every event it has played on a marker strip. What is left is the
-      **generator** that fills its two holes from a host, and a release job so a plugin
-      can fetch a pinned copy rather than build one. Design and the measurements:
+      seeks, and shows every event it has played on a marker strip; the generator
+      (`examples/preview-gen`) fills its two holes with a pack, its atlases and the
+      sibling packs its instance parts play from. What is left is packaging — a release
+      job so a plugin fetches a pinned shell rather than builds one, and the buttons,
+      which live in the Player repositories. Design and the measurements:
       [`PREVIEW.md`](./PREVIEW.md).
 
 ## UI integration

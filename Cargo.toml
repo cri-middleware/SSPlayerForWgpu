@@ -4,6 +4,7 @@ members = [
     "libs/ssplayer-wgpu",
     "libs/ssplayer-wgpu-ffi",
     "libs/ssplayer-bevy",
+    "examples/preview-gen",
     "examples/viewer",
     "examples/viewer-bevy",
     "examples/overall-bevy",

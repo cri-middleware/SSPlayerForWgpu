@@ -130,6 +130,23 @@ Inline, in this order, with no external `src` and no `import` anywhere:
 dropped `File` is read through `File.arrayBuffer`, which is user-initiated and so is not
 the `fetch` path that `file://` blocks — measured, see *Verified*.
 
+### Sibling packs, for the same reason
+
+An instance part plays a sub-animation out of **another** `.ssab`, and the page cannot
+fetch it: at `file://` there is nothing to fetch it from, and `loadSsab` given no `src`
+has no base to resolve against. So sibling packs go in the second hole beside the
+atlases, keyed by file name, and the page registers each with `addSsab` **before**
+loading the main pack — the main pack's own walk then skips what is already there.
+
+`SSPack::instance_packs()` is what names them, transitively; it is `textureRefs`'s
+counterpart for playback data. Missing one is the quietest failure in this whole
+document: the instance part simply draws nothing, with no warning and no gap in the
+picture to point at.
+
+Registering a sibling makes the player try to load *its* atlases through the web loader,
+which fails at `file://`. Those console warnings are expected; the supply step below is
+what feeds them.
+
 ### Both pack forms, because the editors produce the reference one
 
 An **embedded-mode** pack is one input file: `missingAssets` is empty and the page
@@ -145,10 +162,13 @@ second hole**, holding the atlases as base64 keyed by file name.
 The supply path is the documented one, and it is the page's work, not the host's:
 
 ```js
+for (const [name, bytes] of siblingPacks) await player.addSsab(bytes, name, undefined);
 await player.loadSsab(ssabBytes, undefined, undefined);
-for (const r of player.textureRefs(undefined)) {    // {key, path, embedded}
-  if (r.embedded) continue;
-  await ctx.addTextureFromBytes(r.key, atlasBytesFor(r.path));   // on the CONTEXT
+for (const pack of [undefined, ...siblingNames]) {
+  for (const r of player.textureRefs(pack)) {       // {key, path, embedded}
+    if (r.embedded) continue;
+    await ctx.addTextureFromBytes(r.key, atlasBytesFor(r.path));   // on the CONTEXT
+  }
 }
 ```
 
@@ -246,14 +266,14 @@ Call it again when the element resizes and after the picker changes animation. S
 
 ## Work order
 
-1. **The generator** — fills the two holes from a pack and an optional animation name.
-   The thing a host calls; also the CLI, once there is somewhere to publish it from.
-   Everything it needs is in *Page composition*: the pack goes in base64 in the `ssab`
-   hole, and `textureRefs()` names exactly which sibling `.png` files to inline beside it.
-2. **A release job**, so a plugin can fetch a pinned shell rather than build one.
+Both halves are built — the shell (`examples/preview/shell.html` +
+`scripts/build-preview.sh`) and the generator (`examples/preview-gen`, which a host in
+another language ports rather than links). What is left is packaging:
 
-The shell itself is built: `examples/preview/shell.html` plus `scripts/build-preview.sh`.
-Its own notes are [`examples/preview/README.md`](./examples/preview/README.md).
+1. **A release job**, so a plugin fetches a pinned shell rather than builds one. Until
+   then a host has to build it, which means a Rust toolchain and wasm-pack.
+2. **The buttons**, which live in the Player repositories rather than here: convert (or
+   find) the `.ssab`, run the gather, write to a temp directory, open it.
 
 ## Out of scope
 

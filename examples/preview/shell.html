@@ -143,7 +143,7 @@
     <canvas id="c"></canvas>
     <div id="drop">
       <strong>Drop a <code>.ssab</code> here</strong>
-      <span>Reference packs: drop the <code>.png</code> atlases with it, in one go.</span>
+      <span>Drop its <code>.png</code> atlases and any sibling <code>.ssab</code> with it, in one go.</span>
     </div>
   </div>
 
@@ -169,7 +169,7 @@
 </footer>
 
 <script id="ssab" type="application/base64"></script>
-<script id="atlases" type="application/json">{}</script>
+<script id="files" type="application/json">{}</script>
 
 <script>__SS_GLUE__</script>
 <script id="wasm" type="application/base64">__SS_WASM__</script>
@@ -341,24 +341,47 @@ async function show(name) {
   showFrame(start);
 }
 
+const baseName = (path) => path.split(/[\\/]/).pop();
+
 /**
- * Load a pack and whatever atlases came with it.
+ * Load a pack, the sibling packs its instance parts play from, and everybody's
+ * atlases — all out of one flat `{ name: bytes }` map.
  *
- * `textureRefs` names the files a reference pack wants, so the page supplies
- * them by name and never computes a hash. They go in on the CONTEXT with
+ * Siblings go in **first**: the main pack's own walk skips a pack the player
+ * already has, and an instance part whose pack never arrived draws nothing at
+ * all, silently. Registering one tries to fetch its atlases and cannot at
+ * `file://`, which is what the console warnings are; the supply loop below is
+ * what actually feeds them.
+ *
+ * `textureRefs` names the files each pack wants, so the page supplies them by
+ * name and never computes a hash. They go in on the CONTEXT with
  * `addTextureFromBytes`, not through `setCellmapTexture`: that one is the
  * runtime *override* and would leave the pack claiming an atlas was replaced
  * when it was only supplied.
  */
-async function load(ssab, atlases, label) {
+async function load(ssab, files, label, initial) {
+  const siblings = [];
+  for (const [name, data] of Object.entries(files)) {
+    if (!name.endsWith('.ssab')) continue;
+    const stem = baseName(name).replace(/\.ssab$/, '');
+    try {
+      await player.addSsab(data, stem, undefined);
+      siblings.push(stem);
+    } catch (error) {
+      note(`could not register ${name}: ${error}`, true);
+    }
+  }
+
   await player.loadSsab(ssab, undefined, undefined);
 
   const missing = [];
-  for (const ref of player.textureRefs(undefined)) {
-    if (ref.embedded) continue;
-    const supplied = atlases[ref.path] ?? atlases[ref.path.split(/[\\/]/).pop()];
-    if (supplied) ctx.addTextureFromBytes(ref.key, supplied);
-    else missing.push(ref.path);
+  for (const pack of [undefined, ...siblings]) {
+    for (const ref of player.textureRefs(pack)) {
+      if (ref.embedded) continue;
+      const supplied = files[ref.path] ?? files[baseName(ref.path)];
+      if (supplied) ctx.addTextureFromBytes(ref.key, supplied);
+      else if (!missing.includes(ref.path)) missing.push(ref.path);
+    }
   }
 
   $('pack').textContent = label;
@@ -372,19 +395,26 @@ async function load(ssab, atlases, label) {
   // is what the loop above could not find.
   note(missing.length ? `no atlas for ${missing.join(', ')} — those parts draw as white silhouettes` : '', missing.length > 0);
 
-  if (names.length) await show(names[0]);
+  if (!names.length) return;
+  const wanted = initial && names.includes(initial) ? initial : names[0];
+  $('anim').value = wanted;
+  await show(wanted);
 }
 
-async function loadDropped(files) {
-  const atlases = {};
+/**
+ * The hand-drop entrance. Everything dropped together is one bundle: the first
+ * `.ssab` is what plays, any others are its siblings, and the rest are atlases.
+ */
+async function loadDropped(dropped) {
+  const files = {};
   let ssab = null, label = '';
-  for (const file of files) {
+  for (const file of dropped) {
     const data = new Uint8Array(await file.arrayBuffer());
-    if (file.name.endsWith('.ssab')) { ssab = data; label = file.name; }
-    else atlases[file.name] = data;
+    if (file.name.endsWith('.ssab') && !ssab) { ssab = data; label = file.name; }
+    else files[file.name] = data;
   }
   if (!ssab) { note('no .ssab among the dropped files', true); return; }
-  await load(ssab, atlases, label);
+  await load(ssab, files, label);
 }
 
 // --- boot ----------------------------------------------------------------
@@ -440,13 +470,13 @@ async function loadDropped(files) {
   new ResizeObserver(() => fitCanvas()).observe(stage);
   fitCanvas();
 
-  // The pack the generator inlined, if any. Its atlases arrive in the second
-  // hole, keyed by the file name `textureRefs` reports.
+  // The pack the generator inlined, if any. Everything it depends on — sibling
+  // packs and atlases alike — arrives in the second hole, keyed by file name.
   const inlined = bytes($('ssab').textContent);
   if (inlined) {
-    const holed = JSON.parse($('atlases').textContent || '{}');
-    const atlases = Object.fromEntries(Object.entries(holed).map(([name, b64]) => [name, bytes(b64)]));
-    await load(inlined, atlases, $('ssab').dataset.name || 'inlined pack');
+    const holed = JSON.parse($('files').textContent || '{}');
+    const files = Object.fromEntries(Object.entries(holed).map(([name, b64]) => [name, bytes(b64)]));
+    await load(inlined, files, $('ssab').dataset.name || 'inlined pack', $('ssab').dataset.animation);
   }
 
   let previous = performance.now();
