@@ -112,11 +112,47 @@ regenerates the header** — its `build.rs` runs cbindgen; building
 `libs/ssplayer-wgpu-ffi/include/ssplayer_wgpu.h` is committed output, so if it
 changes, commit it — CI checks it with `git diff --exit-code`.
 
-[AGENTS.md](./AGENTS.md) carries the full matrix, including the auto-fix forms.
+For `clippy --fix`, `git add` your own edits first and pass `--allow-staged`, never
+`--allow-dirty`, so clippy's edits land unstaged and review apart from yours.
+
+The rest of the matrix:
+
+| Check | Command |
+|---|---|
+| Fetch the SDK | `git submodule update --init` |
+| Generate the fixtures (required once) | `./scripts/deploy-examples.sh` — the tests read `assets/` |
+| Build the library for this host | `./scripts/build.sh` |
+| Native viewer | `cargo run -p ssplayer-wgpu-viewer` |
+| Metal C++ viewer (macOS) | `cd examples/viewer-metal-cpp && cmake -B build && cmake --build build && ./build/ssviewer-metal` |
+| DX12 C++ viewer (Windows) | `cd examples\viewer-dx12-cpp; cmake -B build; cmake --build build --config Release; .\build\Release\ssviewer-dx12.exe` |
+| Vulkan C++ viewer (Linux) | `cd examples/viewer-vulkan-cpp && cmake -B build && cmake --build build && ./build/ssviewer-vulkan` — `--x11` / `--wayland` picks the window path |
+| Preview shell | `./scripts/build-preview.sh`, then open `bin/ssplayer-preview.html` as a file, not over a server |
+| Preview with a pack in it | `cargo run -p ssplayer-preview-gen -- pack=assets/Ringo/Ringo.ssab open=yes` |
+| npm package | `./scripts/build.sh platform=web` — needs `pnpm` (`corepack enable`) and `wasm-pack` |
+| js layer typecheck | `cd packages/ssplayer-wgpu && pnpm run typecheck`, after a `platform=web` build |
+| Web demo | `./scripts/build.sh platform=web && (cd examples/web && python3 -m http.server)` |
+| Third-party notices current | `./scripts/generate-licenses.sh`, then `git diff --exit-code THIRD_PARTY_NOTICES.md` |
+
+**Before and after anything that changes how geometry reaches the GPU, take a golden dump.**
+`tests/golden.rs::golden_corpus` is `#[ignore]`d and renders all 134 fixture/animation/frame/stencil
+combinations: `SS_GOLDEN_DIR=/tmp/before cargo test --test golden -- --ignored`, then re-run with
+`SS_GOLDEN_COMPARE=/tmp/before`. The reference is GPU-specific, so it must come from the same
+machine — it is a before/after tool, not a checked-in golden set.
+
+**Measure before and after any performance change, and drive a real frame loop while doing it.**
+`SSScene::stats()` reports primitives, draw calls, bytes uploaded, how much of the draw list is
+mergeable, and GPU pass time when the device has `Features::TIMESTAMP_QUERY`; both viewers print
+it. `tests/scale.rs` interleaves `update` with the render pass, because timing them in separate
+loops flatters anything that caches across frames. GPU time is read back a frame or two late by
+design; do not add a stall to make it current.
+
+For the documentation site, see [RELEASING.md](./RELEASING.md).
 
 ## Coding Standards
 
 ### Rust
+- Rendering parity is judged against the WebGL player (`../SSPlayerForWeb/packages/ssplayer-webgl/`), which the drawing code was ported from; consult it before inventing new behaviour.
+- Documentation in this repository is English.
 - `cargo fmt` decides formatting; `rustfmt.toml` is in the repository root.
 - Clippy runs with `-D warnings` over all targets, so a lint is an error.
 - Public items carry doc comments. The crate READMEs under `libs/` are the
