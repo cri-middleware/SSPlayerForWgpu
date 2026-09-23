@@ -4,8 +4,7 @@ title: C API リファレンス
 
 # C API リファレンス
 
-`ssplayer_wgpu.h` の全エントリポイントを用途別に並べたものです。関数ごとの詳細と安全性の注意はヘッダ自身に
-書かれています。このページはその見取り図です。
+`ssplayer_wgpu.h` の全エントリポイントを用途別に並べたものです。関数ごとの詳細と安全性の注意はヘッダ自身に書かれています。このページはその見取り図です。
 
 ヘッダは[リリース zip かソースビルド](../start/cpp.md#install)から入手します。C99 で、依存はありません。
 
@@ -29,8 +28,7 @@ title: C API リファレンス
 | `ss_player_destroy(player)` | 1 体削除。ハンドルの箱はシーンが消えるまで残るので、二重破棄は安全な no-op |
 | `ss_scene_player_count(scene)` | 診断用 |
 
-ハンドルは世代付きです。古い `ss_player_t *` は「破棄済み」に解決し、そのスロットを引き継いだ別の
-キャラクターには決して解決しません。
+ハンドルは世代付きです。古い `ss_player_t *` は「破棄済み」に解決し、そのスロットを引き継いだ別のキャラクターには決して解決しません。
 
 ## フレーム
 
@@ -54,8 +52,7 @@ title: C API リファレンス
 | `ss_scene_add_texture(scene, key, rgba, w, h)` | ストレートアルファ RGBA8 でアトラスを供給（`SsTextureRef::key` で） |
 | `ss_scene_add_texture_png(scene, key, data, len)` | エンコード済み PNG を渡してライブラリにデコードさせる |
 
-テクスチャは**シーン**に登録します。テクスチャマップがデバイススコープだからです。ウィンドウ内の全
-プレイヤーから見え、同じパックを 5 体で表示してもアップロードは 1 回です。
+テクスチャは**シーン**に登録します。テクスチャマップがデバイススコープだからです。ウィンドウ内の全プレイヤーから見え、同じパックを 5 体で表示してもアップロードは 1 回です。
 
 ## アニメーションの選択と情報
 
@@ -105,8 +102,7 @@ title: C API リファレンス
 | `ss_player_event_signal_param_count(player, i)` / `ss_player_event_signal_param_at(player, i, p, out)` | シグナルのパラメータ |
 
 `kind` は `SS_EVENT_USER_DATA`（0）/ `SS_EVENT_SIGNAL`（1）/ `SS_EVENT_AUDIO`（2）。シグナルパラメータの
-`value_type` は `SS_SIGNAL_VALUE_NONE` / `_BOOL` / `_INDEX` / `_INTEGER` / `_FLOATING` / `_TEXT`（0–5）です。
-[イベントとユーザーデータ](../guide/events.md)を参照。
+`value_type` は `SS_SIGNAL_VALUE_NONE` / `_BOOL` / `_INDEX` / `_INTEGER` / `_FLOATING` / `_TEXT`（0–5）です。[イベントとユーザーデータ](../guide/events.md)を参照。
 
 ## キャラクターの配置
 
@@ -119,8 +115,7 @@ title: C API リファレンス
 
 ## パーツとオーバーライド
 
-各オーバーライドには名前探索を省く `_by_index` 版があります。`ss_player_find_part_index` で一度だけ引いて
-保持してください。
+各オーバーライドには名前探索を省く `_by_index` 版があります。`ss_player_find_part_index` で一度だけ引いて保持してください。
 
 | | |
 |---|---|
@@ -150,7 +145,4 @@ GPU に届きます。[テクスチャ差し替え](../guide/texture-replacement
 
 ## この Face に無いもの
 
-**モーションブレンディング**（トラックスタック）は Rust だけです。自分が持つレンダーパスへの描画も同様で、
-この Face はデバイスを自分で構築し所有します。全体像は
-[スコープと名前の対応](../guide/concepts.md#what-each-face-can-do)、デバイス共有を提供しない理由は
-[制限事項](../limitations.md#no-device-sharing-across-the-c-abi)を参照してください。
+**モーションブレンディング**（トラックスタック）は Rust だけです。自分が持つレンダーパスへの描画も同様で、この Face はデバイスを自分で構築し所有します。全体像は[スコープと名前の対応](../guide/concepts.md#what-each-face-can-do)、デバイス共有を提供しない理由は[制限事項](../limitations.md#no-device-sharing-across-the-c-abi)を参照してください。

@@ -10,6 +10,7 @@
 *   Follow the existing style of the file you touch (naming, type usage, control flow, error handling).
 *   **Anything that exists twice changes twice** — a page and its translation, a `.sh` and its `.ps1`. A
     change that lands in one half is the defect this family produces most.
+*   **Never break a line between two Japanese characters**: Chrome draws that break as a visible space.
 *   **Finish by running this repository's checks**: the matrix in [CONTRIBUTING.md](./CONTRIBUTING.md). For
     `clippy --fix`, `git add` your own edits first and pass `--allow-staged`, never `--allow-dirty`. Read
     what a run says it verified rather than its exit code — several checks here pass, or skip themselves,
