@@ -235,7 +235,7 @@ Bevy アダプタは Bevy のリリースラインを追い、ビューア類は
 
 ## 🤝 コントリビュート
 
-手引きは [CONTRIBUTING.md](./CONTRIBUTING.md) です（制約、バグの報告方法、開発環境の準備、プルリクエスト前に実行すること）。不変条件の全体と検証の一覧は [AGENTS.md](./AGENTS.md)、予定しているものと意図的に見送ったものは [ROADMAP.md](./ROADMAP.md) にあります。
+手引きは [CONTRIBUTING.md](./CONTRIBUTING.md) です（制約、バグの報告方法、開発環境の準備、プルリクエスト前に実行することの一覧）。予定しているものと意図的に見送ったものは [ROADMAP.md](./ROADMAP.md) にあります。
 
 SDK は submodule なので、`ssruntime` や `ssab` に手を入れる必要のある変更は、まず向こうへプルリクエストを出し、その後こちらで submodule を更新する形になります。
 

@@ -69,8 +69,7 @@ jobs:
           VK_ICD_FILENAMES: /usr/share/vulkan/icd.d/lvp_icd.x86_64.json
         # Deliberately a hard failure: the rendering tests skip themselves when
         # there is no adapter, so without this a broken driver install would come
-        # back as a green run that drew nothing (AGENTS.md, "Beware green
-        # rendering tests").
+        # back as a green run that drew nothing.
         run: vulkaninfo --summary
 
       - name: Test
