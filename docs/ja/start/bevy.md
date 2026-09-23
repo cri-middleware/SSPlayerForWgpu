@@ -4,8 +4,7 @@ title: Bevy ではじめる
 
 # Bevy ではじめる
 
-キャラクターをエンティティとして spawn すると、Bevy が自分の 2D パスで、自分が持っているデバイス上に
-描画します。`ssplayer-bevy` は 2 つ目の Player ではなく**アダプタ**です。描画しているのは
+キャラクターをエンティティとして spawn すると、Bevy が自分の 2D パスで、自分が持っているデバイス上に描画します。`ssplayer-bevy` は 2 つ目の Player ではなく**アダプタ**です。描画しているのは
 `ssplayer-wgpu` で、このクレートはその継ぎ目にすぎません。
 
 **ここでは wgpu に一切触れません。** `SSRenderer` を触りたくなったら、それは
@@ -16,8 +15,7 @@ title: Bevy ではじめる
 **0.19.x のみ。**
 
 Bevy と Player は 1 つの `wgpu` に解決される必要があります。`bevy_render` 0.19 は `wgpu ^29.0.3` を要求し、
-Player は 29 系に固定されています。wgpu のメジャーが 2 つあるということは互換性のない型が 2 組あるという
-ことで、両者を橋渡しするものはありません — 不一致は実行時の驚きではなくコンパイルエラーになります。
+Player は 29 系に固定されています。wgpu のメジャーが 2 つあるということは互換性のない型が 2 組あるということで、両者を橋渡しするものはありません — 不一致は実行時の驚きではなくコンパイルエラーになります。
 npm ならこれを peer dependency と呼ぶところですが、cargo にその仕組みは無いので、対応範囲はここに明記し、
 workspace が 1 つの `wgpu` に解決することで担保しています。
 
@@ -25,8 +23,7 @@ workspace が 1 つの `wgpu` に解決することで担保しています。
 
 === "リリース版"
 
-    🚧 **crates.io には未公開です。** `ssplayer-wgpu` の公開待ちで、そちらは SDK クレートの公開待ちです。
-    公開されればこうなります：
+    🚧 **crates.io には未公開です。** `ssplayer-wgpu` の公開待ちで、そちらは SDK クレートの公開待ちです。公開されればこうなります：
 
     ```toml
     [dependencies]
@@ -40,8 +37,7 @@ workspace が 1 つの `wgpu` に解決することで担保しています。
     ssplayer-bevy = { git = "https://github.com/cri-middleware/SSPlayerForWgpu" }
     ```
 
-    これが `ssplayer-wgpu` を引き込むので、両方に依存する必要はありません。ソースを取り込む場合は
-    チェックアウト内の `libs/ssplayer-bevy` を指し、そこで
+    これが `ssplayer-wgpu` を引き込むので、両方に依存する必要はありません。ソースを取り込む場合はチェックアウト内の `libs/ssplayer-bevy` を指し、そこで
     `git submodule update --init --recursive` を実行してください。
 
 ## アプリ全体
@@ -81,30 +77,21 @@ fn setup(mut commands: Commands) {
 | `SsTransform` | `x`, `y`, `scale_x`, `scale_y`, `rotation` | ゼロ |
 | `SsPlayback` | `playing`, `speed`, `order`, `alpha`, `visible`, `restart` | ゼロ |
 
-Bevy の `Transform` では**ありません**。あちらは 3D アフィンで、Player の 5 つのスカラーへの分解は
-非可逆だからです。連動させたい場合はコピーするシステムを 1 つ書いてください。どちらを正とするかは
-あなたが決められます。
+Bevy の `Transform` では**ありません**。あちらは 3D アフィンで、Player の 5 つのスカラーへの分解は非可逆だからです。連動させたい場合はコピーするシステムを 1 つ書いてください。どちらを正とするかはあなたが決められます。
 
 ## 色：カメラに `CompositingSpace::Srgb` を付ける
 
-SpriteStudio のアトラスは sRGB でオーサリングされ、Player はそのバイト列を渡されたターゲットへそのまま
-書き込みます（ネイティブや C++ ホストと同じく、色管理は一切しません）。Bevy の**既定の** 2D カメラは
-**sRGB** ターゲットに描画するため、書き込み時にもう一度エンコードされ、キャラクターが目に見えて
-明るくなりすぎます。
+SpriteStudio のアトラスは sRGB でオーサリングされ、Player はそのバイト列を渡されたターゲットへそのまま書き込みます（ネイティブや C++ ホストと同じく、色管理は一切しません）。Bevy の**既定の** 2D カメラは
+**sRGB** ターゲットに描画するため、書き込み時にもう一度エンコードされ、キャラクターが目に見えて明るくなりすぎます。
 
-`CompositingSpace::Srgb` を付けると Bevy は非 sRGB（`Rgba8Unorm`）ターゲットを選び、sRGB 空間で合成します。
-これが Player（および WebGL リファレンス）のモデルと一致します。付いていない sRGB ターゲットに描画した
-場合、アダプタが 1 度だけ警告します。
+`CompositingSpace::Srgb` を付けると Bevy は非 sRGB（`Rgba8Unorm`）ターゲットを選び、sRGB 空間で合成します。これが Player（および WebGL リファレンス）のモデルと一致します。付いていない sRGB ターゲットに描画した場合、アダプタが 1 度だけ警告します。
 
 !!! warning "HDR は別の話"
-    `Hdr` カメラは `Rgba16Float`（リニア光）で描画され、Player の sRGB 空間出力はトーンマッピング的に
-    正しくありません。忠実な色が必要なら、SDR カメラ ＋ `CompositingSpace::Srgb` を使ってください。
+    `Hdr` カメラは `Rgba16Float`（リニア光）で描画され、Player の sRGB 空間出力はトーンマッピング的に正しくありません。忠実な色が必要なら、SDR カメラ ＋ `CompositingSpace::Srgb` を使ってください。
 
 ## 再開・一時停止・反応
 
-`SsPlayback::playing` は**巻き戻さずに**一時停止／再開します。したがって終了したアニメーションを
-再生し直すことはできません。先頭から再生したい場合は `SsPlayback::restart` を**インクリメント**します
-（値が変われば何でも構いません）。世代カウンタなので、ワンショットを何度でも再トリガーでき、後始末も不要です。
+`SsPlayback::playing` は**巻き戻さずに**一時停止／再開します。したがって終了したアニメーションを再生し直すことはできません。先頭から再生したい場合は `SsPlayback::restart` を**インクリメント**します（値が変われば何でも構いません）。世代カウンタなので、ワンショットを何度でも再トリガーでき、後始末も不要です。
 
 再生はレンダーワールドで動くため、結果は 2 つの経路で返ってきます：
 
@@ -129,14 +116,10 @@ fn play_sounds(mut events: MessageReader<SsEventMessage>) {
 
 ## マスクとデバイスロスト
 
-Bevy の 2D 深度テクスチャは `Depth32Float` でステンシルを持たないため、アダプタは Player の
-**カバレッジビットマップ**バックエンドを自動的に選びます。Bevy のアタッチメントには何も要求せず、描画は
-Bevy 自身のパス内で完結します。コストはマスクを使うキャラクター 1 体につき 1 パス／フレーム。
-[マスク](../guide/masks.md)を参照。
+Bevy の 2D 深度テクスチャは `Depth32Float` でステンシルを持たないため、アダプタは Player の**カバレッジビットマップ**バックエンドを自動的に選びます。Bevy のアタッチメントには何も要求せず、描画は
+Bevy 自身のパス内で完結します。コストはマスクを使うキャラクター 1 体につき 1 パス／フレーム。[マスク](../guide/masks.md)を参照。
 
-デバイスロストは Bevy 自身の復帰に乗って回復しますが、**opt-in が必要**です。Bevy の既定のエラー
-ハンドラはデバイスロストで*終了*するため、`RenderErrorPolicy::Recover` を返す `RenderErrorHandler` を
-入れてください（[デバイスロスト](../guide/device-loss.md)）。
+デバイスロストは Bevy 自身の復帰に乗って回復しますが、**opt-in が必要**です。Bevy の既定のエラーハンドラはデバイスロストで*終了*するため、`RenderErrorPolicy::Recover` を返す `RenderErrorHandler` を入れてください（[デバイスロスト](../guide/device-loss.md)）。
 
 ## サンプルを動かす
 

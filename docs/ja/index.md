@@ -1,9 +1,7 @@
 # 🦀 SSPlayer for wgpu
 
 **[SpriteStudio](https://www.webtech.co.jp/spritestudio/)** のアニメーション（`.ssab`）を
-[wgpu](https://wgpu.rs/) で再生します。レンダラーもシェーダーも 1 つ、呼び方が 4 通り。モーションは
-専用エディタでアーティストが作り、あなたはファイルを読み込んで再生するだけです。動画ファイルも、
-作り直しも、エンジンへのロックインもありません。
+[wgpu](https://wgpu.rs/) で再生します。レンダラーもシェーダーも 1 つ、呼び方が 4 通り。モーションは専用エディタでアーティストが作り、あなたはファイルを読み込んで再生するだけです。動画ファイルも、作り直しも、エンジンへのロックインもありません。
 
 wgpu は **WebGPU / Vulkan / DirectX 12 / Metal** を 1 つの API の裏に置きます。ブラウザのキャンバスも、
 Windows のゲームも、macOS のアプリも、4 本の移植版ではなく同じライブラリ 1 本で賄えるのはそのためです。
@@ -15,8 +13,7 @@ Windows のゲームも、macOS のアプリも、4 本の移植版ではなく�
 
 ## 🚀 ここから始める
 
-同じライブラリの呼び方が 4 通りあります。**自分のアプリが書かれている言語**のものを選んでください。
-各パスはそれ単体で完結していて、他の 3 つを読む必要はありません。
+同じライブラリの呼び方が 4 通りあります。**自分のアプリが書かれている言語**のものを選んでください。各パスはそれ単体で完結していて、他の 3 つを読む必要はありません。
 
 <div class="grid cards" markdown>
 
@@ -24,8 +21,7 @@ Windows のゲームも、macOS のアプリも、4 本の移植版ではなく�
 
     ---
 
-    `wgpu::Device` とレンダーパスを自分で持っているケース（自作レンダラー、`winit`、`egui`、`Slint`）。
-    あなたが開いたパスの中に描画します。
+    `wgpu::Device` とレンダーパスを自分で持っているケース（自作レンダラー、`winit`、`egui`、`Slint`）。あなたが開いたパスの中に描画します。
 
     [:octicons-arrow-right-24: Rust ではじめる](./start/rust.md)
 
@@ -42,8 +38,7 @@ Windows のゲームも、macOS のアプリも、4 本の移植版ではなく�
 
     ---
 
-    静的ライブラリ 1 本とヘッダ 1 枚。`HWND` / `CAMetalLayer` / `Window` / `wl_surface` を渡して、
-    毎フレーム 2 つの関数を呼ぶだけ。裏側は DX12 / Metal / Vulkan です。
+    静的ライブラリ 1 本とヘッダ 1 枚。`HWND` / `CAMetalLayer` / `Window` / `wl_surface` を渡して、毎フレーム 2 つの関数を呼ぶだけ。裏側は DX12 / Metal / Vulkan です。
     **wgpu の型は ABI を一切越えません。**
 
     [:octicons-arrow-right-24: C / C++ ではじめる](./start/cpp.md)
@@ -59,12 +54,10 @@ Windows のゲームも、macOS のアプリも、4 本の移植版ではなく�
 
 </div>
 
-どれを選んでも `.ssab` が必要です — [アセットの準備](./start/assets.md)を参照してください。試すだけなら
-自前のデータは不要です。すべてのサンプルは SDK 付属のテストアニメーションで動きます。
+どれを選んでも `.ssab` が必要です — [アセットの準備](./start/assets.md)を参照してください。試すだけなら自前のデータは不要です。すべてのサンプルは SDK 付属のテストアニメーションで動きます。
 
 ▶️ **まず動いているところを見たい場合**：<a href="../demo/" target="_blank" rel="noreferrer">WebGPU デモ</a>
-がこのドキュメントと一緒に公開されています。インストール不要（WebGPU 対応ブラウザが必要）。
-ページは 3 つ：API の 2 つの形、<a href="../demo/element.html" target="_blank" rel="noreferrer">カスタム要素</a>
+がこのドキュメントと一緒に公開されています。インストール不要（WebGPU 対応ブラウザが必要）。ページは 3 つ：API の 2 つの形、<a href="../demo/element.html" target="_blank" rel="noreferrer">カスタム要素</a>
 単体、そして<a href="../demo/multi.html" target="_blank" rel="noreferrer">それを 1 ページに並べたもの</a>
 （他の要素と重ねても `GPUDevice` は 1 つ）。
 
@@ -84,8 +77,7 @@ Windows のゲームも、macOS のアプリも、4 本の移植版ではなく�
 
 ## 📦 成果物
 
-ライブラリは 1 つ、パッケージは 4 つ。**まだどれも公開されていません** — 現時点ではすべてソースから
-ビルドする経路になります。何が公開の条件かは各ページに書いてあります。
+ライブラリは 1 つ、パッケージは 4 つ。**まだどれも公開されていません** — 現時点ではすべてソースからビルドする経路になります。何が公開の条件かは各ページに書いてあります。
 
 | Face | 公開形態 | 状況 |
 |---|---|---|
@@ -109,14 +101,11 @@ flowchart LR
     lib -->|wasm-bindgen| web["ブラウザ<br/>WebGPU"]
 ```
 
-コンバートは**事前**に行います。この Player は実行時に一切変換せず、コンバータも同梱しません。
-[アセットの準備](./start/assets.md)を参照してください。
+コンバートは**事前**に行います。この Player は実行時に一切変換せず、コンバータも同梱しません。[アセットの準備](./start/assets.md)を参照してください。
 
 ## 🔗 関連
 
 - [SpriteStudio Docs](https://cri-middleware.github.io/SpriteStudio-Docs/) — SDK と全公式 Player のポータル。
-- [SpriteStudio-SDK](https://github.com/cri-middleware/SpriteStudio-SDK) — この Player が直接リンクする
-  共通コア（`ssruntime` / `ssab`）。
-- [SSPlayerForWeb](https://github.com/cri-middleware/SSPlayerForWeb) — WebGL Player。本 Player の描画パリティの
-  基準であり、WebGPU が無い環境での答えでもあります。
+- [SpriteStudio-SDK](https://github.com/cri-middleware/SpriteStudio-SDK) — この Player が直接リンクする共通コア（`ssruntime` / `ssab`）。
+- [SSPlayerForWeb](https://github.com/cri-middleware/SSPlayerForWeb) — WebGL Player。本 Player の描画パリティの基準であり、WebGPU が無い環境での答えでもあります。
 - [SSConverterGUI](https://github.com/cri-middleware/SSConverterGUI) — デスクトップ版コンバータ。

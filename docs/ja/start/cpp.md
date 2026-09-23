@@ -8,14 +8,10 @@ title: C / C++ ではじめる
 2 つの関数を呼ぶと、**Windows では DirectX 12、macOS では Metal、Linux では Vulkan** で描画されます。
 
 !!! tip "wgpu を知っている必要はありません"
-    wgpu は「1 つのライブラリで 3 つのグラフィックス API を賄う」ための手段であり、ここでの関わりは
-    それだけです。**wgpu の型はこの ABI を一切越えず**、ヘッダにも登場しません。渡すのはプラットフォームの
-    ウィンドウハンドルで、返ってくるのは `SS_OK` かエラーコードです。
+    wgpu は「1 つのライブラリで 3 つのグラフィックス API を賄う」ための手段であり、ここでの関わりはそれだけです。**wgpu の型はこの ABI を一切越えず**、ヘッダにも登場しません。渡すのはプラットフォームのウィンドウハンドルで、返ってくるのは `SS_OK` かエラーコードです。
 
     1 点だけ：この Face は**自分でグラフィックスデバイスを持ちます**。あなたの
-    `ID3D12CommandList` や `MTLCommandBuffer` に描き込むわけではありません。エンジンのデバイスを C ABI 経由で
-    共有することは[意図的に対象外](../limitations.md#no-device-sharing-across-the-c-abi)です。C から合成したい
-    場合の経路はオフスクリーン描画＋テクスチャ共有になります。
+    `ID3D12CommandList` や `MTLCommandBuffer` に描き込むわけではありません。エンジンのデバイスを C ABI 経由で共有することは[意図的に対象外](../limitations.md#no-device-sharing-across-the-c-abi)です。C から合成したい場合の経路はオフスクリーン描画＋テクスチャ共有になります。
 
 ## 手に入るもの
 
@@ -30,8 +26,7 @@ title: C / C++ ではじめる
 
 === "リリース版"
 
-    🚧 **まだリリースされていません。** これらをビルドするワークフロー
-    （`.github/workflows/release.yml`）は存在し、最初のタグで公開されます。公開後は
+    🚧 **まだリリースされていません。** これらをビルドするワークフロー（`.github/workflows/release.yml`）は存在し、最初のタグで公開されます。公開後は
     [Releases ページ](https://github.com/cri-middleware/SSPlayerForWgpu/releases)にプラットフォームごとの
     zip（`include/` `lib/` `LICENSE.md`）が並びます：
 
@@ -42,13 +37,11 @@ title: C / C++ ではじめる
     | `ssplayer-wgpu-linux-x86_64.zip` | Linux x86_64（Vulkan） |
     | `ssplayer-wgpu-linux-aarch64.zip` | Linux aarch64（Vulkan） |
 
-    **静的ライブラリのみ**です。自分のバイナリにリンクする形になるので、横に置いて配布するランタイム
-    依存はありません。共有ライブラリが必要な場合はソースからビルドしてください（`build.sh` が生成します）。
+    **静的ライブラリのみ**です。自分のバイナリにリンクする形になるので、横に置いて配布するランタイム依存はありません。共有ライブラリが必要な場合はソースからビルドしてください（`build.sh` が生成します）。
 
 === "ソースから"
 
-    必要なのは Rust ツールチェイン（1.98+）だけです。同じビルドで cbindgen がヘッダも再生成するため、
-    ヘッダは常に今ビルドしたライブラリと一致します。
+    必要なのは Rust ツールチェイン（1.98+）だけです。同じビルドで cbindgen がヘッダも再生成するため、ヘッダは常に今ビルドしたライブラリと一致します。
 
     ```bash
     git clone --recursive https://github.com/cri-middleware/SSPlayerForWgpu.git
@@ -61,22 +54,19 @@ title: C / C++ ではじめる
     | `target/release/` | `libssplayer_wgpu.a` **と** `libssplayer_wgpu.dylib` / `.so`。MSVC では `ssplayer_wgpu.lib` / `ssplayer_wgpu.dll` / インポートライブラリ `ssplayer_wgpu.dll.lib` |
     | `libs/ssplayer-wgpu-ffi/include/ssplayer_wgpu.h` | このビルドで再生成されたヘッダ |
 
-    `./scripts/build.sh`（Windows では `build.ps1`）も同じことをしつつ、結果を `bin/` に収集します
-    （`bin/include/`、`bin/libs/<platform>/<arch>/`）。これはリリース zip の元になるレイアウトです。
+    `./scripts/build.sh`（Windows では `build.ps1`）も同じことをしつつ、結果を `bin/` に収集します（`bin/include/`、`bin/libs/<platform>/<arch>/`）。これはリリース zip の元になるレイアウトです。
     macOS で 2 スライスのライブラリが欲しい場合は `arch=universal` を付けます。
 
 ## リンク
 
-ライブラリは Rust 製なので、**静的**リンクにはツールチェインが本来指定してくれるプラットフォーム
-ライブラリが必要です。対象プラットフォーム上でツールチェインに聞いてください：
+ライブラリは Rust 製なので、**静的**リンクにはツールチェインが本来指定してくれるプラットフォームライブラリが必要です。対象プラットフォーム上でツールチェインに聞いてください：
 
 ```bash
 cargo rustc -p ssplayer-wgpu-ffi --release --crate-type staticlib -- --print native-static-libs
 ```
 
 macOS ではこう返ります：`-lSystem -liconv -framework QuartzCore -framework Metal -framework
-Foundation -framework CoreFoundation -lobjc`。これに自分のウィンドウコードが必要とするもの
-（`-framework Cocoa`）を足します。CMake なら：
+Foundation -framework CoreFoundation -lobjc`。これに自分のウィンドウコードが必要とするもの（`-framework Cocoa`）を足します。CMake なら：
 
 ```cmake
 add_executable(myapp src/main.cpp)
@@ -87,15 +77,13 @@ target_link_libraries(myapp PRIVATE
     "-framework Foundation" "-framework CoreFoundation" objc iconv)
 ```
 
-リポジトリ内の 3 つのサンプルビューアは「ソースから」の経路を取り、動的ライブラリをリンクしているため
-上記は不要です。その形は
+リポジトリ内の 3 つのサンプルビューアは「ソースから」の経路を取り、動的ライブラリをリンクしているため上記は不要です。その形は
 [`examples/viewer-metal-cpp/CMakeLists.txt`](https://github.com/cri-middleware/SSPlayerForWgpu/blob/main/examples/viewer-metal-cpp/CMakeLists.txt)
 を参照してください。
 
 ## ウィンドウの指定
 
-`ss_window_handle_t` はプラットフォームのウィンドウを ABI 用に平坦化したものです。`kind` が使うフィールドだけ
-埋め、残りは null にします。
+`ss_window_handle_t` はプラットフォームのウィンドウを ABI 用に平坦化したものです。`kind` が使うフィールドだけ埋め、残りは null にします。
 
 | `kind` | `window` | `display` |
 |---|---|---|
@@ -149,18 +137,15 @@ ss_scene_destroy(scene);
 毎フレームの API はこれだけです：**`ss_scene_update` のあと `ss_scene_render`**。1 シーン＝1 ウィンドウ、
 1 プレイヤー＝1 キャラクター。シーンは自分が持つ全プレイヤーを 1 パスで、`ss_player_set_order` の昇順に描画します。
 
-1 ウィンドウに 2 体なら `ss_scene_create_player` を 2 回呼ぶだけ。デバイスもパイプラインもアトラス
-アップロードも共有されます。`ss_scene_t` と `ss_player_t` が別の型なのはそのためです。
+1 ウィンドウに 2 体なら `ss_scene_create_player` を 2 回呼ぶだけ。デバイスもパイプラインもアトラスアップロードも共有されます。`ss_scene_t` と `ss_player_t` が別の型なのはそのためです。
 
 ## エラー
 
 失敗しうる関数は `int32_t` を返します：`SS_OK`（0）、`SS_ERROR_INVALID_ARGUMENT`（-1）、
-`SS_ERROR_GPU`（-2）。`ss_last_error()` は呼び出しスレッドで最後に起きた失敗の説明を返します
-（ログ向けであり、分岐用ではありません）。
+`SS_ERROR_GPU`（-2）。`ss_last_error()` は呼び出しスレッドで最後に起きた失敗の説明を返します（ログ向けであり、分岐用ではありません）。
 
 ロードは `.ssab` 本体が読めた限り `SS_OK` を返します。**それ以外に届かなかったものは**エラーではなく
-`ss_player_missing_count` / `ss_player_missing_at` から返ります
-（[ロードとアセット](../guide/loading.md)）。
+`ss_player_missing_count` / `ss_player_missing_at` から返ります（[ロードとアセット](../guide/loading.md)）。
 
 ## サンプルを動かす
 

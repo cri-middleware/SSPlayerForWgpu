@@ -1,7 +1,6 @@
 # 開発者向け
 
-このリポジトリのものはすべて 1 台のマシンでビルドできます。新しいクローンが必要とする順に並べた、
-チェックリスト一式です。
+このリポジトリのものはすべて 1 台のマシンでビルドできます。新しいクローンが必要とする順に並べた、チェックリスト一式です。
 
 ## ソースを取得する
 
@@ -12,12 +11,10 @@ git submodule update --init        # --recursive を忘れた場合
 ```
 
 `SpriteStudio-SDK` は **git サブモジュール**で、`ssruntime` / `ssab` はそこへの path 依存です。他の
-Player が released zip 内の安定 C API を通して SDK と話すのに対し、この Player はそれらのクレートを直接
-リンクして FlatBuffers 型を読むため、未リリースの `.ssab` スキーマ変更に追随する必要があります。
+Player が released zip 内の安定 C API を通して SDK と話すのに対し、この Player はそれらのクレートを直接リンクして FlatBuffers 型を読むため、未リリースの `.ssab` スキーマ変更に追随する必要があります。
 
 !!! danger "サブモジュールの中でコミットしないでください"
-    `ssruntime` や `ssab` に変更が必要な場合は、**SDK リポジトリ**への Pull Request を出し、その後こちらで
-    サブモジュールを上げます：
+    `ssruntime` や `ssab` に変更が必要な場合は、**SDK リポジトリ**への Pull Request を出し、その後こちらでサブモジュールを上げます：
 
     ```bash
     git -C SpriteStudio-SDK fetch origin && git -C SpriteStudio-SDK checkout origin/develop
@@ -31,8 +28,7 @@ Player が released zip 内の安定 C API を通して SDK と話すのに対�
 ./scripts/deploy-examples.sh
 ```
 
-サブモジュールから `ssconverter-cli` をビルドし、SDK のテストプロジェクトを `assets/` に変換して、
-**両方の**エクスポートモードを `examples/web` に配置します。**テストは `assets/` を読む**ので、これは
+サブモジュールから `ssconverter-cli` をビルドし、SDK のテストプロジェクトを `assets/` に変換して、**両方の**エクスポートモードを `examples/web` に配置します。**テストは `assets/` を読む**ので、これは
 `cargo test` の前提であって省略可能な手順ではありません。
 
 ## 全 Face をビルドする
@@ -57,17 +53,14 @@ Player が released zip 内の安定 C API を通して SDK と話すのに対�
 
 ## 知っておくべき 3 つの死角
 
-通常の `cargo build` / `clippy --all-targets` / `cargo test` は、以下を**まったくコンパイルしません**。
-どれも、誰かが意図してビルドするまで静かに腐ります：
+通常の `cargo build` / `clippy --all-targets` / `cargo test` は、以下を**まったくコンパイルしません**。どれも、誰かが意図してビルドするまで静かに腐ります：
 
 1. **`web.rs`** は `web` feature の裏にあり、ネイティブのどのコマンドでもコンパイルされません。触ったら
    wasm ターゲットをビルドしてください。
 2. **TypeScript 層**は wasm-pack が生成した `.d.ts` に対して型付けされているので、`#[wasm_bindgen]`
-   メソッドの改名は cargo が通ったまま TS 層を壊します。Web Face の公開面を変えたら型チェックを走らせて
-   ください。
+   メソッドの改名は cargo が通ったまま TS 層を壊します。Web Face の公開面を変えたら型チェックを走らせてください。
 3. **`host.rs` / `ffi.rs`** は `ffi` feature の裏にあり、そのビルドが cbindgen で
-   `libs/ssplayer-wgpu-ffi/include/ssplayer_wgpu.h` を再生成します。**再生成されたヘッダは、それを動かした
-   変更と一緒にコミットしてください。** そして差分を読むこと。cbindgen はクレート内のモジュールレベルの
+   `libs/ssplayer-wgpu-ffi/include/ssplayer_wgpu.h` を再生成します。**再生成されたヘッダは、それを動かした変更と一緒にコミットしてください。** そして差分を読むこと。cbindgen はクレート内のモジュールレベルの
    `pub const` をすべて拾います。
 
 ## ドキュメントサイトをビルドする
@@ -114,16 +107,9 @@ cargo build -p ssplayer-wgpu-ffi                          # C ヘッダも再生
 
 テストについて 3 点：
 
-* **レンダリングテストは GPU アダプタが無い環境では自分をスキップします。** そういうマシンでの成功は
-  何も検証していない可能性があります。CI はソフトウェア Vulkan デバイス（Mesa lavapipe）を入れ、
-  アダプタが無ければ失敗させます。ラスタライズを変更したら、リードバックを PNG に落として目で見てください。
-* **性能の変更は前後で計測し、そのとき本物のフレームループを回してください。** `update` とレンダーパスは
-  フレームと同じように交互に実行します。別々のループで測ると、フレームを跨いでキャッシュするものが実際より
-  ずっと良く見えます。`cargo test --test scale -- --ignored` がこのリポジトリのスループット計測で、両方を
-  満たしています（CI のソフトウェア GPU では速度を判定できないため `#[ignore]`）。ホスト側から見える
-  カウンタは[パフォーマンス](../guide/performance.md)にあります。
-* **ジオメトリに触る前にゴールデンを取ってください。** `tests/golden.rs::golden_corpus`（既定で ignore）は
-  全フィクスチャ／アニメーション／フレーム／ステンシルの組み合わせを描画し、前回の実行とバイト比較します：
+* **レンダリングテストは GPU アダプタが無い環境では自分をスキップします。** そういうマシンでの成功は何も検証していない可能性があります。CI はソフトウェア Vulkan デバイス（Mesa lavapipe）を入れ、アダプタが無ければ失敗させます。ラスタライズを変更したら、リードバックを PNG に落として目で見てください。
+* **性能の変更は前後で計測し、そのとき本物のフレームループを回してください。** `update` とレンダーパスはフレームと同じように交互に実行します。別々のループで測ると、フレームを跨いでキャッシュするものが実際よりずっと良く見えます。`cargo test --test scale -- --ignored` がこのリポジトリのスループット計測で、両方を満たしています（CI のソフトウェア GPU では速度を判定できないため `#[ignore]`）。ホスト側から見えるカウンタは[パフォーマンス](../guide/performance.md)にあります。
+* **ジオメトリに触る前にゴールデンを取ってください。** `tests/golden.rs::golden_corpus`（既定で ignore）は全フィクスチャ／アニメーション／フレーム／ステンシルの組み合わせを描画し、前回の実行とバイト比較します：
 
     ```bash
     SS_GOLDEN_DIR=/tmp/before cargo test --test golden -- --ignored
@@ -131,13 +117,10 @@ cargo build -p ssplayer-wgpu-ffi                          # C ヘッダも再生
     SS_GOLDEN_COMPARE=/tmp/before cargo test --test golden -- --ignored
     ```
 
-    基準は GPU 固有なので、これはチェックイン済みのゴールデンセットではなく、1 台のマシン上での前後比較
-    ツールです。
+    基準は GPU 固有なので、これはチェックイン済みのゴールデンセットではなく、1 台のマシン上での前後比較ツールです。
 
 ## リリース
 
-`release.yml` が全プラットフォームをビルドし、`scripts/build-release.sh` がマトリクスの成果物から zip と
-チェックサムを組み立てます。ローカルにマトリクスの代替はありません（Linux / Windows / macOS で 3 つの OS が
-必要です）。ローカル実行は `gh run download <run-id> -D artifacts` から始めます。
+`release.yml` が全プラットフォームをビルドし、`scripts/build-release.sh` がマトリクスの成果物から zip とチェックサムを組み立てます。ローカルにマトリクスの代替はありません（Linux / Windows / macOS で 3 つの OS が必要です）。ローカル実行は `gh run download <run-id> -D artifacts` から始めます。
 
 `pages.yml` がこのサイトを公開します（リリース時と、手動実行時）。

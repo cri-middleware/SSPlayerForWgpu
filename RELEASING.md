@@ -54,10 +54,7 @@ refuses a package whose advertised `dist/` or `wasm/` is missing.
 ```
 
 必ず両ロケールを、英語を先に（英語ビルドは `site/ja` を含む `site/` を消します）。
-`mkdocs.base.yml` が `strict: true` を設定します。プルリクエストではリンク検査が走らないため、
-このビルドが唯一のゲートです。`zensical serve` は何も検証せず 1 ロケールずつしか配信しないので、
-言語セレクタを確認できるのは `build-pages.sh serve=yes` だけです。`pages.yml` のビルドジョブは
-そのスクリプト（オプションはすべて明示）なので、CI と手元のゲートがずれません。
+`mkdocs.base.yml` が `strict: true` を設定します。プルリクエストではリンク検査が走らないため、このビルドが唯一のゲートです。`zensical serve` は何も検証せず 1 ロケールずつしか配信しないので、言語セレクタを確認できるのは `build-pages.sh serve=yes` だけです。`pages.yml` のビルドジョブはそのスクリプト（オプションはすべて明示）なので、CI と手元のゲートがずれません。
 
 `nav` は**両方**のロケール設定にあります。ページの追加・改名は両方を編集してください。
 
@@ -70,10 +67,7 @@ refuses a package whose advertised `dist/` or `wasm/` is missing.
 ./scripts/generate-licenses.sh        # コミット対象の THIRD_PARTY_NOTICES.md
 ```
 
-`build.sh` は**ライブラリ**を、`deploy-examples.sh` は**データ**を作ります。フィクスチャが動いたら
-後者、ライブラリの構成が変わったら前者、と変更先が 1 つに決まります。`platform=web` には収集先が
-ありません。`packages/ssplayer-wgpu/{wasm,dist}` をその場で埋めます（この face ではパッケージ
-ディレクトリ自体が成果物だからです）。`build-preview.sh` は独自に `wasm-pack --target no-modules`
+`build.sh` は**ライブラリ**を、`deploy-examples.sh` は**データ**を作ります。フィクスチャが動いたら後者、ライブラリの構成が変わったら前者、と変更先が 1 つに決まります。`platform=web` には収集先がありません。`packages/ssplayer-wgpu/{wasm,dist}` をその場で埋めます（この face ではパッケージディレクトリ自体が成果物だからです）。`build-preview.sh` は独自に `wasm-pack --target no-modules`
 でビルドします。npm パッケージとは別のターゲットなのは、ES モジュールが `file://` から読めないためです。
 
 publish の前に npm tarball を確認してください: `cd packages/ssplayer-wgpu && pnpm pack`。

@@ -4,19 +4,15 @@ title: Web ではじめる
 
 # Web ではじめる
 
-Player を WebAssembly にコンパイルし、**WebGPU** で描画します。1 ページに `GPUDevice` は 1 つ、
-キャンバス 1 枚につき `SsSurfaceWeb` が 1 つ、そして**1 枚のキャンバスに何体でも 1 レンダーパスで**
-描画できます。10 体並べてもデバイス 1 つ・パイプライン 1 セット・アトラスアップロード 1 回です。
+Player を WebAssembly にコンパイルし、**WebGPU** で描画します。1 ページに `GPUDevice` は 1 つ、キャンバス 1 枚につき `SsSurfaceWeb` が 1 つ、そして**1 枚のキャンバスに何体でも 1 レンダーパスで**描画できます。10 体並べてもデバイス 1 つ・パイプライン 1 セット・アトラスアップロード 1 回です。
 
 !!! tip "wgpu を知っている必要はありません"
-    wgpu はライブラリの実装が書かれている対象で、ブラウザではあなたのブラウザが持つ WebGPU に解決されます。
-    **デバイスは `sharedContext()` が作ります**し、API に wgpu の型は登場しません。書くのは `load` /
+    wgpu はライブラリの実装が書かれている対象で、ブラウザではあなたのブラウザが持つ WebGPU に解決されます。**デバイスは `sharedContext()` が作ります**し、API に wgpu の型は登場しません。書くのは `load` /
     `setAnimation` / `play` です。
 
 ## 前提 { #requirements }
 
-WebGPU 対応ブラウザ：**Chrome / Edge 113+、Safari 26+、Firefox 141+**（対応プラットフォーム上）。
-未対応環境では `sharedContext()` が読めるエラーで reject するので、フォールバック（静止画や
+WebGPU 対応ブラウザ：**Chrome / Edge 113+、Safari 26+、Firefox 141+**（対応プラットフォーム上）。未対応環境では `sharedContext()` が読めるエラーで reject するので、フォールバック（静止画や
 [WebGL Player](https://www.npmjs.com/package/@spritestudio/ssplayer-webgl)）は `catch` 一つで書けます。
 
 ## 導入 { #install }
@@ -29,14 +25,12 @@ WebGPU 対応ブラウザ：**Chrome / Edge 113+、Safari 26+、Firefox 141+**�
     npm i @spritestudio/ssplayer-wgpu@beta
     ```
 
-    ESM 専用・ランタイム依存なし。wasm バイナリを同梱しており、バンドラ（Vite / webpack 5 / Rollup）は
-    設定なしでアセットとして拾います。
+    ESM 専用・ランタイム依存なし。wasm バイナリを同梱しており、バンドラ（Vite / webpack 5 / Rollup）は設定なしでアセットとして拾います。
 
 === "ソースから"
 
     パッケージをビルドしてチェックアウトから入れます。`rustup target add wasm32-unknown-unknown`、
-    [`wasm-pack`](https://rustwasm.github.io/wasm-pack/)、`pnpm`（`corepack enable`）と、SDK サブモジュールへの
-    アクセスが必要です。
+    [`wasm-pack`](https://rustwasm.github.io/wasm-pack/)、`pnpm`（`corepack enable`）と、SDK サブモジュールへのアクセスが必要です。
 
     ```bash
     git clone --recursive https://github.com/cri-middleware/SSPlayerForWgpu.git
@@ -45,8 +39,7 @@ WebGPU 対応ブラウザ：**Chrome / Edge 113+、Safari 26+、Firefox 141+**�
     cd packages/ssplayer-wgpu && pnpm pack    # -> spritestudio-ssplayer-wgpu-<version>.tgz
     ```
 
-    アプリ側で `npm i /path/to/spritestudio-ssplayer-wgpu-<version>.tgz`。`prepack` は `dist/` や `wasm/` が
-    欠けた tarball を拒否するので、出来上がった tarball は常に完全です。
+    アプリ側で `npm i /path/to/spritestudio-ssplayer-wgpu-<version>.tgz`。`prepack` は `dist/` や `wasm/` が欠けた tarball を拒否するので、出来上がった tarball は常に完全です。
 
     **動いているところを見るだけ**なら、あと 1 コマンドです：
 
@@ -78,8 +71,7 @@ defineSsPlayerWebGPUElement(); // <ss-player-webgpu> を登録
 | `autoplay` | ロード後に再生開始。**boolean 属性なので、無ければ再生しません** — ポスターのように 1 フレーム目で止まります |
 | `pause-when-hidden` | 画面外・バックグラウンド時に rAF ループを止める。既定でオン、`"false"` で解除 |
 
-`element.loadSrc(src, pack?, anim?)` で実行時にパックを差し替えられ、アニメーション名の配列が返ります。
-要素の登録は import の副作用ではなく **opt-in** なので、API だけ使うバンドルに要素は含まれません。
+`element.loadSrc(src, pack?, anim?)` で実行時にパックを差し替えられ、アニメーション名の配列が返ります。要素の登録は import の副作用ではなく **opt-in** なので、API だけ使うバンドルに要素は含まれません。
 
 要素の全体（レイアウト、可視性ゲート、デバイスロスト、要素から Player API に触る方法）は
 [`<ss-player-webgpu>`](../reference/web-component.md) にまとめてあります。
@@ -114,22 +106,15 @@ const loop = (now) => {
 requestAnimationFrame(loop);
 ```
 
-**プレイヤー API で非同期なのは `load` 系だけです。** パック本体、両方のテクスチャテーブルにある
-アトラス、そしてインスタンスパーツが参照する兄弟 `.ssab` まで取得します。届かなかったものは例外
-ではなく `missingAssets()` から返ります。`setAnimation()` と再生制御はすべて同期です。
+**プレイヤー API で非同期なのは `load` 系だけです。** パック本体、両方のテクスチャテーブルにあるアトラス、そしてインスタンスパーツが参照する兄弟 `.ssab` まで取得します。届かなかったものは例外ではなく `missingAssets()` から返ります。`setAnimation()` と再生制御はすべて同期です。
 
-1 つのプレイヤーで同時に走らせられるロードは 1 本です。前のロードが完了する前に次を始めると、
-どちらかを黙って失う代わりに reject されます。`await` するか、要素と同じように呼び出しを直列に
-つないでください。別々のプレイヤーなら従来どおり並行にロードできます。
+1 つのプレイヤーで同時に走らせられるロードは 1 本です。前のロードが完了する前に次を始めると、どちらかを黙って失う代わりに reject されます。`await` するか、要素と同じように呼び出しを直列につないでください。別々のプレイヤーなら従来どおり並行にロードできます。
 
-ハンドルは明示的です。使い終わったら `player.destroy()` / `surface.destroy()` を呼んでください
-（JS 参照を捨てるだけではスワップチェーンが残ります）。どちらも冪等です。
+ハンドルは明示的です。使い終わったら `player.destroy()` / `surface.destroy()` を呼んでください（JS 参照を捨てるだけではスワップチェーンが残ります）。どちらも冪等です。
 
 ## wasm の読み込み
 
-バインディングは `new URL('ssplayer_wgpu_bg.wasm', import.meta.url)` で自分の場所を特定します。ESM バンドラは
-これを解決できます。`import.meta.url` がビルドで失われる場合（classic `<script>` や IIFE バンドル）、あるいは
-バイナリを別の場所から配信する場合は、最初の `sharedContext()` より前に指定します：
+バインディングは `new URL('ssplayer_wgpu_bg.wasm', import.meta.url)` で自分の場所を特定します。ESM バンドラはこれを解決できます。`import.meta.url` がビルドで失われる場合（classic `<script>` や IIFE バンドル）、あるいはバイナリを別の場所から配信する場合は、最初の `sharedContext()` より前に指定します：
 
 ```js
 import { setWasmUrl, sharedContext } from '@spritestudio/ssplayer-wgpu';
@@ -142,10 +127,7 @@ await sharedContext();
 
 ## デバイスロスト
 
-ブラウザはいつでも `GPUDevice` を取り上げられます（タブのバックグラウンド化、GPU プロセスのクラッシュ）。
-フレームループで `ctx.isDeviceLost()` を確認し、`restoreSharedDevice(ctx)` を呼んでください。ページ上の
-全キャンバス・全プレイヤーが保持済みのソースから再構築され、止まったところから再生が続きます。
-カスタム要素はこれを自前でやります。[デバイスロスト](../guide/device-loss.md)を参照。
+ブラウザはいつでも `GPUDevice` を取り上げられます（タブのバックグラウンド化、GPU プロセスのクラッシュ）。フレームループで `ctx.isDeviceLost()` を確認し、`restoreSharedDevice(ctx)` を呼んでください。ページ上の全キャンバス・全プレイヤーが保持済みのソースから再構築され、止まったところから再生が続きます。カスタム要素はこれを自前でやります。[デバイスロスト](../guide/device-loss.md)を参照。
 
 ## 次に読む
 

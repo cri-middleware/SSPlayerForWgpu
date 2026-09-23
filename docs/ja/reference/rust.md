@@ -40,8 +40,7 @@ pub use ssruntime::TrackBlend;
 | `SSScene` | 描画ターゲット | `new`, `set_viewport`, `update`, `encode_mask_coverage`, `draw`, `stats`, `restore_device` |
 | `SSPlayer` | キャラクター | `load`, `set_animation`, 再生制御, オーバーライド, `set_cellmap_texture`, `events`, `set_transform`, `restore_textures` |
 
-`SSPlayer` は **wgpu の型のフィールドを一切持ちません**。だから 1 つのシーンに何体でも載り、パックの
-アトラスのアップロードを共有します。[借用モデル](../wgpu/borrow-model.md)を参照。
+`SSPlayer` は **wgpu の型のフィールドを一切持ちません**。だから 1 つのシーンに何体でも載り、パックのアトラスのアップロードを共有します。[借用モデル](../wgpu/borrow-model.md)を参照。
 
 ## モジュール
 
@@ -65,27 +64,19 @@ pub use ssruntime::TrackBlend;
 | `web` | | wasm-bindgen 経由の `SsContextWeb` / `SsSurfaceWeb` / `SsPlayerWeb`。**意図的に `embedded` を引き込みません** — ブラウザが既にデコーダを持っているためです |
 | `ffi` | | C のエントリポイントと、生のウィンドウハンドルから wgpu を構築する `NativeHost` |
 
-クレートはただの `rlib` です。姉妹クレート `ssplayer-wgpu-ffi` がこのクレートの `ffi` / `web` モジュールを
-再エクスポートし、`cdylib` ＋ `staticlib`（ネイティブ C ライブラリ）と wasm モジュールとしてビルドされる
-側です。つまり 1 つのソースが Rust の依存・ブラウザ・ネイティブ共有ライブラリの 3 役を担います。
+クレートはただの `rlib` です。姉妹クレート `ssplayer-wgpu-ffi` がこのクレートの `ffi` / `web` モジュールを再エクスポートし、`cdylib` ＋ `staticlib`（ネイティブ C ライブラリ）と wasm モジュールとしてビルドされる側です。つまり 1 つのソースが Rust の依存・ブラウザ・ネイティブ共有ライブラリの 3 役を担います。
 
 !!! note "`SSPlayer::load` には `embedded` とファイルシステムが必要です"
-    この簡便な経路は `#[cfg(all(feature = "embedded", not(target_arch = "wasm32")))]` です。それ以外
-    （wasm、アーカイブ、エンジンのアセットサーバー）では `load_with(&mut loader, src)` が入口になります。
-    [ロードとアセット](../guide/loading.md)を参照。
+    この簡便な経路は `#[cfg(all(feature = "embedded", not(target_arch = "wasm32")))]` です。それ以外（wasm、アーカイブ、エンジンのアセットサーバー）では `load_with(&mut loader, src)` が入口になります。[ロードとアセット](../guide/loading.md)を参照。
 
 ## エラー
 
-ロードは `Result<(), SSRuntimeError>` を返し、**`.ssab` 本体が読めなかったときだけ**失敗します。それ以外に
-届かなかったものは `missing_assets()` にあります。
+ロードは `Result<(), SSRuntimeError>` を返し、**`.ssab` 本体が読めなかったときだけ**失敗します。それ以外に届かなかったものは `missing_assets()` にあります。
 
-オーバーライドやトラック系の多くも `Result<(), SSRuntimeError>` を返し、何もロードされていないか名前が
-解決できない場合に `Err` になります。
+オーバーライドやトラック系の多くも `Result<(), SSRuntimeError>` を返し、何もロードされていないか名前が解決できない場合に `Err` になります。
 
 ## バージョニング
 
-`ssplayer-wgpu` と `ssplayer-bevy` は**独立**にバージョン管理されています。追いかける対象が違うから
-です（Player は SDK、アダプタは Bevy のリリース系列）。
+`ssplayer-wgpu` と `ssplayer-bevy` は**独立**にバージョン管理されています。追いかける対象が違うからです（Player は SDK、アダプタは Bevy のリリース系列）。
 
-wgpu はリポジトリ全体で **29** 系に固定されています。
-[エンジンへの組み込み](../wgpu/engines.md#the-wgpu-pin)を参照。
+wgpu はリポジトリ全体で **29** 系に固定されています。[エンジンへの組み込み](../wgpu/engines.md#the-wgpu-pin)を参照。

@@ -4,8 +4,7 @@ title: JavaScript API リファレンス
 
 # JavaScript API リファレンス
 
-パッケージは型定義（`dist/index.d.ts`）を同梱しているので、以下はエディタが補完してくれます。
-このページは見取り図です。
+パッケージは型定義（`dist/index.d.ts`）を同梱しているので、以下はエディタが補完してくれます。このページは見取り図です。
 
 ```js
 import { sharedContext, restoreSharedDevice, setWasmUrl } from '@spritestudio/ssplayer-wgpu';
@@ -48,9 +47,7 @@ import { defineSsPlayerWebGPUElement } from '@spritestudio/ssplayer-wgpu/element
 
 ## `SsPlayerWeb` — キャラクター 1 体
 
-**ロード** — 非同期なのは `load` 系だけで、1 つのプレイヤーが同時に走らせられるロードは **1 本**
-です。前のロードが完了する前に次を始めると reject されるので、`await` するか呼び出しを直列に
-つないでください。
+**ロード** — 非同期なのは `load` 系だけで、1 つのプレイヤーが同時に走らせられるロードは **1 本**です。前のロードが完了する前に次を始めると reject されるので、`await` するか呼び出しを直列につないでください。
 
 | | |
 |---|---|
@@ -104,8 +101,7 @@ import { defineSsPlayerWebGPUElement } from '@spritestudio/ssplayer-wgpu/element
 | `isPartHidden(part)` / `isPartSkinnedMesh(part)` / `partCount()` | `isPartSkinnedMesh` は `true`/`false`、不明なパーツなら `null` |
 | `events()` | `kind` で分類されたプレーンオブジェクト：`'userData'` / `'signal'` / `'audio'` |
 
-**テクスチャ差し替え** — セルマップがバインドするテクスチャ丸ごとを差し替えます（衣装・パレット
-変更）。`pack` に null でメインパック。[テクスチャ差し替え](../guide/texture-replacement.md)を参照。
+**テクスチャ差し替え** — セルマップがバインドするテクスチャ丸ごとを差し替えます（衣装・パレット変更）。`pack` に null でメインパック。[テクスチャ差し替え](../guide/texture-replacement.md)を参照。
 
 | | |
 |---|---|
@@ -131,5 +127,4 @@ import { defineSsPlayerWebGPUElement } from '@spritestudio/ssplayer-wgpu/element
 
 ## この Face に無いもの
 
-**モーションブレンディング**（トラックスタック）は Rust だけです。全体像は
-[スコープと名前の対応](../guide/concepts.md#what-each-face-can-do)を参照。
+**モーションブレンディング**（トラックスタック）は Rust だけです。全体像は[スコープと名前の対応](../guide/concepts.md#what-each-face-can-do)を参照。

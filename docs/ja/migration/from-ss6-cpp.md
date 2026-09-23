@@ -1,15 +1,11 @@
 # SS6Player for CPP からの移行
 
-[SS6Player for CPP](https://github.com/SpriteStudio/SS6PlayerForCpp) からの移行は、3 つが同時に変わります：
-実装言語（C++ → Rust コア）、描画バックエンド（OpenGL 固定 → wgpu：WebGPU / Vulkan / DX12 / Metal）、
-アセットフォーマット（`.ssfb2` → `.ssab`）。
+[SS6Player for CPP](https://github.com/SpriteStudio/SS6PlayerForCpp) からの移行は、3 つが同時に変わります：実装言語（C++ → Rust コア）、描画バックエンド（OpenGL 固定 → wgpu：WebGPU / Vulkan / DX12 / Metal）、アセットフォーマット（`.ssfb2` → `.ssab`）。
 
-単純なライブラリ差し替えではありません。**アセットの再コンバート**と**ホストコードの書き換え**を見込んで
-ください。ただしホストコードは相当小さくなります。このページはその新旧対応表です。
+単純なライブラリ差し替えではありません。**アセットの再コンバート**と**ホストコードの書き換え**を見込んでください。ただしホストコードは相当小さくなります。このページはその新旧対応表です。
 
 !!! tip "C++ のまま使い続けても構いません"
-    [C API](../reference/c.md) は後付けではなく一級の Face で、既存の DX12 / Metal / Vulkan アプリケーションが
-    そのまま叩けます。以下では Rust と C の両方を併記します。
+    [C API](../reference/c.md) は後付けではなく一級の Face で、既存の DX12 / Metal / Vulkan アプリケーションがそのまま叩けます。以下では Rust と C の両方を併記します。
 
 ## 1. アセット
 
@@ -30,9 +26,7 @@
 `SystemProcessMainPre()` / `MainPost()` / `RenderPost()` を呼び、OpenGL のステート・バッファ・テクスチャは
 Player の内部が持っていました。
 
-**本 Player にはグローバルな初期化も終了処理もありません。** wgpu の `Device` / `Queue` / `Surface` は
-アプリケーションのもので、フレームごとに貸し出します。だからこそ、どんなレンダラーやエンジンにも
-ロックインなしで相乗りできます（[借用モデル](../wgpu/borrow-model.md)）。
+**本 Player にはグローバルな初期化も終了処理もありません。** wgpu の `Device` / `Queue` / `Surface` はアプリケーションのもので、フレームごとに貸し出します。だからこそ、どんなレンダラーやエンジンにもロックインなしで相乗りできます（[借用モデル](../wgpu/borrow-model.md)）。
 
 | 役割 | SS6Player for CPP | Rust | C API |
 |---|---|---|---|
@@ -59,11 +53,9 @@ SSScene -> update(&renderer, &device, &queue, dt, &mut [a, b])
 
 ## 3. ロード
 
-**以前**：`.ssfb2` を読んで `Project.BootUp()`、そして `Project.CountGetTexture()` の回数だけ画像を自分で
-読み込み、`Project.TextureSet()` で登録。
+**以前**：`.ssfb2` を読んで `Project.BootUp()`、そして `Project.CountGetTexture()` の回数だけ画像を自分で読み込み、`Project.TextureSet()` で登録。
 
-**現在**：1 呼び出しで、パック本体・アトラス（外部／埋め込み、テクスチャチェンジ対象を含む）・
-インスタンスパーツが再生する兄弟 `.ssab` まで解決されます。
+**現在**：1 呼び出しで、パック本体・アトラス（外部／埋め込み、テクスチャチェンジ対象を含む）・インスタンスパーツが再生する兄弟 `.ssab` まで解決されます。
 
 === "Rust"
 
@@ -77,16 +69,13 @@ SSScene -> update(&renderer, &device, &queue, dt, &mut [a, b])
     ss_player_load(player, "assets/character/character.ssab");
     ```
 
-2 点だけ：`load` は **`Device` も `Queue` も受け取りません**（読んだものは最初の `update` で GPU に届きます）。
-そしてアトラスの欠落は**エラーではなく** `missing_assets()` / `ss_player_missing_count` のエントリです
-（[ロードとアセット](../guide/loading.md)）。
+2 点だけ：`load` は **`Device` も `Queue` も受け取りません**（読んだものは最初の `update` で GPU に届きます）。そしてアトラスの欠落は**エラーではなく** `missing_assets()` / `ss_player_missing_count` のエントリです（[ロードとアセット](../guide/loading.md)）。
 
 ## 4. 再生
 
 ### トラックは無くなり、アニメーションは名前で
 
-`IndexGetAnimation("walk")` ＋ `AnimationPlay(track, index, …)` が、`set_animation("walk")` ＋ `play()` に
-なります。
+`IndexGetAnimation("walk")` ＋ `AnimationPlay(track, index, …)` が、`set_animation("walk")` ＋ `play()` になります。
 
 === "Rust"
 
@@ -112,10 +101,7 @@ SSScene -> update(&renderer, &device, &queue, dt, &mut [a, b])
     ```
 
 !!! note "「トラック」の意味が変わりました"
-    SS6 のトラックは 1 エンティティ上の並列再生スロットでした。本 Player にも
-    [トラックスタック](../guide/motion-blending.md)がありますが、こちらは*ブレンド*のスタック
-    （レイヤー・重み・クロスフェード）で、再生制御ではなく Rust API の `set_track_animation` などから
-    触ります。
+    SS6 のトラックは 1 エンティティ上の並列再生スロットでした。本 Player にも[トラックスタック](../guide/motion-blending.md)がありますが、こちらは*ブレンド*のスタック（レイヤー・重み・クロスフェード）で、再生制御ではなく Rust API の `set_track_animation` などから触ります。
 
 ### 対応表
 
@@ -151,20 +137,16 @@ SSScene -> update(&renderer, &device, &queue, dt, &mut [a, b])
 | n 回 | `n` | `n` |
 
 !!! warning "`set_animation` が保つもの・捨てるもの"
-    速度・フレームレート上書き・再生方向・フレームスキップは `set_animation` を**跨いで残ります**。
-    そして**ループ回数**は、他の Player と同様、本 Player が意図的に復元します。
+    速度・フレームレート上書き・再生方向・フレームスキップは `set_animation` を**跨いで残ります**。そして**ループ回数**は、他の Player と同様、本 Player が意図的に復元します。
 
-    残らないのは**再生区間**だけです。フレーム番号は別のクリップに対して意味を持たないためです。
-    つまり `set_animation` のたびに `set_animation_section` を張り直し、それ以外はリセットされたと
-    思い込まないでください。
+    残らないのは**再生区間**だけです。フレーム番号は別のクリップに対して意味を持たないためです。つまり `set_animation` のたびに `set_animation_section` を張り直し、それ以外はリセットされたと思い込まないでください。
 
 ## 5. イベント：コールバックからポーリングへ
 
 **以前**：`CallBackUserData` / `CallBackSignal` / `CallBackPlayEnd` に関数ポインタを登録し、
 `Entity::Update` の*最中*に呼ばれていました。
 
-**現在**：update の後に読みます。借用モデルでは、更新の途中でアプリケーションへ制御を戻すと、まさに
-貸し出されているリソースを巡って競合するおそれがあるためです。
+**現在**：update の後に読みます。借用モデルでは、更新の途中でアプリケーションへ制御を戻すと、まさに貸し出されているリソースを巡って競合するおそれがあるためです。
 
 | SS6Player for CPP | Rust | C API |
 |---|---|---|
@@ -209,14 +191,11 @@ SSScene -> update(&renderer, &device, &queue, dt, &mut [a, b])
     if (ss_player_just_finished(player)) { /* ... */ }
     ```
 
-イベントはそれを生成した update のもので、次の update でクリアされます。**長い tick で跨いだフレームの
-分もすべて報告される**ので、フレームレートが落ちても取りこぼしません
-（[イベントとユーザーデータ](../guide/events.md)）。
+イベントはそれを生成した update のもので、次の update でクリアされます。**長い tick で跨いだフレームの分もすべて報告される**ので、フレームレートが落ちても取りこぼしません（[イベントとユーザーデータ](../guide/events.md)）。
 
 ## 6. パーツ
 
-パーツの特定は `IDGetParts(name)` から `find_part_index(name)` に変わり、パーツ単位の変更は寿命が明示された
-*オーバーライド*になりました。
+パーツの特定は `IDGetParts(name)` から `find_part_index(name)` に変わり、パーツ単位の変更は寿命が明示された*オーバーライド*になりました。
 
 | SS6Player for CPP | Rust | C API |
 |---|---|---|
@@ -228,8 +207,7 @@ SSScene -> update(&renderer, &device, &queue, dt, &mut [a, b])
 | *(相当なし)* | `clear_all_part_overrides()` | `ss_player_clear_all_part_overrides` |
 | `PartGetTransform(id, …)` | `part_transform(part)` | `ss_player_part_transform` |
 
-セルマップとセルはインデックスではなく**文字列**で指定します。また、各オーバーライドは
-[優先度](../guide/part-overrides.md#blend-op-and-priority)を持ち、それがどれだけの期間生きるかを決めます。
+セルマップとセルはインデックスではなく**文字列**で指定します。また、各オーバーライドは[優先度](../guide/part-overrides.md#blend-op-and-priority)を持ち、それがどれだけの期間生きるかを決めます。
 
 ## 7. プログラム全体の対比
 

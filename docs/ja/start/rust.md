@@ -5,8 +5,7 @@ title: Rust ではじめる
 # Rust ではじめる
 
 **このページは `wgpu::Device` を自分で持っている Rust アプリケーション向けです** — 自作レンダラー、
-`winit` のウィンドウ、`egui`、`Slint` など、wgpu の上に載っているものなら何でも。Player は *あなたが*
-開いたレンダーパスの中に描画します。デバイスもキューもサーフェスも、自分では作りません。
+`winit` のウィンドウ、`egui`、`Slint` など、wgpu の上に載っているものなら何でも。Player は *あなたが*開いたレンダーパスの中に描画します。デバイスもキューもサーフェスも、自分では作りません。
 
 **Bevy アプリ**の場合は [Bevy のパス](./bevy.md)へ。アダプタがこのページの内容を代わりにやってくれます。
 
@@ -22,8 +21,7 @@ title: Rust ではじめる
 
 === "リリース版"
 
-    🚧 **crates.io には未公開です。** `cargo publish` はバージョン要件を持たない依存を拒否するため、
-    先に SDK 側の `ssab` / `ssinterpolate` / `ssruntime` の公開が必要です。公開されればこうなります：
+    🚧 **crates.io には未公開です。** `cargo publish` はバージョン要件を持たない依存を拒否するため、先に SDK 側の `ssab` / `ssinterpolate` / `ssruntime` の公開が必要です。公開されればこうなります：
 
     ```toml
     [dependencies]
@@ -41,8 +39,7 @@ title: Rust ではじめる
     ssplayer-wgpu = { git = "https://github.com/cri-middleware/SSPlayerForWgpu" }
     ```
 
-    **自分のツリーにソースを取り込む**場合（自リポジトリのサブモジュールにする、手元で patch するなど）は、
-    リポジトリのルートではなく**クレートのディレクトリ**を指します：
+    **自分のツリーにソースを取り込む**場合（自リポジトリのサブモジュールにする、手元で patch するなど）は、リポジトリのルートではなく**クレートのディレクトリ**を指します：
 
     ```toml
     [dependencies]
@@ -86,8 +83,7 @@ player.set_animation("anime_1")?;            // 選択と再生開始は別
 player.play();
 ```
 
-`load` は GPU に一切触りません。借用モデルではフレームが始まるまで何も貸し出されないため、読み込まれた
-データは最初の `update` で GPU へ渡ります。[ロードとアセット](../guide/loading.md)を参照。
+`load` は GPU に一切触りません。借用モデルではフレームが始まるまで何も貸し出されないため、読み込まれたデータは最初の `update` で GPU へ渡ります。[ロードとアセット](../guide/loading.md)を参照。
 
 ## 毎フレーム
 
@@ -121,15 +117,12 @@ let mut rpass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
 let draw_calls = scene.draw(&renderer, &mut rpass);
 ```
 
-そのターゲットの**全キャラクターを 1 回の `update` に渡し、1 パスで描画してください**。10 体でもアトラス
-アップロード 1 回・パイプライン 1 セットで済むのはそのためです。前後関係は `SSPlayer::set_order` の昇順です。
+そのターゲットの**全キャラクターを 1 回の `update` に渡し、1 パスで描画してください**。10 体でもアトラスアップロード 1 回・パイプライン 1 セットで済むのはそのためです。前後関係は `SSPlayer::set_order` の昇順です。
 
 パスが守るべきことは 4 つ：
 
-* **カラーフォーマットが `SceneConfig::color_format` と一致していること。** パイプラインはこれに対して
-  焼かれているので、フォーマットが変わるなら `SSScene` を作り直します。
-* **`MaskBackend::Stencil` ならステンシルアタッチメントが必須**（宣言したフォーマットで）。貸せる
-  ステンシルが無い場合は `MaskBackend::Coverage` を使ってください（[マスク](../guide/masks.md)）。
+* **カラーフォーマットが `SceneConfig::color_format` と一致していること。** パイプラインはこれに対して焼かれているので、フォーマットが変わるなら `SSScene` を作り直します。
+* **`MaskBackend::Stencil` ならステンシルアタッチメントが必須**（宣言したフォーマットで）。貸せるステンシルが無い場合は `MaskBackend::Coverage` を使ってください（[マスク](../guide/masks.md)）。
 * **MSAA はオフ。** Player のパイプラインはシングルサンプルです。
 * **非 sRGB ターゲットを渡すこと。** Player はアトラスのバイト列をそのまま書き、色管理をしません。
   sRGB ターゲットでは二重にエンコードされて全体が明るくなりすぎます。`examples/viewer` は
@@ -147,8 +140,7 @@ cd SSPlayerForWgpu
 cargo run -p ssplayer-wgpu-viewer
 ```
 
-`examples/viewer` は winit ホストで、機能をひととおり触れます — パック切り替え、描画順、マスク
-バックエンド、パーツオーバーライド、モーションブレンディング、統計表示。このページの内容の実物です。
+`examples/viewer` は winit ホストで、機能をひととおり触れます — パック切り替え、描画順、マスクバックエンド、パーツオーバーライド、モーションブレンディング、統計表示。このページの内容の実物です。
 
 ## 次に読む
 
