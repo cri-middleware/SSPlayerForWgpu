@@ -131,11 +131,11 @@ it in one pass:
 
 ```rust
 let mut renderer = SSRenderer::new(&device);
-let mut scene = SSScene::new(&device, &SceneConfig { color_format, stencil_format });
+let mut scene = SSScene::new(&device, &SceneConfig { color_format, stencil_format, mask: MaskBackend::Stencil });
 
 let mut player = SSPlayer::new();
 player.load("assets/overall/Basic.ssab")?;   // pack, atlases and sibling packs, in one call
-player.set_animation("Basic")?;
+player.set_animation("anime_1")?;
 player.play();
 
 scene.update(&mut renderer, &device, &queue, delta_secs, &mut [&mut player]);
