@@ -73,8 +73,8 @@ impl Default for SsPlayback {
 }
 
 /// Runtime texture replacement: swap the texture a cellmap binds for a Bevy
-/// image, live, from gameplay code (SDK `70_external_resources.md` §"Runtime
-/// texture replacement" — costume changes, dynamic expressions).
+/// image, live, from gameplay code
+/// (costume changes, dynamic expressions).
 ///
 /// Keyed by cellmap name, or by a TextureChange target's file name — whatever the
 /// character's pack lists. Insert an entry to override, remove it to restore the

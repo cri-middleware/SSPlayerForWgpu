@@ -166,7 +166,7 @@ For the documentation site, see [RELEASING.md](./RELEASING.md).
 - The generated header and the wasm bindings are outputs, not sources: change
   the Rust and regenerate.
 - A name that exists on more than one face keeps the same stem on all of them.
-  The SDK's [Player API conventions](https://github.com/cri-middleware/SpriteStudio-SDK/blob/HEAD/libs/ssruntime/docs/20_design/40_api_conventions.md)
+  The SDK's [Player API conventions](https://github.com/cri-middleware/SpriteStudio-SDK/blob/HEAD/libs/ssruntime/docs/20_design/30_api_conventions.md)
   are what that means in detail, and they apply across every official player.
 
 ---
@@ -270,7 +270,7 @@ cargo test -p ssplayer-wgpu --features ffi --lib
 
 ### C・JavaScript フェイス
 - 生成されたヘッダと wasm バインディングはソースではなく出力です。Rust 側を変更して再生成してください。
-- 複数のフェイスに存在する名前は、どのフェイスでも同じ語幹を保ちます。その具体的な内容は SDK の [Player API conventions](https://github.com/cri-middleware/SpriteStudio-SDK/blob/HEAD/libs/ssruntime/docs/20_design/40_api_conventions.md) にあり、全公式 Player に適用されます。
+- 複数のフェイスに存在する名前は、どのフェイスでも同じ語幹を保ちます。その具体的な内容は SDK の [Player API conventions](https://github.com/cri-middleware/SpriteStudio-SDK/blob/HEAD/libs/ssruntime/docs/20_design/30_api_conventions.md) にあり、全公式 Player に適用されます。
 
 ---
 このプロジェクトに貢献することで、あなたの貢献がプロジェクトの [LICENSE.ja.md](./LICENSE.ja.md) の下でライセンスされることに同意したものとみなされます。

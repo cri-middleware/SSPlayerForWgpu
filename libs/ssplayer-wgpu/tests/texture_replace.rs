@@ -1,5 +1,4 @@
-//! Runtime texture replacement on `SSPlayer` (SDK `70_external_resources.md`
-//! §"Runtime texture replacement").
+//! Runtime texture replacement on `SSPlayer`.
 //!
 //! None of this needs a GPU: an override is a redirect of the player's own
 //! atlas-key table, which every draw resolves through and which `texture_key`
@@ -14,7 +13,7 @@
 //! * the override is **per player**, because the table is: two players of one
 //!   pack do not share it, which is the same "override is per player instance"
 //!   the reference Godot Player has (its per-player texture map), reached here by
-//!   a different structure (§5-1 of the port memo);
+//!   a different structure;
 //! * it survives a tree rebuild (`set_animation`), because it lives in the
 //!   player's table rather than the tree;
 //! * enumeration lists **both** name spaces — cellmaps and TextureChange targets.
@@ -143,7 +142,7 @@ fn enumeration_lists_cellmaps_and_texture_change_targets() {
     // The cellmap itself, under its bare name...
     assert!(names.iter().any(|n| n == "common"), "the cellmap name is missing from {names:?}");
     // ...and a TextureChange target the cellmaps never mention, under its file
-    // name. Missing this second table is the silent bug §54 warns about.
+    // name. Missing this second table leaves those parts silently undrawn.
     assert!(names.iter().any(|n| n == "box_00_00.png"), "an external TextureChange target is missing from {names:?}");
 }
 

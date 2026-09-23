@@ -619,11 +619,11 @@ pub struct SSPlayer {
     finished_edge: bool,
     /// The latch that makes `finished_edge` an edge.
     ///
-    /// Held explicitly, as the SDK's Player porting guide asks: the alternative
+    /// Held explicitly: the alternative
     /// is to lean on some earlier `is_playing` guard, which works until someone
-    /// moves the guard. The guide lists "notifying `is_finished` directly"
-    /// (fires every frame afterwards) and "not resetting the latch in `play`"
-    /// (the *next* completion goes missing) as defects that really happened in
+    /// moves the guard. Notifying `is_finished` directly
+    /// (fires every frame afterwards) and not resetting the latch in `play`
+    /// (the *next* completion goes missing) are defects that really happened in
     /// sibling Players.
     prev_finished: bool,
     /// Where this player sits in the scene — the root transform of its tree. Composed by [`SSPlayer::set_transform`]; only the matrix is
@@ -648,7 +648,7 @@ pub struct SSPlayer {
     /// The **only** transport value this player holds, and it is held for the
     /// reason every sibling Player holds it: the runtime resets the count on
     /// every transition, deliberately, because a transition is what states it
-    /// (`30_core/20_playback_control.md`). Everything else the host sets —
+    /// Everything else the host sets —
     /// speed, the frame-rate override, frame skip, the direction and style — the
     /// runtime carries across a `setup_animation` itself, so keeping a copy here
     /// would only give it something to drift from.
@@ -664,8 +664,7 @@ pub struct SSPlayer {
     /// registers its replacement in the device-scoped renderer under a *private*
     /// key, and two players overriding the same cellmap must not collide on it.
     /// Mixing this id into that key is what keeps the override per player, the way
-    /// each sibling Player's own texture map is (SDK `70_external_resources.md`
-    /// §"Runtime texture replacement").
+    /// each sibling Player's own texture map is.
     id: u32,
     /// Active runtime texture overrides, per pack name. Each entry redirects one
     /// cellmap's draws to a private renderer key; the map here is the source of
@@ -994,8 +993,7 @@ impl SSPlayer {
     /// A base key an atlas registers under is also the key a *restore* returns to,
     /// so a cellmap that is actively overridden takes the newly-learned key as its
     /// new `original` — and the override's redirect is re-applied on top, so a
-    /// reload never quietly cancels a live override (SDK
-    /// `70_external_resources.md` §"Runtime texture replacement"; the same
+    /// reload never quietly cancels a live override (the same
     /// name-over-hash follow-through the reference Godot Player does on a resource
     /// swap).
     fn record_atlas_keys(&mut self, pack: &str, entries: impl Iterator<Item = (u32, u32)>) {
@@ -1163,7 +1161,7 @@ impl SSPlayer {
         // to the pack we are selecting from. That is what every sibling Player
         // does, and it is why they keep the speed, the frame-rate override, the
         // frame skip and the playback direction across a switch for free: the
-        // runtime carries those itself (`30_core/20_playback_control.md`), and it
+        // runtime carries those itself, and it
         // can only carry them for a context that survives. Rebuilding the context
         // here — which this used to do unconditionally — threw all four away and
         // made this Player the only one that did.
@@ -1235,7 +1233,7 @@ impl SSPlayer {
         // Re-arm the completion latch. Without this, replaying an animation that
         // already finished would compare against a `true` left over from the
         // previous run and the *next* completion would never be reported — one of
-        // the defects the SDK's porting guide records from sibling Players.
+        // the defects found in sibling Players.
         self.prev_finished = false;
         if let Some(root) = &mut self.root {
             root.context.play();
@@ -1771,8 +1769,8 @@ impl SSPlayer {
     /// yourself, is how you end an infinite one.
     ///
     /// The related trap is deriving completion from `!is_playing` or from
-    /// reaching the last frame; both are wrong in ways the SDK's porting guide
-    /// records from sibling Players, which is why neither is offered here.
+    /// reaching the last frame; both are wrong in ways sibling Players
+    /// have run into, which is why neither is offered here.
     pub fn just_finished(&self) -> bool {
         self.finished_edge
     }
@@ -2119,8 +2117,7 @@ impl SSPlayer {
     //
     // Swapping the texture a cellmap binds *from your program* — costume changes,
     // dynamic expressions — rather than from the authoring data. The SDK defines
-    // it as a Player-side responsibility, distinct from the Override Layer API
-    // (`70_external_resources.md` §"Runtime texture replacement").
+    // it as a Player-side responsibility, distinct from the Override Layer API.
     //
     // Where the sibling Players keep a per-player texture map and overwrite an
     // entry in it, this player's texture map is the device-scoped [`SSRenderer`]'s,
@@ -2527,7 +2524,7 @@ fn build_rig(
         for (i, part) in parts.iter().enumerate() {
             let part_type = part.part_type_type();
 
-            // Static mask flags (mask doc §1). Geometry kind picks the
+            // Static mask flags. Geometry kind picks the
             // writer builder; Shape/Text/Nines can't write coverage yet.
             let geom = match part_type {
                 PartType::PartTypeNormal | PartType::PartTypeMask => GeomKind::Quad,
@@ -2624,7 +2621,7 @@ fn step_slots(node: &mut PlaybackNode, frame_no: f32, delta_secs: f32, node_loop
 const FLAG_MASK_INFLUENCE: u8 = 0x01;
 
 /// Advance the mask cursor to `up_to_rank`, appending stencil writes for every
-/// planned writer whose rank is below it (mask doc §2-1, WebGL `syncMasksTo`):
+/// planned writer whose rank is below it (WebGL `syncMasksTo`):
 /// a pure mask's backward scope has ended → remove it (Decr/Invert); a clipping
 /// writer's forward scope has begun → add it (Incr/Invert). Monotonic in
 /// `cursor`; ops are baked per pipeline, so ref is always 0.
@@ -2689,14 +2686,14 @@ struct NodeDraw<'a> {
 /// root scope (`inherited_stencil == None`), pure masks are pre-written and the
 /// coverage is scoped-replayed as content is drawn in rank order; masked content
 /// is tested per part by its polarity. When `inherited_stencil` is set, this
-/// node is a sub-animation clipped by a parent mask (screen-space, single level,
-/// mask doc §3-2-2): it runs no masks of its own and every content batch is
+/// node is a sub-animation clipped by a parent mask (screen-space, single level):
+/// it runs no masks of its own and every content batch is
 /// tested with the inherited polarity.
 ///
 /// `draw` carries the owning player's placement and fade down the tree; whatever
 /// coverage this scope writes, it takes back before returning (see
 /// [`unwind_masks`]).
-/// A parent's coverage bitmap, as a sub-animation reads it (mask doc §3-2-2).
+/// A parent's coverage bitmap, as a sub-animation reads it.
 ///
 /// The bitmap and its writers belong to the animation that owns the mask; a
 /// child only ever borrows them, so this carries no ownership — just enough to
@@ -2727,14 +2724,14 @@ impl InheritedCoverage {
 }
 
 /// A visible instance child's clipping writers, gathered so the *parent* can
-/// carry them past the instance boundary (mask doc §2-1 clipping scope, extended
+/// carry them past the instance boundary (clipping scope, extended
 /// across an instance; the fix ForUnity #133 / ForGodot #295 landed). A clipping
 /// mask written inside a sub-animation must keep clipping the parent's parts
 /// drawn *after* the instance, so the parent folds each such writer into its own
 /// coverage: baked from the child's geometry through the slot placement, and
 /// ranked at the instance part so the replay's forward scope (`rank > slot`)
 /// reaches exactly the parent parts after it. Pure masks do not bubble — they
-/// close inside the child (§2-1 backward scope). Only the coverage backend uses
+/// close inside the child (backward scope). Only the coverage backend uses
 /// this today; the stencil path is a separate step.
 struct Bubble<'a> {
     /// The instance part's rank in the parent's draw order — the scope point.
@@ -2746,18 +2743,18 @@ struct Bubble<'a> {
     /// The child's clipping writers (only), in child part-index space.
     clip: Vec<MaskWriter>,
     /// The instance part's effective `mask_influence`, composed down the chain
-    /// (mask doc §2-6, AND). A writer inside a `mask_influence == 0` instance is
+    /// (AND). A writer inside a `mask_influence == 0` instance is
     /// forced onto the union/counter plane so it composes with an outer mask as a
-    /// union instead of cancelling it (§3-1-4).
+    /// union instead of cancelling it.
     eff_influence: bool,
 }
 
 /// The mask context a sub-animation inherits from the instance part that draws
-/// it, composed down the hierarchy (mask doc §2-6). A masked instance does NOT
+/// it, composed down the hierarchy. A masked instance does NOT
 /// replace the child's own masking — it is *added* to it: the child keeps running
 /// its own writers, and every child part composes these inherited values with its
-/// own (`ForUnity` is the reference; `ForGodot` drops the child's own masking,
-/// which the mask doc's §2-1 treats as a gap). The identity — a top-level
+/// own (`ForUnity` is the reference; `ForGodot` drops the child's own masking).
+/// The identity — a top-level
 /// animation called by no instance — is [`InheritedMask::ROOT`].
 #[derive(Clone, Copy)]
 struct InheritedMask {
@@ -2773,10 +2770,10 @@ struct InheritedMask {
 }
 
 impl InheritedMask {
-    /// The identity a top-level animation starts from (mask doc §2-6).
+    /// The identity a top-level animation starts from.
     const ROOT: Self = Self { active: false, influence: true, visible_inside: false };
 
-    /// Push this context down through one instance part (mask doc §2-6): the
+    /// Push this context down through one instance part: the
     /// instance part's own flags compose with the inherited ones — `mask_influence`
     /// with AND, `visible_inside_mask` with OR — and `active` records whether the
     /// mask reaches below at all (the instance part is a target: composed influence,
@@ -2787,13 +2784,13 @@ impl InheritedMask {
     }
 
     /// The effective polarity for a part with its own `visible_inside_mask`,
-    /// OR-composed with the inherited value (mask doc §2-4/§2-6).
+    /// OR-composed with the inherited value.
     fn polarity(self, part: &PartMaskFlags) -> StencilTest {
         if self.visible_inside || part.visible_inside_mask { StencilTest::Inside } else { StencilTest::Outside }
     }
 
     /// Whether a drawn part is a mask target — its effective `mask_influence`
-    /// (own AND inherited) is set (mask doc §2-2/§2-6). `mask_write` does not make
+    /// (own AND inherited) is set. `mask_write` does not make
     /// it a target here; that is the writer's own local fact.
     fn targets(self, part: &PartMaskFlags) -> bool {
         self.influence && part.mask_influence
@@ -2868,7 +2865,7 @@ fn gather_bubbles<'r>(node: &mut PlaybackNode, frame: &FrameView<'r>) -> Vec<Bub
     }
     for (part_idx, rank, slot) in instances {
         // The instance part's own influence composes with the identity a top-level
-        // owner starts from (mask doc §2-6, AND). A masked sub-animation never bakes
+        // owner starts from (AND). A masked sub-animation never bakes
         // coverage — only the top owner does — so the inherited term is 1 here.
         let eff_influence = node.mask_flags.get(part_idx).map(|f| f.mask_influence).unwrap_or(false);
         let Some(child) = node.instances.get_mut(&part_idx) else { continue };
@@ -2912,7 +2909,7 @@ fn render_node(node: &mut PlaybackNode, build: &mut FrameBuild<'_>, draw: NodeDr
     // instance's parts un-clipped by their siblings — verified against the tool's
     // output; the ForGodot player is parent-driven the same way). What a
     // sub-animation still gets is the outer mask it inherited, composed per part
-    // (§2-6 below), and its clipping writers still carry OUT to the parent
+    // (below), and its clipping writers still carry OUT to the parent
     // (`gather_bubbles`). Backend-agnostic on purpose — only what a writer is
     // *appended as* differs, and that is the scene's business.
     let masking = build.scene.mask_backend() != crate::MaskBackend::None && !parent_driven;
@@ -2921,7 +2918,7 @@ fn render_node(node: &mut PlaybackNode, build: &mut FrameBuild<'_>, draw: NodeDr
 
     // A sub-animation clipped by its parent's mask reads the parent's bitmap
     // rather than baking one: same layer, same writers, an affine composed with
-    // the instance placement, and the instance part's rank (mask doc §3-2-2).
+    // the instance placement, and the instance part's rank.
     let mut own_coverage = None;
     if let Some(parent) = inherited_coverage {
         build.scene.inherit_node_coverage(&mut node_slot, &parent.uv, parent.layer, parent.rank, &parent.writers);
@@ -2935,8 +2932,8 @@ fn render_node(node: &mut PlaybackNode, build: &mut FrameBuild<'_>, draw: NodeDr
     let coverage = masking && build.scene.mask_backend() == crate::MaskBackend::Coverage;
 
     // Carry-out: gather each visible instance child's clipping writers so this
-    // node keeps clipping the parent parts drawn after the instance (mask doc
-    // §2-1/§2-6; see [`Bubble`]). Both backends consume these — coverage bakes
+    // node keeps clipping the parent parts drawn after the instance (see
+    // [`Bubble`]). Both backends consume these — coverage bakes
     // them below, the stencil path folds them into its write plan. The children
     // are read now, before either, because a coverage block's writer metadata is
     // fixed the moment it is baked.
@@ -2950,7 +2947,7 @@ fn render_node(node: &mut PlaybackNode, build: &mut FrameBuild<'_>, draw: NodeDr
     if coverage && has_writers {
         // Bounds enclose every writer this node bakes: its own, plus each bubbled
         // child writer mapped through its instance placement into this node's local
-        // space, so the bitmap covers them all (mask doc §3-2).
+        // space, so the bitmap covers them all.
         let mut bounds = crate::mask::writer_bounds(&frame, &writers);
         for b in &bubbles {
             if let Some(cb) = crate::mask::writer_bounds(&b.frame, &b.clip) {
@@ -2969,7 +2966,7 @@ fn render_node(node: &mut PlaybackNode, build: &mut FrameBuild<'_>, draw: NodeDr
             // replay metadata and the bit each writer bakes into. A bubbled writer
             // is re-ranked at its instance part (so its forward scope reaches the
             // parent parts after it) and its OP composed with the effective
-            // influence (mask doc §2-6/§3-1-4).
+            // influence.
             let mut all = writers;
             for b in &bubbles {
                 for cw in &b.clip {
@@ -2994,7 +2991,7 @@ fn render_node(node: &mut PlaybackNode, build: &mut FrameBuild<'_>, draw: NodeDr
             for b in &bubbles {
                 // The child bakes through a coverage block whose affine folds its
                 // slot placement onto this node's, so its own local coordinates
-                // land where this node's writers were baked (mask doc §3-2-2).
+                // land where this node's writers were baked.
                 let child_uv = own_coverage.unwrap().compose(&b.slot, b.rank).uv;
                 let mut child_slot = build.scene.begin_node(&b.frame, &IDENTITY_MATRIX);
                 build.scene.inherit_node_coverage(&mut child_slot, &child_uv, layer, b.rank, &MaskWriters::default());
@@ -3028,7 +3025,7 @@ fn render_node(node: &mut PlaybackNode, build: &mut FrameBuild<'_>, draw: NodeDr
         write_plan.sort_by_key(|sw| sw.w.rank);
     }
 
-    // Pre-write pure masks so they are active for lower-rank content (§2-1). Bubbled
+    // Pre-write pure masks so they are active for lower-rank content. Bubbled
     // writers are all clipping, so none of them are pre-written here.
     if !coverage {
         for sw in &write_plan {
@@ -3054,7 +3051,7 @@ fn render_node(node: &mut PlaybackNode, build: &mut FrameBuild<'_>, draw: NodeDr
         match kind {
             DrawBatchKind::Normal | DrawBatchKind::Mesh | DrawBatchKind::Shape => {
                 // Pure masks (PartTypeMask / draw_as_mask) contribute coverage but
-                // never draw their own colour (mask doc §3-3). The runtime still
+                // never draw their own colour. The runtime still
                 // emits a content batch for them, so skip it here.
                 let is_pure = |pi: usize| node.mask_flags.get(pi).map(|f| f.pure_mask()).unwrap_or(false);
                 let has_pure = (start_rank..start_rank + count).any(|r| is_pure(draw_order.get(r) as usize));
@@ -3073,7 +3070,7 @@ fn render_node(node: &mut PlaybackNode, build: &mut FrameBuild<'_>, draw: NodeDr
                     }
                 } else if inherited.active {
                     // Clipped by an inherited outer mask. Each part composes its OWN
-                    // polarity and target with the inherited context (mask doc §2-6):
+                    // polarity and target with the inherited context:
                     // polarity = own `visible_inside` OR inherited; a part whose
                     // effective `mask_influence` (own AND inherited) is 0 opts out and
                     // draws unclipped. The instance part's setting no longer applies
@@ -3109,8 +3106,8 @@ fn render_node(node: &mut PlaybackNode, build: &mut FrameBuild<'_>, draw: NodeDr
                     let part_idx = draw_order.get(rank) as usize;
 
                     // The context this sub-animation inherits: compose this instance
-                    // part's own flags onto what THIS node inherited (mask doc §2-6,
-                    // `mask_influence` AND / `visible_inside_mask` OR). At a root owner
+                    // part's own flags onto what THIS node inherited
+                    // (`mask_influence` AND / `visible_inside_mask` OR). At a root owner
                     // this starts from ROOT, so the child inherits this node's own mask
                     // through the instance part; nested, it chains. Advance the stencil
                     // cursor so the child tests against this node's writers up to the
@@ -3138,7 +3135,7 @@ fn render_node(node: &mut PlaybackNode, build: &mut FrameBuild<'_>, draw: NodeDr
                     let child_alpha = alpha * fd.parts().get(part_idx).alpha();
                     let child_draw = NodeDraw { transform: &child_transform, alpha: child_alpha, tint };
                     // Hand the bitmap down only when the mask actually reaches this
-                    // instance part (`child_ctx.active`); §2-6's AND means an
+                    // instance part (`child_ctx.active`); the AND means an
                     // unmasked instance part leaves its whole subtree unmasked.
                     let child_coverage = child_ctx.active.then(|| own_coverage.map(|parent| parent.compose(&m, rank))).flatten();
                     render_node(&mut child.node, build, child_draw, child_frame_no, true, child_ctx, child_coverage);
@@ -3152,7 +3149,7 @@ fn render_node(node: &mut PlaybackNode, build: &mut FrameBuild<'_>, draw: NodeDr
                     sync_masks_to(build, &write_plan, &mut cursor, start_rank);
                     node.mask_flags.get(part_idx).map(|f| f.polarity()).unwrap_or(StencilTest::None)
                 } else if inherited.active {
-                    // Same §2-6 composition as a drawn part: the emitter's own flags
+                    // Same composition as a drawn part: the emitter's own flags
                     // OR/AND the inherited context; opt out (no test) when not a target.
                     let part_idx = draw_order.get(start_rank) as usize;
                     let f = node.mask_flags.get(part_idx).copied().unwrap_or_default();

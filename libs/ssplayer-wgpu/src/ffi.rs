@@ -848,8 +848,7 @@ pub unsafe extern "C" fn ss_player_texture_at(handle: *mut SsPlayer, pack_name: 
 
 /// Replace the texture a cellmap binds, on one player, from straight-alpha RGBA8
 /// pixels — a costume change or dynamic expression, driven from the program
-/// rather than the authoring data (SDK `70_external_resources.md` §"Runtime
-/// texture replacement").
+/// rather than the authoring data.
 ///
 /// `pack_name` null selects the main pack. `cellmap_name` is a cellmap name or a
 /// TextureChange target — one of the strings `ss_player_cellmap_texture_name`
@@ -1398,7 +1397,7 @@ pub unsafe extern "C" fn ss_player_set_part_visibility_override_by_index(handle:
 // --- overrides, by part name ------------------------------------------
 //
 // The unsuffixed form takes a NAME; `_by_index` is the optimisation for a caller
-// that cached one (SDK: `20_design/40_api_conventions`). Each of these resolves
+// that cached one. Each of these resolves
 // the name and forwards to its sibling, so the two cannot drift apart, and an
 // unknown name fails with SS_ERROR_INVALID_ARGUMENT rather than doing nothing.
 //

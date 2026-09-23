@@ -259,7 +259,7 @@ fn part_names_read_the_pack_rather_than_the_matrix_buffer() {
 }
 
 /// The unsuffixed form takes a part NAME — the index form is the optimisation,
-/// not the default (SDK: `20_design/40_api_conventions`). An unknown name is
+/// not the default. An unknown name is
 /// rejected at the call rather than silently doing nothing, which is the whole
 /// reason resolution happens here and not per frame.
 #[test]

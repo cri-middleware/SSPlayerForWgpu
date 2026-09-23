@@ -1,14 +1,14 @@
 //! Mask planning (stencil) — a Rust port of the WebGL `MaskPlanner`.
 //!
 //! SpriteStudio's "mask" and "clipping mask" both resolve to the same stencil
-//! mechanism (see `libs/ssruntime/docs/40_components/40_mask.ja.md`). The
+//! mechanism. The
 //! runtime only emits `DrawBatchKind::Mask` batches, `mask_indices` and the
 //! per-batch `FLAG_MASK_INFLUENCE` bit; rasterising coverage into a stencil
 //! buffer is the Player's job. This module classifies, per frame, which parts
 //! write coverage (writers) and how, so [`crate::player`] can drive the
 //! pre-write + scoped-replay interleave that a single hardware stencil needs.
 //!
-//! Data sources (mask doc §1):
+//! Data sources:
 //! * **Static per-part flags** ([`PartMaskFlags`]) come from ssab `PartData` and
 //!   are read once at node-build time.
 //! * **Per-frame values** (`PartState.mask`, draw order, batches) come from
@@ -22,7 +22,7 @@ use ssruntime::runtime::framedata::ss::runtime::{DrawBatchKind, root_as_frame_da
 pub const MAX_MASK_WRITERS: usize = 24;
 
 /// Stencil test mode baked into a content pipeline. Selected per masked part
-/// from the target's `visible_inside_mask` polarity (mask doc §2-4).
+/// from the target's `visible_inside_mask` polarity.
 ///
 /// Hashable because it is half of the renderer's pipeline cache key.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
@@ -36,7 +36,7 @@ pub enum StencilTest {
 }
 
 /// Stencil write operation, resolved by the caller from a writer's op and
-/// whether it is being added or removed from coverage (mask doc §2-3). Increment
+/// whether it is being added or removed from coverage. Increment
 /// pairs with decrement (its inverse); invert is its own inverse.
 ///
 /// Hashable because it keys a mask-write pipeline in the renderer cache.
@@ -68,7 +68,7 @@ pub enum GeomKind {
 
 /// Static, per-part mask flags read once from ssab `PartData`.
 ///
-/// `mask_influence` is deliberately dual-purpose (mask doc §1-2): for a writer
+/// `mask_influence` is deliberately dual-purpose: for a writer
 /// it is the stencil OP (0 = increment, 1 = invert); for a drawn target it is
 /// the mask opt-in. Clipping parts (writer *and* target) use the same value for
 /// both roles.
@@ -116,9 +116,9 @@ pub struct MaskWriter {
     /// Part index (into parts / draw_order / SoA).
     pub part_idx: usize,
     /// Rank in `draw_order`; drives the scope replay (pure = backward scope,
-    /// clipping = forward scope, mask doc §2-1).
+    /// clipping = forward scope).
     pub rank: usize,
-    /// Stencil OP: `false` = increment, `true` = invert (mask doc §2-3).
+    /// Stencil OP: `false` = increment, `true` = invert.
     pub op_invert: bool,
     /// `false` = pure mask (pre-written, removed when the cursor passes its
     /// rank); `true` = clipping (added when the cursor reaches its rank).
@@ -195,7 +195,7 @@ impl<'a> IntoIterator for &'a MaskWriters {
 /// The player-local rectangle a frame's writers cover, as `[min_x, min_y,
 /// max_x, max_y]`, or `None` when they cover nothing.
 ///
-/// This is the rectangle the coverage bitmap is stretched over (mask doc §3-2):
+/// This is the rectangle the coverage bitmap is stretched over:
 /// normalising it to `[0,1]` is what makes the bitmap's resolution independent
 /// of how big the mask is on screen, and what lets one affine serve both the
 /// bake and the replay.
@@ -306,13 +306,13 @@ pub fn plan_writers(frame: &FrameView, mask_flags: &[PartMaskFlags]) -> MaskWrit
                 continue;
             }
 
-            // Per-frame cutout value; `mask == 0` opts the writer out (§2-2).
+            // Per-frame cutout value; `mask == 0` opts the writer out.
             let mask_val = parts.get(part_idx).mask();
             if mask_val <= 0.0 {
                 continue;
             }
 
-            // texture 0 (pure masks / shapes) → no cutout (§2-5).
+            // texture 0 (pure masks / shapes) → no cutout.
             let threshold = if texture_hash != 0 { (255.0 - mask_val) / 255.0 } else { -1.0 };
 
             writers.push(MaskWriter { part_idx, rank, op_invert: flags.mask_influence, is_clipping, threshold, texture_hash, geom: flags.geom });

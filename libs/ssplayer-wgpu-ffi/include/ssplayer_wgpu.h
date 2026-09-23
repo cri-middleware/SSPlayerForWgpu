@@ -702,8 +702,7 @@ int32_t ss_player_texture_at(ss_player_t *handle,
 /*
  Replace the texture a cellmap binds, on one player, from straight-alpha RGBA8
  pixels — a costume change or dynamic expression, driven from the program
- rather than the authoring data (SDK `70_external_resources.md` §"Runtime
- texture replacement").
+ rather than the authoring data.
 
  `pack_name` null selects the main pack. `cellmap_name` is a cellmap name or a
  TextureChange target — one of the strings `ss_player_cellmap_texture_name`

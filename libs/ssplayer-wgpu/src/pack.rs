@@ -158,8 +158,7 @@ impl SSPack {
         // batches resolve to nothing — here that means the 1x1 white fallback,
         // so the part turns into a white silhouette rather than disappearing.
         // Both tables go into one list under the key a draw batch will ask for,
-        // exactly as the porting guide requires (`30_core/10_initialization.ja.md`
-        // §3, and `SS6PlayerForGodot`'s `_loadTextures`).
+        // exactly as `SS6PlayerForGodot`'s `_loadTextures` does.
         //
         // An `ExternalTexture`'s `name_hash` is the hash of its file name, so it
         // is also the key of its embedded blob — no join needed, unlike a

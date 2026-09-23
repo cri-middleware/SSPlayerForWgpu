@@ -1,6 +1,6 @@
 //! Instance-internal clipping masks must carry **past the instance boundary** and
-//! keep clipping the parent's parts drawn after the instance (mask doc §2-1/§2-6;
-//! the fix ForUnity #133 / ForGodot #295). The `InstancePropagation` fixture is
+//! keep clipping the parent's parts drawn after the instance
+//! (the fix ForUnity #133 / ForGodot #295). The `InstancePropagation` fixture is
 //! built for exactly this: four `Source01_*` instances (a 2×2 of maskInfluence ×
 //! visibleInsideMask), each playing a child whose lower `Check_*_DM_v` rows are
 //! clipping writers, with `Arrow*` parts drawn after the instances and a `Hole32`
@@ -9,8 +9,8 @@
 //! Because the two mask backends are independent implementations of the same
 //! spec, the load-bearing check is that they **agree** on this fixture — if only
 //! one carries the mask out, they diverge. This test also dumps both renders to
-//! PNGs under the scratch dir for eyeballing (mask doc / AGENTS: look at the
-//! pixels, do not trust counts alone).
+//! PNGs under the scratch dir for eyeballing: look at the pixels, do not trust
+//! counts alone.
 //!
 //! Skips itself when no GPU adapter is present, or when the fixture is absent.
 

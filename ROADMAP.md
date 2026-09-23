@@ -19,7 +19,7 @@ breaks are in [CONTRIBUTING.md](./CONTRIBUTING.md#technical-constraints--guiding
       mix, so it could not fold into vertex colour: it rides on `Prim` beside the
       player alpha and multiplies the finished colour in every fragment path.
 - [x] Stencil masking, including clipping writers and per-player unwind.
-- [x] Coverage-bitmap masking (mask doc §3-2), for hosts whose pass lends no
+- [x] Coverage-bitmap masking (mask doc §5), for hosts whose pass lends no
       stencil. Same semantics, no one-frame lag, one extra pass per masking
       player. `MaskBackend` picks between the two.
 - [x] The 13 `ss_shader` integration shaders (the `SHDR` part attribute).
@@ -27,7 +27,7 @@ breaks are in [CONTRIBUTING.md](./CONTRIBUTING.md#technical-constraints--guiding
       speed, frame rate, loop counts.
 - [x] Per-part runtime overrides — colour, cell, visibility.
 - [x] Runtime texture replacement — swap the texture a cellmap binds from the
-      program (SDK `70_external_resources.md`), `set_cellmap_texture` /
+      program (SDK `30_external_resources.md`), `set_cellmap_texture` /
       `ss_player_set_cellmap_texture` / `setCellmapTexture`, plus the Bevy
       `SsCellmapTextures` component. A Player-side override, distinct from the
       per-part Override Layer. Where the sibling Players overwrite an entry in a
@@ -49,7 +49,7 @@ breaks are in [CONTRIBUTING.md](./CONTRIBUTING.md#technical-constraints--guiding
 - [ ] **Integration shader gaps** — `map0` / `map1` secondary textures, shader
       parts combined with a mask, and parts other than Normal.
 - [ ] **The started edge — low priority.** The [Player API
-      conventions](https://github.com/cri-middleware/SpriteStudio-SDK/blob/HEAD/libs/ssruntime/docs/20_design/40_api_conventions.md#4-events)
+      conventions](https://github.com/cri-middleware/SpriteStudio-SDK/blob/HEAD/libs/ssruntime/docs/20_design/30_api_conventions.md#4-events)
       make `animationStarted` one of six required events, and it is the only one
       with no counterpart here on any face: `SsEvent` carries `UserData` /
       `Signal` / `Audio`, and the two lifecycle edges are `just_looped()` /
@@ -72,7 +72,7 @@ breaks are in [CONTRIBUTING.md](./CONTRIBUTING.md#technical-constraints--guiding
 
 ## Expressiveness
 
-- [ ] **Retire one of the two mask backends.** Coverage (mask doc §3-2) now
+- [ ] **Retire one of the two mask backends.** Coverage (mask doc §5) now
       exists beside the stencil, which is a migration state rather than a
       destination: the same `.ssab` rendering differently depending on what the
       host's pass could lend is a poor thing to keep forever. The decision wants
