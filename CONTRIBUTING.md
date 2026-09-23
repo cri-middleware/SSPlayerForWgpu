@@ -16,9 +16,8 @@ Please refer to [CODE_OF_CONDUCT.md](./CODE_OF_CONDUCT.md).
 ## How Can I Contribute?
 
 ### Technical Constraints & Guiding Principles
-[AGENTS.md](./AGENTS.md) carries the full list of invariants under *Hard
-constraints*, and a change that breaks one will be asked to change rather than
-the constraint. The four that catch newcomers most often:
+A change that breaks one of this player's invariants will be asked to change
+rather than the invariant. The four that catch newcomers most often:
 
 - **The player never owns wgpu state.** `Device` / `Queue` / `Surface` /
   `SSRenderer` belong to the host and are lent per frame. Any API that takes
@@ -194,7 +193,7 @@ SSPlayerForWgpu にご関心をお寄せいただき、ありがとうござい�
 ## 貢献する方法
 
 ### 技術的制約と設計原則
-不変条件の全体は [AGENTS.md](./AGENTS.md) の *Hard constraints* にあります。制約を破る変更は、制約側ではなく変更側を直していただくことになります。特に見落とされやすいのは次の 4 つです。
+不変条件を破る変更は、不変条件側ではなく変更側を直していただくことになります。特に見落とされやすいのは次の 4 つです。
 
 - **プレイヤーは wgpu の状態を所有しません。** `Device` / `Queue` / `Surface` / `SSRenderer` はホストのもので、フレームごとに貸し出されます。これらの所有権を取る API は誤りで、**`SSPlayer` に wgpu 型のフィールドを持たせてはいけません**。「1 canvas = 1 player」に戻らないのはこの規則のおかげです。
 - **頂点バッファはありません。** ランタイムの SoA 配列をシーンのアリーナへ memcpy し、頂点ステージが `@builtin(vertex_index)` から展開します。CPU が書くのはパーツごとに 80 バイトの `Prim` 1 つだけで、頂点ごとには何も書きません。機能を足すときは `Prim` に載せてください。頂点ごとの CPU 処理を復活させないこと。
@@ -255,7 +254,9 @@ cargo test -p ssplayer-wgpu --features ffi --lib
 
 既定のコマンドでは `src/ffi.rs` も `src/host.rs` もコンパイルされないため、C フェイスだけ 3 行を要します。**ヘッダを再生成するのは `ssplayer-wgpu-ffi` クレート**で、その `build.rs` が cbindgen を実行します。`-p ssplayer-wgpu --features ffi` のビルドはモジュールをコンパイルしますが、再生成は行いません。`libs/ssplayer-wgpu-ffi/include/ssplayer_wgpu.h` はコミットされる生成物なので、変更が出たらコミットしてください。CI は `git diff --exit-code` で確認しています。
 
-自動修正の形を含む一覧の全体は [AGENTS.md](./AGENTS.md) にあります。
+`clippy --fix` を使うときは、先に自分の編集を `git add` してから `--allow-staged` を付けてください。`--allow-dirty` は使いません。clippy の修正が unstaged に残るので、自分の編集と分けてレビューできます。
+
+ビューア・プレビュー・npm パッケージ・ゴールデンダンプを含むマトリクスの残りは、英語版の [Verification](#verification) にあります。
 
 ## コーディング規約
 
