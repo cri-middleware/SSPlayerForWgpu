@@ -5,8 +5,8 @@ The wgpu Player's roadmap. Runtime and converter work lives in the
 items marked **needs SDK** wait on a capability from there.
 
 This player is first and foremost a **Rust** API, with WebGPU (`wasm-bindgen`) and
-C/C++ (`cbindgen`) as thin wrappers over it. The invariants every change has to
-respect are in [`AGENTS.md`](./AGENTS.md) under *Hard constraints*.
+C/C++ (`cbindgen`) as thin wrappers over it. The constraints a change most often
+breaks are in [CONTRIBUTING.md](./CONTRIBUTING.md#technical-constraints--guiding-principles).
 
 `[x]` = done · `[ ]` = planned · ⛔ = blocked
 
