@@ -33,13 +33,14 @@ per device — never one per canvas or window.
 ## Usage
 
 ```rust
-use ssplayer_wgpu::{SSPlayer, SSRenderer, SSScene, SceneConfig};
+use ssplayer_wgpu::{MaskBackend, SSPlayer, SSRenderer, SSScene, SceneConfig};
 
 // Once, against the device the host already owns.
 let mut renderer = SSRenderer::new(&device);
 let mut scene = SSScene::new(&device, &SceneConfig {
     color_format: surface_format,
-    stencil_format: Some(wgpu::TextureFormat::Depth24PlusStencil8), // None disables masking
+    stencil_format: Some(wgpu::TextureFormat::Depth24PlusStencil8),
+    mask: MaskBackend::Stencil, // Coverage when the pass lends no stencil
 });
 scene.set_viewport(&queue, width as f32, height as f32, /* y_down */ false);
 
@@ -47,7 +48,7 @@ scene.set_viewport(&queue, width as f32, height as f32, /* y_down */ false);
 // packs its instance parts play from.
 let mut player = SSPlayer::new();
 player.load("assets/overall/Basic.ssab")?;
-player.set_animation("Basic")?;
+player.set_animation("anime_1")?;
 player.play();
 
 // Per frame: advance every player and build this target's geometry …

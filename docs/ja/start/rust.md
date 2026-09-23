@@ -82,7 +82,7 @@ scene.set_viewport(&queue, width as f32, height as f32, /* y_down */ false);
 // キャラクター 1 体。
 let mut player = SSPlayer::new();
 player.load("assets/overall/Basic.ssab")?;   // パック・アトラス・兄弟パックを 1 呼び出しで
-player.set_animation("Basic")?;              // 選択と再生開始は別
+player.set_animation("anime_1")?;            // 選択と再生開始は別
 player.play();
 ```
 

@@ -85,7 +85,7 @@ scene.set_viewport(&queue, width as f32, height as f32, /* y_down */ false);
 // One character.
 let mut player = SSPlayer::new();
 player.load("assets/overall/Basic.ssab")?;   // pack + atlases + sibling packs, in one call
-player.set_animation("Basic")?;              // selecting is separate from starting
+player.set_animation("anime_1")?;            // selecting is separate from starting
 player.play();
 ```
 
