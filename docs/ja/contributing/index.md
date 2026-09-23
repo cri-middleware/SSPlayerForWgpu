@@ -88,9 +88,9 @@ Player が released zip 内の安定 C API を通して SDK と話すのに対�
 
 | | |
 |---|---|
-| [`AGENTS.md`](https://github.com/cri-middleware/SSPlayerForWgpu/blob/main/AGENTS.md) | 変更が守るべき不変条件と、その検証方法。自明でない変更の前に読んでください |
+| [`CONTRIBUTING.md`](https://github.com/cri-middleware/SSPlayerForWgpu/blob/main/CONTRIBUTING.md) | 変更が守るべき制約と、その検証方法。自明でない変更の前に読んでください |
 | [`ROADMAP.md`](https://github.com/cri-middleware/SSPlayerForWgpu/blob/main/ROADMAP.md) | 計画済み・未検証・意図的に採用しなかったもの |
-| [SDK の `AGENTS.md`](https://github.com/cri-middleware/SpriteStudio-SDK) | 再生セマンティクス（Brain）はここが正典です。このリポジトリに複製してはいけません |
+| [SDK の Player 移植ガイド](https://github.com/cri-middleware/SpriteStudio-SDK/tree/HEAD/libs/ssruntime/docs) | 再生セマンティクス（Brain）はここが正典です。このリポジトリに複製してはいけません |
 | このドキュメント | 読者向けのガイド。パッケージ README は crates.io / npm / GitHub の玄関として残ります |
 
 ## 変更を検証する

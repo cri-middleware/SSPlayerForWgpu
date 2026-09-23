@@ -271,9 +271,8 @@ products.
 ## 🤝 Contributing
 
 [CONTRIBUTING.md](./CONTRIBUTING.md) is the guide — the constraints, how to report a bug, how to set
-the environment up, and what to run before opening a pull request. [AGENTS.md](./AGENTS.md) is the full
-invariant list and the verification matrix; [ROADMAP.md](./ROADMAP.md) is what is planned and what was
-deliberately declined.
+the environment up, and the full matrix of what to run before opening a pull request.
+[ROADMAP.md](./ROADMAP.md) is what is planned and what was deliberately declined.
 
 The SDK is a submodule, so a change that needs `ssruntime` or `ssab` is a pull request there followed by
 a submodule bump here.
