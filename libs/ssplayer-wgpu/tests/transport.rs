@@ -262,7 +262,7 @@ fn is_playing_forward_tracks_the_leg_not_the_configured_direction() {
     assert_eq!(player.playback_direction(), PlaybackDirection::Forward, "the configured heading is untouched by the turn — that is the whole point");
 }
 
-/// The four transport verbs, as the SDK's Player Porting Guide specifies them.
+/// The four transport verbs.
 /// `pause` holds and nothing else; `resume` is what lifts the hold; `play`
 /// heads out and so cannot serve as a resume; `stop` leaves the playhead alone.
 #[test]

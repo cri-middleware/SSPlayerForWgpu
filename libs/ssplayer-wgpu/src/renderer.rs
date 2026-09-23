@@ -48,8 +48,7 @@ impl GeomClass {
     /// The vertex entry that expands this class **into coverage space**: the same
     /// geometry, projected by the node's bbox affine instead of the target's
     /// projection, and stopping short of the player's placement — the bitmap is
-    /// pinned to player-local coordinates so it does not move when the player does
-    /// (mask doc §3-2-2).
+    /// pinned to player-local coordinates so it does not move when the player does.
     fn coverage_entry(self) -> &'static str {
         match self {
             GeomClass::Quad => "vs_cov_quad",
@@ -81,8 +80,8 @@ fn wgsl_consts() -> String {
     )
 }
 
-/// The coverage bitmap's format. RGBA8 with one writer per bit gives the 24 the
-/// mask doc budgets for (§3-2), and matches what the reference implementation
+/// The coverage bitmap's format. RGBA8 with one writer per bit gives 24
+/// writers, and matches what the reference implementation
 /// rasterises, so the two players encode coverage identically.
 pub(crate) const COVERAGE_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Rgba8Unorm;
 
@@ -109,7 +108,7 @@ pub(crate) enum PipelineKind {
     /// its own kind because it draws from a different pipeline layout — the one
     /// with the coverage array bound at group(2).
     ContentCoverage(usize, StencilTest, GeomClass),
-    /// Coverage-write geometry (mask doc §3-2): the same shapes as
+    /// Coverage-write geometry: the same shapes as
     /// [`PipelineKind::Mask`], rasterised into the coverage bitmap instead of the
     /// stencil. One pipeline per class — the writer's bit travels on the `Prim`,
     /// not in the pipeline, so 24 writers still compile three pipelines between
@@ -340,7 +339,7 @@ fn blend_state(blend: BlendType) -> wgpu::BlendState {
     wgpu::BlendState { color: wgpu::BlendComponent { src_factor: src, dst_factor: dst, operation: op }, alpha: wgpu::BlendComponent { src_factor: One, dst_factor: OneMinusSrcAlpha, operation: Add } }
 }
 
-/// Stencil comparison a content pipeline uses for a given test (mask doc §2-4).
+/// Stencil comparison a content pipeline uses for a given test.
 fn stencil_compare(stencil: StencilTest) -> wgpu::CompareFunction {
     match stencil {
         StencilTest::None => wgpu::CompareFunction::Always,
@@ -349,7 +348,7 @@ fn stencil_compare(stencil: StencilTest) -> wgpu::CompareFunction {
     }
 }
 
-/// Stencil bit planes, one per OP family (mask doc §3-1-4). `Invert` and the
+/// Stencil bit planes, one per OP family. `Invert` and the
 /// increment/decrement pair do not commute, so they must never share bits:
 /// mixed they make coverage depend on writer order and leave the cancellation
 /// short of zero. A stencil write is `new = (op(old) & write_mask) | (old &
@@ -378,7 +377,7 @@ fn stencil_write_op(op: MaskOp) -> wgpu::StencilOperation {
     }
 }
 
-/// The bit plane a writer's OP writes into (mask doc §3-1-4).
+/// The bit plane a writer's OP writes into.
 fn stencil_write_plane(op: MaskOp) -> u32 {
     match op {
         MaskOp::Incr | MaskOp::Decr => STENCIL_PLANE_COUNTER,
@@ -392,8 +391,8 @@ fn stencil_face(compare: wgpu::CompareFunction, pass_op: wgpu::StencilOperation)
 }
 
 /// Depth/stencil state for a pipeline that only *tests* coverage (content), or
-/// only *writes* it (mask writers, `write_mask` = the OP's own plane, mask doc
-/// §3-1-4). `read_mask` is always 0xFF so a test reads both planes as a union.
+/// only *writes* it (mask writers, `write_mask` = the OP's own plane).
+/// `read_mask` is always 0xFF so a test reads both planes as a union.
 /// The depth aspect is inert throughout: never written, always passing.
 fn depth_stencil_state(format: Option<wgpu::TextureFormat>, compare: wgpu::CompareFunction, pass_op: wgpu::StencilOperation, write_mask: u32) -> Option<wgpu::DepthStencilState> {
     format.map(|format| wgpu::DepthStencilState {
@@ -467,7 +466,7 @@ struct Prim {
     colors: array<u32, 4>,
     alphas: array<f32, 4>,
     rates: array<f32, 4>,
-    // Coverage masking (mask doc §3-2). `cov_base` is the arena offset of the
+    // Coverage masking. `cov_base` is the arena offset of the
     // owning node's coverage block; `mask_info` says whether this primitive is a
     // writer baking a bit or a target replaying them, and is zero — meaning "not
     // coverage-masked" — for every primitive under the stencil backend.
@@ -510,7 +509,7 @@ fn ss_straight_rgb(tex: vec4<f32>) -> vec3<f32> {
 
 @group(2) @binding(0) var t_coverage: texture_2d_array<f32>;
 
-// --- coverage masking (mask doc §3-2) -------------------------------------
+// --- coverage masking ---------------------------------------------------
 
 // A part-local point in the space the coverage bitmap is pinned to: through the
 // part's own world matrix, but *not* through the player's placement, so the
@@ -803,7 +802,7 @@ fn vs_cov_shape(@builtin(vertex_index) vi: u32) -> VertexOutput {
     return out;
 }
 
-// Writes the writer's bit wherever its cutout says it covers (mask doc §2-5).
+// Writes the writer's bit wherever its cutout says it covers.
 // `varg.x` carries the threshold; below zero means "no cutout", which is what a
 // textureless pure mask uses to cover its whole shape.
 @fragment
@@ -821,7 +820,7 @@ fn fs_coverage(in: VertexOutput) -> @location(0) vec4<f32> {
 // Re-runs the writers that are in scope for this part, in draw order, and says
 // whether the fragment survives. This is the stencil's job done per fragment:
 // the bitmap holds every writer's shape at once, and the scope test picks which
-// of them were "applied" by the time this part drew (mask doc §3-2-1).
+// of them were "applied" by the time this part drew.
 fn mask_passes(in: VertexOutput, info: u32, cov_base: u32) -> bool {
     let layer = i32(f_arena[cov_base + 6u]);
     let count = u32(f_arena[cov_base + 7u]);
@@ -846,18 +845,18 @@ fn mask_passes(in: VertexOutput, info: u32, cov_base: u32) -> bool {
     let cov = textureLoad(t_coverage, texel, layer, 0);
 
     // A sub-animation is scoped by the rank of the instance part it hangs off,
-    // not by its own internal ranks (mask doc §3-2-2).
+    // not by its own internal ranks.
     let this_rank = select(f32(info >> 16u), rank_override, rank_override >= 0.0);
     // Two accumulators, never one: increment and invert are each self-inverse but
     // do not commute, so mixing them makes coverage depend on the order the
-    // writers happened to be drawn in (mask doc §3-1-4).
+    // writers happened to be drawn in.
     var parity = 0u;
     var counter = 0u;
     for (var i = 0u; i < count; i = i + 1u) {
         let rec = cov_base + COVERAGE_HEADER + i * COVERAGE_STRIDE;
         let rank = f_arena[rec];
         let is_clipping = f_arena[rec + 3u] > 0.5;
-        // Scope (§2-1): a clipping writer covers what draws after it, a pure mask
+        // Scope: a clipping writer covers what draws after it, a pure mask
         // what draws before.
         let in_scope = select(this_rank < rank, (this_rank > rank), is_clipping);
         if (!in_scope) {
@@ -1276,7 +1275,7 @@ impl SSRenderer {
         let storage = |binding: u32| wgpu::BindGroupLayoutEntry {
             binding,
             // The fragment stage reads the arena too: the coverage replay walks
-            // the node's writer records there, per fragment (mask doc §3-2-1).
+            // the node's writer records there, per fragment.
             visibility: wgpu::ShaderStages::VERTEX_FRAGMENT,
             ty: wgpu::BindingType::Buffer { ty: wgpu::BufferBindingType::Storage { read_only: true }, has_dynamic_offset: false, min_binding_size: None },
             count: None,
@@ -1326,7 +1325,7 @@ impl SSRenderer {
         // Coverage masking adds a third group holding the frame's bitmap array.
         // No sampler: the replay reads exact texels with `textureLoad`, because a
         // filtered read would blend neighbouring writers' bits into each other and
-        // decode as coverage that nobody wrote (mask doc §3-2-1).
+        // decode as coverage that nobody wrote.
         let coverage_bind_group_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
             label: Some("SpriteStudio Coverage Layout"),
             entries: &[wgpu::BindGroupLayoutEntry {
@@ -1497,7 +1496,7 @@ impl SSRenderer {
                 vertex_entry: class.coverage_entry(),
                 entry: "fs_coverage",
                 // Additive, so writers whose bits are disjoint OR together into
-                // one bitmap however they overlap (mask doc §3-2-1).
+                // one bitmap however they overlap.
                 blend: Some(wgpu::BlendState {
                     color: wgpu::BlendComponent { src_factor: wgpu::BlendFactor::One, dst_factor: wgpu::BlendFactor::One, operation: wgpu::BlendOperation::Add },
                     alpha: wgpu::BlendComponent { src_factor: wgpu::BlendFactor::One, dst_factor: wgpu::BlendFactor::One, operation: wgpu::BlendOperation::Add },

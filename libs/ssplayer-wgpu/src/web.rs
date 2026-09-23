@@ -985,8 +985,7 @@ impl SsPlayerWeb {
     /// The shape of `SS6PlayerForGodot`'s `setSSABResource`, which loads the
     /// pack's textures before returning and leaves `setAnimation` a pure
     /// selection. Texture loading belongs to initialisation, not to animation
-    /// selection: the porting guide puts it there
-    /// (`ssruntime/docs/30_core/10_initialization.ja.md` §3), and switching
+    /// selection: switching
     /// motions is a frequent, synchronous operation that must not carry a
     /// `Promise`. [`SsPlayerWeb::set_animation`] therefore stays synchronous.
     ///
@@ -1182,8 +1181,8 @@ impl SsPlayerWeb {
     // --- Runtime texture replacement ---------------------------
     //
     // Swap the texture a cellmap binds, from the page rather than the authoring
-    // data — costume changes, dynamic expressions (SDK `70_external_resources.md`
-    // §"Runtime texture replacement"). Per player: the redirect lives in this
+    // data — costume changes, dynamic expressions.
+    // Per player: the redirect lives in this
     // player's atlas-key table, so another player of the same pack is unaffected,
     // and an instance child (its own pack) does not inherit it.
     //
@@ -1530,7 +1529,7 @@ impl SsPlayerWeb {
     // --- overrides, by part name ---
     //
     // The unsuffixed form takes a NAME; `ByIndex` is the optimisation for a
-    // caller that cached one (SDK: `20_design/40_api_conventions`). wasm-bindgen
+    // caller that cached one. wasm-bindgen
     // cannot express a `string | number` union, so the two are separate methods
     // here rather than one overload as in the browser Players.
 

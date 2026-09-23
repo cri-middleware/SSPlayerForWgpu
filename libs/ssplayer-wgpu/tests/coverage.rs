@@ -1,4 +1,4 @@
-//! The coverage-bitmap mask backend (mask doc §3-2), measured against the
+//! The coverage-bitmap mask backend, measured against the
 //! stencil one.
 //!
 //! The two backends implement the same semantics from opposite ends, so what

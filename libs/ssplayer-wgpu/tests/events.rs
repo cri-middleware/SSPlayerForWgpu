@@ -1,6 +1,6 @@
 //! Timeline events and the end-of-playback notifications (SPEC §9.5).
 //!
-//! These pin the two things the SDK's Player porting guide singles out, because
+//! These pin two things, because
 //! both are invisible until they are wrong and both have bitten sibling Players:
 //!
 //! 1. **Events on frames that frame skipping jumped over must still fire.** A

@@ -57,9 +57,9 @@ pub(crate) fn pack_tint(rgb: u32) -> u32 {
 
 /// How a scene rasterises mask coverage.
 ///
-/// The two working backends implement the same semantics from opposite ends of
-/// the mask doc: [`MaskBackend::Stencil`] is §3-1 (the hardware stencil), and
-/// [`MaskBackend::Coverage`] is §3-2, written for engines that never lend one.
+/// The two working backends implement the same semantics from opposite ends:
+/// [`MaskBackend::Stencil`] is the hardware stencil, and
+/// [`MaskBackend::Coverage`] is written for engines that never lend one.
 /// Which is available is a property of the *host's render pass*, not of the
 /// animation — the same `.ssab` must look the same either way.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
@@ -67,10 +67,10 @@ pub enum MaskBackend {
     /// No masking. Pure masks draw nothing and masked targets draw unclipped.
     #[default]
     None,
-    /// The host's stencil buffer (mask doc §3-1). Needs
+    /// The host's stencil buffer. Needs
     /// [`SceneConfig::stencil_format`] and a matching attachment on every pass.
     Stencil,
-    /// A coverage bitmap the player rasterises for itself (mask doc §3-2).
+    /// A coverage bitmap the player rasterises for itself.
     ///
     /// Needs no stencil from the host, and so is the backend for a pass that has
     /// none to give — Bevy's 2d depth is `Depth32Float`, and a WebGPU engine that
@@ -185,16 +185,16 @@ struct Prim {
     /// `mask_info` says this primitive takes part in coverage masking. Zero is a
     /// real arena offset, so the flag is what gates it, never this value.
     cov_base: u32,
-    /// Coverage masking, packed (mask doc §3-2). Zero — the `Default` — is "no
+    /// Coverage masking, packed. Zero — the `Default` — is "no
     /// coverage masking", which is every primitive under the stencil backend.
     ///
     /// | bits | meaning |
     /// |---|---|
     /// | 0 | set when this primitive takes part in coverage masking |
     /// | 1 | 1 = writer (baking a bit), 0 = masked target (replaying) |
-    /// | 2 | target polarity: 1 = visible inside the coverage (§2-4) |
+    /// | 2 | target polarity: 1 = visible inside the coverage |
     /// | 8..16 | writer: which bit of the bitmap it writes (0..23) |
-    /// | 16..32 | target: its own `draw_order` rank, for the scope test (§2-1) |
+    /// | 16..32 | target: its own `draw_order` rank, for the scope test |
     mask_info: u32,
     /// Player-level tint (see [`BatchInfo::tint`]), in [`pack_rgb`]'s byte order.
     /// Unlike every other field, zero is not the neutral value here — it is
@@ -223,7 +223,7 @@ enum MaskWriterDest {
 const MASK_INFO_ACTIVE: u32 = 1 << 0;
 /// Set when the primitive is a coverage *writer* rather than a masked target.
 const MASK_INFO_WRITER: u32 = 1 << 1;
-/// Set when a masked target draws *inside* the coverage (mask doc §2-4).
+/// Set when a masked target draws *inside* the coverage.
 const MASK_INFO_INSIDE: u32 = 1 << 2;
 
 /// Pack a writer's [`Prim::mask_info`].
@@ -312,7 +312,7 @@ const COVERAGE_LAYER_F32: usize = 6;
 ///
 /// A sub-animation clipped by its parent's mask sits at the parent's instance
 /// part in the parent's draw order, and that is the rank the scope has to be
-/// judged against (mask doc §3-2-2) — the child's internal ranks belong to a
+/// judged against — the child's internal ranks belong to a
 /// different order entirely and mean nothing to the parent's writers.
 /// [`NO_RANK_OVERRIDE`] means "use the part's own rank", which is every root
 /// scope.
@@ -323,11 +323,10 @@ const NO_RANK_OVERRIDE: f32 = -1.0;
 /// Smallest coverage bitmap edge. Below this the quantisation costs more in
 /// reallocation than the texels are worth.
 const COVERAGE_MIN_SIZE: u32 = 128;
-/// Largest coverage bitmap edge — the mask doc's worked example (§3-2), and
-/// 4 MiB a layer at RGBA8.
+/// Largest coverage bitmap edge — 4 MiB a layer at RGBA8.
 const COVERAGE_MAX_SIZE: u32 = 1024;
 /// How far below a size class the footprint must fall before the smaller class is
-/// taken (mask doc §3-2-3, 対策 2). The reference Player's value.
+/// taken. The reference Player's value.
 const COVERAGE_SHRINK_DEADBAND: f32 = 0.15;
 
 /// The frame's coverage bitmaps: one array texture, one layer per masking node.
@@ -505,14 +504,14 @@ impl SSScene {
         }
     }
 
-    /// Rasterise this frame's coverage bitmaps (mask doc §3-2).
+    /// Rasterise this frame's coverage bitmaps.
     ///
     /// Call between [`SSScene::update`] and [`SSScene::draw`], on **the same
     /// encoder** the host will open its own pass with. Passes recorded into one
     /// encoder execute in order, so what this bakes is what the very next pass
     /// samples — which is why this player has none of the one-frame lag that
     /// engines whose offscreen targets are only readable next frame have to work
-    /// around (§3-2-3). Do not split the two across encoders or frames.
+    /// around. Do not split the two across encoders or frames.
     ///
     /// A no-op under any backend but [`MaskBackend::Coverage`], and on frames
     /// where nothing masks.
@@ -569,8 +568,8 @@ impl SSScene {
         let longest = nodes.iter().fold(0.0f32, |acc, node| acc.max(node.extent.0).max(node.extent.1));
         let wanted = (longest.max(1.0).ceil() as u32).next_power_of_two().clamp(COVERAGE_MIN_SIZE, COVERAGE_MAX_SIZE);
 
-        // Shrinking waits for the footprint to fall well inside the smaller class
-        // (§3-2-3, 対策 2); growing is immediate. The asymmetry is deliberate:
+        // Shrinking waits for the footprint to fall well inside the smaller class;
+        // growing is immediate. The asymmetry is deliberate:
         // holding a size too long costs VRAM nobody sees, while growing late
         // costs visibly ragged mask edges.
         match self.coverage.as_ref().map(|targets| targets.size) {
@@ -1059,7 +1058,7 @@ impl FrameChunk {
     /// Attach this node's coverage block, once its writers are planned.
     ///
     /// `uv` is the affine that takes a **player-local** point to coverage UV
-    /// `[0,1]` — the bbox normalisation of mask doc §3-2-2, as
+    /// `[0,1]` — the bbox normalisation, as
     /// `[a, b, c, d, tx, ty]` for `u = a*x + c*y + tx`, `v = b*x + d*y + ty`.
     /// Both the bake (which turns UV into clip space) and the replay (which
     /// samples with it) read this one transform, so the two cannot disagree about
@@ -1073,7 +1072,7 @@ impl FrameChunk {
         node.coverage_layer = layer;
     }
 
-    /// Point a sub-animation at its parent's bitmap (mask doc §3-2-2).
+    /// Point a sub-animation at its parent's bitmap.
     ///
     /// No new layer and no new writers: the child reads the same bitmap the
     /// parent baked. What differs is the affine — composed with the instance
@@ -1289,7 +1288,7 @@ impl FrameChunk {
                     // are textureless (white fallback), so this colour shows as-is.
                     // Shape bypasses the PartColor blend formula: it is forced to
                     // the Mix path with rate 1 (hasPc) / 0 (no PartColor), so the
-                    // fill is the bilinear PartColor itself (10_parts_color §1-2).
+                    // fill is the bilinear PartColor itself.
                     let part_color_idx = part.part_color();
                     let has_pc = part_color_idx >= 0 && parts_color.is_some();
                     let (colors, alphas) = parts_color
@@ -1356,7 +1355,7 @@ impl FrameChunk {
     /// Called once per writer per frame — there is no add/remove interleave here,
     /// because the coverage backend does not carry a running state through the
     /// draw walk. What the stencil path spends passes replaying, the replay
-    /// shader recomputes per fragment from the writer's rank (mask doc §3-2).
+    /// shader recomputes per fragment from the writer's rank.
     pub fn append_coverage_writer(&mut self, frame: &FrameView, node: &NodeSlot, writer: &MaskWriter, bit: usize) {
         self.append_writer(frame, node, writer, MaskWriterDest::Coverage(bit));
     }
