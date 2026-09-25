@@ -256,7 +256,7 @@ cargo test -p ssplayer-wgpu --features ffi --lib
 
 `clippy --fix` を使うときは、先に自分の編集を `git add` してから `--allow-staged` を付けてください。`--allow-dirty` は使いません。clippy の修正が unstaged に残るので、自分の編集と分けてレビューできます。
 
-ビューア・プレビュー・npm パッケージ・ゴールデンダンプを含むマトリクスの残りは、英語版の [Verification](#verification) にあります。
+ビューア・プレビュー・npm パッケージ・ゴールデンダンプ・性能計測を含むマトリクスの残りは、英語版の [Verification](#verification) にあります。ドキュメントサイトについては [RELEASING.md](./RELEASING.md) を参照してください。
 
 ## コーディング規約
 
@@ -275,4 +275,4 @@ cargo test -p ssplayer-wgpu --features ffi --lib
 - 複数のフェイスに存在する名前は、どのフェイスでも同じ語幹を保ちます。その具体的な内容は SDK の [Player API conventions](https://github.com/cri-middleware/SpriteStudio-SDK/blob/HEAD/libs/ssruntime/docs/20_design/30_api_conventions.md) にあり、全公式 Player に適用されます。
 
 ---
-このプロジェクトに貢献することで、あなたの貢献がプロジェクトの [LICENSE.ja.md](./LICENSE.ja.md) の下でライセンスされることに同意したものとみなされます。
+このプロジェクトに貢献することで、あなたの貢献がプロジェクトの [LICENSE.md](./LICENSE.md)（参考訳: [LICENSE.ja.md](./LICENSE.ja.md)）の下でライセンスされることに同意したものとみなされます。

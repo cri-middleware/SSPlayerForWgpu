@@ -217,8 +217,8 @@ modes, deploying them to `examples/web` as `assets/` (reference, plus its siblin
 
 ## 🧭 Repository layout
 
-A single Cargo workspace. The library is one crate carrying all three faces; everything else is a host
-that drives it.
+A single Cargo workspace. The library is one crate carrying all three faces, which a second crate only
+builds into binaries; everything else is a host that drives it.
 
 ```mermaid
 flowchart TD
@@ -255,7 +255,8 @@ flowchart TD
 
 | Path | What |
 |---|---|
-| [`libs/ssplayer-wgpu/`](./libs/ssplayer-wgpu) | crate `ssplayer-wgpu` — the player. `rlib` + `cdylib` + `staticlib`, with the `web` and `ffi` faces behind features |
+| [`libs/ssplayer-wgpu/`](./libs/ssplayer-wgpu) | crate `ssplayer-wgpu` — the player, a plain `rlib`, with the `web` and `ffi` faces behind features |
+| [`libs/ssplayer-wgpu-ffi/`](./libs/ssplayer-wgpu-ffi) | crate `ssplayer-wgpu-ffi` — emits those two faces as `staticlib` / `cdylib` (the C ABI CMake hosts link, and the wasm `wasm-pack` builds) and regenerates `include/ssplayer_wgpu.h`. Not published |
 | [`libs/ssplayer-bevy/`](./libs/ssplayer-bevy) | crate `ssplayer-bevy` — the Bevy adapter. Its own crate, so the player never depends on an engine; see its README for the Bevy line it tracks |
 | [`packages/ssplayer-wgpu/`](./packages/ssplayer-wgpu) | npm package `@spritestudio/ssplayer-wgpu` — the wasm plus the TypeScript layer over it (`.` and `./element`). Published from where it sits; `wasm/` and `dist/` are gitignored build outputs |
 | [`examples/`](./examples) | one host per environment; see [Samples](#-samples) |
