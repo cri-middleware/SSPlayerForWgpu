@@ -151,7 +151,7 @@ For the documentation site, see [RELEASING.md](./RELEASING.md).
 
 ### Rust
 - Rendering parity is judged against the WebGL player (`../SSPlayerForWeb/packages/ssplayer-webgl/`), which the drawing code was ported from; consult it before inventing new behaviour.
-- Documentation in this repository is English.
+- Doc comments and the crate READMEs under `libs/` are written in English.
 - `cargo fmt` decides formatting; `rustfmt.toml` is in the repository root.
 - Clippy runs with `-D warnings` over all targets, so a lint is an error.
 - Public items carry doc comments. The crate READMEs under `libs/` are the
@@ -261,6 +261,8 @@ cargo test -p ssplayer-wgpu --features ffi --lib
 ## コーディング規約
 
 ### Rust
+- 描画の一致は WebGL 版 Player（`../SSPlayerForWeb/packages/ssplayer-webgl/`）を基準に判断します。描画コードはそこから移植したものなので、新しい挙動を作る前に参照してください。
+- doc コメントと `libs/` 以下の各クレートの README は英語で書きます。
 - 整形は `cargo fmt` が決めます。`rustfmt.toml` はリポジトリルートにあります。
 - clippy は全ターゲットに対して `-D warnings` で走るため、lint は警告ではなくエラーです。
 - 公開項目には doc コメントを付けてください。`libs/` 以下の各クレートの README が API 向けの文書で、説明対象のコードと一緒に動くことが期待されています。
