@@ -96,7 +96,7 @@ today, and each page says what unblocks its released form.
 |---|---|---|
 | Rust | `ssplayer-wgpu` on crates.io | 🚧 waits on the SDK crates publishing first |
 | Bevy | `ssplayer-bevy` on crates.io | 🚧 same, plus the player itself |
-| C / C++ | `ssplayer-wgpu-<platform>.zip` on GitHub Releases — `include/`, `lib/`, `LICENSE.md`, `LICENSE.ja.md` | 🚧 the workflow exists; no release cut yet |
+| C / C++ | `ssplayer-wgpu-<platform>.zip` on GitHub Releases — `include/`, `lib/`, `LICENSE.md`, `LICENSE.ja.md`, `THIRD_PARTY_NOTICES.md` | 🚧 the workflow exists; no release cut yet |
 | Web | `@spritestudio/ssplayer-wgpu` on npm | 🚧 not on npm yet |
 
 ## 🗺️ From editor to screen

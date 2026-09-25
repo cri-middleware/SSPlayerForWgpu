@@ -6,9 +6,9 @@ title: Rust API reference
 
 The generated reference is published beside these pages:
 
-<a href="../../api/ssplayer_wgpu/index.html" target="_blank" rel="noreferrer">**📦 rustdoc for `ssplayer_wgpu`**</a>
+<a href="../api/ssplayer_wgpu/index.html" target="_blank" rel="noreferrer">**📦 rustdoc for `ssplayer_wgpu`**</a>
 &nbsp;·&nbsp;
-<a href="../../api/ssplayer_bevy/index.html" target="_blank" rel="noreferrer">**rustdoc for `ssplayer_bevy`**</a>
+<a href="../api/ssplayer_bevy/index.html" target="_blank" rel="noreferrer">**rustdoc for `ssplayer_bevy`**</a>
 
 Locally, `cargo doc --no-deps --all-features -p ssplayer-wgpu --open` renders the same thing.
 

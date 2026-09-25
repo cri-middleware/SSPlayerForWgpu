@@ -330,6 +330,12 @@ wasm-pack build "$ROOT_DIR/libs/ssplayer-wgpu-ffi" \
 # root already.
 rm -f "$PKG_DIR/wasm/package.json" "$PKG_DIR/wasm/.gitignore" "$PKG_DIR/wasm/LICENSE.md" "$PKG_DIR/wasm/LICENSE.ja.md" "$PKG_DIR/wasm/README.md"
 
+# The wasm compiles in wgpu and every crate under it, so the package carries their
+# notices. Copied rather than committed a second time, so it cannot drift from the
+# root file scripts/generate-licenses.sh writes; `files` in package.json lists it,
+# and the prepack check refuses to publish without it.
+cp "$ROOT_DIR/THIRD_PARTY_NOTICES.md" "$PKG_DIR/"
+
 echo ">> pnpm install + build (tsdown) -> packages/ssplayer-wgpu/dist"
 ( cd "$PKG_DIR" && pnpm install --frozen-lockfile && pnpm run build )
 

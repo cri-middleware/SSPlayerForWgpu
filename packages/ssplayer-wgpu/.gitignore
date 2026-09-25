@@ -2,4 +2,7 @@
 /dist/
 # the wasm-pack package, staged here by scripts/build.sh platform=web
 /wasm/
+# the notices for the crates compiled into the wasm, copied from the repository root
+# by scripts/build.sh platform=web
+/THIRD_PARTY_NOTICES.md
 node_modules/

@@ -12,8 +12,10 @@ Copyright © CRI Middleware Co., Ltd.
 ## Third-party components
 
 The player links the SpriteStudio SDK (`ssruntime`, `ssab`) and a set of Rust crates — wgpu and its
-dependencies chief among them — each under its own licence. Their terms are the ones that ship with
-those crates; a build of your application should collect them the way it collects any other Rust
+dependencies chief among them — each under its own licence. Their notices are collected in
+[THIRD_PARTY_NOTICES.md](https://github.com/cri-middleware/SSPlayerForWgpu/blob/main/THIRD_PARTY_NOTICES.md)
+in the repository, and a copy ships inside every release zip and npm package. A build of your
+application that links the crates itself should collect them the way it collects any other Rust
 dependency's notices (`cargo about` and `cargo license` both do this).
 
 [SpriteStudio](https://www.webtech.co.jp/spritestudio/) itself, and the animation data you
