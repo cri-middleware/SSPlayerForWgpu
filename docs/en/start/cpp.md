@@ -25,6 +25,7 @@ functions a frame; it renders through **DirectX 12 on Windows, Metal on macOS an
 | `lib/libssplayer_wgpu.a` (`ssplayer_wgpu.lib` on MSVC) | the static library |
 | `LICENSE.md` | BSD-3-Clause |
 | `LICENSE.ja.md` | a reference translation of it |
+| `THIRD_PARTY_NOTICES.md` | the licences of the Rust crates compiled into the library — what to carry into your acknowledgements |
 
 ## Install
 
@@ -33,7 +34,8 @@ functions a frame; it renders through **DirectX 12 on Windows, Metal on macOS an
     🚧 **No release cut yet.** The workflow that builds these exists
     (`.github/workflows/release.yml`); the first tag is what publishes them. They will appear on
     the [Releases page](https://github.com/cri-middleware/SSPlayerForWgpu/releases) as one zip per
-    platform, each holding `include/`, `lib/`, `LICENSE.md` and `LICENSE.ja.md`:
+    platform, each holding `include/`, `lib/`, `LICENSE.md`, `LICENSE.ja.md` and
+    `THIRD_PARTY_NOTICES.md`:
 
     | Zip | For |
     |---|---|

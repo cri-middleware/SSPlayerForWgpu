@@ -21,6 +21,7 @@ title: C / C++ ではじめる
 | `lib/libssplayer_wgpu.a`（MSVC では `ssplayer_wgpu.lib`） | 静的ライブラリ |
 | `LICENSE.md` | BSD-3-Clause |
 | `LICENSE.ja.md` | その参考訳 |
+| `THIRD_PARTY_NOTICES.md` | ライブラリに組み込まれた Rust クレートのライセンス。謝辞に載せるべきもの |
 
 ## 導入 { #install }
 
@@ -28,7 +29,7 @@ title: C / C++ ではじめる
 
     🚧 **まだリリースされていません。** これらをビルドするワークフロー（`.github/workflows/release.yml`）は存在し、最初のタグで公開されます。公開後は
     [Releases ページ](https://github.com/cri-middleware/SSPlayerForWgpu/releases)にプラットフォームごとの
-    zip（`include/` `lib/` `LICENSE.md` `LICENSE.ja.md`）が並びます：
+    zip（`include/` `lib/` `LICENSE.md` `LICENSE.ja.md` `THIRD_PARTY_NOTICES.md`）が並びます：
 
     | zip | 対象 |
     |---|---|
