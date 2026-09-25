@@ -258,7 +258,7 @@ for p in $NATIVE; do
   cp "$IN/$p/include/ssplayer_wgpu.h" "$stage/include/"
   cp "$IN/$p/libs/$os/$arch/$lib" "$stage/lib/"
   cp "$IN/$p/LICENSE.md" "$IN/$p/LICENSE.ja.md" "$stage/"
-  [ -f "$ROOT_DIR/THIRD_PARTY_NOTICES.md" ] && cp "$ROOT_DIR/THIRD_PARTY_NOTICES.md" "$stage/"
+  cp "$ROOT_DIR/THIRD_PARTY_NOTICES.md" "$stage/"
 
   zipname="ssplayer-wgpu-$p.zip"
   ( cd "$stage" && zip -qry "$OUT/$zipname" . )
@@ -296,7 +296,7 @@ if [ "$VERIFY" = "yes" ]; then
     lib="$(lib_for "$p")"
     zipname="ssplayer-wgpu-$p.zip"
     names="$(unzip -Z1 "$OUT/$zipname")"
-    for want in "include/ssplayer_wgpu.h" "lib/$lib" "LICENSE.md" "LICENSE.ja.md"; do
+    for want in "include/ssplayer_wgpu.h" "lib/$lib" "LICENSE.md" "LICENSE.ja.md" "THIRD_PARTY_NOTICES.md"; do
       printf '%s\n' "$names" | grep -qx "$want" || fail "$zipname does not contain $want"
     done
     # A static library that is a few kilobytes is a link that produced nothing.

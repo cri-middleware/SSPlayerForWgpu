@@ -253,6 +253,12 @@ foreach ($stray in @("package.json", ".gitignore", "LICENSE.md", "LICENSE.ja.md"
     if (Test-Path $path) { Remove-Item -Force $path }
 }
 
+# The wasm compiles in wgpu and every crate under it, so the package carries their
+# notices. Copied rather than committed a second time, so it cannot drift from the
+# root file scripts/generate-licenses.ps1 writes; `files` in package.json lists it,
+# and the prepack check refuses to publish without it.
+Copy-Item -Force (Join-Path $ROOT_DIR "THIRD_PARTY_NOTICES.md") $PKG_DIR
+
 Write-Host ">> pnpm install + build (tsdown) -> packages/ssplayer-wgpu/dist"
 Push-Location $PKG_DIR
 try {
