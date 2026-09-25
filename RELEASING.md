@@ -13,8 +13,8 @@ Maintainers only. Contributors do not run any of this — see [CONTRIBUTING.md](
 Both locales, English first: it clears `site/`, which contains `site/ja`. `mkdocs.base.yml` sets
 `strict: true`, and nothing checks links on a pull request, so this build is the only gate.
 `zensical serve` validates nothing and serves one locale at a time, so `build-pages.sh serve=yes`
-is the only way to watch the language selector resolve. `pages.yml`'s build job **is** that script
-with every option spelled out, so CI and the local gate cannot drift.
+is the only way to watch the language selector resolve. `pages.yml`'s build job **is** that script,
+so CI builds exactly what a local run with the same options builds.
 
 `nav` lives in **both** locale configs, so adding or renaming a page means editing both.
 
@@ -54,7 +54,7 @@ refuses a package whose advertised `dist/` or `wasm/` is missing.
 ```
 
 必ず両ロケールを、英語を先に（英語ビルドは `site/ja` を含む `site/` を消します）。
-`mkdocs.base.yml` が `strict: true` を設定します。プルリクエストではリンク検査が走らないため、このビルドが唯一のゲートです。`zensical serve` は何も検証せず 1 ロケールずつしか配信しないので、言語セレクタを確認できるのは `build-pages.sh serve=yes` だけです。`pages.yml` のビルドジョブはそのスクリプト（オプションはすべて明示）なので、CI と手元のゲートがずれません。
+`mkdocs.base.yml` が `strict: true` を設定します。プルリクエストではリンク検査が走らないため、このビルドが唯一のゲートです。`zensical serve` は何も検証せず 1 ロケールずつしか配信しないので、言語セレクタを確認できるのは `build-pages.sh serve=yes` だけです。`pages.yml` のビルドジョブはそのスクリプトなので、CI が建てるものは、同じオプションで手元で建てたものと一致します。
 
 `nav` は**両方**のロケール設定にあります。ページの追加・改名は両方を編集してください。
 
