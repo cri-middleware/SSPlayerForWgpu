@@ -28,7 +28,7 @@ title: C / C++ ではじめる
 
     🚧 **まだリリースされていません。** これらをビルドするワークフロー（`.github/workflows/release.yml`）は存在し、最初のタグで公開されます。公開後は
     [Releases ページ](https://github.com/cri-middleware/SSPlayerForWgpu/releases)にプラットフォームごとの
-    zip（`include/` `lib/` `LICENSE.md`）が並びます：
+    zip（`include/` `lib/` `LICENSE.md` `LICENSE.ja.md`）が並びます：
 
     | zip | 対象 |
     |---|---|

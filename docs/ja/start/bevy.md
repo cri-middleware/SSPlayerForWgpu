@@ -108,7 +108,7 @@ fn play_sounds(mut events: MessageReader<SsEventMessage>) {
 
 | 経路 | 種類 | 用途 |
 |---|---|---|
-| `SsPlaybackState` コンポーネント | ポーリング | 現在の `frame_no`、終了したかどうか |
+| `SsPlaybackState` コンポーネント | ポーリング | 現在の `frame_no`、アニメーションが終了したかどうか（`finished`） |
 | `SsEventMessage` | `MessageReader` | タイムラインイベント（ユーザーデータ・シグナル・オーディオ） |
 | `SsFinished` / `SsLooped` | `MessageReader` | 再生完了・ループ境界のエッジ |
 

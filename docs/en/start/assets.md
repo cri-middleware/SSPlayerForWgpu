@@ -66,7 +66,7 @@ Not just the pack. A single call resolves, transitively:
 * the pack itself;
 * its atlases from **both** texture tables — the cell maps, *and* the texture files named by parts
   the artist gave a TextureChange (`TCHG`). Missing the second table is a bug that fails quietly:
-  the part draws as a white silhouette with no error;
+  the part falls back to a 1×1 white texture and draws as a white silhouette with no error;
 * the sibling `.ssab` files its **instance parts** play from — a character that plays another
   character's animation inside itself.
 
