@@ -481,7 +481,8 @@ fn collect_events(node: &PlaybackNode, animation: Option<&str>, out: &mut Vec<Ss
     let (Some(animation), Some(ssab_bytes)) = (animation, node.context.get_ssab_data()) else {
         return;
     };
-    // SAFETY: the same buffer the node was built from, already validated there.
+    // SAFETY: the buffer the node was built from, which the host guaranteed is a valid
+    // `.ssab` (`SSPack::build`).
     let ab = unsafe { root_as_ss_anime_binary_unchecked(ssab_bytes) };
     let Some(anim) = ab.animations().iter().find(|a| a.name() == animation) else {
         return;
@@ -1899,7 +1900,8 @@ impl SSPlayer {
     pub fn is_part_skinned_mesh_by_index(&self, part: u32) -> Option<bool> {
         let pack = self.packs.get(self.main_pack.as_ref()?)?;
         let bytes = pack.resource().data();
-        // SAFETY: the pack verified the buffer when it adopted it.
+        // SAFETY: the pack's bytes, which the host guaranteed are a valid `.ssab` when it
+        // loaded them (`SSPack::build`).
         let ab = unsafe { root_as_ss_anime_binary_unchecked(bytes.as_slice()) };
         let parts = ab.parts();
         if part as usize >= parts.len() {
@@ -2023,7 +2025,8 @@ impl SSPlayer {
     pub fn part_names(&self) -> Option<Vec<String>> {
         let pack = self.packs.get(self.main_pack.as_ref()?)?;
         let bytes = pack.resource().data();
-        // SAFETY: the pack verified the buffer when it adopted it.
+        // SAFETY: the pack's bytes, which the host guaranteed are a valid `.ssab` when it
+        // loaded them (`SSPack::build`).
         let ab = unsafe { root_as_ss_anime_binary_unchecked(bytes.as_slice()) };
         let parts = ab.parts();
         Some((0..parts.len()).map(|i| parts.get(i).name().to_string()).collect())
@@ -2037,7 +2040,8 @@ impl SSPlayer {
     pub fn cellmap_names(&self) -> Option<Vec<String>> {
         let pack = self.packs.get(self.main_pack.as_ref()?)?;
         let bytes = pack.resource().data();
-        // SAFETY: the pack verified the buffer when it adopted it.
+        // SAFETY: the pack's bytes, which the host guaranteed are a valid `.ssab` when it
+        // loaded them (`SSPack::build`).
         let ab = unsafe { root_as_ss_anime_binary_unchecked(bytes.as_slice()) };
         Some(ab.cellmaps()?.iter().map(|c| c.name().to_string()).collect())
     }
@@ -2145,7 +2149,8 @@ impl SSPlayer {
         let name = pack_name.or(self.main_pack.as_deref())?;
         let pack = self.packs.get(name)?;
         let bytes = pack.resource().data();
-        // SAFETY: the pack verified the buffer when it adopted it.
+        // SAFETY: the pack's bytes, which the host guaranteed are a valid `.ssab` when it
+        // loaded them (`SSPack::build`).
         let ab = unsafe { root_as_ss_anime_binary_unchecked(bytes.as_slice()) };
         let mut names: Vec<String> = Vec::new();
         if let Some(cellmaps) = ab.cellmaps() {
@@ -2278,7 +2283,8 @@ impl SSPlayer {
         let pack = self.packs.get(self.main_pack.as_ref()?)?;
         let index = pack.resource().resource()?.find_animation_index(name)?;
         let bytes = pack.resource().data();
-        // SAFETY: the pack verified the buffer when it adopted it.
+        // SAFETY: the pack's bytes, which the host guaranteed are a valid `.ssab` when it
+        // loaded them (`SSPack::build`).
         let ab = unsafe { root_as_ss_anime_binary_unchecked(bytes.as_slice()) };
         let animations = ab.animations();
         // The runtime built its metadata by walking this same vector in order, so

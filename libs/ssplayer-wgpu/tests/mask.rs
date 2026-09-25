@@ -11,7 +11,8 @@ use std::sync::Arc;
 
 fn load(path: &str) -> Arc<SsabResource> {
     let bytes = std::fs::read(path).unwrap_or_else(|_| panic!("read {path}"));
-    SsabResource::new(SsabData::load_copy(&bytes).unwrap())
+    // SAFETY: the converter wrote this pack from the suite's own fixtures, so it is a valid `.ssab`.
+    unsafe { SsabResource::new(SsabData::load_copy(&bytes).unwrap()) }
 }
 
 /// Build static per-part mask flags from ssab `PartData` (mirrors `build_node`).
