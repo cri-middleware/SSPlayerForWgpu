@@ -118,24 +118,32 @@ impl SSPack {
     /// name into each pack — so the two agree without the host having to derive
     /// one from a file path. Use [`SSPack::load_named`] when the host names packs
     /// itself.
+    ///
+    /// The bytes are not verified — not here, and not by the runtime — so a malformed or
+    /// crafted `.ssab` can cause out-of-bounds reads. Load only packs you trust (SECURITY.md).
     pub fn load(bytes: &[u8]) -> Result<Self, SSRuntimeError> {
         Self::build(None, bytes)
     }
 
     /// Parse `bytes` under a name the caller chooses, overriding the one in the
     /// `.ssab`. What `add_ssab` / `load_ssab` use.
+    ///
+    /// The bytes are not verified — not here, and not by the runtime — so a malformed or
+    /// crafted `.ssab` can cause out-of-bounds reads. Load only packs you trust (SECURITY.md).
     pub fn load_named(name: &str, bytes: &[u8]) -> Result<Self, SSRuntimeError> {
         Self::build(Some(name), bytes)
     }
 
     fn build(name: Option<&str>, bytes: &[u8]) -> Result<Self, SSRuntimeError> {
-        let resource = SsabResource::new(SsabData::load_copy(bytes)?);
+        // SAFETY: `load` and `load_named` require the host to pass a valid `.ssab` (their
+        // docs); neither this crate nor the runtime checks it.
+        let resource = unsafe { SsabResource::new(SsabData::load_copy(bytes)?) };
         if resource.resource_static_ptr().is_null() {
             return Err(SSRuntimeError::NotLoaded);
         }
 
-        // SAFETY: `SsabData::load_copy` accepted the buffer as an `SsAnimeBinary`,
-        // and the copy it owns outlives this borrow.
+        // SAFETY: the same bytes, which the host guaranteed are a valid `.ssab` (above), read
+        // from the copy the resource owns, which outlives this borrow.
         let ab = unsafe { root_as_ss_anime_binary_unchecked(resource.data().as_slice()) };
         let name: Arc<str> = Arc::from(name.unwrap_or_else(|| ab.name()));
 
