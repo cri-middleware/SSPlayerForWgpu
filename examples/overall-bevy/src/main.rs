@@ -37,9 +37,9 @@ const ASSET_ROOT: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/../../assets");
 /// names are what the packs actually declare — the sibling examples draw from this
 /// same shared set.
 const SCENES: &[(&str, &str, &str)] = &[
-    ("Ringo — wait", "Ringo/Ringo.ssab", "wait1"),
-    ("Ringo — run", "Ringo/Ringo.ssab", "run"),
-    ("Ringo — dance", "Ringo/Ringo.ssab", "dance"),
+    ("Ringo - wait", "Ringo/Ringo.ssab", "wait1"),
+    ("Ringo - run", "Ringo/Ringo.ssab", "run"),
+    ("Ringo - dance", "Ringo/Ringo.ssab", "dance"),
     ("Basic", "overall/Basic.ssab", "anime_1"),
     ("Shape", "overall/Shape.ssab", "anime_1"),
     ("Parts colour", "overall/PartsColor.ssab", "PartsColor_only"),
@@ -91,7 +91,7 @@ fn setup(mut commands: Commands, asset_server: Res<AssetServer>) {
 
     commands.spawn((Text::new(""), TextFont { font_size: bevy::text::FontSize::Px(15.0), ..default() }, TextColor(Color::WHITE), Node { position_type: PositionType::Absolute, top: Val::Px(8.0), left: Val::Px(10.0), ..default() }, Hud));
 
-    commands.insert_resource(Tour { index: 0, character, last_event: "—".into() });
+    commands.insert_resource(Tour { index: 0, character, last_event: "-".into() });
 }
 
 /// `[` / `]` switch scene, `Space` play/pause, `Up` / `Down` speed, `R` restart —
@@ -112,7 +112,7 @@ fn controls(keys: Res<ButtonInput<KeyCode>>, asset_server: Res<AssetServer>, mut
         // scenes loads Ringo once.
         player.pack = asset_server.load(pack);
         player.animation = anim.into();
-        tour.last_event = "—".into();
+        tour.last_event = "-".into();
     }
 
     if keys.just_pressed(KeyCode::Space) {
