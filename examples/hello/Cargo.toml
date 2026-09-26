@@ -1,0 +1,16 @@
+[package]
+name = "ssplayer-wgpu-hello"
+version = "0.1.0"
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+description = "The smallest winit + wgpu program that plays a SpriteStudio animation"
+publish = false
+
+[dependencies]
+ssplayer-wgpu = { workspace = true }
+wgpu = { workspace = true }
+winit = "0.30.13"
+pollster = "1.0.1"

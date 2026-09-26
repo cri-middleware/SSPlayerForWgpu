@@ -125,7 +125,7 @@ let draw_calls = scene.draw(&renderer, &mut rpass);
 * **`MaskBackend::Stencil` ならステンシルアタッチメントが必須**（宣言したフォーマットで）。貸せるステンシルが無い場合は `MaskBackend::Coverage` を使ってください（[マスク](../guide/masks.md)）。
 * **MSAA はオフ。** Player のパイプラインはシングルサンプルです。
 * **非 sRGB ターゲットを渡すこと。** Player はアトラスのバイト列をそのまま書き、色管理をしません。
-  sRGB ターゲットでは二重にエンコードされて全体が明るくなりすぎます。`examples/viewer` は
+  sRGB ターゲットでは二重にエンコードされて全体が明るくなりすぎます。`examples/hello` は
   `capabilities.formats.iter().find(|f| !f.is_srgb())` でサーフェスフォーマットを選んでいます。
   sRGB 空間で合成する方法でも構いません。
 
@@ -137,10 +137,10 @@ let draw_calls = scene.draw(&renderer, &mut rpass);
 git clone --recursive https://github.com/cri-middleware/SSPlayerForWgpu.git
 cd SSPlayerForWgpu
 ./scripts/deploy-examples.sh          # SDK のテストプロジェクトを assets/ に変換
-cargo run -p ssplayer-wgpu-viewer
+cargo run -p ssplayer-wgpu-hello
 ```
 
-`examples/viewer` は winit ホストで、機能をひととおり触れます — パック切り替え、描画順、マスクバックエンド、パーツオーバーライド、モーションブレンディング、統計表示。このページの内容の実物です。
+[`examples/hello`](https://github.com/cri-middleware/SSPlayerForWgpu/blob/main/examples/hello/src/main.rs) は、このページの手順をそのまま 1 つのプログラムにしたものです。winit のウィンドウにキャラクターを 1 体、ウィンドウに収めて表示します。ほかの機能 — パック切り替え、描画順、マスクバックエンド、パーツオーバーライド、モーションブレンディング、統計表示 — を触るときは `cargo run -p ssplayer-wgpu-viewer` を使ってください。
 
 ## 次に読む
 

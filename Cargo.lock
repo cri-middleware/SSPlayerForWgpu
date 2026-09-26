@@ -4743,6 +4743,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "ssplayer-wgpu-hello"
+version = "0.1.0"
+dependencies = [
+ "pollster",
+ "ssplayer-wgpu",
+ "wgpu",
+ "winit",
+]
+
+[[package]]
 name = "ssplayer-wgpu-viewer"
 version = "0.1.0"
 dependencies = [

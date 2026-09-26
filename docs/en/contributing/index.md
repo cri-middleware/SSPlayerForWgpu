@@ -49,6 +49,7 @@ prerequisite for `cargo test`, not an optional step.
 | C handle lifetimes | `cargo test -p ssplayer-wgpu --features ffi --lib` |
 | npm package (wasm + TS layer) | `./scripts/build.sh platform=web` — needs `pnpm` and `wasm-pack` |
 | TS layer typecheck | `cd packages/ssplayer-wgpu && pnpm run typecheck` |
+| Smallest Rust host | `cargo run -p ssplayer-wgpu-hello` |
 | Native viewer | `cargo run -p ssplayer-wgpu-viewer` |
 | Bevy viewers | `cargo run -p ssplayer-bevy-overall` / `-p ssplayer-bevy-viewer` |
 | Metal C++ viewer (macOS) | `cd examples/viewer-metal-cpp && cmake -B build && cmake --build build && ./build/ssviewer-metal` |

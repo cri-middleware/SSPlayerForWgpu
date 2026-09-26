@@ -44,6 +44,7 @@ Player が released zip 内の安定 C API を通して SDK と話すのに対�
 | C ハンドルの寿命テスト | `cargo test -p ssplayer-wgpu --features ffi --lib` |
 | npm パッケージ（wasm ＋ TS 層） | `./scripts/build.sh platform=web` — `pnpm` と `wasm-pack` が必要 |
 | TS 層の型チェック | `cd packages/ssplayer-wgpu && pnpm run typecheck` |
+| 最小の Rust ホスト | `cargo run -p ssplayer-wgpu-hello` |
 | ネイティブビューア | `cargo run -p ssplayer-wgpu-viewer` |
 | Bevy ビューア | `cargo run -p ssplayer-bevy-overall` / `-p ssplayer-bevy-viewer` |
 | Metal C++ ビューア（macOS） | `cd examples/viewer-metal-cpp && cmake -B build && cmake --build build && ./build/ssviewer-metal` |

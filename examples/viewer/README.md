@@ -1,11 +1,11 @@
 # viewer — native Rust host (winit + wgpu)
 
-The reference host for the **Rust face**. It owns a winit window and a full wgpu
+The development host for the **Rust face**. It owns a winit window and a full wgpu
 stack, then drives borrow-model players with it — which is exactly what your own
-application does, so this directory is the shortest answer to "how do I use this
-crate?".
+application does. For the shortest answer to "how do I use this crate?", read
+[`../hello`](../hello) first: one character, one file.
 
-It is also the development viewer: several characters in one pass, each on its
+This is the development viewer: several characters in one pass, each on its
 own pack and animation, with per-frame cost printed live.
 
 ## Build and run

@@ -137,7 +137,7 @@ Four rules the pass has to honour:
 * **MSAA must be off.** The player's pipelines are single-sampled.
 * **Give it a non-sRGB target.** The player writes atlas bytes verbatim and does no colour
   management, so an sRGB target encodes them a second time and everything comes out too bright.
-  `examples/viewer` picks its surface format with
+  `examples/hello` picks its surface format with
   `capabilities.formats.iter().find(|f| !f.is_srgb())`; compositing in sRGB space works too.
 
 On resize, recreate your own attachments and call `set_viewport` again.
@@ -148,12 +148,13 @@ On resize, recreate your own attachments and call `set_viewport` again.
 git clone --recursive https://github.com/cri-middleware/SSPlayerForWgpu.git
 cd SSPlayerForWgpu
 ./scripts/deploy-examples.sh          # converts the SDK's test projects into assets/
-cargo run -p ssplayer-wgpu-viewer
+cargo run -p ssplayer-wgpu-hello
 ```
 
-`examples/viewer` is a winit host with the whole surface exercised — pack switching, draw order,
-mask backends, per-part overrides, motion blending, live stats. It is the reference for everything
-on this page.
+[`examples/hello`](https://github.com/cri-middleware/SSPlayerForWgpu/blob/main/examples/hello/src/main.rs)
+is this page as one program: a winit window and one character, fitted into the window. When you
+want the rest of the surface — pack switching, draw order, mask backends, per-part overrides,
+motion blending, live stats — `cargo run -p ssplayer-wgpu-viewer` exercises all of it.
 
 ## Next
 
