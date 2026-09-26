@@ -135,18 +135,25 @@ unset.
 On the C face the values are flattened: `value_type` says which field of `SsSignalParamData` to
 read. In Rust it is the `SignalValue` enum; in JavaScript, a plain value.
 
-## Completion and loop edges
+## Start, completion and loop edges
 
-Events tell you what the timeline said. Two other signals tell you what playback did:
+Events tell you what the timeline said. Three other signals tell you what playback did:
 
 | | Rust | C | JavaScript | Bevy |
 |---|---|---|---|---|
+| Started on this tick | `just_started()` | `ss_player_just_started` | `justStarted()` | `SsStarted` message |
 | Completed on this tick | `just_finished()` | `ss_player_just_finished` | `justFinished()` | `SsFinished` message |
 | Crossed a loop boundary | `just_looped()` | `ss_player_just_looped` | `justLooped()` | `SsLooped` message |
 
-Both are **edges**, true for exactly the tick that did it, and the next `update()` moves them on — so
-a completed one-shot cannot fire twice, including after the character is hidden and shown again.
-Reading an edge does not consume it; the tick does.
+All three are **edges**, true for exactly the tick that did it, and the next `update()` moves them
+on — so a completed one-shot cannot fire twice, including after the character is hidden and shown
+again. Reading an edge does not consume it; the tick does.
+
+The start edge is raised by the first tick after `play` or `play_from`, and **not by `resume`**,
+which carries on rather than starting. After a `play` of your own you already know; it earns its
+place when something else started playback — the Bevy adapter plays whatever animation you hand
+`SsPlayer`. A `play` on a hidden character is reported by the first tick that runs once it is
+shown, and one that `stop` or `set_animation` overtook before any tick ran is not reported.
 
 ## Next
 

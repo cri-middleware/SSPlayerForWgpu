@@ -75,8 +75,9 @@ an agent would otherwise break silently.
     `Context::is_looped()`. **A pack outlives every tree built from it** — `build_node` binds each `Context`
     to its pack's resource by raw pointer, so re-registering a name never changes what is already playing.
     And **a tick that did not run reports nothing**: `set_visible(false)` skips the advance, so
-    `build_frame` clears `events` / `looped` / `finished_edge`, while `prev_finished` stays, being the latch
-    that stops a consumed completion edge firing twice.
+    `build_frame` clears `events` / `looped` / `finished_edge` / `started_edge`, while `prev_finished` and
+    `start_pending` stay: the latch that stops a consumed completion edge firing twice, and a `play` no tick
+    has reported yet.
 *   **Each player leaves the stencil buffer as it found it** (`unwind_masks`), or the first player's mask
     clips the second in a shared pass. **The two mask backends must agree**: which one a scene uses is the
     host's property, never the animation's, so keep the coverage path inside the mask doc's numbers —

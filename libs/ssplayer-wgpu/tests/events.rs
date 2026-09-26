@@ -11,6 +11,10 @@
 //!    the next play, so reporting it raw fires every frame afterwards, and
 //!    forgetting to re-arm the latch in `play` loses the *next* completion.
 //!
+//! The start edge sits beside them: raised by the first tick that runs after a
+//! `play`, never by `resume`, and dropped when the `play` is overtaken before
+//! any tick ran.
+//!
 //! The event tests run against packs that actually carry events and **fail if
 //! none of them produced any**. `Basic.ssab` has no timeline events at all, so
 //! an earlier draft of this file passed while asserting nothing.
@@ -74,8 +78,93 @@ fn a_player_with_no_animation_reports_nothing() {
     let player = SSPlayer::new();
 
     assert!(player.events().is_empty());
+    assert!(!player.just_started());
     assert!(!player.just_looped());
     assert!(!player.just_finished());
+}
+
+/// Ringo, on its first animation, not started, plus the name of a second one.
+fn ringo() -> Option<(SSPlayer, String)> {
+    let mut player = SSPlayer::new();
+    player.load(format!("{}/Ringo/Ringo.ssab", asset_root())).ok()?;
+    let names = player.animation_names()?;
+    player.set_animation(names.first()?).ok()?;
+    Some((player, names.get(1)?.clone()))
+}
+
+#[test]
+fn started_is_an_edge_raised_by_play_and_not_by_resume() {
+    let Some((device, queue)) = gpu() else {
+        eprintln!("no adapter — skipping");
+        return;
+    };
+    let mut renderer = SSRenderer::new(&device);
+    let mut scene = scene(&device, &queue);
+    let Some((mut player, _)) = ringo() else {
+        eprintln!("Ringo missing — skipping");
+        return;
+    };
+    let mut tick = |player: &mut SSPlayer| scene.update(&mut renderer, &device, &queue, 1.0 / 60.0, &mut [player]);
+
+    player.set_loop_count(-1);
+    player.play();
+    assert!(!player.just_started(), "the tick reports the start, not the call");
+    tick(&mut player);
+    assert!(player.just_started(), "the first tick after play must report it");
+    for _ in 0..5 {
+        tick(&mut player);
+        assert!(!player.just_started(), "the edge must not repeat");
+    }
+
+    player.pause();
+    tick(&mut player);
+    player.resume();
+    for _ in 0..5 {
+        tick(&mut player);
+        assert!(!player.just_started(), "resume carries on; it is not a start");
+    }
+
+    player.play_from(player.start_frame() as f32);
+    tick(&mut player);
+    assert!(player.just_started(), "play_from is a start too");
+}
+
+#[test]
+fn a_start_is_reported_by_the_first_tick_that_runs() {
+    let Some((device, queue)) = gpu() else {
+        eprintln!("no adapter — skipping");
+        return;
+    };
+    let mut renderer = SSRenderer::new(&device);
+    let mut scene = scene(&device, &queue);
+    let Some((mut player, other)) = ringo() else {
+        eprintln!("Ringo missing — skipping");
+        return;
+    };
+    let mut tick = |player: &mut SSPlayer| scene.update(&mut renderer, &device, &queue, 1.0 / 60.0, &mut [player]);
+
+    // A hidden player's ticks do not run, so they report nothing — and the
+    // start waits for the first one that does.
+    player.set_visible(false);
+    player.play();
+    for n in 0..3 {
+        tick(&mut player);
+        assert!(!player.just_started(), "a hidden player reported a start (tick {n})");
+    }
+    player.set_visible(true);
+    tick(&mut player);
+    assert!(player.just_started(), "the play made while hidden must reach the first visible tick");
+
+    player.play();
+    player.stop();
+    tick(&mut player);
+    assert!(!player.just_started(), "a play stopped before any tick ran never started");
+
+    // Selecting an animation leaves it stopped, so the play before it started nothing.
+    player.play();
+    player.set_animation(&other).unwrap();
+    tick(&mut player);
+    assert!(!player.just_started(), "set_animation overtook the play");
 }
 
 #[test]

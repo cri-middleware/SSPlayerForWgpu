@@ -126,16 +126,19 @@
 C Face では値が平坦化されており、`value_type` が `SsSignalParamData` のどのフィールドを読むかを示します。
 Rust では `SignalValue` enum、JavaScript ではそのままの値です。
 
-## 完了・ループのエッジ
+## 開始・完了・ループのエッジ
 
-イベントはタイムラインが言ったことを教えます。再生が何をしたかは別の 2 つが教えます：
+イベントはタイムラインが言ったことを教えます。再生が何をしたかは別の 3 つが教えます：
 
 | | Rust | C | JavaScript | Bevy |
 |---|---|---|---|---|
+| この tick で開始した | `just_started()` | `ss_player_just_started` | `justStarted()` | `SsStarted` メッセージ |
 | この tick で完了した | `just_finished()` | `ss_player_just_finished` | `justFinished()` | `SsFinished` メッセージ |
 | ループ境界を跨いだ | `just_looped()` | `ss_player_just_looped` | `justLooped()` | `SsLooped` メッセージ |
 
-どちらも**エッジ**で、それを行った tick でだけ true になり、次の `update()` で進みます。したがって完了したワンショットが 2 度発火することはありません（非表示にして戻した場合も含めて）。エッジは読んでも消費されず、進めるのは tick です。
+3 つとも**エッジ**で、それを行った tick でだけ true になり、次の `update()` で進みます。したがって完了したワンショットが 2 度発火することはありません（非表示にして戻した場合も含めて）。エッジは読んでも消費されず、進めるのは tick です。
+
+開始エッジを立てるのは `play` または `play_from` の後に最初に走った tick で、**`resume` では立ちません**（`resume` は続きから進めるだけで、開始ではありません）。自分で `play` を呼んだ直後なら、呼び出し側はもう知っています。役に立つのは再生を始めたのが自分以外のとき — たとえば Bevy アダプタは `SsPlayer` に渡されたアニメーションを自動で再生します。非表示のキャラクターに対する `play` は表示に戻って最初に走った tick が報告し、tick が走る前に `stop` や `set_animation` が追い越した `play` は報告されません。
 
 ## 次に読む
 

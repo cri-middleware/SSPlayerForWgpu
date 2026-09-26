@@ -110,7 +110,7 @@ fn play_sounds(mut events: MessageReader<SsEventMessage>) {
 |---|---|---|
 | `SsPlaybackState` コンポーネント | ポーリング | 現在の `frame_no`、アニメーションが終了したかどうか（`finished`） |
 | `SsEventMessage` | `MessageReader` | タイムラインイベント（ユーザーデータ・シグナル・オーディオ） |
-| `SsFinished` / `SsLooped` | `MessageReader` | 再生完了・ループ境界のエッジ |
+| `SsStarted` / `SsFinished` / `SsLooped` | `MessageReader` | 再生開始・再生完了・ループ境界のエッジ |
 
 どちらも**1 フレーム遅れ**です。再生はレンダーワールドで、そのフレームの `Update` より後に動くためです。
 

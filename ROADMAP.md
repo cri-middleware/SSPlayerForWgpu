@@ -36,7 +36,7 @@ breaks are in [CONTRIBUTING.md](./CONTRIBUTING.md#technical-constraints--guiding
       to a private key — per player, an instance child (its own pack) does not
       inherit it, and a restore points back at the untouched atlas rather than
       reloading it.
-- [x] Events — user data, signal, audio, animation finished / looped.
+- [x] Events — user data, signal, audio, and the started / finished / looped edges.
 - [x] Many players per render target, drawn in one pass in ascending `order`.
 - [ ] **9-slice parts.** The runtime already emits the batches and the geometry
       (`get_nines_*`), so this is one WGSL vertex entry, one `GeomClass`, one
@@ -48,27 +48,6 @@ breaks are in [CONTRIBUTING.md](./CONTRIBUTING.md#technical-constraints--guiding
       loading, layout and a glyph atlas all land on this side.
 - [ ] **Integration shader gaps** — `map0` / `map1` secondary textures, shader
       parts combined with a mask, and parts other than Normal.
-- [ ] **The started edge — low priority.** The [Player API
-      conventions](https://github.com/cri-middleware/SpriteStudio-SDK/blob/HEAD/libs/ssruntime/docs/20_design/30_api_conventions.md#4-events)
-      make `animationStarted` one of six required events, and it is the only one
-      with no counterpart here on any face: `SsEvent` carries `UserData` /
-      `Signal` / `Audio`, and the two lifecycle edges are `just_looped()` /
-      `just_finished()` (`ss_player_just_looped` /
-      `ss_player_just_finished`, `justLooped()` / `justFinished()`,
-      `SsLooped` / `SsFinished`). There is no `just_started()`. Every one of the
-      other six Players publishes the event.
-      **Low priority because the caller usually already knows**: `set_animation`
-      + `play` is the host's own call, so on a polling API the edge is readable
-      at the call site, and §4 lets a host that cannot subscribe publish pulses
-      instead of events. What it does not cover is a start the host did not
-      initiate — an instance slot heading out, or a declarative binding that
-      swapped the animation — which is the case that would justify doing it.
-      The shape if it lands: `just_started()` beside the other two, cleared by
-      the same `build_frame` path that clears them, `ss_player_just_started`
-      on the C face, `justStarted()` on the js face, `SsStarted` on Bevy, and a
-      row in the *Completion and loop edges* table in
-      [`docs/{en,ja}/guide/events.md`](./docs/en/guide/events.md). Until then the
-      absence is worth stating there rather than leaving a reader to infer it.
 
 ## Expressiveness
 

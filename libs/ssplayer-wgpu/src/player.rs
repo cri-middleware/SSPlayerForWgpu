@@ -627,6 +627,11 @@ pub struct SSPlayer {
     /// (the *next* completion goes missing) are defects that really happened in
     /// sibling Players.
     prev_finished: bool,
+    /// Whether the last update was the first to run after a `play`.
+    started_edge: bool,
+    /// A `play` that no tick has run since. The tick reports it, not the call,
+    /// so a hidden player's skipped tick leaves it for the first one that runs.
+    start_pending: bool,
     /// Where this player sits in the scene — the root transform of its tree. Composed by [`SSPlayer::set_transform`]; only the matrix is
     /// kept because nothing yet re-composes it. A future `box` (§9.3, the
     /// WebGL player's viewport-tracking rect) moves after `set_transform` runs,
@@ -742,6 +747,8 @@ impl SSPlayer {
             looped: false,
             finished_edge: false,
             prev_finished: false,
+            started_edge: false,
+            start_pending: false,
             transform: IDENTITY,
             order: 0,
             visible: true,
@@ -1197,6 +1204,10 @@ impl SSPlayer {
         self.looped = false;
         self.finished_edge = false;
         self.prev_finished = false;
+        // The setup leaves the new animation stopped, so a `play` made before it
+        // started nothing that a tick could report.
+        self.started_edge = false;
+        self.start_pending = false;
         // The one thing the runtime does NOT carry across a setup, deliberately,
         // because the transition is what states it.
         self.reapply_loop_count();
@@ -1213,10 +1224,6 @@ impl SSPlayer {
         }
     }
 
-    /// Start the selected animation from the head of its section, re-arming the
-    /// loop count. **Not a resume**: it rewinds, so lifting a
-    /// [`SSPlayer::pause`] is [`SSPlayer::resume`]'s job.
-    /// No-op until [`SSPlayer::set_animation`] has succeeded.
     /// [`SSPlayer::play`] from `start_frame` rather than from the head of the
     /// section. The family spells this `play(startFrame)`; Rust has no
     /// overloads, so it is a second name here.
@@ -1227,9 +1234,14 @@ impl SSPlayer {
         self.prev_finished = false;
         if let Some(root) = &mut self.root {
             root.context.play_with_start_frame(start_frame);
+            self.start_pending = true;
         }
     }
 
+    /// Start the selected animation from the head of its section, re-arming the
+    /// loop count. **Not a resume**: it rewinds, so lifting a
+    /// [`SSPlayer::pause`] is [`SSPlayer::resume`]'s job.
+    /// No-op until [`SSPlayer::set_animation`] has succeeded.
     pub fn play(&mut self) {
         // Re-arm the completion latch. Without this, replaying an animation that
         // already finished would compare against a `true` left over from the
@@ -1238,6 +1250,7 @@ impl SSPlayer {
         self.prev_finished = false;
         if let Some(root) = &mut self.root {
             root.context.play();
+            self.start_pending = true;
         }
     }
 
@@ -1262,6 +1275,8 @@ impl SSPlayer {
     /// End playback. The playhead stays where it stands; nothing rewinds, so the
     /// host keeps drawing the frame it stopped on.
     pub fn stop(&mut self) {
+        // A `play` stopped before any tick ran never started.
+        self.start_pending = false;
         if let Some(root) = &mut self.root {
             root.context.stop();
         }
@@ -1747,8 +1762,24 @@ impl SSPlayer {
     // survives being wrapped by both `js` and `ffi` without becoming a different
     // API on each.
     //
-    // All three read the tick that `SSScene::update` just ran, and are replaced
+    // All four read the tick that `SSScene::update` just ran, and are replaced
     // by the next one.
+
+    /// Whether the last update was the first to run after a [`SSPlayer::play`]
+    /// or [`SSPlayer::play_from`] — the start edge, true for exactly one update.
+    ///
+    /// **Not raised by [`SSPlayer::resume`]**: lifting a pause carries on, it
+    /// does not start. The tick reports it rather than the call, so a `play` on
+    /// a hidden player is reported by the first tick that runs once it is
+    /// visible, and a `play` that [`SSPlayer::stop`] or
+    /// [`SSPlayer::set_animation`] overtook before any tick ran is not reported.
+    ///
+    /// After a `play` of your own the call site already knows. This is for a
+    /// start something else made — a declarative binding that plays whatever
+    /// animation it is handed, as the Bevy adapter does.
+    pub fn just_started(&self) -> bool {
+        self.started_edge
+    }
 
     /// Whether the last update crossed a loop boundary.
     ///
@@ -2418,12 +2449,14 @@ impl SSPlayer {
             self.events.clear();
             self.looped = false;
             self.finished_edge = false;
+            self.started_edge = false;
             return;
         }
 
         let Some(root) = &mut self.root else { return };
         // The runtime works in milliseconds for the primary context.
         root.context.update(delta_secs * 1000.0);
+        self.started_edge = std::mem::take(&mut self.start_pending);
         let frame_no = root.context.get_frame_no();
         // The loop edge instance/effect slots re-arm their playback keys on. It
         // is a pulse the controller clears on entry to every `update`, so it has

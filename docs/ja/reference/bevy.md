@@ -78,6 +78,7 @@ spawn すれば 4 つとも既定値で付きます。
 | メッセージ | 内容 |
 |---|---|
 | `SsEventMessage` | `entity`、`event: SsEvent` — ユーザーデータ・シグナル・オーディオ |
+| `SsStarted` | `entity` — 開始**エッジ**：`playing` 中のアニメーション・パックの切り替え、初めて `playing` を有効にしたとき、`restart` の加算。再開では立ちません |
 | `SsFinished` | `entity` — 完了**エッジ** |
 | `SsLooped` | `entity` — ループ境界エッジ |
 

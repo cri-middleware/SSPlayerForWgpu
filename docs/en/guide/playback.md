@@ -201,7 +201,7 @@ a new owner, and nothing is carried across that.
 | Range | `start_frame()` / `end_frame()` / `total_frames()` | `ss_player_start_frame` / `_end_frame` / `_total_frames` | `startFrame()` / `endFrame()` / `totalFrames()` |
 | Is it running | `is_playing()` / `is_pausing()` | `ss_player_is_playing` / `_is_pausing` | `isPlaying()` / `isPausing()` |
 | Did it complete | `is_finished()` | `ss_player_is_finished` | `isFinished()` |
-| **Edges** from the last tick | `just_looped()` / `just_finished()` | `ss_player_just_looped` / `_just_finished` | `justLooped()` / `justFinished()` |
+| **Edges** from the last tick | `just_started()` / `just_looped()` / `just_finished()` | `ss_player_just_started` / `_just_looped` / `_just_finished` | `justStarted()` / `justLooped()` / `justFinished()` |
 
 The last row is the one to reach for. `just_finished()` is an **edge**: true for exactly the tick
 that completed playback, and the next `update()` moves it on — so a completion cannot fire twice, and
@@ -211,8 +211,9 @@ not the *read*.
 
 !!! note "A tick that did not run reports nothing"
     Hiding a character (`set_visible(false)`) skips the timeline advance, and the player clears its
-    events, loop flag and completion edge for that frame rather than repeating the last visible
-    tick's answers. A host that plays a sound per event will not hear it twice.
+    events and its start, loop and completion edges for that frame rather than repeating the last
+    visible tick's answers. A host that plays a sound per event will not hear it twice. A `play`
+    made while hidden is not lost: the first tick that runs reports its start.
 
 ## Smoothness: sub-frame and frame skip
 

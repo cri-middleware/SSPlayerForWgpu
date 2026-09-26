@@ -125,7 +125,7 @@ fn play_sounds(mut events: MessageReader<SsEventMessage>) {
 |---|---|---|
 | `SsPlaybackState` component | Polled | the current `frame_no`, and whether the animation has `finished` |
 | `SsEventMessage` | `MessageReader` | timeline events — user data, signals, audio cues |
-| `SsFinished` / `SsLooped` | `MessageReader` | the one-shot completion and loop edges |
+| `SsStarted` / `SsFinished` / `SsLooped` | `MessageReader` | the one-shot start, completion and loop edges |
 
 Both surfaces are **one frame behind**: what you read this frame is what playback produced last
 frame, because it ran in the render world after last frame's `Update`.
