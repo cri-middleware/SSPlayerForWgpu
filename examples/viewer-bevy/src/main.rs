@@ -176,7 +176,7 @@ fn setup(mut commands: Commands, asset_server: Res<AssetServer>) {
     }
 
     commands.insert_resource(catalogue);
-    commands.insert_resource(ViewerState { focus: None, layout: Layout::Row, reverse_order: false, y_flip: false, cast, last_event: "—".into() });
+    commands.insert_resource(ViewerState { focus: None, layout: Layout::Row, reverse_order: false, y_flip: false, cast, last_event: "-".into() });
 }
 
 /// The members the pack / animation / appearance keys act on: the focused one, or
@@ -367,7 +367,7 @@ fn handle_drop(mut drops: MessageReader<FileDragAndDrop>, asset_server: Res<Asse
                     player.animation = info.anims.first().cloned().unwrap_or_default();
                 }
             }
-            state.last_event = "—".into();
+            state.last_event = "-".into();
         }
     }
 }
