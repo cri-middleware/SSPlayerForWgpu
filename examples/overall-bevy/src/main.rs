@@ -52,7 +52,7 @@ const SCENES: &[(&str, &str, &str)] = &[
     ("Audio cues", "overall/Sound.ssab", "anime_1"),
     ("User data", "overall/UserData.ssab", "anime_1"),
     ("Signals", "overall/Signal.ssab", "anime_1"),
-    ("Masked instances", "Mask/True_Light.ssab", "True_light"),
+    ("Masked instances", "overall/InstancePropagation.ssab", "anime_1"),
 ];
 
 /// Where the tour is, the character it drives, and the last event to show.
