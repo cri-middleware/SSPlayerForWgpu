@@ -96,12 +96,17 @@ premultiplied 化されます。**復元**はセルマップを元のアトラ�
 
     ```rust
     use ssplayer_bevy::SsCellmapTextures;
+    use bevy::image::ImageLoaderSettings;
     use bevy::platform::collections::HashMap;
+
+    // 非 sRGB で読む。Player はアトラスのバイト列をそのまま扱いますが、Bevy は指定が
+    // 無いと PNG を sRGB として読むため、衣装が暗く描かれます。
+    let sailor = asset_server.load_with_settings("sailor.png", |s: &mut ImageLoaderSettings| s.is_srgb = false);
 
     // コンポーネントを挿入（または編集）する。まだロード中の画像は、準備できたフレームで
     // 適用されるので、直前にリクエストしたばかりのハンドルでも問題ありません。
     let mut overrides = HashMap::new();
-    overrides.insert("Clothes".to_string(), asset_server.load("sailor.png"));
+    overrides.insert("Clothes".to_string(), sailor);
     commands.entity(character).insert(SsCellmapTextures { overrides });
 
     // エントリを（あるいはコンポーネントごと）削除すると元に戻ります。

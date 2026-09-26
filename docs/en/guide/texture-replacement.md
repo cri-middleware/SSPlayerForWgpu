@@ -104,12 +104,17 @@ never touched, so nothing is reloaded.
 
     ```rust
     use ssplayer_bevy::SsCellmapTextures;
+    use bevy::image::ImageLoaderSettings;
     use bevy::platform::collections::HashMap;
+
+    // Not sRGB: the player takes atlas bytes as authored, and Bevy loads a PNG as
+    // sRGB unless told otherwise — which draws the costume too dark.
+    let sailor = asset_server.load_with_settings("sailor.png", |s: &mut ImageLoaderSettings| s.is_srgb = false);
 
     // Insert (or edit) the component. An image that is still loading is applied
     // the frame it becomes ready, so a freshly-requested handle is fine.
     let mut overrides = HashMap::new();
-    overrides.insert("Clothes".to_string(), asset_server.load("sailor.png"));
+    overrides.insert("Clothes".to_string(), sailor);
     commands.entity(character).insert(SsCellmapTextures { overrides });
 
     // Remove an entry — or the whole component — to restore the original.

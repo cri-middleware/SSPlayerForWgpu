@@ -89,8 +89,9 @@ Swap the whole texture a cell map binds — a costume or palette change — for 
 
 Insert an entry to override, remove it (or the whole component) to restore. An image still loading
 is applied the frame it becomes ready, so a freshly-requested handle is fine. The swap is
-per-character; a straight-alpha Bevy image is assumed. Only characters that swap textures need spawn
-it. See [Texture replacement](../guide/texture-replacement.md).
+per-character, and assumes a straight-alpha Bevy image **loaded with `is_srgb: false`** — an sRGB one
+draws too dark, and the adapter warns once. Only characters that swap textures need spawn it. See
+[Texture replacement](../guide/texture-replacement.md).
 
 ## Messages (reactive)
 

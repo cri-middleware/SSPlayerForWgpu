@@ -79,6 +79,7 @@ pub(crate) struct SsRenderState {
     warned_second_view: bool,
     warned_srgb: bool,
     warned_msaa: bool,
+    warned_srgb_override: bool,
 }
 
 /// Build the render-world state on the device Bevy just acquired.
@@ -103,6 +104,7 @@ pub(crate) fn init_state(mut commands: Commands, device: Res<RenderDevice>) {
         warned_second_view: false,
         warned_srgb: false,
         warned_msaa: false,
+        warned_srgb_override: false,
     });
 }
 
@@ -131,7 +133,7 @@ pub(crate) fn sync_players(mut state: Option<ResMut<SsRenderState>>, extracted: 
 
     // Split the borrow: the override reconcile needs the device-scoped renderer
     // and one slot at once, which are disjoint fields.
-    let SsRenderState { renderer, slots, lent_atlases, .. } = state;
+    let SsRenderState { renderer, slots, lent_atlases, warned_srgb_override, .. } = state;
     let device = device.wgpu_device();
 
     for extracted_player in &extracted.players {
@@ -234,7 +236,7 @@ pub(crate) fn sync_players(mut state: Option<ResMut<SsRenderState>>, extracted: 
         }
         slot.playing = want;
 
-        reconcile_overrides(slot, renderer, device, &images, &extracted_player.overrides, pack_changed);
+        reconcile_overrides(slot, renderer, device, &images, &extracted_player.overrides, pack_changed, warned_srgb_override);
     }
 
     lend_atlases(renderer, device, lent_atlases, slots, &packs, &images, packs_changed);
@@ -277,7 +279,7 @@ fn lend_atlases(renderer: &mut SSRenderer, device: &wgpu::Device, lent: &mut Has
 /// pack changed under it — clears the lot, because the new pack's cellmaps are not
 /// the old one's. An image Bevy has not finished preparing is left for a later
 /// frame, so binding a freshly-loaded handle is safe.
-fn reconcile_overrides(slot: &mut PlayerSlot, renderer: &mut SSRenderer, device: &wgpu::Device, images: &RenderAssets<GpuImage>, wanted: &[(String, Handle<Image>)], pack_changed: bool) {
+fn reconcile_overrides(slot: &mut PlayerSlot, renderer: &mut SSRenderer, device: &wgpu::Device, images: &RenderAssets<GpuImage>, wanted: &[(String, Handle<Image>)], pack_changed: bool, warned_srgb: &mut bool) {
     if pack_changed && !slot.applied_overrides.is_empty() {
         for (name, (_, key)) in std::mem::take(&mut slot.applied_overrides) {
             slot.player.restore_cellmap_texture(None, &name);
@@ -295,6 +297,16 @@ fn reconcile_overrides(slot: &mut PlayerSlot, renderer: &mut SSRenderer, device:
         }
         let Some(gpu) = images.get(id) else { continue };
         let Some(key) = slot.player.override_cellmap_texture_key(None, name) else { continue };
+        // The player takes atlas bytes as authored; sampling an sRGB texture hands
+        // it linear values instead, and the costume comes out visibly darker than
+        // the atlas it replaces. Bevy loads a PNG as sRGB unless told otherwise.
+        if gpu.texture_descriptor.format.is_srgb() && !*warned_srgb {
+            *warned_srgb = true;
+            warn!(
+                "ssplayer-bevy: texture override {name:?} is an sRGB image and will draw too dark. \
+                 Load it with `is_srgb: false` in its `ImageLoaderSettings`."
+            );
+        }
         let size = gpu.texture.size();
         renderer.set_texture(device, key, &gpu.texture_view, (size.width, size.height), SsAlphaMode::Straight);
         slot.applied_overrides.insert(name.clone(), (id, key));

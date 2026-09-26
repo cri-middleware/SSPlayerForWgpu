@@ -86,7 +86,9 @@ impl Default for SsPlayback {
 /// ready, so binding a freshly-spawned `Handle<Image>` is fine.
 ///
 /// The replacement should match the original atlas's size and cell layout — the
-/// runtime's UVs stay in the original cellmap's pixel space. The override is this
+/// runtime's UVs stay in the original cellmap's pixel space — and be loaded with
+/// `is_srgb: false` in its `ImageLoaderSettings`: the player takes atlas bytes as
+/// authored, and an sRGB image draws too dark. The override is this
 /// character's alone: another entity playing the same pack is unaffected, and an
 /// instance child (its own pack) does not inherit it.
 ///
