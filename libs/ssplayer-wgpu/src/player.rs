@@ -2637,15 +2637,18 @@ fn step_slots(node: &mut PlaybackNode, frame_no: f32, delta_secs: f32, node_loop
         let child_delta = delta_secs * ev.speed.abs();
         let r = child.slot.step(ev, &mut child.node.context, frame_no, delta_secs, node_looped);
 
-        // On a transition edge the slot configures the child's section but leaves
-        // the frame snap to the host: play() moves the child to its start frame
-        // so independent playback actually advances.
+        // On a transition edge the slot configures the child — section, direction,
+        // loop count, and the frame it starts on — but does not start it: play()
+        // does, so independent playback actually advances.
         if r.transitioned {
             child.node.context.play();
         }
+        // The slot's frame, the transition tick included. Reading the controller
+        // back after that play() would put a synced child at its section start for
+        // one tick instead of where the parent has it.
         // Raw, never rounded: rounding here would truncate sub-frame progress on
         // every tick and freeze the child when a tick is worth less than a frame.
-        child.frame_no = child.node.context.get_frame_no();
+        child.frame_no = r.child_frame_no;
         child.visible = r.visible;
 
         // Recurse regardless of visibility, and re-arm the grandchildren on the

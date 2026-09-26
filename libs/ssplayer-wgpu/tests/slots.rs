@@ -118,3 +118,31 @@ fn a_hidden_independent_child_keeps_its_clock() {
     }
     assert!(worst.0 <= 2, "the independent child's frame stood still for {} ticks (up to tick {}): its clock stopped while the part was hidden, which is what stepping from the draw order does. frames={frames:?}", worst.0, worst.1);
 }
+
+/// A synced child follows its parent on the tick its key is reached, too.
+///
+/// The slot seeks it to the parent-relative frame; the host's play() on that
+/// tick then resets the controller to the section start, which the next step
+/// seeks again. Drawing what the controller says after the play() rather than
+/// the slot's frame put the child half a frame behind its parent on that tick.
+#[test]
+fn a_synced_child_follows_the_parent_on_its_transition_tick() {
+    let Some(mut player) = instance_player() else {
+        eprintln!("Instance fixtures missing; run scripts/deploy-examples.sh. skipping.");
+        return;
+    };
+    let Some(part_idx) = part_index("NO_KEY") else {
+        eprintln!("the fixture no longer carries NO_KEY — this test would prove nothing. skipping.");
+        return;
+    };
+    let Some(frames) = sample_child_frames(&mut player, part_idx, 1) else {
+        eprintln!("no GPU adapter available, skipping");
+        return;
+    };
+
+    // A 1/60 s tick lands the 30 fps parent between frames, which is what makes
+    // the section start and the parent-relative frame different numbers.
+    let parent = player.frame_no();
+    assert!(parent.fract() != 0.0, "the first tick landed on a whole frame ({parent}) — the test would pass either way");
+    assert!((frames[0] - parent).abs() < 1e-3, "on its transition tick the synced child is at {} while its parent is at {parent}", frames[0]);
+}
