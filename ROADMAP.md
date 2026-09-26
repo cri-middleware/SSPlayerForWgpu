@@ -244,8 +244,9 @@ player, where every host and the C ABI reach it, and the host half belongs in an
   the effect particles, whose seed is the part index. A tool whose preview must
   *be* its output wants neither — render once into a texture it owns and present
   that texture in both places.
-- **A counter for dropped mask writers.** Player safety stays minimal here, and
-  the cap it would report on goes away with the coverage bitmap above.
+- **A counter for dropped mask writers.** Player safety stays minimal here: a pack
+  past the 24 writers both backends share (*Exact masks* above) is the data's to
+  fix, not a tally for the player to keep.
 - **Discarding transparent texels instead of writing zero.** Parity with the
   WebGL player, which does the same.
 - **Sharing an engine's device through the C ABI.** wgpu types do not cross a C
