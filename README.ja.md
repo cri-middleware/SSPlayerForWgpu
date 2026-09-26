@@ -1,6 +1,6 @@
 [**English**](./README.md) | [**日本語**](./README.ja.md)
 
-# SSPlayerForWgpu
+# SpriteStudio Player for wgpu
 
 **Rust のためのプロ品質 2D アニメーション。ネイティブウィンドウからブラウザ、C++ ホストまでを 1 つの wgpu レンダラーで。**
 

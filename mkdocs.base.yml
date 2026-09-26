@@ -16,7 +16,7 @@
 # `markdown_extensions`, `extra.alternate`) live here and *only* here, while the ones that
 # differ per locale (`nav`, `extra.social`) live in the locale files and *only* there.
 
-site_name: SSPlayer for wgpu
+site_name: SpriteStudio Player for wgpu
 site_author: "CRI Middleware Co., Ltd."
 repo_name: "cri-middleware/SSPlayerForWgpu"
 repo_url: "https://github.com/cri-middleware/SSPlayerForWgpu"

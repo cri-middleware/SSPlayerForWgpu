@@ -8,7 +8,7 @@ authors.workspace = true
 license.workspace = true
 repository.workspace = true
 homepage.workspace = true
-description = "Bevy adapter for the wgpu SpriteStudio player"
+description = "Bevy adapter for SpriteStudio Player for wgpu"
 # Not on crates.io while the API is still moving.
 publish = false
 

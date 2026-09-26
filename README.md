@@ -1,6 +1,6 @@
 [**English**](./README.md) | [**日本語**](./README.ja.md)
 
-# SSPlayerForWgpu
+# SpriteStudio Player for wgpu
 
 **Professional 2D animation for Rust — one wgpu renderer, from a native window to the browser to a C++ host.**
 

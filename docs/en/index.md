@@ -1,4 +1,4 @@
-# 🦀 SSPlayer for wgpu
+# 🦀 SpriteStudio Player for wgpu
 
 Play **[SpriteStudio](https://www.webtech.co.jp/spritestudio/)** animations (`.ssab`)
 through [wgpu](https://wgpu.rs/) — one renderer, one set of shaders, and four ways to call it.

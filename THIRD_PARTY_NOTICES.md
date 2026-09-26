@@ -1,6 +1,6 @@
 # Third-Party Notices
 
-This file contains the license notices for third-party libraries used in **SSPlayerForWgpu**.
+This file contains the license notices for third-party libraries used in **SpriteStudio Player for wgpu**.
 
 We would like to thank the authors and contributors of these open-source projects.
 

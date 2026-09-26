@@ -1,4 +1,4 @@
-# SpriteStudioPlayer for wgpu — Roadmap
+# SpriteStudio Player for wgpu — Roadmap
 
 The wgpu Player's roadmap. Runtime and converter work lives in the
 [SpriteStudio-SDK roadmap](https://github.com/cri-middleware/SpriteStudio-SDK/blob/main/ROADMAP.md);
