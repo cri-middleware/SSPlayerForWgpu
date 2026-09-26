@@ -28,30 +28,31 @@ use bevy::prelude::*;
 use bevy::render::view::Msaa;
 use ssplayer_bevy::{SsEvent, SsEventMessage, SsFinished, SsLooped, SsPlayback, SsPlaybackState, SsPlayer, SsPlayerPlugin, SsStarted, SsTransform};
 
-/// The repo's `assets/`, absolute so the example is launchable from anywhere and
-/// so Bevy's asset root (for the audio files) points at the same tree the player
-/// loads packs from. See the colour note in the adapter crate's README.
+/// The repo's `assets/`, absolute so the example is launchable from anywhere. It
+/// is Bevy's asset root, so the packs below and the audio files they cue are both
+/// asset paths into it. See the colour note in the adapter crate's README.
 const ASSET_ROOT: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/../../assets");
 
-/// The tour: `(label, pack, animation)`. The animation names are what the packs
-/// actually declare — the sibling examples draw from this same shared set.
+/// The tour: `(label, pack, animation)`, the pack as an asset path. The animation
+/// names are what the packs actually declare — the sibling examples draw from this
+/// same shared set.
 const SCENES: &[(&str, &str, &str)] = &[
-    ("Ringo — wait", "assets/Ringo/Ringo.ssab", "wait1"),
-    ("Ringo — run", "assets/Ringo/Ringo.ssab", "run"),
-    ("Ringo — dance", "assets/Ringo/Ringo.ssab", "dance"),
-    ("Basic", "assets/overall/Basic.ssab", "anime_1"),
-    ("Shape", "assets/overall/Shape.ssab", "anime_1"),
-    ("Parts colour", "assets/overall/PartsColor.ssab", "PartsColor_only"),
-    ("Mesh", "assets/overall/Mesh.ssab", "anime_1"),
-    ("Blend modes", "assets/overall/BlendMode.ssab", "anime_1"),
-    ("Effect (particles)", "assets/overall/Effect.ssab", "anime_1"),
-    ("Mask", "assets/overall/Mask.ssab", "anime_1"),
-    ("Instance (sub-animation)", "assets/overall/Instance.ssab", "anime_1"),
-    ("Texture change", "assets/overall/TextureChange.ssab", "anime_1"),
-    ("Audio cues", "assets/overall/Sound.ssab", "anime_1"),
-    ("User data", "assets/overall/UserData.ssab", "anime_1"),
-    ("Signals", "assets/overall/Signal.ssab", "anime_1"),
-    ("Masked instances", "assets/Mask/True_Light.ssab", "True_light"),
+    ("Ringo — wait", "Ringo/Ringo.ssab", "wait1"),
+    ("Ringo — run", "Ringo/Ringo.ssab", "run"),
+    ("Ringo — dance", "Ringo/Ringo.ssab", "dance"),
+    ("Basic", "overall/Basic.ssab", "anime_1"),
+    ("Shape", "overall/Shape.ssab", "anime_1"),
+    ("Parts colour", "overall/PartsColor.ssab", "PartsColor_only"),
+    ("Mesh", "overall/Mesh.ssab", "anime_1"),
+    ("Blend modes", "overall/BlendMode.ssab", "anime_1"),
+    ("Effect (particles)", "overall/Effect.ssab", "anime_1"),
+    ("Mask", "overall/Mask.ssab", "anime_1"),
+    ("Instance (sub-animation)", "overall/Instance.ssab", "anime_1"),
+    ("Texture change", "overall/TextureChange.ssab", "anime_1"),
+    ("Audio cues", "overall/Sound.ssab", "anime_1"),
+    ("User data", "overall/UserData.ssab", "anime_1"),
+    ("Signals", "overall/Signal.ssab", "anime_1"),
+    ("Masked instances", "Mask/True_Light.ssab", "True_light"),
 ];
 
 /// Where the tour is, the character it drives, and the last event to show.
@@ -75,7 +76,7 @@ fn main() {
         .run();
 }
 
-fn setup(mut commands: Commands) {
+fn setup(mut commands: Commands, asset_server: Res<AssetServer>) {
     // Msaa::Off: the player's pipelines are single-sampled. CompositingSpace::Srgb:
     // SpriteStudio art is authored in sRGB and the player writes it verbatim, so a
     // default (sRGB-target, linear-compositing) camera makes it too bright.
@@ -85,8 +86,8 @@ fn setup(mut commands: Commands) {
     // clear would let them blow out.
     commands.spawn(Sprite { color: Color::srgb(0.10, 0.11, 0.15), custom_size: Some(Vec2::splat(100_000.0)), ..default() });
 
-    let (_, src, anim) = SCENES[0];
-    let character = commands.spawn((SsPlayer { src: src.into(), animation: anim.into() }, SsTransform { scale_x: 0.7, scale_y: 0.7, ..default() }, SsPlayback::default())).id();
+    let (_, pack, anim) = SCENES[0];
+    let character = commands.spawn((SsPlayer { pack: asset_server.load(pack), animation: anim.into() }, SsTransform { scale_x: 0.7, scale_y: 0.7, ..default() }, SsPlayback::default())).id();
 
     commands.spawn((Text::new(""), TextFont { font_size: bevy::text::FontSize::Px(15.0), ..default() }, TextColor(Color::WHITE), Node { position_type: PositionType::Absolute, top: Val::Px(8.0), left: Val::Px(10.0), ..default() }, Hud));
 
@@ -95,7 +96,7 @@ fn setup(mut commands: Commands) {
 
 /// `[` / `]` switch scene, `Space` play/pause, `Up` / `Down` speed, `R` restart —
 /// each a plain edit of the character's components.
-fn controls(keys: Res<ButtonInput<KeyCode>>, mut tour: ResMut<Tour>, mut players: Query<(&mut SsPlayer, &mut SsPlayback)>) {
+fn controls(keys: Res<ButtonInput<KeyCode>>, asset_server: Res<AssetServer>, mut tour: ResMut<Tour>, mut players: Query<(&mut SsPlayer, &mut SsPlayback)>) {
     let Ok((mut player, mut playback)) = players.get_mut(tour.character) else {
         return;
     };
@@ -104,10 +105,12 @@ fn controls(keys: Res<ButtonInput<KeyCode>>, mut tour: ResMut<Tour>, mut players
     if step != 0 {
         let n = SCENES.len() as i32;
         tour.index = (((tour.index as i32 + step) % n + n) % n) as usize;
-        let (_, src, anim) = SCENES[tour.index];
-        // Changing `src` rebuilds from the new pack; changing `animation` selects
-        // within it. Both are what the adapter watches for.
-        player.src = src.into();
+        let (_, pack, anim) = SCENES[tour.index];
+        // Changing `pack` rebuilds from the new pack once it has loaded; changing
+        // `animation` selects within it. Both are what the adapter watches for.
+        // The same path is the same handle, so stepping between Ringo's three
+        // scenes loads Ringo once.
+        player.pack = asset_server.load(pack);
         player.animation = anim.into();
         tour.last_event = "—".into();
     }

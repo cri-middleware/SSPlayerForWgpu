@@ -6,7 +6,8 @@
 //! Bevy renders in two worlds, and this crate is split along that seam:
 //!
 //! * **Main world** — [`SsPlayer`], [`SsTransform`] and [`SsPlayback`]. Spawn
-//!   them, change them, and that is the whole authoring surface.
+//!   them, change them, and that is the whole authoring surface. The `.ssab` a
+//!   character plays is an [`SsPack`] asset, loaded through the `AssetServer`.
 //! * **Render world** — the playback trees, one device-scoped `SSRenderer` and
 //!   one target-scoped `SSScene`. Nothing here is reachable from gameplay code.
 //!
@@ -43,14 +44,14 @@
 //!   geometry build, so a second view would advance every animation twice per
 //!   frame. Later views are skipped, with a warning.
 //! * **MSAA must be off.** The player's pipelines are single-sampled.
-//! * **Loading is synchronous** and reads the filesystem directly, rather than
-//!   going through Bevy's `AssetServer`.
 
+mod asset;
 mod components;
 mod extract;
 mod feedback;
 mod render;
 
+pub use asset::{SsPack, SsPackLoadError, SsPackLoader};
 pub use components::{SsCellmapTextures, SsPlayback, SsPlaybackState, SsPlayer, SsTransform};
 pub use feedback::{SsEventMessage, SsFinished, SsLooped, SsStarted};
 // The event payloads a host matches on, re-exported so it need not also depend
@@ -58,10 +59,12 @@ pub use feedback::{SsEventMessage, SsFinished, SsLooped, SsStarted};
 pub use ssplayer_wgpu::{AudioEvent, SignalEvent, SignalParam, SignalValue, SsEvent, UserDataEvent};
 
 use bevy::app::{App, Plugin, PreUpdate};
+use bevy::asset::AssetApp;
 use bevy::core_pipeline::core_2d::main_transparent_pass_2d;
 use bevy::core_pipeline::{Core2d, Core2dSystems};
 use bevy::log::error;
 use bevy::prelude::IntoScheduleConfigs;
+use bevy::render::render_asset::RenderAssetPlugin;
 use bevy::render::{ExtractSchedule, Render, RenderApp, RenderStartup, RenderSystems};
 
 /// Adds SpriteStudio playback and drawing to a Bevy app.
@@ -75,7 +78,11 @@ impl Plugin for SsPlayerPlugin {
         // the one `Arc`, so what the render world writes the main world reads.
         let channel = feedback::FeedbackChannel::default();
 
-        app.add_message::<SsEventMessage>()
+        app.init_asset::<SsPack>()
+            .init_asset_loader::<SsPackLoader>()
+            // Moves each loaded pack into the render world, and again on a reload.
+            .add_plugins(RenderAssetPlugin::<asset::RenderSsPack>::default())
+            .add_message::<SsEventMessage>()
             .add_message::<SsStarted>()
             .add_message::<SsFinished>()
             .add_message::<SsLooped>()

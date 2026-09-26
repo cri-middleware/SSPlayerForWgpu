@@ -60,13 +60,13 @@ fn main() {
         .run();
 }
 
-fn setup(mut commands: Commands) {
+fn setup(mut commands: Commands, asset_server: Res<AssetServer>) {
     // MSAA off: the player's pipelines are single-sampled.
     // CompositingSpace::Srgb: see "Colour" below — without it everything is too bright.
     commands.spawn((Camera2d, Msaa::Off, CompositingSpace::Srgb));
 
     commands.spawn((
-        SsPlayer { src: "assets/Ringo/Ringo.ssab".into(), animation: "wait1".into() },
+        SsPlayer { pack: asset_server.load("Ringo/Ringo.ssab"), animation: "wait1".into() },
         SsTransform { scale_x: 0.6, scale_y: 0.6, ..default() },
         SsPlayback { order: 1, ..default() },
     ));
@@ -78,13 +78,21 @@ at their defaults.
 
 | Component | Carries | Cost of changing it |
 |---|---|---|
-| `SsPlayer` | `src`, `animation` | Rebuilds the playback tree — the allocating one |
+| `SsPlayer` | `pack`, `animation` | Rebuilds the playback tree — the allocating one |
 | `SsTransform` | `x`, `y`, `scale_x`, `scale_y`, `rotation` | Free |
 | `SsPlayback` | `playing`, `speed`, `order`, `alpha`, `visible`, `restart` | Free |
 
 It is **not** Bevy's `Transform`: that is a 3D affine, and decomposing it into the player's five
 scalars is lossy. If you want the two linked, write the one system that copies across — you keep the
 choice of which is authoritative.
+
+## Where the files go
+
+The pack loads through Bevy's `AssetServer`, so `"Ringo/Ringo.ssab"` is an asset path: put the
+converted `.ssab` and the images beside it under your app's `assets/` folder, as the converter wrote
+them. The character appears once the pack and its atlases have loaded — never a frame drawn without
+them — and characters sharing a pack share one copy of it and one texture per atlas. With Bevy's
+`file_watcher` feature, reconverting in SpriteStudio rebuilds the character from the new file.
 
 ## Colour: the camera needs `CompositingSpace::Srgb`
 

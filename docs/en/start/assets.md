@@ -52,7 +52,7 @@ keep the exported files together, and the loader finds them.
 | Face | `load` takes | Resolved against |
 |---|---|---|
 | Rust | a filesystem path | the process's working directory; everything the pack names, against the `.ssab`'s own directory |
-| Bevy | a filesystem path in `SsPlayer::src` | the same. It reads the filesystem directly rather than going through `AssetServer` |
+| Bevy | an asset path, through `asset_server.load` into `SsPlayer::pack` | the app's asset root, like any Bevy asset; everything the pack names, against the `.ssab`'s own directory |
 | C / C++ | a filesystem path | the same |
 | Web | a URL | the page, then the `.ssab`'s own URL directory |
 

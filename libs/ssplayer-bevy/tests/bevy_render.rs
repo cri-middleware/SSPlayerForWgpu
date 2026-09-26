@@ -12,7 +12,7 @@
 //! door.
 
 use bevy::app::{App, PluginGroup};
-use bevy::asset::{Assets, Handle, RenderAssetUsages};
+use bevy::asset::{AssetPlugin, AssetServer, Assets, Handle, RecursiveDependencyLoadState, RenderAssetUsages};
 use bevy::camera::{Camera, Camera2d, ClearColorConfig, Hdr, RenderTarget};
 use bevy::color::Color;
 use bevy::ecs::prelude::*;
@@ -34,9 +34,15 @@ const SIZE: u32 = 384;
 /// an unmasked character would pass whether or not the coverage bake ran.
 const MASK_PACK: &str = "assets/overall/Mask.ssab";
 const MASK_ANIM: &str = "anime_1";
-/// Frames to pump. Enough for the asset load, the first coverage bake and a
-/// readback to make it back to the CPU.
+/// A pack whose atlas is a file beside it, for comparing what Bevy lends against
+/// what the player loads for itself.
+const RINGO_PACK: &str = "assets/Ringo/Ringo.ssab";
+/// Frames to pump once every pack has settled. Enough for the first coverage
+/// bake and a readback to make it back to the CPU.
 const FRAMES: u32 = 12;
+/// A ceiling on the frames a load may take, so a pack that never settles fails
+/// the test instead of hanging it.
+const LOAD_FRAMES: u32 = 600;
 
 fn repo_root() -> &'static str {
     concat!(env!("CARGO_MANIFEST_DIR"), "/../..")
@@ -69,7 +75,9 @@ fn headless_app() -> Option<(App, Handle<Image>, Captured)> {
             // test harness running several cases cannot honour.
             .disable::<bevy::winit::WinitPlugin>()
             .set(WindowPlugin { primary_window: None, exit_condition: bevy::window::ExitCondition::DontExit, ..default() })
-            .set(RenderPlugin { synchronous_pipeline_compilation: true, ..default() }),
+            .set(RenderPlugin { synchronous_pipeline_compilation: true, ..default() })
+            // The repository root, so the fixture paths below are asset paths.
+            .set(AssetPlugin { file_path: repo_root().into(), ..default() }),
     )
     // `GpuReadbackPlugin` already comes with DefaultPlugins.
     .add_plugins(SsPlayerPlugin);
@@ -107,11 +115,32 @@ fn run(mut app: App, handle: Handle<Image>, captured: Captured, setup: impl FnOn
     app.finish();
     app.cleanup();
 
+    pump(&mut app);
+    let pixels = captured.0.lock().unwrap().clone();
+    pixels.expect("the readback never arrived — the render app did not produce a frame")
+}
+
+/// Pump until every character's pack has settled, then `FRAMES` more. A load
+/// runs on Bevy's IO pool, so how many frames it spans is the machine's business.
+fn pump(app: &mut App) {
+    for _ in 0..LOAD_FRAMES {
+        let world = app.world_mut();
+        let server = world.resource::<AssetServer>().clone();
+        let settled = world.query::<&SsPlayer>().iter(world).all(|player| matches!(server.get_recursive_dependency_load_state(&player.pack), Some(RecursiveDependencyLoadState::Loaded | RecursiveDependencyLoadState::Failed(_))));
+        if settled {
+            break;
+        }
+        app.update();
+    }
     for _ in 0..FRAMES {
         app.update();
     }
-    let pixels = captured.0.lock().unwrap().clone();
-    pixels.expect("the readback never arrived — the render app did not produce a frame")
+}
+
+/// The masked character every test here draws, at half size.
+fn masked_character(world: &World) -> (SsPlayer, SsTransform, SsPlayback) {
+    let pack = world.resource::<AssetServer>().load(MASK_PACK);
+    (SsPlayer { pack, animation: MASK_ANIM.into() }, SsTransform { scale_x: 0.5, scale_y: 0.5, ..default() }, SsPlayback::default())
 }
 
 fn drawn_pixels(rgba: &[u8]) -> usize {
@@ -148,7 +177,8 @@ fn a_masked_character_draws_inside_bevy() {
     };
 
     let pixels = run(app, handle, captured, |world| {
-        world.spawn((SsPlayer { src: fixture(MASK_PACK), animation: MASK_ANIM.into() }, SsTransform { scale_x: 0.5, scale_y: 0.5, ..default() }, SsPlayback::default()));
+        let character = masked_character(world);
+        world.spawn(character);
     });
 
     dump("01-masked-character-in-bevy", &pixels);
@@ -173,12 +203,13 @@ fn the_mask_clips_and_is_not_a_no_op() {
         return;
     };
     let masked = run(app, handle, captured, |world| {
-        world.spawn((SsPlayer { src: fixture(MASK_PACK), animation: MASK_ANIM.into() }, SsTransform { scale_x: 0.5, scale_y: 0.5, ..default() }, SsPlayback::default()));
+        let character = masked_character(world);
+        world.spawn(character);
     });
 
     // The same animation drawn by the player crate with masking off, as the
     // "unclipped" reference. Same pack, same frame count, same projection.
-    let unmasked = crate::reference::render_unmasked(SIZE, MASK_PACK, MASK_ANIM);
+    let unmasked = crate::reference::render_unmasked(SIZE, MASK_PACK, MASK_ANIM, true);
 
     dump("02-masked", &masked);
     dump("02-unmasked-reference", &unmasked);
@@ -207,7 +238,8 @@ fn characters_draw_over_bevy_sprites() {
         // A saturated sprite covering the whole target: anything the player draws
         // has to change these pixels, and nothing the player draws is this colour.
         world.spawn(Sprite { color: Color::srgb(0.0, 1.0, 0.0), custom_size: Some(Vec2::splat(SIZE as f32)), ..default() });
-        world.spawn((SsPlayer { src: fixture(MASK_PACK), animation: MASK_ANIM.into() }, SsTransform { scale_x: 0.5, scale_y: 0.5, ..default() }, SsPlayback::default()));
+        let character = masked_character(world);
+        world.spawn(character);
     });
 
     dump("03-over-a-bevy-sprite", &pixels);
@@ -237,17 +269,50 @@ fn a_masked_character_draws_in_hdr() {
     };
 
     app.world_mut().spawn((Camera2d, Camera { clear_color: ClearColorConfig::Custom(Color::BLACK), ..default() }, RenderTarget::Image(handle.into()), Hdr, Msaa::Off));
-    app.world_mut().spawn((SsPlayer { src: fixture(MASK_PACK), animation: MASK_ANIM.into() }, SsTransform { scale_x: 0.5, scale_y: 0.5, ..default() }, SsPlayback::default()));
+    let character = masked_character(app.world());
+    app.world_mut().spawn(character);
 
     app.finish();
     app.cleanup();
-    for _ in 0..FRAMES {
-        app.update();
-    }
+    pump(&mut app);
     let pixels = captured.0.lock().unwrap().clone().expect("the readback never arrived — the render app did not produce a frame");
 
     dump("04-hdr-masked-character", &pixels);
     assert!(drawn_pixels(&pixels) > 0, "nothing drawn in an HDR (Rgba16Float) view — the format-swap path in draw_players may not be rebuilding the scene");
+}
+
+/// The atlas reaches the player as Bevy's texture, in its own colours.
+///
+/// A pack's atlas is a Bevy `Image` lent to the player, not a file the player
+/// decodes. Were the lending to miss, the parts would draw as white silhouettes;
+/// were the image loaded as sRGB, every colour would come out darker. Either way
+/// the picture parts from the one the player draws when it loads the atlas itself,
+/// which is what this compares against — on the first frame, held, so the two
+/// clocks do not matter.
+#[test]
+fn the_lent_atlas_draws_as_the_player_draws_it() {
+    if !Path::new(&fixture(RINGO_PACK)).exists() {
+        eprintln!("assets not generated, skipping");
+        return;
+    }
+    let Some((app, handle, captured)) = headless_app() else {
+        eprintln!("no GPU adapter available, skipping");
+        return;
+    };
+    let animation = ssplayer_wgpu::SSPack::load(&std::fs::read(fixture(RINGO_PACK)).unwrap()).unwrap().animation_names()[0].clone();
+
+    let pixels = run(app, handle, captured, |world| {
+        let pack = world.resource::<AssetServer>().load(RINGO_PACK);
+        world.spawn((SsPlayer { pack, animation: animation.clone() }, SsTransform { scale_x: 0.5, scale_y: 0.5, ..default() }, SsPlayback { playing: false, ..default() }));
+    });
+    let reference = crate::reference::render_unmasked(SIZE, RINGO_PACK, &animation, false);
+
+    dump("06-lent-atlas", &pixels);
+    dump("06-lent-atlas-reference", &reference);
+    let drawn = drawn_pixels(&reference);
+    assert!(drawn > 0, "the reference drew nothing — this test would pass vacuously");
+    let differing = pixels.as_chunks::<4>().0.iter().zip(reference.as_chunks::<4>().0.iter()).filter(|(a, b)| a.iter().zip(*b).any(|(x, y)| x.abs_diff(*y) > 8)).count();
+    assert!(differing < drawn / 100, "{differing} of {drawn} drawn pixels differ from the player's own render — the atlas was not lent, or was lent in the wrong colour space");
 }
 
 /// Playback state makes the round trip from the render world back to the main
@@ -270,13 +335,12 @@ fn playback_state_crosses_back_to_the_main_world() {
     };
 
     app.world_mut().spawn((Camera2d, Camera { clear_color: ClearColorConfig::Custom(Color::BLACK), ..default() }, RenderTarget::Image(handle.into()), Msaa::Off));
-    let player = app.world_mut().spawn((SsPlayer { src: fixture(MASK_PACK), animation: MASK_ANIM.into() }, SsTransform { scale_x: 0.5, scale_y: 0.5, ..default() }, SsPlayback::default())).id();
+    let character = masked_character(app.world());
+    let player = app.world_mut().spawn(character).id();
 
     app.finish();
     app.cleanup();
-    for _ in 0..FRAMES {
-        app.update();
-    }
+    pump(&mut app);
 
     let state = app.world().entity(player).get::<SsPlaybackState>().expect("SsPlaybackState is a required component of SsPlayer and must be present");
     assert!(state.frame_no > 0.0, "playback state did not cross back: frame_no is still {} after {FRAMES} frames — the render->main feedback never arrived", state.frame_no);
@@ -301,13 +365,12 @@ fn a_multisampled_view_is_skipped_not_a_panic() {
 
     // Msaa::Sample4 rather than the usual Msaa::Off: this is the misconfiguration.
     app.world_mut().spawn((Camera2d, Camera { clear_color: ClearColorConfig::Custom(Color::BLACK), ..default() }, RenderTarget::Image(handle.into()), Msaa::Sample4));
-    app.world_mut().spawn((SsPlayer { src: fixture(MASK_PACK), animation: MASK_ANIM.into() }, SsTransform { scale_x: 0.5, scale_y: 0.5, ..default() }, SsPlayback::default()));
+    let character = masked_character(app.world());
+    app.world_mut().spawn(character);
 
     app.finish();
     app.cleanup();
-    for _ in 0..FRAMES {
-        app.update();
-    }
+    pump(&mut app);
     let pixels = captured.0.lock().unwrap().clone().expect("the readback never arrived — a multisampled view likely panicked instead of being skipped");
     assert_eq!(drawn_pixels(&pixels), 0, "a multisampled view drew the character; it should have been skipped");
 }
@@ -331,13 +394,12 @@ fn drawing_survives_the_bound_camera_being_replaced() {
     };
 
     let camera_a = app.world_mut().spawn((Camera2d, Camera { clear_color: ClearColorConfig::Custom(Color::BLACK), ..default() }, RenderTarget::Image(handle.clone().into()), Msaa::Off)).id();
-    app.world_mut().spawn((SsPlayer { src: fixture(MASK_PACK), animation: MASK_ANIM.into() }, SsTransform { scale_x: 0.5, scale_y: 0.5, ..default() }, SsPlayback::default()));
+    let character = masked_character(app.world());
+    app.world_mut().spawn(character);
 
     app.finish();
     app.cleanup();
-    for _ in 0..FRAMES {
-        app.update();
-    }
+    pump(&mut app);
 
     // Swap the camera: despawn the bound one, spawn another onto the same target.
     app.world_mut().entity_mut(camera_a).despawn();
@@ -357,8 +419,8 @@ mod reference {
     use std::path::Path;
 
     /// Render `pack` with masking switched off, at `size`, matching the Bevy
-    /// camera's 1:1 pixel projection.
-    pub fn render_unmasked(size: u32, pack: &str, anim: &str) -> Vec<u8> {
+    /// camera's 1:1 pixel projection. Unless `playing`, it holds the first frame.
+    pub fn render_unmasked(size: u32, pack: &str, anim: &str, playing: bool) -> Vec<u8> {
         let path = super::fixture(pack);
         let dir = Path::new(&path).parent().unwrap().to_path_buf();
 
@@ -383,7 +445,9 @@ mod reference {
         player.load(&path).unwrap();
         player.set_animation(anim).unwrap();
         player.set_transform(0.0, 0.0, 0.5, 0.5, 0.0);
-        player.play();
+        if playing {
+            player.play();
+        }
         scene.set_viewport(&queue, size as f32, size as f32, false);
         for _ in 0..super::FRAMES {
             scene.update(&mut renderer, &device, &queue, 1.0 / 60.0, &mut [&mut player]);

@@ -35,7 +35,7 @@
 //!   on the render-world player, and the adapter exposes only `SsPlayer` /
 //!   `SsTransform` / `SsPlayback`, none of which carries a track stack yet.
 
-use bevy::asset::AssetPlugin;
+use bevy::asset::{AssetPlugin, UnapprovedPathMode};
 use bevy::audio::{AudioPlayer, PlaybackSettings};
 use bevy::camera::CompositingSpace;
 use bevy::input::ButtonInput;
@@ -46,10 +46,10 @@ use ssplayer_bevy::{SsEvent, SsEventMessage, SsFinished, SsLooped, SsPlayback, S
 use ssplayer_wgpu::SSPack;
 use std::path::{Path, PathBuf};
 
-/// The repo's `assets/`, absolute so the viewer is launchable from anywhere and so
-/// Bevy's asset root (for the audio files) points at the same tree the player
-/// loads packs from. This example carries no `assets/` of its own; it points at
-/// the shared, generated tree, exactly as `examples/viewer` does.
+/// The repo's `assets/`, absolute so the viewer is launchable from anywhere. It is
+/// Bevy's asset root, so the packs and the audio files they cue are asset paths
+/// into it. This example carries no `assets/` of its own; it points at the shared,
+/// generated tree, exactly as `examples/viewer` does.
 const ASSET_ROOT: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/../../assets");
 
 /// Cast size at startup. Two rather than one, so a regression in player isolation
@@ -82,7 +82,7 @@ impl Layout {
     }
 }
 
-/// One pack in the picker: its name, where it is on disk, and what it can play.
+/// One pack in the picker: its name, where it is, and what it can play.
 ///
 /// Parsed once from the `.ssab` in the main world — the same thing the native
 /// viewer does — so the input systems can name an animation without reaching into
@@ -90,8 +90,9 @@ impl Layout {
 #[derive(Clone)]
 struct PackInfo {
     name: String,
-    /// Absolute path, as [`ssplayer_wgpu::SSPlayer::load`] takes it; the loader
-    /// roots on this string and finds the atlases and referenced packs beside it.
+    /// What `AssetServer::load` takes: relative to [`ASSET_ROOT`] for the shared
+    /// set, absolute for a dropped file. The pack is loaded when a character
+    /// switches to it, not when it enters the picker.
     path: String,
     anims: Vec<String>,
 }
@@ -134,7 +135,9 @@ struct Hud;
 
 fn main() {
     App::new()
-        .add_plugins(DefaultPlugins.set(WindowPlugin { primary_window: Some(Window { title: "SpriteStudio in Bevy — viewer".into(), ..default() }), ..default() }).set(AssetPlugin { file_path: ASSET_ROOT.to_string(), ..default() }))
+        // A dropped `.ssab` can be anywhere on disk, outside the asset root; a
+        // development viewer allows that, which a shipped app should not.
+        .add_plugins(DefaultPlugins.set(WindowPlugin { primary_window: Some(Window { title: "SpriteStudio in Bevy — viewer".into(), ..default() }), ..default() }).set(AssetPlugin { file_path: ASSET_ROOT.to_string(), unapproved_path_mode: UnapprovedPathMode::Allow, ..default() }))
         .add_plugins(SsPlayerPlugin)
         .add_systems(Startup, setup)
         // Chained: input mutates the cast, drop grows the catalogue, layout reads
@@ -143,7 +146,7 @@ fn main() {
         .run();
 }
 
-fn setup(mut commands: Commands) {
+fn setup(mut commands: Commands, asset_server: Res<AssetServer>) {
     // Msaa::Off is required: the player's pipelines are single-sampled.
     // CompositingSpace::Srgb is required for correct colour: SpriteStudio art is
     // authored in sRGB and the player writes those bytes verbatim, so a default
@@ -167,7 +170,7 @@ fn setup(mut commands: Commands) {
     let start = catalogue.initial;
     if let Some(info) = catalogue.packs.get(start) {
         for i in 0..INITIAL_CAST {
-            let entity = commands.spawn((SsPlayer { src: info.path.clone(), animation: info.anims.first().cloned().unwrap_or_default() }, Slot { pack_idx: start, anim_idx: 0 }, SsPlayback { order: i as i32, ..default() })).id();
+            let entity = commands.spawn((SsPlayer { pack: asset_server.load(&info.path), animation: info.anims.first().cloned().unwrap_or_default() }, Slot { pack_idx: start, anim_idx: 0 }, SsPlayback { order: i as i32, ..default() })).id();
             cast.push(entity);
         }
     }
@@ -188,7 +191,15 @@ fn targets(state: &ViewerState) -> Vec<Entity> {
 /// Every key. Each branch is a plain edit of the adapter's components, which is
 /// the whole point of the demo: the characters are driven entirely through
 /// `SsPlayer` / `SsPlayback` / `Slot`.
-fn handle_input(keys: Res<ButtonInput<KeyCode>>, mut state: ResMut<ViewerState>, catalogue: Res<Catalogue>, mut commands: Commands, mut exit: MessageWriter<AppExit>, mut players: Query<(&mut SsPlayer, &mut SsPlayback, &mut Slot)>) {
+fn handle_input(
+    keys: Res<ButtonInput<KeyCode>>,
+    asset_server: Res<AssetServer>,
+    mut state: ResMut<ViewerState>,
+    catalogue: Res<Catalogue>,
+    mut commands: Commands,
+    mut exit: MessageWriter<AppExit>,
+    mut players: Query<(&mut SsPlayer, &mut SsPlayback, &mut Slot)>,
+) {
     if keys.just_pressed(KeyCode::Escape) {
         exit.write(AppExit::Success);
         return;
@@ -222,8 +233,9 @@ fn handle_input(keys: Res<ButtonInput<KeyCode>>, mut state: ResMut<ViewerState>,
         }
     }
 
-    // Horizontal: switch pack. Changing `src` rebuilds the tree from the new pack,
-    // which is the allocating edit; the animation is clamped into the new range.
+    // Horizontal: switch pack. Changing `pack` rebuilds the tree from the new pack
+    // once it has loaded, which is the allocating edit; the animation is clamped
+    // into the new range.
     let pack_step = keys.just_pressed(KeyCode::ArrowRight) as i32 - keys.just_pressed(KeyCode::ArrowLeft) as i32;
     if pack_step != 0 {
         let n = catalogue.packs.len() as i32;
@@ -232,7 +244,7 @@ fn handle_input(keys: Res<ButtonInput<KeyCode>>, mut state: ResMut<ViewerState>,
                 slot.pack_idx = (((slot.pack_idx as i32 + pack_step) % n + n) % n) as usize;
                 let info = &catalogue.packs[slot.pack_idx];
                 slot.anim_idx = slot.anim_idx.min(info.anims.len().saturating_sub(1));
-                player.src = info.path.clone();
+                player.pack = asset_server.load(&info.path);
                 player.animation = info.anims.get(slot.anim_idx).cloned().unwrap_or_default();
             }
         }
@@ -268,7 +280,7 @@ fn handle_input(keys: Res<ButtonInput<KeyCode>>, mut state: ResMut<ViewerState>,
         // Start the newcomer on whatever the last one plays.
         let (pack_idx, anim_idx) = state.cast.last().and_then(|&e| players.get(e).ok().map(|(_, _, slot)| (slot.pack_idx, slot.anim_idx))).unwrap_or((catalogue.initial, 0));
         if let Some(info) = catalogue.packs.get(pack_idx) {
-            let entity = commands.spawn((SsPlayer { src: info.path.clone(), animation: info.anims.get(anim_idx).cloned().unwrap_or_default() }, Slot { pack_idx, anim_idx }, SsPlayback { order: state.cast.len() as i32, ..default() })).id();
+            let entity = commands.spawn((SsPlayer { pack: asset_server.load(&info.path), animation: info.anims.get(anim_idx).cloned().unwrap_or_default() }, Slot { pack_idx, anim_idx }, SsPlayback { order: state.cast.len() as i32, ..default() })).id();
             state.cast.push(entity);
         }
     }
@@ -312,7 +324,7 @@ fn handle_input(keys: Res<ButtonInput<KeyCode>>, mut state: ResMut<ViewerState>,
 /// dropped folder. Drop the folder rather than the file when a pack has external
 /// instance references: those resolve by pack name against the pack's own
 /// directory, and the player's loader finds the siblings there.
-fn handle_drop(mut drops: MessageReader<FileDragAndDrop>, mut state: ResMut<ViewerState>, mut catalogue: ResMut<Catalogue>, mut players: Query<(&mut SsPlayer, &mut SsPlayback, &mut Slot)>) {
+fn handle_drop(mut drops: MessageReader<FileDragAndDrop>, asset_server: Res<AssetServer>, mut state: ResMut<ViewerState>, mut catalogue: ResMut<Catalogue>, mut players: Query<(&mut SsPlayer, &mut SsPlayback, &mut Slot)>) {
     for event in drops.read() {
         let FileDragAndDrop::DroppedFile { path_buf, .. } = event else { continue };
 
@@ -328,14 +340,17 @@ fn handle_drop(mut drops: MessageReader<FileDragAndDrop>, mut state: ResMut<View
 
         let mut first = None;
         for path in paths {
-            let Some(info) = parse_pack(&path) else { continue };
+            let Some(info) = parse_pack(&path, path.to_string_lossy().into_owned()) else { continue };
             info!("dropped pack {:?} / {} animation(s)", info.name, info.anims.len());
             // A pack dropped twice replaces its own entry rather than growing the
-            // list — what makes "convert, drop, look, convert again" work.
+            // list, and is read again: the asset server would otherwise hand back
+            // what it loaded the first time. That is what makes "convert, drop,
+            // look, convert again" work.
             let idx = catalogue.packs.iter().position(|p| p.name == info.name).unwrap_or(catalogue.packs.len());
             if idx == catalogue.packs.len() {
                 catalogue.packs.push(info);
             } else {
+                asset_server.reload(&info.path);
                 catalogue.packs[idx] = info;
             }
             first.get_or_insert(idx);
@@ -348,7 +363,7 @@ fn handle_drop(mut drops: MessageReader<FileDragAndDrop>, mut state: ResMut<View
                     slot.pack_idx = idx;
                     slot.anim_idx = 0;
                     let info = &catalogue.packs[idx];
-                    player.src = info.path.clone();
+                    player.pack = asset_server.load(&info.path);
                     player.animation = info.anims.first().cloned().unwrap_or_default();
                 }
             }
@@ -467,9 +482,10 @@ fn is_ssab(path: &Path) -> bool {
     path.is_file() && path.extension().and_then(|s| s.to_str()) == Some("ssab")
 }
 
-/// Parse one `.ssab` into a [`PackInfo`]. The pack is never renamed — the name
-/// inside it is what instance references resolve against.
-fn parse_pack(path: &Path) -> Option<PackInfo> {
+/// Parse the `.ssab` at `path` into a [`PackInfo`] that loads it from `asset_path`.
+/// The pack is never renamed — the name inside it is what instance references
+/// resolve against.
+fn parse_pack(path: &Path, asset_path: String) -> Option<PackInfo> {
     let bytes = match std::fs::read(path) {
         Ok(bytes) => bytes,
         Err(e) => {
@@ -478,7 +494,7 @@ fn parse_pack(path: &Path) -> Option<PackInfo> {
         }
     };
     match SSPack::load(&bytes) {
-        Ok(pack) => Some(PackInfo { name: pack.name().to_owned(), path: path.to_string_lossy().into_owned(), anims: pack.animation_names() }),
+        Ok(pack) => Some(PackInfo { name: pack.name().to_owned(), path: asset_path, anims: pack.animation_names() }),
         Err(e) => {
             warn!("failed to parse {:?}: {e:?}", path);
             None
@@ -495,7 +511,7 @@ fn load_catalogue() -> Catalogue {
     }
     paths.sort();
 
-    let packs: Vec<PackInfo> = paths.iter().filter_map(|p| parse_pack(p)).collect();
+    let packs: Vec<PackInfo> = paths.iter().filter_map(|p| parse_pack(p, format!("overall/{}", p.file_name()?.to_string_lossy()))).collect();
     let initial = packs.iter().position(|p| p.name == "Basic").unwrap_or(0);
     Catalogue { packs, initial }
 }

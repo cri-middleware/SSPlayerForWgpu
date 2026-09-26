@@ -7,17 +7,20 @@
 use bevy::platform::collections::HashMap;
 use bevy::prelude::*;
 
+use crate::asset::SsPack;
+
 /// A SpriteStudio character.
 ///
-/// Changing `src` or `animation` rebuilds the playback tree on the next frame;
-/// everything else is allocation-free transport, which is why placement and
-/// playback sit in their own components.
+/// Changing `pack` or `animation` rebuilds the playback tree on the next frame,
+/// and so does the pack's file changing under a hot-reloading app; everything
+/// else is allocation-free transport, which is why placement and playback sit in
+/// their own components.
 #[derive(Component, Clone, Debug, Default)]
 #[require(SsTransform, SsPlayback, SsPlaybackState)]
 pub struct SsPlayer {
-    /// Path to the `.ssab` this character plays from, as
-    /// [`ssplayer_wgpu::SSPlayer::load`] takes it.
-    pub src: String,
+    /// The `.ssab` this character plays from: `asset_server.load("Ringo/Ringo.ssab")`.
+    /// The character appears once the pack and its atlases have loaded.
+    pub pack: Handle<SsPack>,
     /// Animation to select. Empty means "do not select one yet".
     pub animation: String,
 }

@@ -112,7 +112,10 @@ breaks are in [CONTRIBUTING.md](./CONTRIBUTING.md#technical-constraints--guiding
       `examples/overall-bevy` as its hosts. A separate crate, so the core never
       depends on Bevy and the adapter can follow its own wgpu major; it tracks one
       Bevy line at a time, because Bevy and the player must resolve to a single
-      `wgpu`.
+      `wgpu`. A `.ssab` is an `SsPack` asset loaded through the `AssetServer`,
+      parsed once however many characters play it, with its atlases as Bevy
+      images lent to the player — so the renderer holds no pixels of its own for
+      them, and a hot reload rebuilds the characters from the new file.
 - [ ] **Bevy: more than one camera.** The adapter holds one `SSScene`, binds it to
       the first view that renders and skips the rest with a warning
       (`ssplayer-bevy/src/render.rs`, `bound_view`), so a UI camera, a

@@ -56,13 +56,13 @@ fn main() {
         .run();
 }
 
-fn setup(mut commands: Commands) {
+fn setup(mut commands: Commands, asset_server: Res<AssetServer>) {
     // MSAA はオフ：Player のパイプラインはシングルサンプル。
     // CompositingSpace::Srgb は下の「色」を参照 — 付けないと全体が明るくなりすぎます。
     commands.spawn((Camera2d, Msaa::Off, CompositingSpace::Srgb));
 
     commands.spawn((
-        SsPlayer { src: "assets/Ringo/Ringo.ssab".into(), animation: "wait1".into() },
+        SsPlayer { pack: asset_server.load("Ringo/Ringo.ssab"), animation: "wait1".into() },
         SsTransform { scale_x: 0.6, scale_y: 0.6, ..default() },
         SsPlayback { order: 1, ..default() },
     ));
@@ -73,11 +73,15 @@ fn setup(mut commands: Commands) {
 
 | コンポーネント | 持つもの | 変更コスト |
 |---|---|---|
-| `SsPlayer` | `src`, `animation` | 再生ツリーを再構築します — 唯一アロケーションを伴うもの |
+| `SsPlayer` | `pack`, `animation` | 再生ツリーを再構築します — 唯一アロケーションを伴うもの |
 | `SsTransform` | `x`, `y`, `scale_x`, `scale_y`, `rotation` | ゼロ |
 | `SsPlayback` | `playing`, `speed`, `order`, `alpha`, `visible`, `restart` | ゼロ |
 
 Bevy の `Transform` では**ありません**。あちらは 3D アフィンで、Player の 5 つのスカラーへの分解は非可逆だからです。連動させたい場合はコピーするシステムを 1 つ書いてください。どちらを正とするかはあなたが決められます。
+
+## ファイルをどこに置くか
+
+パックは Bevy の `AssetServer` を通して読むので、`"Ringo/Ringo.ssab"` は asset パスです。変換した `.ssab` と横にある画像を、コンバータが書き出したとおりの配置でアプリの `assets/` フォルダに置いてください。キャラクターはパックとアトラスが読み終わってから現れ、アトラス抜きのフレームが描かれることはありません。同じパックのキャラクター同士は、パックを 1 部、アトラスごとのテクスチャを 1 枚だけ共有します。Bevy の `file_watcher` フィーチャーを有効にすると、SpriteStudio で変換し直したときに新しいファイルからキャラクターを組み直します。
 
 ## 色：カメラに `CompositingSpace::Srgb` を付ける
 

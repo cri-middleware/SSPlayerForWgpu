@@ -4,16 +4,23 @@
 //! wants to say about a character has to cross here. Nothing crosses back yet:
 //! reading events and completion edges is its own phase (see the crate docs).
 
+use bevy::asset::RecursiveDependencyLoadState;
 use bevy::prelude::*;
 use bevy::render::Extract;
 use bevy::render::sync_world::MainEntity;
 
+use crate::asset::SsPack;
 use crate::components::{SsCellmapTextures, SsPlayback, SsPlayer, SsTransform};
 
 /// One character's worth of main-world state, as of this frame.
 pub(crate) struct ExtractedPlayer {
     pub entity: MainEntity,
-    pub src: String,
+    pub pack: AssetId<SsPack>,
+    /// Whether the pack and everything it depends on have finished loading —
+    /// successfully or not. A character is built only once this holds, so it
+    /// never shows a frame drawn before its atlases arrived; an atlas that failed
+    /// draws white, as it does when the player loads for itself.
+    pub settled: bool,
     pub animation: String,
     pub transform: SsTransform,
     pub playback: SsPlayback,
@@ -37,12 +44,13 @@ pub(crate) struct ExtractedPlayers {
 // A five-part query with an optional is exactly the shape `type_complexity`
 // fires on, and the shape Bevy queries take; naming it would obscure, not clarify.
 #[allow(clippy::type_complexity)]
-pub(crate) fn extract_players(mut extracted: ResMut<ExtractedPlayers>, time: Extract<Res<Time>>, query: Extract<Query<(Entity, &SsPlayer, &SsTransform, &SsPlayback, Option<&SsCellmapTextures>)>>) {
+pub(crate) fn extract_players(mut extracted: ResMut<ExtractedPlayers>, time: Extract<Res<Time>>, asset_server: Extract<Res<AssetServer>>, query: Extract<Query<(Entity, &SsPlayer, &SsTransform, &SsPlayback, Option<&SsCellmapTextures>)>>) {
     extracted.delta_secs = time.delta_secs();
     extracted.players.clear();
     extracted.players.extend(query.iter().map(|(entity, player, transform, playback, textures)| ExtractedPlayer {
         entity: MainEntity::from(entity),
-        src: player.src.clone(),
+        pack: player.pack.id(),
+        settled: matches!(asset_server.get_recursive_dependency_load_state(&player.pack), Some(RecursiveDependencyLoadState::Loaded | RecursiveDependencyLoadState::Failed(_))),
         animation: player.animation.clone(),
         transform: *transform,
         playback: *playback,
