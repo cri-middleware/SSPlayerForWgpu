@@ -40,7 +40,7 @@ an agent would otherwise break silently.
 | What the player does, and how to use each face | [README.md](./README.md), the [docs site](./docs/en/) |
 | How to build, run and verify, and what each script takes | [CONTRIBUTING.md](./CONTRIBUTING.md), each script's `--help` |
 | How the site and the shipped artifacts are built | [RELEASING.md](./RELEASING.md), maintainers only |
-| What to build next, and what was measured and declined | [ROADMAP.md](./ROADMAP.md), plus the two entries that outgrew it: [PREVIEW.md](./PREVIEW.md), [FIT_ALIGN.md](./FIT_ALIGN.md) |
+| What to build next, and what was measured and declined | [ROADMAP.md](./ROADMAP.md), plus the entry that outgrew it: [PREVIEW.md](./PREVIEW.md) |
 
 ## Invariants
 

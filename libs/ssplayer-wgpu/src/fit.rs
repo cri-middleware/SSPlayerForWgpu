@@ -5,7 +5,7 @@
 //! the art fitted into it. The vocabulary here is the family's — `contain` /
 //! `cover` / `none` and nine alignments, the words `<Image resizeMode>` already
 //! taught every host — so this is a port of a settled contract rather than a new
-//! design. `FIT_ALIGN.md` in the repository root is that contract.
+//! design.
 //!
 //! Everything in this module is arithmetic over a box and a target size. There is
 //! no GPU work in it and no state, which is why it lives in the player where the

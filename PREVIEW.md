@@ -261,8 +261,8 @@ and it shows the character standing in the frame it was composed in, which is wh
 the preview comparable to an engine's canvas.
 
 Call it again when the element resizes and after the picker changes animation. See
-[the guide](./docs/en/guide/placement.md); the contract it ports is
-[`FIT_ALIGN.md`](./FIT_ALIGN.md).
+[the guide](./docs/en/guide/placement.md); the contract it ports is the porting guide's
+[Placement: Fit and Align](https://github.com/cri-middleware/SpriteStudio-SDK/blob/HEAD/libs/ssruntime/docs/50_features/70_placement.md).
 
 ## Work order
 

@@ -155,7 +155,7 @@ player, where every host and the C ABI reach it, and the host half belongs in an
 - [x] **`fit` / `align`** — `SSPlayer::fit_into` / `ss_player_fit_into` / `fitInto`, over the
       family's vocabulary (`contain` / `cover` / `none` and nine alignments). Pure arithmetic in
       `fit.rs`, so the three faces are translation only and an adapter inherits it; the contract
-      it ports is [`FIT_ALIGN.md`](./FIT_ALIGN.md). The box is the animation's authored canvas
+      it ports is the porting guide's [Placement: Fit and Align](https://github.com/cri-middleware/SpriteStudio-SDK/blob/HEAD/libs/ssruntime/docs/50_features/70_placement.md). The box is the animation's authored canvas
       (`canvas_rect`, the canvas placed against the origin by its pivot) unless the caller supplies
       one — **measured boxes are not built**: `frameScope: animation | pack` would mean baking every
       frame at load, and nothing needs it yet. Not wired into `ssplayer-bevy`, which is the first
