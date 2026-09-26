@@ -121,6 +121,7 @@ The rest of the matrix:
 | Fetch the SDK | `git submodule update --init` |
 | Generate the fixtures (required once) | `./scripts/deploy-examples.sh` — the tests read `assets/` |
 | Build the library for this host | `./scripts/build.sh` |
+| Smallest Rust host | `cargo run -p ssplayer-wgpu-hello` |
 | Native viewer | `cargo run -p ssplayer-wgpu-viewer` |
 | Metal C++ viewer (macOS) | `cd examples/viewer-metal-cpp && cmake -B build && cmake --build build && ./build/ssviewer-metal` |
 | DX12 C++ viewer (Windows) | `cd examples\viewer-dx12-cpp; cmake -B build; cmake --build build --config Release; .\build\Release\ssviewer-dx12.exe` |

@@ -138,11 +138,12 @@ C と JavaScript のフェイスは名前が違うだけで同じ形をしてお
 
 ## 🎬 サンプル
 
-環境ごとにホストが 1 つ（ウィンドウをエンジンが所有する Bevy だけ 2 つ）、それぞれ自己完結しています。どれもその環境の利用ガイドを兼ねた README を持っており、ウィンドウの作り方、デバイスの貸し方、アセットの入れ方が書いてあります。
+環境ごとにホストが 1 つ（Rust は最小のホストと開発用ビューアの 2 つ、ウィンドウをエンジンが所有する Bevy も 2 つ）、それぞれ自己完結しています。どれもその環境の利用ガイドを兼ねた README を持っており、ウィンドウの作り方、デバイスの貸し方、アセットの入れ方が書いてあります。
 
 | サンプル | 環境 | 実行方法 |
 |---|---|---|
-| [`examples/viewer`](./examples/viewer) | Rust, winit | `cargo run -p ssplayer-wgpu-viewer` |
+| [`examples/hello`](./examples/hello) | Rust, winit — 最小のホスト。キャラクター 1 体 | `cargo run -p ssplayer-wgpu-hello` |
+| [`examples/viewer`](./examples/viewer) | Rust, winit — 開発用ビューア。複数キャラクターを並べたもの | `cargo run -p ssplayer-wgpu-viewer` |
 | [`examples/web`](./examples/web) | ブラウザ上の WebGPU | `./scripts/build.sh platform=web` の後 `cd examples/web && python3 -m http.server` |
 | [`examples/viewer-metal-cpp`](./examples/viewer-metal-cpp) | C++ / Metal, macOS | `cmake -B build && cmake --build build && ./build/ssviewer-metal` |
 | [`examples/viewer-dx12-cpp`](./examples/viewer-dx12-cpp) | C++ / DX12, Windows | `cmake -B build; cmake --build build --config Release; .\build\Release\ssviewer-dx12.exe` |
