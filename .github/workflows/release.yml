@@ -47,7 +47,7 @@ jobs:
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v7
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           # SpriteStudio-SDK is a private submodule in a different repository, so
           # the job-scoped GITHUB_TOKEN cannot fetch it. Supply a fine-grained PAT
@@ -93,7 +93,7 @@ jobs:
 
       - name: Setup Node
         if: matrix.artifact == 'web-wasm32'
-        uses: actions/setup-node@v7
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
           node-version: 22
           cache: pnpm
@@ -126,7 +126,7 @@ jobs:
       # `gh run download -D artifacts` recreates exactly this layout for a local run.
       - name: Upload ${{ matrix.artifact }}
         if: matrix.artifact != 'web-wasm32'
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: ${{ matrix.artifact }}
           path: bin
@@ -135,7 +135,7 @@ jobs:
 
       - name: Upload ${{ matrix.artifact }}
         if: matrix.artifact == 'web-wasm32'
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: ${{ matrix.artifact }}
           path: |
@@ -160,10 +160,10 @@ jobs:
     steps:
       # No submodule here: this job assembles what the matrix already built, so
       # it never touches the SDK and needs no token for it.
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       - name: Download all artifacts
-        uses: actions/download-artifact@v8
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
           path: artifacts
 
@@ -182,7 +182,7 @@ jobs:
         run: ./scripts/build-release.sh in=artifacts out=release-dist verify=yes clean=yes
 
       - name: Upload final release package
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: ssplayer-wgpu-release-dist
           path: release-dist
