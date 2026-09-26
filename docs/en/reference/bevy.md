@@ -83,6 +83,7 @@ it. See [Texture replacement](../guide/texture-replacement.md).
 | Message | Carries |
 |---|---|
 | `SsEventMessage` | `entity`, `event: SsEvent` — user data, signal or audio |
+| `SsStarted` | `entity` — the start **edge**: a new animation or pack while `playing`, `playing` turned on for the first time, or a bumped `restart`. Not a resume |
 | `SsFinished` | `entity` — the completion **edge** |
 | `SsLooped` | `entity` — the loop boundary edge |
 

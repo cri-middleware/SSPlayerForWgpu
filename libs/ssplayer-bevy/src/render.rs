@@ -351,7 +351,15 @@ pub(crate) fn draw_players(
             .iter()
             .map(|slot| {
                 let player = &slot.player;
-                PlaybackFeedback { entity: slot.entity.id(), frame_no: player.frame_no(), is_finished: player.is_finished(), finished_edge: player.just_finished(), looped: player.just_looped(), events: player.events().to_vec() }
+                PlaybackFeedback {
+                    entity: slot.entity.id(),
+                    frame_no: player.frame_no(),
+                    is_finished: player.is_finished(),
+                    started_edge: player.just_started(),
+                    finished_edge: player.just_finished(),
+                    looped: player.just_looped(),
+                    events: player.events().to_vec(),
+                }
             })
             .collect(),
     );

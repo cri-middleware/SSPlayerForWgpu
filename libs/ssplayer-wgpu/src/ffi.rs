@@ -1753,6 +1753,17 @@ pub unsafe extern "C" fn ss_player_is_part_skinned_mesh_by_index(handle: *mut Ss
 // The strings are borrowed from the player and stay valid until the next
 // `ss_scene_update` on it — the same rule `ss_player_texture_at` follows.
 
+/// Whether the last `ss_scene_update` was the first to run after an
+/// `ss_player_play` / `ss_player_play_from`: true for exactly one update. Not
+/// raised by `ss_player_resume`, which carries on rather than starting.
+///
+/// # Safety
+/// `handle` must be a live handle or null.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn ss_player_just_started(handle: *mut SsPlayer) -> bool {
+    unsafe { player(handle) }.map(|p| p.just_started()).unwrap_or(false)
+}
+
 /// Whether the last `ss_scene_update` **completed** playback: true for exactly
 /// one update, unlike the sticky `ss_player_is_finished`. Never true under an
 /// infinite loop, and not raised by `ss_player_stop`.

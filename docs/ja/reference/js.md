@@ -76,7 +76,7 @@ import { defineSsPlayerWebGPUElement } from '@spritestudio/ssplayer-wgpu/element
 | `setSkipFrames(on)` / `skipFrames()` | 長い tick で複数フレームを跨ぐ |
 | `startFrame()` / `endFrame()` / `totalFrames()` | 現在の範囲 |
 | `isPlaying()` / `isPausing()` / `isPlayingForward()` / `isFinished()` | 状態 |
-| `justLooped()` / `justFinished()` | 直前の `frame()` のエッジ |
+| `justStarted()` / `justLooped()` / `justFinished()` | 直前の `frame()` のエッジ。`justStarted` は `resume()` では立ちません |
 
 **配置**
 

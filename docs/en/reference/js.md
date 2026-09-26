@@ -79,7 +79,7 @@ the calls.
 | `setSkipFrames(on)` / `skipFrames()` | Cross several frames in one long tick |
 | `startFrame()` / `endFrame()` / `totalFrames()` | The current range |
 | `isPlaying()` / `isPausing()` / `isPlayingForward()` / `isFinished()` | State |
-| `justLooped()` / `justFinished()` | Edges from the last `frame()` |
+| `justStarted()` / `justLooped()` / `justFinished()` | Edges from the last `frame()`. `justStarted` is not raised by `resume()` |
 
 **Placement**
 

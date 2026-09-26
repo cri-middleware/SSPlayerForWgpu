@@ -52,7 +52,7 @@ mod feedback;
 mod render;
 
 pub use components::{SsCellmapTextures, SsPlayback, SsPlaybackState, SsPlayer, SsTransform};
-pub use feedback::{SsEventMessage, SsFinished, SsLooped};
+pub use feedback::{SsEventMessage, SsFinished, SsLooped, SsStarted};
 // The event payloads a host matches on, re-exported so it need not also depend
 // on `ssplayer-wgpu` just to name them.
 pub use ssplayer_wgpu::{AudioEvent, SignalEvent, SignalParam, SignalValue, SsEvent, UserDataEvent};
@@ -76,6 +76,7 @@ impl Plugin for SsPlayerPlugin {
         let channel = feedback::FeedbackChannel::default();
 
         app.add_message::<SsEventMessage>()
+            .add_message::<SsStarted>()
             .add_message::<SsFinished>()
             .add_message::<SsLooped>()
             .insert_resource(channel.clone())

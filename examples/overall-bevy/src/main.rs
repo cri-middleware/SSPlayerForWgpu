@@ -26,7 +26,7 @@ use bevy::camera::CompositingSpace;
 use bevy::input::ButtonInput;
 use bevy::prelude::*;
 use bevy::render::view::Msaa;
-use ssplayer_bevy::{SsEvent, SsEventMessage, SsFinished, SsLooped, SsPlayback, SsPlaybackState, SsPlayer, SsPlayerPlugin, SsTransform};
+use ssplayer_bevy::{SsEvent, SsEventMessage, SsFinished, SsLooped, SsPlayback, SsPlaybackState, SsPlayer, SsPlayerPlugin, SsStarted, SsTransform};
 
 /// The repo's `assets/`, absolute so the example is launchable from anywhere and
 /// so Bevy's asset root (for the audio files) points at the same tree the player
@@ -131,7 +131,18 @@ fn controls(keys: Res<ButtonInput<KeyCode>>, mut tour: ResMut<Tour>, mut players
 /// The return trip: timeline events come back as messages. This logs them, keeps
 /// the last one for the HUD, and — for an audio cue — actually plays the sound,
 /// because the player only says *what* to play.
-fn playback_events(mut events: MessageReader<SsEventMessage>, mut finished: MessageReader<SsFinished>, mut looped: MessageReader<SsLooped>, mut tour: ResMut<Tour>, asset_server: Res<AssetServer>, mut commands: Commands) {
+fn playback_events(
+    mut started: MessageReader<SsStarted>,
+    mut events: MessageReader<SsEventMessage>,
+    mut finished: MessageReader<SsFinished>,
+    mut looped: MessageReader<SsLooped>,
+    mut tour: ResMut<Tour>,
+    asset_server: Res<AssetServer>,
+    mut commands: Commands,
+) {
+    for _ in started.read() {
+        tour.last_event = "started".into();
+    }
     for message in events.read() {
         match &message.event {
             SsEvent::Audio(audio) => {

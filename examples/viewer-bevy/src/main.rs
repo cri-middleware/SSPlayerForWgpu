@@ -42,7 +42,7 @@ use bevy::input::ButtonInput;
 use bevy::prelude::*;
 use bevy::render::view::Msaa;
 use bevy::window::FileDragAndDrop;
-use ssplayer_bevy::{SsEvent, SsEventMessage, SsFinished, SsLooped, SsPlayback, SsPlaybackState, SsPlayer, SsPlayerPlugin, SsTransform};
+use ssplayer_bevy::{SsEvent, SsEventMessage, SsFinished, SsLooped, SsPlayback, SsPlaybackState, SsPlayer, SsPlayerPlugin, SsStarted, SsTransform};
 use ssplayer_wgpu::SSPack;
 use std::path::{Path, PathBuf};
 
@@ -360,7 +360,18 @@ fn handle_drop(mut drops: MessageReader<FileDragAndDrop>, mut state: ResMut<View
 /// The return trip: timeline events come back as messages. This keeps the last one
 /// for the HUD and — for an audio cue — actually plays the sound, because the
 /// player only says *what* to play.
-fn playback_events(mut events: MessageReader<SsEventMessage>, mut finished: MessageReader<SsFinished>, mut looped: MessageReader<SsLooped>, mut state: ResMut<ViewerState>, asset_server: Res<AssetServer>, mut commands: Commands) {
+fn playback_events(
+    mut started: MessageReader<SsStarted>,
+    mut events: MessageReader<SsEventMessage>,
+    mut finished: MessageReader<SsFinished>,
+    mut looped: MessageReader<SsLooped>,
+    mut state: ResMut<ViewerState>,
+    asset_server: Res<AssetServer>,
+    mut commands: Commands,
+) {
+    for _ in started.read() {
+        state.last_event = "started".into();
+    }
     for message in events.read() {
         match &message.event {
             SsEvent::Audio(audio) => {

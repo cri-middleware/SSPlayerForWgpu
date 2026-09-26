@@ -155,7 +155,7 @@ through two surfaces:
 |---|---|---|
 | `SsPlaybackState` component | Polled | The current `frame_no`, and whether the animation has `finished` |
 | `SsEventMessage` | `MessageReader` | Timeline events — match on `SsEvent` for the user-data marker, the signal, or the audio cue |
-| `SsFinished` / `SsLooped` | `MessageReader` | The one-shot completion and loop edges |
+| `SsStarted` / `SsFinished` / `SsLooped` | `MessageReader` | The one-shot start, completion and loop edges |
 
 ```rust
 fn play_sounds(mut events: MessageReader<SsEventMessage>) {

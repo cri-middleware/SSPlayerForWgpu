@@ -1656,8 +1656,16 @@ impl SsPlayerWeb {
 
     // --- Events ---
     //
-    // Polled after `frame()`, which is what advanced the clock. All three
+    // Polled after `frame()`, which is what advanced the clock. All four
     // describe that tick and are replaced by the next one.
+
+    /// Whether the last `frame()` was the first to run after a `play()` /
+    /// `playFrom()` — true for exactly one call. Not raised by `resume()`, which
+    /// carries on rather than starting.
+    #[wasm_bindgen(js_name = justStarted)]
+    pub fn just_started(&self) -> Result<bool, JsValue> {
+        with_player!(self, |p| p.just_started())
+    }
 
     /// Whether the last `frame()` crossed a loop boundary. One report per call
     /// however many cycles it crossed.

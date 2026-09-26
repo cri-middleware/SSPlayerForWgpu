@@ -2,9 +2,9 @@
 //! carried back so gameplay can react to them.
 //!
 //! Playback advances in the render world (see [`crate::render`]), so what a tick
-//! produces — the events it crossed, whether it looped or finished, the frame it
-//! landed on — has to cross back. It does so through a buffer the draw system
-//! fills and a main-world system drains, which is why it lands **one frame late**:
+//! produces — the events it crossed, whether it started, looped or finished, the
+//! frame it landed on — has to cross back. It does so through a buffer the draw
+//! system fills and a main-world system drains, which is why it lands **one frame late**:
 //! the main world reads on frame N+1 what the render world produced on frame N.
 //! For a sound cue or a state change that is imperceptible; a host that cannot
 //! tolerate it would have to move playback into the main world, which this crate
@@ -23,6 +23,8 @@ pub(crate) struct PlaybackFeedback {
     pub entity: Entity,
     pub frame_no: f32,
     pub is_finished: bool,
+    /// The start *edge* — set only on the first tick after a `play()`.
+    pub started_edge: bool,
     /// The completion *edge* — set only on the tick the animation finished.
     pub finished_edge: bool,
     /// The loop pulse — set only on the tick the timeline wrapped.
@@ -65,6 +67,16 @@ pub struct SsEventMessage {
     pub event: SsEvent,
 }
 
+/// Raised once, on the first frame a character's animation ran after a start:
+/// a new pack or animation on [`crate::SsPlayer`] while
+/// [`crate::SsPlayback`]`::playing` is on, `playing` turning on for a tree that
+/// has not started yet, or a bumped `restart`. Turning `playing` back on after a
+/// pause resumes, and is not a start.
+#[derive(Message, Clone, Copy, Debug)]
+pub struct SsStarted {
+    pub entity: Entity,
+}
+
 /// Raised once, on the frame a character's animation reached its end.
 #[derive(Message, Clone, Copy, Debug)]
 pub struct SsFinished {
@@ -83,11 +95,21 @@ pub struct SsLooped {
 /// Runs in `PreUpdate` so a gameplay system reading the messages in `Update`
 /// sees this frame's batch. A message for an entity that has since despawned is
 /// harmless: nothing reads it against a live component.
-pub(crate) fn dispatch_feedback(channel: Res<FeedbackChannel>, mut states: Query<&mut SsPlaybackState>, mut events: MessageWriter<SsEventMessage>, mut finished: MessageWriter<SsFinished>, mut looped: MessageWriter<SsLooped>) {
+pub(crate) fn dispatch_feedback(
+    channel: Res<FeedbackChannel>,
+    mut states: Query<&mut SsPlaybackState>,
+    mut events: MessageWriter<SsEventMessage>,
+    mut started: MessageWriter<SsStarted>,
+    mut finished: MessageWriter<SsFinished>,
+    mut looped: MessageWriter<SsLooped>,
+) {
     for feedback in channel.take() {
         if let Ok(mut state) = states.get_mut(feedback.entity) {
             state.frame_no = feedback.frame_no;
             state.finished = feedback.is_finished;
+        }
+        if feedback.started_edge {
+            started.write(SsStarted { entity: feedback.entity });
         }
         for event in feedback.events {
             events.write(SsEventMessage { entity: feedback.entity, event });
