@@ -55,15 +55,16 @@ breaks are in [CONTRIBUTING.md](./CONTRIBUTING.md#technical-constraints--guiding
 
 ## Expressiveness
 
-- [ ] **Retire one of the two mask backends.** Coverage (mask doc §5) now
-      exists beside the stencil, which is a migration state rather than a
-      destination: the same `.ssab` rendering differently depending on what the
-      host's pass could lend is a poor thing to keep forever. The decision wants
-      numbers, not opinion — run the golden corpus through both and count where
-      they part, then measure what the extra pass costs. Retiring the stencil
-      would also drop `SceneConfig::stencil_format` from the host contract and a
-      whole invariant (`unwind_masks`); keeping both means every future mask
-      feature lands twice.
+- [ ] ⛔ **One mask backend, once Bevy's 2d pass carries a stencil.** Both
+      exist because each is the cheap answer somewhere: a host that lends a
+      stencil pays nothing extra for it, while coverage (mask doc §5) is the only
+      answer for a pass with none to lend — and Bevy's is one, `bevy_core_pipeline`
+      0.19 fixing `CORE_2D_DEPTH_FORMAT` at `Depth32Float`. Folding onto coverage
+      would charge every stencil host an extra pass and a coverage array per
+      masking player, so the fold waits for that constant to gain a stencil, and
+      goes the other way: dropping coverage takes the extra pass with it, while
+      `SceneConfig::stencil_format` and `unwind_masks` stay. Check the constant on
+      each Bevy bump. Until then every mask feature lands in both.
 - [ ] **Exact masks, past what the stencil can express.** Mixed INCR / INVERT
       overlaps are approximated and nesting is limited by 8 bits. The coverage
       backend already lifts the nesting limit — its accumulators are shader
@@ -111,7 +112,10 @@ breaks are in [CONTRIBUTING.md](./CONTRIBUTING.md#technical-constraints--guiding
       `examples/overall-bevy` as its hosts. A separate crate, so the core never
       depends on Bevy and the adapter can follow its own wgpu major; it tracks one
       Bevy line at a time, because Bevy and the player must resolve to a single
-      `wgpu`.
+      `wgpu`. A `.ssab` is an `SsPack` asset loaded through the `AssetServer`,
+      parsed once however many characters play it, with its atlases as Bevy
+      images lent to the player — so the renderer holds no pixels of its own for
+      them, and a hot reload rebuilds the characters from the new file.
 - [ ] **Bevy: more than one camera.** The adapter holds one `SSScene`, binds it to
       the first view that renders and skips the rest with a warning
       (`ssplayer-bevy/src/render.rs`, `bound_view`), so a UI camera, a

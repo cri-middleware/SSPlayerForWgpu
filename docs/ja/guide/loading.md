@@ -33,7 +33,7 @@
 
     ```rust
     commands.spawn(SsPlayer {
-        src: "assets/Ringo/Ringo.ssab".into(),
+        pack: asset_server.load("Ringo/Ringo.ssab"),
         animation: "wait1".into(),
     });
     ```

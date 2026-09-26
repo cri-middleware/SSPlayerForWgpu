@@ -41,7 +41,7 @@ reference モードでは、画像パスは **`.ssab` 自身のディレクト�
 | Face | `load` が受け取るもの | 解決の基準 |
 |---|---|---|
 | Rust | ファイルパス | プロセスのカレントディレクトリ。パックが指す先は `.ssab` 自身のディレクトリ基準 |
-| Bevy | `SsPlayer::src` のファイルパス | 同上。`AssetServer` は経由せず直接ファイルシステムを読みます |
+| Bevy | `asset_server.load` で `SsPlayer::pack` に渡す asset パス | Bevy の他のアセットと同じくアプリの asset ルート基準。パックが指す先は `.ssab` 自身のディレクトリ基準 |
 | C / C++ | ファイルパス | 同上 |
 | Web | URL | ページ基準、その後は `.ssab` 自身の URL ディレクトリ基準 |
 

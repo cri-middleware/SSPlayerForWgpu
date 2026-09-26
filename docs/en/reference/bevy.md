@@ -28,11 +28,25 @@ The camera, however, needs two things: `Msaa::Off` (the player's pipelines are s
 
 | Field | | |
 |---|---|---|
-| `src: String` | path to the `.ssab` | **Changing it rebuilds the playback tree** |
+| `pack: Handle<SsPack>` | the `.ssab`, from `asset_server.load(...)` | **Changing it rebuilds the playback tree**, once the new pack has loaded |
 | `animation: String` | animation to select. Empty means "not yet" | The same |
 
 `SsTransform`, `SsPlayback` and `SsPlaybackState` are **required components**, so spawning
 `SsPlayer` alone gives you all four at their defaults.
+
+### `SsPack` — the `.ssab` as an asset
+
+A `.ssab` loads through Bevy's `AssetServer`, from whatever source the app configures. The loader
+runs the player's own walk: it reads the packs the pack's instance parts play from, and requests each
+atlas as a Bevy `Image` — non-sRGB, because the player takes atlas bytes as authored.
+
+* A character is built only once its pack and every atlas have settled, so it never shows a frame
+  drawn without them. An atlas that failed to load draws white.
+* Characters sharing a handle share one parse of each pack and one GPU texture per atlas, lent to the
+  player rather than copied.
+* With Bevy's `file_watcher` feature, changing the `.ssab` or a sibling pack rebuilds the characters
+  playing it; changing an atlas re-lends it in place.
+* `SsPack::pack()` is the parsed pack, for its name and `animation_names()`.
 
 ### `SsTransform` — where it sits
 
@@ -75,8 +89,9 @@ Swap the whole texture a cell map binds — a costume or palette change — for 
 
 Insert an entry to override, remove it (or the whole component) to restore. An image still loading
 is applied the frame it becomes ready, so a freshly-requested handle is fine. The swap is
-per-character; a straight-alpha Bevy image is assumed. Only characters that swap textures need spawn
-it. See [Texture replacement](../guide/texture-replacement.md).
+per-character, and assumes a straight-alpha Bevy image **loaded with `is_srgb: false`** — an sRGB one
+draws too dark, and the adapter warns once. Only characters that swap textures need spawn it. See
+[Texture replacement](../guide/texture-replacement.md).
 
 ## Messages (reactive)
 
@@ -121,7 +136,6 @@ would be a race.
 |---|---|
 | **One view** | `SSScene::update` fuses the timeline advance with the geometry build, so a second view would advance every animation twice per frame. Later views are skipped, with a warning |
 | **MSAA** | must be off. The adapter warns once and skips a multisampled target rather than crashing |
-| **Assets** | loading is synchronous and reads the filesystem directly rather than going through `AssetServer` — so no hot reload, no packed assets, no shared atlases |
 | **Part overrides, motion blending** | not exposed as components. See [Scopes and names](../guide/concepts.md#what-each-face-can-do) |
 
 ## Masks and device loss

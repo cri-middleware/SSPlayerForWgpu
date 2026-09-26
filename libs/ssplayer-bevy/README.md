@@ -35,13 +35,13 @@ fn main() {
         .run();
 }
 
-fn setup(mut commands: Commands) {
+fn setup(mut commands: Commands, asset_server: Res<AssetServer>) {
     // MSAA has to be off: the player's pipelines are single-sampled.
     // CompositingSpace::Srgb is needed for correct colour (see below).
     commands.spawn((Camera2d, Msaa::Off, CompositingSpace::Srgb));
 
     commands.spawn((
-        SsPlayer { src: "assets/Ringo/Ringo.ssab".into(), animation: "wait1".into() },
+        SsPlayer { pack: asset_server.load("Ringo/Ringo.ssab"), animation: "wait1".into() },
         SsTransform { scale_x: 0.6, scale_y: 0.6, ..default() },
         SsPlayback { order: 1, ..default() },
     ));
@@ -50,6 +50,13 @@ fn setup(mut commands: Commands) {
 
 `SsTransform` and `SsPlayback` are required components, so spawning `SsPlayer`
 alone gives you both at their defaults.
+
+The pack is an `SsPack` asset, loaded through Bevy's `AssetServer` from the app's
+`assets/` folder (or whatever source the app configures). The character appears
+once the pack and its atlases have loaded; characters sharing a pack share one
+parse of it and one GPU texture per atlas, lent to the player rather than copied.
+With Bevy's `file_watcher` feature, reconverting rebuilds the character from the
+new file.
 
 ## Colour: give the camera `CompositingSpace::Srgb`
 
@@ -180,7 +187,7 @@ crate deliberately does not do.
 |---|---|
 | **Window resize** | Followed automatically — the draw system reprojects to the camera's viewport every frame |
 | **HDR camera** | The view's format becomes `Rgba16Float`; the scene rebuilds its pipelines for it on the frame the format changes, mask included |
-| **Device loss** | Recovers by riding Bevy's own recovery: on a new device Bevy re-runs `RenderStartup`, which rebuilds the renderer, and the players reload from the main world next frame. **You must opt in** — Bevy's default error handler *quits* on device loss, so install a `RenderErrorHandler` that returns `RenderErrorPolicy::Recover` for it |
+| **Device loss** | Recovers by riding Bevy's own recovery: on a new device Bevy re-runs `RenderStartup`, which rebuilds the renderer, and the players are rebuilt from the packs already in the render world next frame, their atlases re-lent once Bevy has prepared its images again. **You must opt in** — Bevy's default error handler *quits* on device loss, so install a `RenderErrorHandler` that returns `RenderErrorPolicy::Recover` for it |
 
 ## What this version does not do yet
 
@@ -193,6 +200,3 @@ crate deliberately does not do.
 * **MSAA must be off** — the player's pipelines are single-sampled. Bevy's
   default camera has MSAA on, so give it `Msaa::Off`; the adapter warns once and
   skips (rather than crashing) if it finds a multisampled target.
-* **Loading is synchronous** and reads the filesystem directly rather than going
-  through Bevy's `AssetServer`, so it does not get hot reload, packed assets or
-  shared atlases.

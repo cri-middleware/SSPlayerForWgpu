@@ -9,7 +9,7 @@ use bevy::asset::AssetId;
 use bevy::prelude::*;
 use bevy::render::camera::ExtractedCamera;
 use bevy::render::render_asset::RenderAssets;
-use bevy::render::render_resource::RenderPassDescriptor;
+use bevy::render::render_resource::{RenderPassDescriptor, TextureId};
 use bevy::render::renderer::{RenderContext, RenderDevice, RenderQueue, ViewQuery};
 use bevy::render::sync_world::MainEntity;
 use bevy::render::texture::GpuImage;
@@ -19,12 +19,13 @@ use bevy::render::view::ViewTarget;
 use ssplayer_wgpu::{AlphaMode as SsAlphaMode, MaskBackend, SSPlayer, SSRenderer, SSScene, SceneConfig};
 use std::collections::{HashMap, HashSet};
 
+use crate::asset::{Keys, RenderSsPack, SsPack};
 use crate::extract::ExtractedPlayers;
 use crate::feedback::{FeedbackChannel, PlaybackFeedback};
 
 /// One character's playback tree, plus what it was last built from.
 ///
-/// `src` and `animation` are kept so a change to either can be told from the
+/// `pack` and `animation` are kept so a change to either can be told from the
 /// frame-to-frame traffic: rebuilding the tree allocates, the rest does not.
 ///
 /// `started` / `playing` / `restart` track transport, because the player's
@@ -37,7 +38,9 @@ use crate::feedback::{FeedbackChannel, PlaybackFeedback};
 struct PlayerSlot {
     entity: MainEntity,
     player: SSPlayer,
-    src: String,
+    /// The pack the tree was built from, and which load of it — a hot reload
+    /// replaces the asset under the same id with a new generation.
+    pack: Option<(AssetId<SsPack>, u64)>,
     animation: String,
     started: bool,
     playing: bool,
@@ -67,11 +70,16 @@ pub(crate) struct SsRenderState {
     scene_format: Option<wgpu::TextureFormat>,
     /// Insertion-ordered, because this order is what breaks `order` ties.
     slots: Vec<PlayerSlot>,
+    /// Every atlas lent to `renderer`, by renderer key, and the Bevy texture
+    /// lent under it. Device-scoped like the renderer, so the characters sharing
+    /// a pack share one binding.
+    lent_atlases: HashMap<u32, TextureId>,
     /// The view `scene` belongs to; anything else is refused.
     bound_view: Option<Entity>,
     warned_second_view: bool,
     warned_srgb: bool,
     warned_msaa: bool,
+    warned_srgb_override: bool,
 }
 
 /// Build the render-world state on the device Bevy just acquired.
@@ -79,21 +87,35 @@ pub(crate) struct SsRenderState {
 /// Deliberately in `RenderStartup`, which Bevy re-runs every time it acquires a
 /// `RenderDevice` — including after recovering a lost one. That is the whole
 /// device-loss story for this adapter: a fresh `SSRenderer` on the new device,
-/// `slots` cleared, and `sync_players` rebuilds the players from the main world
-/// next frame (reloading each pack). So recovery needs no `restore_device` here —
+/// `slots` and the lent atlases cleared, and `sync_players` rebuilds the players
+/// from the packs already in the render world next frame, lending the atlases
+/// again once Bevy has re-prepared its images. So recovery needs no `restore_device` here —
 /// but it is the host's to opt into, because Bevy's default error handler quits
 /// on device loss rather than recovering. Do not move this to a run-once startup:
 /// that is what would break recovery.
 pub(crate) fn init_state(mut commands: Commands, device: Res<RenderDevice>) {
-    commands.insert_resource(SsRenderState { renderer: SSRenderer::new(device.wgpu_device()), scene: None, scene_format: None, slots: Vec::new(), bound_view: None, warned_second_view: false, warned_srgb: false, warned_msaa: false });
+    commands.insert_resource(SsRenderState {
+        renderer: SSRenderer::new(device.wgpu_device()),
+        scene: None,
+        scene_format: None,
+        slots: Vec::new(),
+        lent_atlases: HashMap::new(),
+        bound_view: None,
+        warned_second_view: false,
+        warned_srgb: false,
+        warned_msaa: false,
+        warned_srgb_override: false,
+    });
 }
 
 /// Apply this frame's extracted state to the playback trees.
 ///
-/// Runs before anything touches the GPU: loading reads files and builds the
-/// tree, and the borrow model lends no device until `update`, so what a load
-/// reads waits in the player until the first frame that draws it.
-pub(crate) fn sync_players(mut state: Option<ResMut<SsRenderState>>, extracted: Res<ExtractedPlayers>, device: Res<RenderDevice>, images: Res<RenderAssets<GpuImage>>) {
+/// Runs before anything touches the GPU. Nothing here reads a file: the pack
+/// arrived through the asset server, and building a tree from it takes its
+/// already-parsed packs. An embedded atlas the pack carries waits in the player
+/// until the first frame that draws it, because the borrow model lends no device
+/// until `update`.
+pub(crate) fn sync_players(mut state: Option<ResMut<SsRenderState>>, extracted: Res<ExtractedPlayers>, device: Res<RenderDevice>, images: Res<RenderAssets<GpuImage>>, packs: Res<RenderAssets<RenderSsPack>>) {
     let Some(state) = state.as_deref_mut() else {
         return;
     };
@@ -105,11 +127,13 @@ pub(crate) fn sync_players(mut state: Option<ResMut<SsRenderState>>, extracted: 
 
     // Drop the trees whose entities went away. The extracted list is this
     // frame's whole truth, so anything absent from it is gone.
+    let before = state.slots.len();
     state.slots.retain(|slot| extracted.players.iter().any(|player| player.entity == slot.entity));
+    let mut packs_changed = state.slots.len() != before;
 
     // Split the borrow: the override reconcile needs the device-scoped renderer
     // and one slot at once, which are disjoint fields.
-    let SsRenderState { renderer, slots, .. } = state;
+    let SsRenderState { renderer, slots, lent_atlases, warned_srgb_override, .. } = state;
     let device = device.wgpu_device();
 
     for extracted_player in &extracted.players {
@@ -117,35 +141,55 @@ pub(crate) fn sync_players(mut state: Option<ResMut<SsRenderState>>, extracted: 
         let index = match position {
             Some(index) => index,
             None => {
-                slots.push(PlayerSlot { entity: extracted_player.entity, player: SSPlayer::new(), src: String::new(), animation: String::new(), started: false, playing: false, restart: 0, applied_overrides: HashMap::new() });
+                slots.push(PlayerSlot { entity: extracted_player.entity, player: SSPlayer::new(), pack: None, animation: String::new(), started: false, playing: false, restart: 0, applied_overrides: HashMap::new() });
                 slots.len() - 1
             }
         };
         let slot = &mut slots[index];
 
         // The two allocating steps, each guarded by what it was last given.
+        //
+        // A pack is taken only once it has settled, so the tree is never built
+        // before its atlases can be lent — no frame of white silhouettes. Until a
+        // newer load settles the character keeps the tree it has, which is what
+        // keeps a hot reload from blinking it out.
         let mut pack_changed = false;
-        if slot.src != extracted_player.src {
-            slot.src.clone_from(&extracted_player.src);
+        if extracted_player.settled
+            && let Some(pack) = packs.get(extracted_player.pack)
+            && slot.pack != Some((extracted_player.pack, pack.generation))
+        {
+            slot.pack = Some((extracted_player.pack, pack.generation));
+            // A fresh player rather than a re-registration: a player only ever
+            // accumulates packs, and the old ones are this pack's no longer.
+            slot.player = SSPlayer::new();
+            slot.player.set_pack(&pack.packs[0]);
+            for sibling in &pack.packs[1..] {
+                slot.player.add_pack(sibling);
+            }
+            // Key each pack's atlases the way the asset loader did, so the draw
+            // batches resolve to the textures lent below. Nothing is read.
+            let mut keys = Keys { base: &pack.path };
+            for each in &pack.packs {
+                bevy::tasks::block_on(slot.player.load_assets(&mut keys, each.name()));
+            }
             slot.animation.clear();
             // A different pack means a different tree; transport starts over.
             slot.started = false;
             slot.playing = false;
             pack_changed = true;
-            if let Err(err) = slot.player.load(&extracted_player.src) {
-                error!("ssplayer-bevy: could not load {:?}: {err:?}", extracted_player.src);
-                continue;
-            }
-            for missing in slot.player.missing_assets() {
-                warn!("ssplayer-bevy: {:?} is missing {:?}", extracted_player.src, missing);
-            }
+            packs_changed = true;
         }
-        if !extracted_player.animation.is_empty() && slot.animation != extracted_player.animation {
+        // Only against a tree built from the pack the character names now. A switch
+        // changes `pack` and `animation` together, and until the new pack settles
+        // the tree is still the old one — which has no such animation.
+        let built_from_named_pack = slot.pack.is_some_and(|(id, _)| id == extracted_player.pack);
+        if built_from_named_pack && !extracted_player.animation.is_empty() && slot.animation != extracted_player.animation {
             slot.animation.clone_from(&extracted_player.animation);
             if let Err(err) = slot.player.set_animation(&extracted_player.animation) {
                 // The names come from the pack, so listing them turns a typo
                 // into a one-line fix rather than a hunt through the .ssab.
-                error!("ssplayer-bevy: no animation {:?} in {:?} ({err:?}); it has {:?}", extracted_player.animation, extracted_player.src, slot.player.animation_names().unwrap_or_default());
+                let path = packs.get(extracted_player.pack).map(|pack| pack.path.to_string()).unwrap_or_default();
+                error!("ssplayer-bevy: no animation {:?} in {path:?} ({err:?}); it has {:?}", extracted_player.animation, slot.player.animation_names().unwrap_or_default());
                 continue;
             }
             // A fresh tree, stopped at its head; transport starts over.
@@ -192,7 +236,37 @@ pub(crate) fn sync_players(mut state: Option<ResMut<SsRenderState>>, extracted: 
         }
         slot.playing = want;
 
-        reconcile_overrides(slot, renderer, device, &images, &extracted_player.overrides, pack_changed);
+        reconcile_overrides(slot, renderer, device, &images, &extracted_player.overrides, pack_changed, warned_srgb_override);
+    }
+
+    lend_atlases(renderer, device, lent_atlases, slots, &packs, &images, packs_changed);
+}
+
+/// Lend the renderer every atlas the characters' packs draw with, as the texture
+/// Bevy prepared for it.
+///
+/// Borrowed rather than uploaded, so an atlas is decoded once (by Bevy) and held
+/// once (on the GPU): the renderer keeps no pixels of its own for it. Re-lent when
+/// Bevy replaces the texture — a hot-reloaded image — and, when the set of packs
+/// in play changed, taken back from the renderer once no character's pack names
+/// it, which is what lets Bevy free it.
+fn lend_atlases(renderer: &mut SSRenderer, device: &wgpu::Device, lent: &mut HashMap<u32, TextureId>, slots: &[PlayerSlot], packs: &RenderAssets<RenderSsPack>, images: &RenderAssets<GpuImage>, packs_changed: bool) {
+    let in_play = || slots.iter().filter_map(|slot| slot.pack).filter_map(|(id, _)| packs.get(id));
+    for pack in in_play() {
+        for &(key, image) in &pack.atlases {
+            let Some(gpu) = images.get(image) else { continue };
+            if lent.get(&key) == Some(&gpu.texture.id()) {
+                continue;
+            }
+            let size = gpu.texture.size();
+            renderer.set_texture(device, key, &gpu.texture_view, (size.width, size.height), SsAlphaMode::Straight);
+            lent.insert(key, gpu.texture.id());
+        }
+    }
+    if packs_changed {
+        for (key, _) in lent.extract_if(|key, _| !in_play().any(|pack| pack.atlases.iter().any(|(k, _)| k == key))) {
+            renderer.forget_texture(key);
+        }
     }
 }
 
@@ -205,7 +279,7 @@ pub(crate) fn sync_players(mut state: Option<ResMut<SsRenderState>>, extracted: 
 /// pack changed under it — clears the lot, because the new pack's cellmaps are not
 /// the old one's. An image Bevy has not finished preparing is left for a later
 /// frame, so binding a freshly-loaded handle is safe.
-fn reconcile_overrides(slot: &mut PlayerSlot, renderer: &mut SSRenderer, device: &wgpu::Device, images: &RenderAssets<GpuImage>, wanted: &[(String, Handle<Image>)], pack_changed: bool) {
+fn reconcile_overrides(slot: &mut PlayerSlot, renderer: &mut SSRenderer, device: &wgpu::Device, images: &RenderAssets<GpuImage>, wanted: &[(String, Handle<Image>)], pack_changed: bool, warned_srgb: &mut bool) {
     if pack_changed && !slot.applied_overrides.is_empty() {
         for (name, (_, key)) in std::mem::take(&mut slot.applied_overrides) {
             slot.player.restore_cellmap_texture(None, &name);
@@ -223,6 +297,16 @@ fn reconcile_overrides(slot: &mut PlayerSlot, renderer: &mut SSRenderer, device:
         }
         let Some(gpu) = images.get(id) else { continue };
         let Some(key) = slot.player.override_cellmap_texture_key(None, name) else { continue };
+        // The player takes atlas bytes as authored; sampling an sRGB texture hands
+        // it linear values instead, and the costume comes out visibly darker than
+        // the atlas it replaces. Bevy loads a PNG as sRGB unless told otherwise.
+        if gpu.texture_descriptor.format.is_srgb() && !*warned_srgb {
+            *warned_srgb = true;
+            warn!(
+                "ssplayer-bevy: texture override {name:?} is an sRGB image and will draw too dark. \
+                 Load it with `is_srgb: false` in its `ImageLoaderSettings`."
+            );
+        }
         let size = gpu.texture.size();
         renderer.set_texture(device, key, &gpu.texture_view, (size.width, size.height), SsAlphaMode::Straight);
         slot.applied_overrides.insert(name.clone(), (id, key));
