@@ -196,8 +196,8 @@ try {
         # `cargo doc` writes no index.html at the root of a workspace -- with
         # several crates there is no single page to land on. The nav entry in both
         # locale configs links straight to the player, and this covers anyone who
-        # trims the URL back to /api/. Keep it identical to the one in pages.yml
-        # and in the .sh twin.
+        # trims the URL back to /api/. Keep it identical to the one in the .sh
+        # twin.
         #
         # Only the two published crates are here. ssplayer-wgpu-ffi sets
         # `doc = false` (it is a staticlib/cdylib whose surface is the C header,
