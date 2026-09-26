@@ -1,4 +1,4 @@
-# 🦀 SSPlayer for wgpu
+# 🦀 SpriteStudio Player for wgpu
 
 **[SpriteStudio](https://www.webtech.co.jp/spritestudio/)** のアニメーション（`.ssab`）を
 [wgpu](https://wgpu.rs/) で再生します。レンダラーもシェーダーも 1 つ、呼び方が 4 通り。モーションは専用エディタでアーティストが作り、あなたはファイルを読み込んで再生するだけです。動画ファイルも、作り直しも、エンジンへのロックインもありません。

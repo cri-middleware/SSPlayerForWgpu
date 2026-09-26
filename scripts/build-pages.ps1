@@ -207,8 +207,8 @@ try {
         $landing = @'
 <!doctype html>
 <meta charset="utf-8">
-<title>SSPlayer for wgpu — Rust API</title>
-<h1>SSPlayer for wgpu — Rust API</h1>
+<title>SpriteStudio Player for wgpu — Rust API</title>
+<h1>SpriteStudio Player for wgpu — Rust API</h1>
 <ul>
   <li><a href="ssplayer_wgpu/index.html">ssplayer_wgpu</a> — the player</li>
   <li><a href="ssplayer_bevy/index.html">ssplayer_bevy</a> — the Bevy adapter</li>
