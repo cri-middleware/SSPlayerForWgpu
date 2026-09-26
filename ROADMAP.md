@@ -13,7 +13,11 @@ breaks are in [CONTRIBUTING.md](./CONTRIBUTING.md#technical-constraints--guiding
 ## Playback & rendering
 
 - [x] Draw kinds — Normal, Mesh, Shape, Instance, Effect, Mask.
-- [x] All 12 blend modes and part colours, premultiplied throughout.
+- [x] Part colours and blend modes, premultiplied throughout. Seven blend states
+      serve ten of the twelve modes: Mulalpha and Mul2 share Mul's and Screen2
+      shares Screen's, as in `ssplayer-pixi`, and no fixture has confirmed those
+      three exact. `Div2` / `Overlay2` fall back to `Mix` — see *Backdrop-reading
+      blends* below.
 - [x] Player-level tint — `set_tint` / `ss_player_set_tint` / `setTint`, taking
       `0xRRGGBB` like `ssplayer-webgl`'s `tint`. It applies after the PartsColor
       mix, so it could not fold into vertex colour: it rides on `Prim` beside the
