@@ -102,7 +102,7 @@ for what is planned.
 | | Rust | C | JavaScript | Bevy |
 |---|:--:|:--:|:--:|:--:|
 | [Load, both export modes, sibling packs](./loading.md) | ✅ | ✅ | ✅ | ✅ |
-| [Transport: play / pause / resume / stop / seek](./playback.md) | ✅ | ✅ | ✅ | partial |
+| [Transport: play / pause / resume / stop / seek](./playback.md) | ✅ | ✅ | ✅ | ✅ |
 | [Loop count, sections, direction, sub-frame](./playback.md) | ✅ | ✅ | ✅ | ✅ |
 | [Events: user data, signal, audio](./events.md) | ✅ | ✅ | ✅ | ✅ |
 | [Part overrides: visibility, cell, colour](./part-overrides.md) | ✅ | ✅ | ✅ | — |

@@ -110,12 +110,18 @@ draws too dark, and the adapter warns once. Only characters that swap textures n
 | `SsFinished` | `entity` — the completion **edge** |
 | `SsLooped` | `entity` — the loop boundary edge |
 
-A seek is the one command that goes the other way, from gameplay to the character. It is a message
-rather than a field, because it happens once rather than being a state the character is in:
+Three commands go the other way, from gameplay to the character. They are messages rather than
+fields, because each happens once rather than being a state the character is in. One sent before the
+pack has loaded is applied once the animation is set up, and of several of a kind in one frame, the
+last wins:
 
 | Message | Carries |
 |---|---|
-| `SsSeek` | `entity`, `frame: f32` — move the playhead there. Fractional frames are honoured, and it stays inside the section. One sent before the pack has loaded lands once the animation is set up |
+| `SsPlay` | `entity`, `start_frame: Option<f32>` — **play**: rewind to the head of the section, or to `start_frame`, re-arm the loop count and start, even a finished or stopped animation. `None` is what bumping `restart` does. `playing` still governs afterwards |
+| `SsStop` | `entity` — **stop**: end playback where it stands. The frame stays drawn, and turning `playing` off and on does not start it again; `SsPlay` or `restart` does |
+| `SsSeek` | `entity`, `frame: f32` — move the playhead there. Fractional frames are honoured, and it stays inside the section |
+
+Sent together in one frame they apply as play, stop, seek.
 
 ```rust
 fn jump(mut seeks: MessageWriter<SsSeek>, character: Single<Entity, With<SsPlayer>>) {

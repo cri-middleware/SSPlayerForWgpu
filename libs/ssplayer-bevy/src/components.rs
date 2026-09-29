@@ -53,8 +53,9 @@ impl Default for SsTransform {
 #[derive(Component, Clone, Copy, Debug)]
 pub struct SsPlayback {
     /// Whether the timeline advances. Toggling it pauses and resumes in place; it
-    /// never rewinds, so it cannot replay a finished animation — that is
-    /// [`SsPlayback::restart`]'s job.
+    /// never rewinds, so it cannot replay a finished animation, nor start one an
+    /// [`SsStop`] ended — that is [`SsPlayback::restart`]'s job, or an
+    /// [`SsPlay`]'s.
     pub playing: bool,
     /// A multiple of the authored rate. `0` and negatives stop the playhead.
     pub speed_scale: f32,
@@ -131,6 +132,35 @@ impl Default for SsPlayback {
 pub struct SsSeek {
     pub entity: Entity,
     pub frame: f32,
+}
+
+/// Start a character's animation from the head of its section, or from
+/// `start_frame`, as [`ssplayer_wgpu::SSPlayer::play`] and
+/// [`ssplayer_wgpu::SSPlayer::play_from`] do: it rewinds, re-arms the loop count
+/// and starts even a finished or stopped animation. `start_frame: None` is what
+/// bumping [`SsPlayback::restart`] does.
+///
+/// [`SsPlayback::playing`] still governs afterwards, as it does after a
+/// restart: a character held with `playing: false` starts and holds on its
+/// first frame. One sent before the pack has loaded is applied once the
+/// animation is set up; of several in one frame, the last wins.
+#[derive(Message, Clone, Copy, Debug)]
+pub struct SsPlay {
+    pub entity: Entity,
+    pub start_frame: Option<f32>,
+}
+
+/// End a character's playback where it stands, as
+/// [`ssplayer_wgpu::SSPlayer::stop`] does. The playhead stays, so the frame it
+/// stopped on is still drawn, and it does not count as finished.
+///
+/// A stop is not a pause: turning [`SsPlayback::playing`] off and on again
+/// does not start a stopped animation, because resuming only carries on what
+/// is running. Start it again with [`SsPlay`] or [`SsPlayback::restart`]. One
+/// sent before the pack has loaded is applied once the animation is set up.
+#[derive(Message, Clone, Copy, Debug)]
+pub struct SsStop {
+    pub entity: Entity,
 }
 
 /// Runtime texture replacement: swap the texture a cellmap binds for a Bevy

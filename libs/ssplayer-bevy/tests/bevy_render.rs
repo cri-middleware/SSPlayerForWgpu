@@ -25,7 +25,7 @@ use bevy::render::render_resource::{Extent3d, TextureDimension, TextureFormat, T
 use bevy::render::view::Msaa;
 use bevy::sprite::Sprite;
 use bevy::window::WindowPlugin;
-use ssplayer_bevy::{PlaybackDirection, SsPlayback, SsPlaybackState, SsPlayer, SsPlayerPlugin, SsSeek, SsTransform};
+use ssplayer_bevy::{PlaybackDirection, SsPlay, SsPlayback, SsPlaybackState, SsPlayer, SsPlayerPlugin, SsSeek, SsStop, SsTransform};
 use std::path::Path;
 use std::sync::{Arc, Mutex};
 
@@ -423,6 +423,70 @@ fn a_seek_sent_before_the_pack_loads_lands_once_it_has() {
 
     let state = app.world().entity(player).get::<SsPlaybackState>().expect("SsPlaybackState is a required component of SsPlayer and must be present");
     assert_eq!(state.frame_no, 5.0, "the seek did not land");
+}
+
+/// `SsPlay` with a start frame lands there, like `play_from`, even when sent
+/// before the pack has loaded.
+#[test]
+fn a_play_from_a_frame_starts_there() {
+    if !fixtures_present() {
+        eprintln!("assets not generated, skipping");
+        return;
+    }
+    let Some((mut app, handle, _captured)) = headless_app() else {
+        eprintln!("no GPU adapter available, skipping");
+        return;
+    };
+
+    app.world_mut().spawn((Camera2d, Camera { clear_color: ClearColorConfig::Custom(Color::BLACK), ..default() }, RenderTarget::Image(handle.into()), Msaa::Off));
+    let (character, transform, playback) = masked_character(app.world());
+    let player = app.world_mut().spawn((character, transform, SsPlayback { speed_scale: 0.0, ..playback })).id();
+    app.world_mut().write_message(SsPlay { entity: player, start_frame: Some(7.0) });
+
+    app.finish();
+    app.cleanup();
+    pump(&mut app);
+
+    let state = app.world().entity(player).get::<SsPlaybackState>().expect("SsPlaybackState is a required component of SsPlayer and must be present");
+    assert_eq!(state.frame_no, 7.0, "the play did not start from frame 7");
+}
+
+/// `SsStop` holds the playhead where it stands, and — unlike a pause — turning
+/// `playing` off and on again does not start it: resuming only carries on what
+/// is running.
+#[test]
+fn a_stop_holds_the_frame_and_playing_does_not_resume_it() {
+    if !fixtures_present() {
+        eprintln!("assets not generated, skipping");
+        return;
+    }
+    let Some((mut app, handle, _captured)) = headless_app() else {
+        eprintln!("no GPU adapter available, skipping");
+        return;
+    };
+
+    app.world_mut().spawn((Camera2d, Camera { clear_color: ClearColorConfig::Custom(Color::BLACK), ..default() }, RenderTarget::Image(handle.into()), Msaa::Off));
+    let character = masked_character(app.world());
+    let player = app.world_mut().spawn(character).id();
+
+    app.finish();
+    app.cleanup();
+    pump(&mut app);
+
+    app.world_mut().write_message(SsStop { entity: player });
+    for _ in 0..FRAMES {
+        app.update();
+    }
+    let frame_no = |app: &App| app.world().entity(player).get::<SsPlaybackState>().expect("SsPlaybackState is a required component of SsPlayer and must be present").frame_no;
+    let stopped_at = frame_no(&app);
+
+    app.world_mut().entity_mut(player).get_mut::<SsPlayback>().expect("SsPlayback is required").playing = false;
+    app.update();
+    app.world_mut().entity_mut(player).get_mut::<SsPlayback>().expect("SsPlayback is required").playing = true;
+    for _ in 0..FRAMES {
+        app.update();
+    }
+    assert_eq!(frame_no(&app), stopped_at, "a stopped animation moved: the stop did not hold, or `playing` resumed it");
 }
 
 /// A multisampled view is skipped, not a hard crash.

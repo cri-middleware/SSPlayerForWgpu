@@ -56,9 +56,12 @@ struct PlayerSlot {
     /// pin playback where it began. Cleared when the tree rebuilds.
     loop_count: Option<i32>,
     section: Option<Option<(i32, i32)>>,
-    /// A seek not yet applied: kept until the character has an animation set up
-    /// to seek in.
+    /// Transport commands not yet applied, kept until the character has an
+    /// animation set up to apply them to: a seek, a play (and the frame it
+    /// starts from), a stop.
     pending_seek: Option<f32>,
+    pending_play: Option<Option<f32>>,
+    pending_stop: bool,
     /// Runtime texture overrides currently bound, cellmap name -> (the image
     /// applied, the GPU texture it had then, the private renderer key it went in
     /// under). Diffed against the character's `SsCellmapTextures` each frame: a
@@ -167,6 +170,8 @@ pub(crate) fn sync_players(mut state: Option<ResMut<SsRenderState>>, extracted: 
                     loop_count: None,
                     section: None,
                     pending_seek: None,
+                    pending_play: None,
+                    pending_stop: false,
                     applied_overrides: HashMap::new(),
                 });
                 slots.len() - 1
@@ -267,6 +272,32 @@ pub(crate) fn sync_players(mut state: Option<ResMut<SsRenderState>>, extracted: 
             slot.playing = true;
         }
 
+        // This frame's commands. Of each kind the last written wins, and one
+        // written before the tree exists waits for it. Applied in the order a
+        // host would mean them if it sent several at once: play, then stop, then
+        // seek.
+        if let Some(&(_, start_frame)) = extracted.plays.iter().rev().find(|(entity, _)| *entity == slot.entity) {
+            slot.pending_play = Some(start_frame);
+        }
+        if extracted.stops.contains(&slot.entity) {
+            slot.pending_stop = true;
+        }
+        if let Some(&(_, frame)) = extracted.seeks.iter().rev().find(|(entity, _)| *entity == slot.entity) {
+            slot.pending_seek = Some(frame);
+        }
+        let ready = slot.player.current_animation().is_some();
+
+        // Where a restart goes, and for the same reason: `playing` below still
+        // governs, so a held character starts and holds on its first frame.
+        if ready && let Some(start_frame) = slot.pending_play.take() {
+            match start_frame {
+                Some(frame) => slot.player.play_from(frame),
+                None => slot.player.play(),
+            }
+            slot.started = true;
+            slot.playing = true;
+        }
+
         // Transport under the player's split play/resume semantics: `play()`
         // rewinds and re-arms, so it is only the initial start; `pause()` holds
         // and `resume()` lifts, neither rewinding. `is_playing()` stays true
@@ -287,13 +318,14 @@ pub(crate) fn sync_players(mut state: Option<ResMut<SsRenderState>>, extracted: 
         }
         slot.playing = want;
 
-        // After the start: `play` rewinds, and would undo a seek made before it.
-        if let Some(&(_, frame)) = extracted.seeks.iter().rev().find(|(entity, _)| *entity == slot.entity) {
-            slot.pending_seek = Some(frame);
+        // After the start, which would otherwise start a stopped animation again.
+        // `slot.playing` is left as it is: a stopped animation ignores `resume`,
+        // so `playing` toggling afterwards leaves it stopped, as on the player.
+        if ready && std::mem::take(&mut slot.pending_stop) {
+            slot.player.stop();
         }
-        if slot.player.current_animation().is_some()
-            && let Some(frame) = slot.pending_seek.take()
-        {
+        // After the start too: `play` rewinds, and would undo a seek made before it.
+        if ready && let Some(frame) = slot.pending_seek.take() {
             slot.player.seek(frame);
         }
 

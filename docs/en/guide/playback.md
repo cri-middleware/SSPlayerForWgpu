@@ -64,6 +64,10 @@ not ask it to, this page is why.
 
     // To play from the head, bump the generation counter — any change of value.
     playback.restart += 1;
+
+    // The rest are messages, since each happens once.
+    plays.write(SsPlay { entity, start_frame: Some(12.0) });   // play from a frame
+    stops.write(SsStop { entity });                             // stop
     ```
 
 ## Speed, direction and ping-pong
