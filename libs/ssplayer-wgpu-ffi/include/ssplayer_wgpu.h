@@ -859,7 +859,7 @@ void ss_player_stop(ss_player_t *handle);
 /*
  Scale playback speed; 1.0 is the authored speed.
 
- Zero and negative values are **ignored** (the runtime keeps 1.0). To play
+ Zero and negative values **stop** the playhead where it stands. To play
  backwards use `ss_player_set_playback_direction`, which is the separate
  setting that controls direction.
 
