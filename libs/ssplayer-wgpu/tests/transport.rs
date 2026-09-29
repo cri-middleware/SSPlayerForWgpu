@@ -147,8 +147,8 @@ fn a_real_switch_drops_the_section_and_keeps_the_rest() {
     assert_eq!(player.total_frames(), player.end_frame() - player.start_frame() + 1);
     assert!(player.total_frames() > 4, "the section should not have followed");
 
-    // Everything else stays. The runtime carries these across a setup itself —
-    // this Player used to rebuild the context and lose all four.
+    // Everything else stays: the runtime carries these across a setup on one
+    // context.
     assert_eq!(player.speed_scale(), 2.0, "speed describes the playback, not the clip");
     assert!(!player.frame_skip_enabled(), "frame skip is a Player policy");
     assert_eq!(player.playback_direction(), PlaybackDirection::Backward);
@@ -156,6 +156,50 @@ fn a_real_switch_drops_the_section_and_keeps_the_rest() {
     // The loop count is the one the runtime drops, because the transition states
     // it — so the Player puts its own back, as every sibling Player does.
     assert_eq!(player.loop_count(), 3, "the host's loop count survives the switch");
+}
+
+/// The settings are the player's, not the tree's. This Player builds a new
+/// context for its first animation and for a new pack, where the siblings keep
+/// one context and rebind it, so without holding them itself the four would go
+/// back to the runtime's defaults at exactly those two points.
+#[test]
+fn transport_set_before_the_first_animation_holds_across_a_new_pack() {
+    let mut player = SSPlayer::new();
+    player.set_speed_scale(0.5);
+    player.set_frame_rate(12);
+    player.set_frame_skip_enabled(false);
+    player.set_playback_direction(PlaybackDirection::Backward, PlaybackStyle::PingPong);
+
+    let check = |player: &SSPlayer, when: &str| {
+        assert_eq!(player.speed_scale(), 0.5, "speed {when}");
+        assert_eq!(player.frame_rate(), 12, "frame-rate override {when}");
+        assert!(!player.frame_skip_enabled(), "frame skip {when}");
+        assert_eq!(player.playback_direction(), PlaybackDirection::Backward, "direction {when}");
+        assert_eq!(player.playback_style(), PlaybackStyle::PingPong, "style {when}");
+    };
+    check(&player, "read back before any tree exists");
+
+    for pack in ["overall/Basic.ssab", "Ringo/Ringo.ssab"] {
+        player.load(format!("{}/{pack}", asset_root())).unwrap();
+        check(&player, &format!("after loading {pack}, before an animation"));
+        let anim = player.animation_names().unwrap().first().cloned().unwrap();
+        player.set_animation(&anim).unwrap();
+        check(&player, &format!("once {pack}'s {anim} is set up"));
+    }
+}
+
+/// A speed at or below zero is the stop the runtime turns it into, whether or
+/// not a tree exists yet to hand it to.
+#[test]
+fn a_stop_set_before_the_first_animation_reads_back_as_a_stop() {
+    let mut player = SSPlayer::new();
+    player.set_speed_scale(-1.0);
+    assert_eq!(player.speed_scale(), 0.0);
+
+    player.load(format!("{}/overall/Basic.ssab", asset_root())).unwrap();
+    let anim = player.animation_names().unwrap().first().cloned().unwrap();
+    player.set_animation(&anim).unwrap();
+    assert_eq!(player.speed_scale(), 0.0);
 }
 
 #[test]
