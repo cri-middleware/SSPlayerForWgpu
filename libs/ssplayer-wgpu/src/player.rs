@@ -651,17 +651,25 @@ pub struct SSPlayer {
     tint: u32,
     /// The loop count the host chose, re-applied after every `setup_animation`.
     ///
-    /// The **only** transport value this player holds, and it is held for the
-    /// reason every sibling Player holds it: the runtime resets the count on
-    /// every transition, deliberately, because a transition is what states it
-    /// Everything else the host sets —
-    /// speed, the frame-rate override, frame skip, the direction and style — the
-    /// runtime carries across a `setup_animation` itself, so keeping a copy here
-    /// would only give it something to drift from.
+    /// Held for the reason every sibling Player holds it: the runtime resets the
+    /// count on every transition, deliberately, because a transition is what
+    /// states it.
     ///
     /// `None` until the host sets one, so a count it never chose is never
     /// written over the animation's own default.
     loop_count: Option<i32>,
+    /// The rest of the transport the host chose — speed, the frame-rate
+    /// override, frame skip, the direction and style — handed to every root
+    /// context this player builds.
+    ///
+    /// The runtime carries these across a `setup_animation` itself, but they
+    /// live on its context, and this player builds a new one for its first
+    /// animation and whenever the pack behind it changes. The sibling Players
+    /// keep one context and rebind it, so there the settings hold from before
+    /// the first animation and across a pack change; holding them here is what
+    /// makes that true of this one. Only the setters below write them, so the
+    /// copy cannot drift from the context it was handed to.
+    transport: HostTransport,
     /// Whether the *display* frame keeps its fraction (see
     /// [`SSPlayer::set_sub_frame_enabled`]). The playhead is an `f32` either way.
     sub_frame: bool,
@@ -685,6 +693,24 @@ pub struct SSPlayer {
     /// Private override keys a restore has retired, dropped from the renderer on
     /// the next flush. Deferred for the same reason as the uploads.
     pending_forgets: Vec<u32>,
+}
+
+/// The transport settings of [`SSPlayer::transport`](SSPlayer), at the
+/// runtime's own defaults until the host changes one.
+#[derive(Clone, Copy, Debug)]
+struct HostTransport {
+    speed_scale: f32,
+    /// The frame-rate override; `0` leaves the authored rate.
+    frame_rate: i32,
+    frame_skip: bool,
+    direction: PlaybackDirection,
+    style: PlaybackStyle,
+}
+
+impl Default for HostTransport {
+    fn default() -> Self {
+        Self { speed_scale: 1.0, frame_rate: 0, frame_skip: true, direction: PlaybackDirection::Forward, style: PlaybackStyle::Normal }
+    }
 }
 
 /// One active runtime texture override: a cellmap redirected to a private
@@ -755,6 +781,7 @@ impl SSPlayer {
             alpha: 1.0,
             tint: WHITE_TINT,
             loop_count: None,
+            transport: HostTransport::default(),
             // On, matching the Web and Flutter players: this one draws for
             // applications and for hosts with a display refresh to keep up with,
             // where interpolating between authored frames is the point. The game
@@ -1166,13 +1193,10 @@ impl SSPlayer {
         let static_res: &'static ssruntime::AnimationResource<'static> = unsafe { &*res_ptr };
 
         // Hand the existing root context the new clip whenever it is still bound
-        // to the pack we are selecting from. That is what every sibling Player
-        // does, and it is why they keep the speed, the frame-rate override, the
-        // frame skip and the playback direction across a switch for free: the
-        // runtime carries those itself, and it
-        // can only carry them for a context that survives. Rebuilding the context
-        // here — which this used to do unconditionally — threw all four away and
-        // made this Player the only one that did.
+        // to the pack we are selecting from, as every sibling Player does: the
+        // runtime carries the host's transport across a setup on one context. A
+        // context built new — the first animation, or a replaced pack — is
+        // handed it from `transport` below instead.
         //
         // Only the per-animation rig is rebuilt: which instance children are
         // mounted and which effect slots exist is the animation's business.
@@ -1188,7 +1212,14 @@ impl SSPlayer {
             _ => false,
         };
         if !reused {
-            let root = build_node(&self.packs, &self.atlas_keys, &main_pack, anim_name).ok_or(SSRuntimeError::NotLoaded)?;
+            let mut root = build_node(&self.packs, &self.atlas_keys, &main_pack, anim_name).ok_or(SSRuntimeError::NotLoaded)?;
+            // A new context starts at the runtime's defaults; the host's settings
+            // are this player's, not the tree's.
+            let t = self.transport;
+            root.context.set_speed_scale(t.speed_scale);
+            root.context.set_frame_rate(t.frame_rate);
+            root.context.set_skip_frames(t.frame_skip);
+            root.context.set_playback_direction(t.direction.into(), t.style.into());
             // Assigning drops the previous tree, and with it the last raw pointer
             // into any pack a re-registration retired.
             self.root = Some(root);
@@ -1215,8 +1246,8 @@ impl SSPlayer {
     }
 
     /// Put the host's loop count back after a `setup_animation` dropped it. See
-    /// [`SSPlayer::loop_count`](struct.SSPlayer.html) — it is the one value this
-    /// player holds, and this is the only place it is replayed.
+    /// [`SSPlayer::loop_count`](struct.SSPlayer.html) — it is the one setting a
+    /// setup resets, and this is the only place it is replayed.
     fn reapply_loop_count(&mut self) {
         let Some(count) = self.loop_count else { return };
         if let Some(root) = &mut self.root {
@@ -1287,8 +1318,10 @@ impl SSPlayer {
     /// [`SSPlayer::set_playback_direction`] -- and read back from
     /// [`SSPlayer::speed`] as the `0.0` they became.
     ///
-    /// Survives [`SSPlayer::set_animation`], and may be set before the first one.
+    /// Survives [`SSPlayer::set_animation`] and a pack change, and may be set
+    /// before the first animation.
     pub fn set_speed_scale(&mut self, speed: f32) {
+        self.transport.speed_scale = speed;
         if let Some(root) = &mut self.root {
             root.context.set_speed_scale(speed);
         }
@@ -1298,7 +1331,8 @@ impl SSPlayer {
     /// runtime, so a rate that clamped to a stop reads back as `0.0` rather than
     /// as the negative that was asked for.
     pub fn speed_scale(&self) -> f32 {
-        self.root.as_ref().map(|r| r.context.get_speed_scale()).unwrap_or(1.0)
+        // The runtime stores anything not above zero as the stop it is.
+        self.root.as_ref().map(|r| r.context.get_speed_scale()).unwrap_or(self.transport.speed_scale.max(0.0))
     }
 
     pub fn is_playing(&self) -> bool {
@@ -1376,20 +1410,18 @@ impl SSPlayer {
 
     // --- Playback shape ----------------------------------------------------
     //
-    // NOTE: everything here survives `set_animation`, as it does on every other
-    // Player, and for the same reason: the switch hands the existing `Context` a
-    // new clip, and the runtime deliberately keeps the speed, the frame skip,
-    // the frame-rate override and the playback direction across one (SDK #369 /
-    // #370 / #375). The loop count is the exception it makes on purpose — the
-    // transition is what states a count — so this Player holds that one value
-    // and puts it back, exactly as the others do.
+    // NOTE: everything here holds across `set_animation` and a pack change, and
+    // may be set before the first animation, as on every other Player. The
+    // runtime keeps the speed, the frame skip, the frame-rate override and the
+    // direction across a setup on one context; this Player also builds a new
+    // context for its first animation and for a replaced pack, so it holds
+    // those in `transport` and hands them to each root it builds. The loop
+    // count is the exception the runtime makes on purpose — the transition is
+    // what states a count — so it is held too and put back after every setup,
+    // exactly as the others do.
     //
     // What does NOT survive is the playback SECTION: frame numbers mean nothing
     // against a different clip.
-    //
-    // The tree is still rebuilt when the pack under the main name has been
-    // replaced, because then there is no context to hand a new clip to. Nothing
-    // is carried across that — a new pack is a new owner.
 
     /// `count` cycles then stop; `-1` (or `0`) loops forever. Under
     /// [`PlaybackStyle::PingPong`] one cycle is a full round trip.
@@ -1410,17 +1442,23 @@ impl SSPlayer {
         self.root.as_ref().map(|r| r.context.get_remaining_loops()).unwrap_or(0)
     }
 
-    /// Override the advance rate. The pack's authored rate otherwise — prefer
-    /// [`SSPlayer::set_speed_scale`], which scales playback without replacing it.
+    /// Override the advance rate. The pack's authored rate otherwise, and `0`
+    /// or below goes back to it — prefer [`SSPlayer::set_speed_scale`], which
+    /// scales playback without replacing it.
+    ///
+    /// Survives [`SSPlayer::set_animation`] and a pack change, and may be set
+    /// before the first animation.
     pub fn set_frame_rate(&mut self, fps: i32) {
+        self.transport.frame_rate = fps;
         if let Some(root) = &mut self.root {
             root.context.set_frame_rate(fps);
         }
     }
 
-    /// See [`SSPlayer::set_frame_rate`]. Zero before an animation is set.
+    /// See [`SSPlayer::set_frame_rate`]. Before an animation is set, the
+    /// override, or zero without one.
     pub fn frame_rate(&self) -> i32 {
-        self.root.as_ref().map(|r| r.context.get_frame_rate()).unwrap_or(0)
+        self.root.as_ref().map(|r| r.context.get_frame_rate()).unwrap_or(self.transport.frame_rate.max(0))
     }
 
     /// Restrict playback to `start..=end` of the current animation, so looping
@@ -1535,7 +1573,12 @@ impl SSPlayer {
     /// Which way the playhead walks, and what it does at the far end. Taken
     /// together because the runtime sets them as a pair — pass the current value
     /// for whichever you are not changing.
+    ///
+    /// Survives [`SSPlayer::set_animation`] and a pack change, and may be set
+    /// before the first animation.
     pub fn set_playback_direction(&mut self, direction: PlaybackDirection, style: PlaybackStyle) {
+        self.transport.direction = direction;
+        self.transport.style = style;
         if let Some(root) = &mut self.root {
             root.context.set_playback_direction(direction.into(), style.into());
         }
@@ -1543,18 +1586,14 @@ impl SSPlayer {
 
     /// See [`SSPlayer::set_playback_direction`].
     pub fn playback_direction(&self) -> PlaybackDirection {
-        self.root.as_ref().map(|r| r.context.get_playback_direction().into()).unwrap_or(PlaybackDirection::Forward)
+        self.root.as_ref().map(|r| r.context.get_playback_direction().into()).unwrap_or(self.transport.direction)
     }
 
     /// See [`SSPlayer::set_playback_direction`].
     pub fn playback_style(&self) -> PlaybackStyle {
-        self.root.as_ref().map(|r| r.context.get_playback_style().into()).unwrap_or(PlaybackStyle::Normal)
+        self.root.as_ref().map(|r| r.context.get_playback_style().into()).unwrap_or(self.transport.style)
     }
 
-    /// How a long tick is spent. On (the default) advances by the elapsed time
-    /// and drops the frames in between, keeping playback on the wall clock; off
-    /// advances exactly one frame per update, so nothing is skipped but a
-    /// stalled host plays in slow motion.
     /// Whether the frame handed to the runtime **for display** keeps its
     /// fraction. On by default here.
     ///
@@ -1576,7 +1615,15 @@ impl SSPlayer {
         self.sub_frame
     }
 
+    /// How a long tick is spent. On (the default) advances by the elapsed time
+    /// and drops the frames in between, keeping playback on the wall clock; off
+    /// advances exactly one frame per update, so nothing is skipped but a
+    /// stalled host plays in slow motion.
+    ///
+    /// Survives [`SSPlayer::set_animation`] and a pack change, and may be set
+    /// before the first animation.
     pub fn set_frame_skip_enabled(&mut self, skip: bool) {
+        self.transport.frame_skip = skip;
         if let Some(root) = &mut self.root {
             root.context.set_skip_frames(skip);
         }
@@ -1584,7 +1631,7 @@ impl SSPlayer {
 
     /// See [`SSPlayer::set_frame_skip_enabled`].
     pub fn frame_skip_enabled(&self) -> bool {
-        self.root.as_ref().map(|r| r.context.get_skip_frames()).unwrap_or(true)
+        self.root.as_ref().map(|r| r.context.get_skip_frames()).unwrap_or(self.transport.frame_skip)
     }
 
     // --- Per-part overrides -------------------------------------

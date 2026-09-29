@@ -179,19 +179,16 @@ measured in, and selecting an animation rebuilds the tree and takes the section 
     player.seek(18);
     ```
 
-## What survives switching animation
+## What survives switching animation or pack
 
-Selecting a new animation hands the existing playback context a new clip rather than building a new
-one, so most of the transport state carries across. This is the family's behaviour, not this
-player's invention.
+The transport settings belong to the player, not to the animation. They hold across
+`set_animation` and across a new pack (`load`, `set_pack`), and they can be set before the first
+animation. This is the family's behaviour, not this player's invention.
 
-| Survives `set_animation` | Does **not** survive |
+| Survives `set_animation` and a new pack | Does **not** survive |
 |---|---|
 | speed scale, frame-rate override, playback direction, frame skip | the **section** — frame numbers mean nothing against a different clip |
 | the loop count | |
-
-The tree *is* rebuilt from scratch when the pack behind the name has been replaced — a new pack is
-a new owner, and nothing is carried across that.
 
 ## Asking where playback is
 
