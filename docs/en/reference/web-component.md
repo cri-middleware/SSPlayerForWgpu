@@ -31,13 +31,37 @@ exists for a page that already has another SpriteStudio player registered under 
 |---|---|
 | `src` | URL of the `.ssab` — reference or embedded export, either works |
 | `pack` | Pack-name override. Defaults to the name inside the `.ssab` |
-| `anim` | Animation to play. Defaults to the first one the pack declares |
+| `animation` | Animation to play. Defaults to the first one the pack declares |
 | `autoplay` | Start playing once loaded. A **boolean attribute**, so absent means no |
+| `speed-scale` | A multiple of the authored rate. `0` and negatives stop |
+| `fit` | `contain` (default) or `cover` fits the authored canvas into the element; `none` draws 1:1 with the origin at the centre |
+| `align` | Where the fitted canvas sits: `center` (default), `top`, `bottom`, `left`, `right`, `top-left`, `top-right`, `bottom-left`, `bottom-right` |
+| `flip-x`, `flip-y` | Mirror the character. Boolean attributes; the alignment follows them |
 | `pause-when-hidden` | Stop the rAF loop while off-screen or backgrounded. **On by default** — opt out with `pause-when-hidden="false"` |
 
-!!! warning "Attributes are read when the element connects, not watched afterwards"
-    There is no `attributeChangedCallback`: setting `element.setAttribute('src', …)` on a live
-    element does **nothing**. To switch packs at runtime, call `loadSrc()`.
+### Changing them on a live element
+
+`src`, `pack`, `animation`, `speed-scale`, `fit`, `align`, `flip-x` and `flip-y` are watched:
+setting one on an element that is already playing takes effect.
+
+* A new `src` or `pack` loads that pack, as `loadSrc()` does, and the element dispatches `load`
+  once it is set up.
+* A new `animation` switches to it. With `autoplay` on, it plays from its head; without, it holds
+  its first frame.
+* `autoplay` is read whenever an animation is set up, and `pause-when-hidden` once, when the
+  element connects.
+
+### How the character fits the element
+
+The element fits the animation's **authored canvas** into its box, placed by the pivot the artist
+set, so a character authored standing on its origin lands inside the box rather than with its head
+out of the top. It is `contain` and `center` unless `fit` and `align` say otherwise.
+
+The box is the canvas of the animation the pack was **loaded on**, and it stays for every
+`animation` switch after that: one pack's animations may differ in canvas (Ringo's `dead` is 1300
+wide against 800), and a character that rescaled when it changed motion would look wrong. A new
+`src` or `pack` picks the box again. `fit="none"` skips all of this and draws one authored unit per
+canvas pixel with the origin at the centre.
 
 ### `autoplay` is opt-in, like `<video>`
 
@@ -63,18 +87,19 @@ The element does not hide the API — it exposes what it built, so anything on t
 ```js
 const el = document.querySelector('ss-player-webgpu');
 await el.loadSrc('/assets/Other.ssab');       // resolves to the animation names
-el.player.setSpeedScale(0.5);
+el.player.setLoopCount(1);
 el.player.setPartVisibilityOverride('hat', true, false);
-for (const e of el.player.events()) { /* ... */ }
 ```
 
-### `loadSrc(src, pack?, anim?)`
+### `loadSrc(src, pack?, animation?)`
 
 Fetches and plays a `.ssab`, and is how you switch packs at runtime. It resolves to the array of
 animation names, so a UI can offer them.
 
-It selects the animation (`anim`, or the first) and then honours `autoplay` exactly as the initial
-load did — so an element without `autoplay` holds the new pack's first frame too.
+It selects the animation (`animation`, or the first) and then honours `autoplay` exactly as the
+initial load did — so an element without `autoplay` holds the new pack's first frame too. It does
+not rewrite the element's attributes, so an element that is moved in the DOM (and so connects
+again) loads what its `src` says; a page that moves elements sets the attribute instead.
 
 Passing `pack` makes the element fetch the bytes itself and register them under that name, since
 `load` takes no name override.
@@ -85,6 +110,31 @@ gesture, and two in quick succession must switch twice rather than fail — so e
 before it, and the last one called is what stays on screen. The returned promise still rejects if
 *that* load fails, and it is yours to catch: only a startup failure reaches the element's own error
 box.
+
+## Events
+
+The element dispatches what playback did as DOM events on itself. They do not bubble.
+
+| Event | When | `detail` |
+|---|---|---|
+| `animationstarted` | the first frame that ran after a `play` | — |
+| `animationfinished` | the frame that completed playback. Never under an infinite loop, and not raised by `stop()` | — |
+| `animationlooped` | the frame that crossed a loop boundary | — |
+| `userdata` | a user-data key was crossed | `{ partIndex, integer?, rect?, point?, text? }` |
+| `signal` | a signal key was crossed | `{ partIndex, commandId, params }` |
+| `audio` | an audio key was crossed | `{ partIndex, soundName, loopNum, … }` |
+| `load` | a pack has loaded and its animation is set up | — |
+
+The first six are the family's required set, under the same stems every SpriteStudio Player uses
+(`animationFinished`, `userData`, …), lower-cased as DOM event names are. The timeline events carry
+the objects [`player.events()`](./js.md) returns, so a key crossed on a frame the tick skipped over
+still arrives. The element never plays sound: see [Events](../guide/events.md) for when an `audio`
+event is meant to.
+
+```js
+el.addEventListener('animationfinished', () => showNextButton());
+el.addEventListener('userdata', (e) => console.log(e.detail.text));
+```
 
 ## Layout and resolution
 

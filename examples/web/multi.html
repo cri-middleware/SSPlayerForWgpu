@@ -77,7 +77,7 @@
     </p>
 
     <figure>
-      <ss-player-webgpu class="checker" src="assets/Ringo/Ringo.ssab" data-origin="bottom" autoplay></ss-player-webgpu>
+      <ss-player-webgpu class="checker" src="assets/Ringo/Ringo.ssab" autoplay></ss-player-webgpu>
       <figcaption>ふつうのブロック要素。ページがサイズを決め、要素がそこを canvas で埋めます。</figcaption>
     </figure>
 
@@ -87,7 +87,7 @@
 
     <h2>文中にも置けます</h2>
     <p>
-      要素は行の中にも収まります <ss-player-webgpu class="inline" src="assets/Ringo/Ringo.ssab" data-origin="bottom" autoplay></ss-player-webgpu>
+      要素は行の中にも収まります <ss-player-webgpu class="inline" src="assets/Ringo/Ringo.ssab" autoplay></ss-player-webgpu>
       — <code>display: inline-block</code> にして高さを与えるだけで、行送りの一部として扱われます。
       canvas は要素の CSS ボックスに追従するので、ウィンドウ幅を変えれば解像度も付いてきます。
     </p>
@@ -101,7 +101,7 @@
 
     <div class="card">
       <span class="badge">上に HTML</span>
-      <ss-player-webgpu src="assets/Ringo/Ringo.ssab" data-origin="bottom" autoplay></ss-player-webgpu>
+      <ss-player-webgpu src="assets/Ringo/Ringo.ssab" autoplay></ss-player-webgpu>
       <div class="copy">
         <h3>テキストはアニメーションの上</h3>
         <p>グラデーションの帯も、見出しも、ただの子要素です。</p>
@@ -125,15 +125,15 @@
 
     <div class="fx">
       <div>
-        <ss-player-webgpu class="checker round" src="assets/Ringo/Ringo.ssab" data-origin="bottom" autoplay></ss-player-webgpu>
+        <ss-player-webgpu class="checker round" src="assets/Ringo/Ringo.ssab" autoplay></ss-player-webgpu>
         <span class="hint">border-radius: 50%</span>
       </div>
       <div>
-        <ss-player-webgpu class="checker gray" src="assets/Ringo/Ringo.ssab" data-origin="bottom" autoplay></ss-player-webgpu>
+        <ss-player-webgpu class="checker gray" src="assets/Ringo/Ringo.ssab" autoplay></ss-player-webgpu>
         <span class="hint">filter: grayscale(1)</span>
       </div>
       <div>
-        <ss-player-webgpu class="checker hue" src="assets/Ringo/Ringo.ssab" data-origin="bottom" autoplay></ss-player-webgpu>
+        <ss-player-webgpu class="checker hue" src="assets/Ringo/Ringo.ssab" autoplay></ss-player-webgpu>
         <span class="hint">filter: hue-rotate(140deg)</span>
       </div>
     </div>
@@ -172,12 +172,12 @@
     <h2>数を増やしても device は増えません</h2>
     <p class="hint">以下は数を稼ぐためだけのものです。HUD の canvas は増え、GPUDevice は 1 のままです。</p>
     <div class="grid">
-      <ss-player-webgpu class="checker" src="assets/Ringo/Ringo.ssab" data-origin="bottom" autoplay></ss-player-webgpu>
+      <ss-player-webgpu class="checker" src="assets/Ringo/Ringo.ssab" autoplay></ss-player-webgpu>
       <ss-player-webgpu class="checker" src="assets/Basic.ssab" autoplay></ss-player-webgpu>
       <ss-player-webgpu class="checker" src="assets/Mask.ssab" autoplay></ss-player-webgpu>
       <ss-player-webgpu class="checker" src="assets/Shape.ssab" autoplay></ss-player-webgpu>
       <ss-player-webgpu class="checker" src="assets/Mesh.ssab" autoplay></ss-player-webgpu>
-      <ss-player-webgpu class="checker" src="assets/Ringo/Ringo.ssab" data-origin="bottom" autoplay></ss-player-webgpu>
+      <ss-player-webgpu class="checker" src="assets/Ringo/Ringo.ssab" autoplay></ss-player-webgpu>
     </div>
 
     <p style="margin-top:2.5em">
@@ -209,28 +209,6 @@
       badges.set(el, { badge, last: -1, advancing: false });
     }
 
-    /**
-     * Scale a player so its authored canvas fits its element's box.
-     *
-     * The element draws 1:1 — one authored pixel is one CSS pixel — and puts the
-     * animation's **origin** at the centre of the box, so fitting is the page's
-     * job. `data-origin="bottom"` is for a character authored standing *on* the
-     * origin, like Ringo: all of its artwork is above the origin, so centring the
-     * origin would hang its head out of the box. Re-run on resize, because the
-     * element follows the box but the scale into it is the page's call.
-     */
-    function fit(el) {
-      const p = el.player;
-      if (!p) return;
-      const [aw, ah] = p.canvasSize();
-      if (!aw || !ah) return;
-      const s = Math.min(el.clientWidth / aw, el.clientHeight / ah);
-      // y is measured downward from the centre of the box.
-      const y = el.dataset.origin === 'bottom' ? (ah * s) / 2 : 0;
-      p.setTransform(0, y, s, s, 0);
-    }
-    addEventListener('resize', () => els.forEach(fit));
-
     const countEl = document.getElementById('active');
     const surfacesEl = document.getElementById('surfaces');
     const devicesEl = document.getElementById('devices');
@@ -247,9 +225,6 @@
         if (el.ctx) { contexts.add(el.ctx); ctx = el.ctx; }
         const player = el.player;
         if (!player) continue;
-        // Cheap and idempotent, and the element it belongs to may only just have
-        // finished loading — so this doubles as "fit it once it exists".
-        fit(el);
         const frame = player.frameNo();
         state.advancing = frame !== state.last;
         state.last = frame;

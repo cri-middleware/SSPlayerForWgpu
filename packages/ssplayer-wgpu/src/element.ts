@@ -1,9 +1,14 @@
 // A `<ss-player-webgpu>` custom element: renders a SpriteStudio `.ssab` to a
 // WebGPU canvas. Attributes: `src` (.ssab URL, embedded or reference), `pack`
-// (name override; default is the name inside the .ssab), `anim` (animation name,
-// default = first), `autoplay` (start playing once loaded; absent = hold the
-// first frame), `pause-when-hidden`
-// (default on — opt out with `pause-when-hidden="false"`).
+// (name override; default is the name inside the .ssab), `animation` (default =
+// first), `autoplay` (start playing once loaded; absent = hold the first frame),
+// `speed-scale`, `fit` / `align` / `flip-x` / `flip-y` (how the authored canvas
+// fits the element's box; `fit="none"` draws 1:1 with the origin centred), and
+// `pause-when-hidden` (default on — opt out with `pause-when-hidden="false"`).
+// It dispatches the family's six events as DOM events: `animationstarted`,
+// `animationfinished`, `animationlooped`, `userdata`, `signal` and `audio`; and
+// `load` once a pack has loaded and its animation is set up, which is how a page
+// that changed `src` learns the new pack's animation names.
 //
 // This is the **convenience wrapper**: one element = one canvas = one player,
 // which is the shortest path for a single-character use like an ad creative
@@ -18,7 +23,18 @@
 import { sharedContext, restoreSharedDevice } from './index.js';
 import type { SsContextWeb, SsSurfaceWeb, SsPlayerWeb } from '../wasm/ssplayer_wgpu.js';
 
+/** The attributes that only move the character, so a change re-fits and nothing else. */
+const FIT_ATTRIBUTES = ['fit', 'align', 'flip-x', 'flip-y'];
+
 export class SsPlayerWebGPUElement extends HTMLElement {
+  /**
+   * What a page may change on a live element. `autoplay` is read when an
+   * animation is set up, and `pause-when-hidden` once at connect.
+   */
+  static get observedAttributes(): string[] {
+    return ['src', 'pack', 'animation', 'speed-scale', ...FIT_ATTRIBUTES];
+  }
+
   canvas?: HTMLCanvasElement;
   ctx?: SsContextWeb;
   surface?: SsSurfaceWeb | null;
@@ -34,6 +50,13 @@ export class SsPlayerWebGPUElement extends HTMLElement {
   private _ro: ResizeObserver | null = null;
   private _onVisibilityChange: (() => void) | null = null;
   private _loads: Promise<unknown> = Promise.resolve();
+  /**
+   * The box the character is fitted into: the canvas of the animation the pack
+   * was loaded on, kept across `animation` switches so the character does not
+   * rescale when one animation's canvas is wider than another's. A new pack
+   * picks it again.
+   */
+  private _frame: { x: number; y: number; width: number; height: number } | undefined;
 
   connectedCallback(): void {
     // A custom element is `display: inline` unless the page says otherwise, and an
@@ -123,6 +146,86 @@ export class SsPlayerWebGPUElement extends HTMLElement {
     // Before `_start` finishes there is no surface yet; it configures itself
     // from the canvas it is handed, which is now the right size.
     this.surface?.resize(w, h);
+    this._fit();
+  }
+
+  attributeChangedCallback(name: string, oldValue: string | null, value: string | null): void {
+    // Before `_start` has a player there is nothing to change: it reads every
+    // attribute itself once the player exists.
+    if (!this.player || oldValue === value) return;
+    if (FIT_ATTRIBUTES.includes(name)) {
+      this._fit();
+    } else if (name === 'speed-scale') {
+      this.player.setSpeedScale(this._speedScale());
+    } else if (name === 'src' || name === 'pack') {
+      const src = this.getAttribute('src');
+      if (src) void this.loadSrc(src, this.getAttribute('pack'), this.getAttribute('animation')).catch((e) => this._fail(e));
+    } else if (name === 'animation' && value) {
+      // Behind any load in flight: the player is lifted out of the context while
+      // one runs, and the switch belongs to the pack that load leaves behind.
+      this._loads = this._loads.then(() => this._switchAnimation(value)).catch((e) => this._fail(e));
+    }
+  }
+
+  /**
+   * Fit the character into the canvas by the `fit` / `align` / `flip-x` /
+   * `flip-y` attributes, against the box picked at load. An unknown `fit` or
+   * `align` throws, naming what it accepts, and fails the element rather than
+   * drawing somewhere the page did not ask for.
+   */
+  private _fit(): void {
+    const player = this.player;
+    const canvas = this.canvas;
+    if (!player || !canvas) return;
+    try {
+      player.fitInto(canvas.width, canvas.height, {
+        fit: this.getAttribute('fit') || 'contain',
+        align: this.getAttribute('align') || 'center',
+        flipX: this.hasAttribute('flip-x'),
+        flipY: this.hasAttribute('flip-y'),
+        frame: this._frame,
+      });
+    } catch (e) {
+      this._fail(e);
+    }
+  }
+
+  /** `speed-scale` as a number; absent or unreadable is the authored speed. */
+  private _speedScale(): number {
+    const value = Number(this.getAttribute('speed-scale') ?? '1');
+    return Number.isFinite(value) ? value : 1;
+  }
+
+  /**
+   * Select another animation of the loaded pack. With `autoplay` it plays from
+   * the head, as it did when the pack loaded; without, it holds its first frame.
+   * The box stays the one the pack loaded on.
+   */
+  private _switchAnimation(name: string): void {
+    const player = this.player;
+    if (!player || player.currentAnimation() === name) return;
+    player.setAnimation(name);
+    if (this.hasAttribute('autoplay')) player.play();
+  }
+
+  /**
+   * Re-dispatch what the last frame did as DOM events, in the order the Bevy
+   * adapter raises its messages: the start edge, the timeline events, then the
+   * completion and loop edges. The stems are the family's (`animationFinished`,
+   * `userData`, …), lower-cased as DOM event names are; the timeline events
+   * carry `player.events()`'s objects as `detail`. They do not bubble.
+   */
+  private _dispatchFrame(): void {
+    const player = this.player;
+    if (!player) return;
+    if (player.justStarted()) this._emit('animationstarted');
+    for (const event of player.events()) this._emit(String(event.kind).toLowerCase(), event);
+    if (player.justFinished()) this._emit('animationfinished');
+    if (player.justLooped()) this._emit('animationlooped');
+  }
+
+  private _emit(type: string, detail?: unknown): void {
+    this.dispatchEvent(new CustomEvent(type, { detail }));
   }
 
   /**
@@ -172,6 +275,7 @@ export class SsPlayerWebGPUElement extends HTMLElement {
           this._fail(e);
           return;
         }
+        this._dispatchFrame();
         // The browser can take the device at any time (backgrounded tab, GPU
         // process crash). Rebuild rather than leaving a blank canvas forever.
         if (this.ctx!.isDeviceLost()) {
@@ -216,8 +320,10 @@ export class SsPlayerWebGPUElement extends HTMLElement {
       if (!this.isConnected) return;
       this.surface = this.ctx.createSurface(this.canvas!);
       this.player = this.surface.createPlayer();
+      // A setting holds from before the first animation and across a pack.
+      this.player.setSpeedScale(this._speedScale());
       const src = this.getAttribute('src');
-      if (src) await this.loadSrc(src, this.getAttribute('pack'), this.getAttribute('anim'));
+      if (src) await this.loadSrc(src, this.getAttribute('pack'), this.getAttribute('animation'));
       this._wantTicker = true;
       this._syncTicker();
     } catch (e) {
@@ -235,15 +341,15 @@ export class SsPlayerWebGPUElement extends HTMLElement {
    * succession must switch twice, not fail, so each waits for the one before it
    * and the last one called is the one left on screen.
    */
-  loadSrc(src: string, pack?: string | null, anim?: string | null): Promise<string[] | undefined> {
-    const run = this._loads.then(() => this._loadSrc(src, pack, anim));
+  loadSrc(src: string, pack?: string | null, animation?: string | null): Promise<string[] | undefined> {
+    const run = this._loads.then(() => this._loadSrc(src, pack, animation));
     // What the next call waits on must settle, so the chain survives a load that
     // rejected. The caller still sees `run` itself, rejection and all.
     this._loads = run.catch(() => {});
     return run;
   }
 
-  private async _loadSrc(src: string, pack?: string | null, anim?: string | null): Promise<string[] | undefined> {
+  private async _loadSrc(src: string, pack?: string | null, animation?: string | null): Promise<string[] | undefined> {
     if (!this.player) return;
     // One call fetches the pack, its atlases and any sibling `.ssab` its instance
     // parts play from (SPEC §8.1, §7.1) — a URL answers both "what bytes" and
@@ -265,7 +371,9 @@ export class SsPlayerWebGPUElement extends HTMLElement {
     // Selecting and starting are separate calls (SPEC §9.3): `setAnimation` is
     // the allocating step, `play` is transport. The old single `play(name)` is
     // deliberately not carried over.
-    this.player.setAnimation(anim || names[0]!);
+    this.player.setAnimation(animation || names[0]!);
+    this._frame = this.player.canvasRect() ?? undefined;
+    this._fit();
     // `autoplay`, the HTML way: a boolean attribute is absent by default, so this
     // is opt-in — the same shape `<video autoplay>` has, and the same shape
     // `<ss-player>` (the WebGL element) already had. Without it the element holds
@@ -276,6 +384,7 @@ export class SsPlayerWebGPUElement extends HTMLElement {
     // other way (ForGodot / ForUnity autoplay on), because a scene node has no
     // code to call `play()` for it. An attribute is that code.
     if (this.hasAttribute('autoplay')) this.player.play();
+    this._emit('load');
     return names;
   }
 
