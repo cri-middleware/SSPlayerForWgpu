@@ -2297,12 +2297,17 @@ impl SSPlayer {
     /// supplies no frame of its own.
     ///
     /// This is the frame the artist composed in, not a measured bounding box, and
-    /// the difference is the point: it costs nothing to read, it is the same box
-    /// for every animation in the pack, so a character does not resize when its
-    /// animation changes, and it is where the author decided the empty space
+    /// the difference is the point: it costs nothing to read, it holds still while
+    /// the animation plays, and it is where the author decided the empty space
     /// belongs. A tighter box is the host's to supply through
     /// [`Placement::frame`] — measuring one here would mean baking every frame of
     /// the animation at load.
+    ///
+    /// It is the *current* animation's canvas, and one pack's animations may
+    /// differ (Ringo's `dead` is 1300 wide, its others 800), so a host that wants
+    /// one scale across a switch reads this once, after its first
+    /// [`SSPlayer::set_animation`], and passes it as [`Placement::frame`] from
+    /// then on.
     ///
     /// The canvas is placed against the origin by the animation's **pivot**,
     /// which the runtime does not apply (it carries no pivot in its metadata) and

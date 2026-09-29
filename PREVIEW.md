@@ -256,9 +256,10 @@ player.fitInto(canvas.width, canvas.height);
 
 The defaults are what it wants: `contain`, `center`, and the **authored canvas** as the
 box, which is what the player fits when no `frame` is supplied. That is the choice worth
-keeping — it costs no measurement, it does not resize when the picker changes animation,
-and it shows the character standing in the frame it was composed in, which is what makes
-the preview comparable to an engine's canvas.
+keeping — it costs no measurement, it holds still while the animation plays, and it shows
+the character standing in the frame it was composed in, which is what makes the preview
+comparable to an engine's canvas. Each animation brings its own canvas, so one whose
+canvas is wider (Ringo's `dead`, 1300 against 800) draws smaller in the same element.
 
 Call it again when the element resizes and after the picker changes animation. See
 [the guide](./docs/en/guide/placement.md); the contract it ports is the porting guide's
