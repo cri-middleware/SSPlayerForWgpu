@@ -60,6 +60,7 @@ the calls.
 | `missingAssets()` | What did not arrive. **Not a rejection** |
 | `textureRefs(pack?)` / `embeddedTextures(pack?)` | What atlases a pack asks for |
 | `animationNames()` / `partNames()` / `cellmapNames()` / `cellNames(cellmap)` | What the pack offers |
+| `currentAnimation()` | The one set up, or `undefined` |
 | `canvasSize()` | The authored canvas |
 
 **Transport** — see [Playback and transport](../guide/playback.md).
@@ -70,13 +71,13 @@ the calls.
 | `play()` / `playFrom(frame)` | **Head-out** — rewinds and re-arms the loop count |
 | `pause()` / `resume()` / `stop()` | Hold, carry on in place, end |
 | `seek(frame)` / `frameNo()` | Fractional frames are honoured |
-| `setSpeedScale(s)` | A multiple of the authored rate. `0` and negatives stop |
+| `setSpeedScale(s)` / `speedScale()` | A multiple of the authored rate. `0` and negatives stop |
 | `setLoopCount(n)` / `loopCount()` / `remainingLoops()` | `n` cycles; `-1` or `0` forever |
 | `setAnimationSection(start, end)` | After `setAnimation` |
 | `setPlaybackDirection(dir, style)` / `playbackDirection()` / `playbackStyle()` | `0`/`1` each |
 | `setFrameRate(fps)` / `frameRate()` | Replace the authored rate |
-| `setSubFrame(on)` / `subFrameEnabled()` | Interpolate between authored frames |
-| `setSkipFrames(on)` / `skipFrames()` | Cross several frames in one long tick |
+| `setSubFrameEnabled(on)` / `subFrameEnabled()` | Interpolate between authored frames |
+| `setFrameSkipEnabled(on)` / `frameSkipEnabled()` | Cross several frames in one long tick |
 | `startFrame()` / `endFrame()` / `totalFrames()` | The current range |
 | `isPlaying()` / `isPausing()` / `isPlayingForward()` / `isFinished()` | State |
 | `justStarted()` / `justLooped()` / `justFinished()` | Edges from the last `frame()`. `justStarted` is not raised by `resume()` |

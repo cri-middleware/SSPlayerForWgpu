@@ -64,6 +64,9 @@ window sees it, and a pack shown five times is uploaded once.
 |---|---|
 | `ss_player_set_animation(player, name)` | Build the playback tree. The allocating call |
 | `ss_player_animation_count(player)` / `ss_player_animation_name(player, i)` | What the pack offers |
+| `ss_player_current_animation(player)` | The one set up, or null |
+| `ss_player_part_name(player, i)` | Part names in part-index order; null past the last |
+| `ss_player_cellmap_count` / `ss_player_cellmap_name(player, i)` / `ss_player_cell_count(player, cellmap)` / `ss_player_cell_name(player, cellmap, i)` | The names a cell override takes |
 | `ss_player_canvas_size(player, &w, &h)` | The authored canvas, for laying out around it |
 | `ss_player_total_frames(player)` / `ss_player_start_frame` / `ss_player_end_frame` | The current range |
 
@@ -76,14 +79,14 @@ window sees it, and a pack shown five times is uploaded once.
 | `ss_player_pause(player)` / `ss_player_resume(player)` | Hold, and carry on in place |
 | `ss_player_stop(player)` | End; the playhead stays where it is |
 | `ss_player_seek(player, frame)` | Jump. Fractional values are honoured |
-| `ss_player_set_speed_scale(player, speed)` | A multiple of the authored rate. `0` and negatives stop |
+| `ss_player_set_speed_scale(player, speed)` / `ss_player_speed_scale` | A multiple of the authored rate. `0` and negatives stop |
 | `ss_player_set_frame_rate(player, fps)` / `ss_player_frame_rate` | Replace the authored rate |
 | `ss_player_set_loop_count(player, n)` / `ss_player_loop_count` / `ss_player_remaining_loops` | `n` cycles; `-1` or `0` forever |
 | `ss_player_set_animation_section(player, start, end)` | Restrict the playhead. Call it **after** `set_animation` |
 | `ss_player_set_playback_direction(player, dir, style)` | `0`/`1` = forward/backward, normal/ping-pong |
 | `ss_player_playback_direction` / `ss_player_playback_style` | Read them back |
-| `ss_player_set_sub_frame(player, on)` / `ss_player_sub_frame_enabled` | Interpolate between authored frames |
-| `ss_player_set_skip_frames(player, on)` / `ss_player_skip_frames` | Cross several frames in one long tick |
+| `ss_player_set_sub_frame_enabled(player, on)` / `ss_player_sub_frame_enabled` | Interpolate between authored frames |
+| `ss_player_set_frame_skip_enabled(player, on)` / `ss_player_frame_skip_enabled` | Cross several frames in one long tick |
 
 See [Playback and transport](../guide/playback.md) — in particular why `play` is not how you lift a
 `pause`.
@@ -129,6 +132,7 @@ Every override has a `_by_index` twin that skips the name lookup; resolve the in
 |---|---|
 | `ss_player_part_count` / `ss_player_find_part_index` | Enumerate and resolve |
 | `ss_player_part_transform(player, part, out)` (+ `_by_index`) | Six floats: `[m00, m01, m10, m11, tx, ty]`, animation-local Y-down |
+| `ss_player_is_part_hidden(player, part)` (+ `_by_index`) | `1` hidden on the displayed frame, `0` shown, `-1` for an unknown part or no animation set up |
 | `ss_player_is_part_skinned_mesh(player, part)` (+ `_by_index`) | `1` skinned, `0` not, `-1` for an unknown part or no pack bound |
 | `ss_player_set_part_visibility_override(player, part, hide, cascade)` (+ `_by_index`, + `clear_`) | A keyframe hide never cascades, so this is the only way to hide a sub-tree |
 | `ss_player_set_part_color_override(player, part, rgba, blend_op, priority)` (+ `_corners`, `_by_index`, `clear_`) | `blend_op` 0–3, `priority` 0–2 |

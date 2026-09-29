@@ -1085,6 +1085,13 @@ impl SsPlayerWeb {
         with_player!(self, |p| p.animation_names().unwrap_or_default())
     }
 
+    /// The animation currently set up, or `undefined` before the first
+    /// `setAnimation` and again after a load replaced the pack.
+    #[wasm_bindgen(js_name = currentAnimation)]
+    pub fn current_animation(&self) -> Result<Option<String>, JsValue> {
+        with_player!(self, |p| p.current_animation().map(str::to_owned))
+    }
+
     /// The atlases a registered pack asks for, as `{ hash, path, embedded }[]`
     /// in pack order. `pack` undefined selects the main pack.
     ///
@@ -1301,6 +1308,13 @@ impl SsPlayerWeb {
         with_player!(self, |p| p.set_speed_scale(speed))
     }
 
+    /// The speed in effect: `0` for a speed that was set to zero or below,
+    /// since that is the stop it became.
+    #[wasm_bindgen(js_name = speedScale)]
+    pub fn speed_scale(&self) -> Result<f32, JsValue> {
+        with_player!(self, |p| p.speed_scale())
+    }
+
     /// Whether this player is currently advancing.
     #[wasm_bindgen(js_name = isPlaying)]
     pub fn is_playing(&self) -> Result<bool, JsValue> {
@@ -1424,12 +1438,12 @@ impl SsPlayerWeb {
     /// The playhead keeps its fraction either way (`frameNo` reports it
     /// unrounded), and so does the stepping of instance and effect children.
     /// This affects only what is drawn.
-    #[wasm_bindgen(js_name = setSubFrame)]
+    #[wasm_bindgen(js_name = setSubFrameEnabled)]
     pub fn set_sub_frame_enabled(&self, enabled: bool) -> Result<(), JsValue> {
         with_player!(self, |p| p.set_sub_frame_enabled(enabled))
     }
 
-    /// See `setSubFrame`.
+    /// See `setSubFrameEnabled`.
     #[wasm_bindgen(js_name = subFrameEnabled)]
     pub fn sub_frame_enabled(&self) -> Result<bool, JsValue> {
         with_player!(self, |p| p.sub_frame_enabled())
@@ -1437,13 +1451,13 @@ impl SsPlayerWeb {
 
     /// On (the default) keeps playback on the wall clock by dropping frames;
     /// off advances exactly one frame per `frame()` call.
-    #[wasm_bindgen(js_name = setSkipFrames)]
+    #[wasm_bindgen(js_name = setFrameSkipEnabled)]
     pub fn set_frame_skip_enabled(&self, skip: bool) -> Result<(), JsValue> {
         with_player!(self, |p| p.set_frame_skip_enabled(skip))
     }
 
-    /// See `setSkipFrames`.
-    #[wasm_bindgen(js_name = skipFrames)]
+    /// See `setFrameSkipEnabled`.
+    #[wasm_bindgen(js_name = frameSkipEnabled)]
     pub fn frame_skip_enabled(&self) -> Result<bool, JsValue> {
         with_player!(self, |p| p.frame_skip_enabled())
     }

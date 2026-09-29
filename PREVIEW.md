@@ -221,7 +221,7 @@ part and payload. Clicking either seeks. The marker for a frame the playhead jus
 crossed flashes, so the static picture and the live pulse are visibly the same thing.
 
 The seek bar needed no new Rust: `seek`, `frameNo`, `startFrame`, `endFrame`,
-`setSpeedScale`, `setSubFrame` and the four transport verbs are all on the js face
+`setSpeedScale`, `setSubFrameEnabled` and the four transport verbs are all on the js face
 already, and a paused player still draws, so scrubbing while stopped updates the picture.
 
 **The strip fills itself from playback**, and the player deliberately did not gain a

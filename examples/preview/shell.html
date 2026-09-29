@@ -452,7 +452,7 @@ async function loadDropped(dropped) {
     player.setSpeedScale(parseFloat(e.target.value));
     $('speedOut').textContent = parseFloat(e.target.value).toFixed(1);
   });
-  $('sub').addEventListener('change', (e) => player.setSubFrame(e.target.checked));
+  $('sub').addEventListener('change', (e) => player.setSubFrameEnabled(e.target.checked));
 
   const stage = $('stage');
   for (const type of ['dragenter', 'dragover']) {

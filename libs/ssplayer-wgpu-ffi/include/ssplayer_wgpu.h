@@ -177,8 +177,7 @@ typedef struct ss_player_t ss_player_t;
 
 /*
  Opaque scene handle: one window's [`NativeHost`], the player handles it has
- issued, and the buffer backing the string `ss_player_animation_name` hands
- back to C.
+ issued, and the buffers backing the strings its players hand back to C.
  */
 typedef struct ss_scene_t ss_scene_t;
 
@@ -859,7 +858,7 @@ void ss_player_stop(ss_player_t *handle);
 /*
  Scale playback speed; 1.0 is the authored speed.
 
- Zero and negative values are **ignored** (the runtime keeps 1.0). To play
+ Zero and negative values **stop** the playhead where it stands. To play
  backwards use `ss_player_set_playback_direction`, which is the separate
  setting that controls direction.
 
@@ -867,6 +866,15 @@ void ss_player_stop(ss_player_t *handle);
  `handle` must be a live handle or null.
  */
 void ss_player_set_speed_scale(ss_player_t *handle, float speed);
+
+/*
+ The speed in effect, as a multiple of the frame rate: `0` for a speed that
+ was set to zero or below, since that is the stop it became.
+
+ # Safety
+ `handle` must be a live handle or null.
+ */
+float ss_player_speed_scale(ss_player_t *handle);
 
 /*
  Whether the root animation is advancing.
@@ -1046,10 +1054,10 @@ int32_t ss_player_playback_style(ss_player_t *handle);
  # Safety
  `handle` must be a live handle or null.
  */
-void ss_player_set_sub_frame(ss_player_t *handle, bool enabled);
+void ss_player_set_sub_frame_enabled(ss_player_t *handle, bool enabled);
 
 /*
- See `ss_player_set_sub_frame`.
+ See `ss_player_set_sub_frame_enabled`.
 
  # Safety
  `handle` must be a live handle or null.
@@ -1063,15 +1071,15 @@ bool ss_player_sub_frame_enabled(ss_player_t *handle);
  # Safety
  `handle` must be a live handle or null.
  */
-void ss_player_set_skip_frames(ss_player_t *handle, bool skip);
+void ss_player_set_frame_skip_enabled(ss_player_t *handle, bool skip);
 
 /*
- See `ss_player_set_skip_frames`.
+ See `ss_player_set_frame_skip_enabled`.
 
  # Safety
  `handle` must be a live handle or null.
  */
-bool ss_player_skip_frames(ss_player_t *handle);
+bool ss_player_frame_skip_enabled(ss_player_t *handle);
 
 /*
  Resolve a part name to its index in the current animation, or -1 when the
@@ -1301,6 +1309,31 @@ int32_t ss_player_is_part_skinned_mesh(ss_player_t *handle, const char *part);
 int32_t ss_player_is_part_skinned_mesh_by_index(ss_player_t *handle, uint32_t part);
 
 /*
+ Whether `part` is hidden on the frame currently displayed: `1` hidden, `0`
+ shown, or `-1` when the name is unknown, `part` is not valid UTF-8, or no
+ animation is set up.
+
+ The companion to `ss_player_part_transform`, which reports where a part
+ *would* be whether or not it is drawn: a host following a part needs both.
+ Like `ss_player_is_part_skinned_mesh` it returns a value rather than a
+ status, so it does not touch `ss_last_error`.
+
+ # Safety
+ `handle` must be a live handle or null; `part` must be a valid
+ null-terminated C string.
+ */
+int32_t ss_player_is_part_hidden(ss_player_t *handle, const char *part);
+
+/*
+ Index form of `ss_player_is_part_hidden`: `1` hidden, `0` shown, `-1` when
+ `part` is out of range or no animation is set up.
+
+ # Safety
+ `handle` must be a live handle or null.
+ */
+int32_t ss_player_is_part_hidden_by_index(ss_player_t *handle, uint32_t part);
+
+/*
  Whether the last `ss_scene_update` was the first to run after an
  `ss_player_play` / `ss_player_play_from`: true for exactly one update. Not
  raised by `ss_player_resume`, which carries on rather than starting.
@@ -1401,13 +1434,86 @@ uint32_t ss_player_animation_count(ss_player_t *handle);
 /*
  The `index`-th animation name of the main pack, or null if out of range.
 
- The string is owned by the player and stays valid until the next call to this
- function on the same player. Copy it if you need to keep it.
+ The string is owned by the scene and stays valid until the next call to this
+ function or `ss_player_cellmap_texture_name` on the same scene. Copy it if
+ you need to keep it.
 
  # Safety
  `handle` must be a live handle or null.
  */
 const char *ss_player_animation_name(ss_player_t *handle, uint32_t index);
+
+/*
+ The animation currently set up, or null before the first
+ `ss_player_set_animation` and again after a load replaced the pack. No
+ animation is not a failure, so that null leaves `ss_last_error` alone.
+
+ The string stays valid until the next call to this function on the same
+ scene. Copy it if you need to keep it.
+
+ # Safety
+ `handle` must be a live handle or null.
+ */
+const char *ss_player_current_animation(ss_player_t *handle);
+
+/*
+ The name of part `index`, in part-index order — what turns the `part_index`
+ an event carries back into something a human reads. An unnamed part reads
+ as an empty string; null past the last part or with no pack bound.
+
+ Readable as soon as a pack is bound, unlike `ss_player_part_count`, which
+ counts from the first update: walk it until it returns null. The string
+ stays valid until the next call to this function on the same scene.
+
+ # Safety
+ `handle` must be a live handle or null.
+ */
+const char *ss_player_part_name(ss_player_t *handle, uint32_t index);
+
+/*
+ How many cellmaps the main pack holds (0 if nothing is loaded).
+
+ # Safety
+ `handle` must be a live handle or null.
+ */
+uint32_t ss_player_cellmap_count(ss_player_t *handle);
+
+/*
+ The `index`-th cellmap name of the main pack, without the `.ssce`
+ extension — the namespace `ss_player_set_part_cell_override` takes. Null if
+ out of range.
+
+ The string stays valid until the next call to this function on the same
+ scene, so it can be handed straight to `ss_player_cell_name`.
+
+ # Safety
+ `handle` must be a live handle or null.
+ */
+const char *ss_player_cellmap_name(ss_player_t *handle, uint32_t index);
+
+/*
+ How many cells `cellmap` holds: 0 when no pack is bound, the cellmap is not
+ in it, or `cellmap` is not valid UTF-8.
+
+ # Safety
+ `handle` must be a live handle or null; `cellmap` must be a valid
+ null-terminated C string.
+ */
+uint32_t ss_player_cell_count(ss_player_t *handle, const char *cellmap);
+
+/*
+ The `index`-th cell name inside `cellmap` — the other half of what
+ `ss_player_set_part_cell_override` takes. Null if out of range, or when the
+ cellmap is not in the main pack.
+
+ The string stays valid until the next call to this function on the same
+ scene. Copy it if you need to keep it.
+
+ # Safety
+ `handle` must be a live handle or null; `cellmap` must be a valid
+ null-terminated C string.
+ */
+const char *ss_player_cell_name(ss_player_t *handle, const char *cellmap, uint32_t index);
 
 /*
  Place this player in its scene: translation in pixels from the centre, scale,

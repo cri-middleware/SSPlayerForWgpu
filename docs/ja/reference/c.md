@@ -60,6 +60,9 @@ title: C API リファレンス
 |---|---|
 | `ss_player_set_animation(player, name)` | 再生ツリーを構築。アロケーションを伴う呼び出し |
 | `ss_player_animation_count(player)` / `ss_player_animation_name(player, i)` | パックが持つもの |
+| `ss_player_current_animation(player)` | 設定中のアニメーション。無ければ null |
+| `ss_player_part_name(player, i)` | パーツ名（パーツインデックス順）。末尾を過ぎると null |
+| `ss_player_cellmap_count` / `ss_player_cellmap_name(player, i)` / `ss_player_cell_count(player, cellmap)` / `ss_player_cell_name(player, cellmap, i)` | セルのオーバーライドに渡す名前 |
 | `ss_player_canvas_size(player, &w, &h)` | オーサリング時のキャンバス。周囲のレイアウト用 |
 | `ss_player_total_frames(player)` / `ss_player_start_frame` / `ss_player_end_frame` | 現在の範囲 |
 
@@ -72,14 +75,14 @@ title: C API リファレンス
 | `ss_player_pause(player)` / `ss_player_resume(player)` | 保持と、その場からの継続 |
 | `ss_player_stop(player)` | 終了。再生ヘッドはその場に残る |
 | `ss_player_seek(player, frame)` | ジャンプ。小数フレーム可 |
-| `ss_player_set_speed_scale(player, speed)` | 既定 fps の倍率。`0` と負値は停止 |
+| `ss_player_set_speed_scale(player, speed)` / `ss_player_speed_scale` | 既定 fps の倍率。`0` と負値は停止 |
 | `ss_player_set_frame_rate(player, fps)` / `ss_player_frame_rate` | 既定 fps を置き換える |
 | `ss_player_set_loop_count(player, n)` / `ss_player_loop_count` / `ss_player_remaining_loops` | `n` 回。`-1` / `0` で無限 |
 | `ss_player_set_animation_section(player, start, end)` | 再生範囲を制限。`set_animation` の**後**に |
 | `ss_player_set_playback_direction(player, dir, style)` | `0`/`1` = 順/逆、通常/ピンポン |
 | `ss_player_playback_direction` / `ss_player_playback_style` | 読み戻し |
-| `ss_player_set_sub_frame(player, on)` / `ss_player_sub_frame_enabled` | フレーム間を補間 |
-| `ss_player_set_skip_frames(player, on)` / `ss_player_skip_frames` | 長い tick で複数フレームを跨ぐ |
+| `ss_player_set_sub_frame_enabled(player, on)` / `ss_player_sub_frame_enabled` | フレーム間を補間 |
+| `ss_player_set_frame_skip_enabled(player, on)` / `ss_player_frame_skip_enabled` | 長い tick で複数フレームを跨ぐ |
 
 [再生と再生制御](../guide/playback.md)も参照してください。特に `pause` の解除に `play` を使えない理由を。
 
@@ -122,6 +125,7 @@ title: C API リファレンス
 |---|---|
 | `ss_player_part_count` / `ss_player_find_part_index` | 列挙と解決 |
 | `ss_player_part_transform(player, part, out)`（＋ `_by_index`） | float 6 個：`[m00, m01, m10, m11, tx, ty]`、アニメーションローカルの Y-down |
+| `ss_player_is_part_hidden(player, part)`（＋ `_by_index`） | 表示中のフレームで `1` 非表示、`0` 表示、`-1` は不明なパーツかアニメーション未設定 |
 | `ss_player_is_part_skinned_mesh(player, part)`（＋ `_by_index`） | `1` skinned、`0` not、`-1` は不明なパーツかパック未バインド |
 | `ss_player_set_part_visibility_override(player, part, hide, cascade)`（＋ `_by_index` / `clear_`） | キーフレームの非表示はカスケードしないので、サブツリーを隠す唯一の方法です |
 | `ss_player_set_part_color_override(player, part, rgba, blend_op, priority)`（＋ `_corners` / `_by_index` / `clear_`） | `blend_op` 0–3、`priority` 0–2 |

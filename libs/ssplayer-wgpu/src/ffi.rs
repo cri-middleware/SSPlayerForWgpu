@@ -355,8 +355,7 @@ pub struct SsPlaced {
 }
 
 /// Opaque scene handle: one window's [`NativeHost`], the player handles it has
-/// issued, and the buffer backing the string `ss_player_animation_name` hands
-/// back to C.
+/// issued, and the buffers backing the strings its players hand back to C.
 pub struct SsScene {
     host: NativeHost,
     /// Every handle this scene created, alive until the scene is destroyed.
@@ -385,6 +384,14 @@ pub struct SsScene {
     event_text_scratch: CScratch,
     param_id_scratch: CScratch,
     param_text_scratch: CScratch,
+    /// Back `ss_player_current_animation`, `ss_player_part_name`,
+    /// `ss_player_cellmap_name` and `ss_player_cell_name`, one each: a caller
+    /// hands a cellmap name straight back to `ss_player_cell_name` while walking
+    /// its cells, and a shared buffer would free that argument under it.
+    current_scratch: CString,
+    part_name_scratch: CString,
+    cellmap_name_scratch: CString,
+    cell_name_scratch: CString,
 }
 
 /// A NUL-terminated string handed back to C, refilled in place.
@@ -587,6 +594,10 @@ pub unsafe extern "C" fn ss_scene_create(desc: *const SsSceneDesc) -> *mut SsSce
             event_text_scratch: CScratch::default(),
             param_id_scratch: CScratch::default(),
             param_text_scratch: CScratch::default(),
+            current_scratch: CString::default(),
+            part_name_scratch: CString::default(),
+            cellmap_name_scratch: CString::default(),
+            cell_name_scratch: CString::default(),
         })),
         Err(msg) => {
             set_last_error(msg);
@@ -1100,7 +1111,7 @@ pub unsafe extern "C" fn ss_player_stop(handle: *mut SsPlayer) {
 
 /// Scale playback speed; 1.0 is the authored speed.
 ///
-/// Zero and negative values are **ignored** (the runtime keeps 1.0). To play
+/// Zero and negative values **stop** the playhead where it stands. To play
 /// backwards use `ss_player_set_playback_direction`, which is the separate
 /// setting that controls direction.
 ///
@@ -1111,6 +1122,16 @@ pub unsafe extern "C" fn ss_player_set_speed_scale(handle: *mut SsPlayer, speed:
     if let Some(player) = unsafe { player(handle) } {
         player.set_speed_scale(speed);
     }
+}
+
+/// The speed in effect, as a multiple of the frame rate: `0` for a speed that
+/// was set to zero or below, since that is the stop it became.
+///
+/// # Safety
+/// `handle` must be a live handle or null.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn ss_player_speed_scale(handle: *mut SsPlayer) -> f32 {
+    unsafe { player(handle) }.map(|p| p.speed_scale()).unwrap_or(1.0)
 }
 
 /// Whether the root animation is advancing.
@@ -1319,13 +1340,13 @@ pub unsafe extern "C" fn ss_player_playback_style(handle: *mut SsPlayer) -> i32 
 /// # Safety
 /// `handle` must be a live handle or null.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn ss_player_set_sub_frame(handle: *mut SsPlayer, enabled: bool) {
+pub unsafe extern "C" fn ss_player_set_sub_frame_enabled(handle: *mut SsPlayer, enabled: bool) {
     if let Some(player) = unsafe { player(handle) } {
         player.set_sub_frame_enabled(enabled);
     }
 }
 
-/// See `ss_player_set_sub_frame`.
+/// See `ss_player_set_sub_frame_enabled`.
 ///
 /// # Safety
 /// `handle` must be a live handle or null.
@@ -1340,18 +1361,18 @@ pub unsafe extern "C" fn ss_player_sub_frame_enabled(handle: *mut SsPlayer) -> b
 /// # Safety
 /// `handle` must be a live handle or null.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn ss_player_set_skip_frames(handle: *mut SsPlayer, skip: bool) {
+pub unsafe extern "C" fn ss_player_set_frame_skip_enabled(handle: *mut SsPlayer, skip: bool) {
     if let Some(player) = unsafe { player(handle) } {
         player.set_frame_skip_enabled(skip);
     }
 }
 
-/// See `ss_player_set_skip_frames`.
+/// See `ss_player_set_frame_skip_enabled`.
 ///
 /// # Safety
 /// `handle` must be a live handle or null.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn ss_player_skip_frames(handle: *mut SsPlayer) -> bool {
+pub unsafe extern "C" fn ss_player_frame_skip_enabled(handle: *mut SsPlayer) -> bool {
     unsafe { player(handle) }.map(|p| p.frame_skip_enabled()).unwrap_or(true)
 }
 
@@ -1744,6 +1765,44 @@ pub unsafe extern "C" fn ss_player_is_part_skinned_mesh_by_index(handle: *mut Ss
     }
 }
 
+/// Whether `part` is hidden on the frame currently displayed: `1` hidden, `0`
+/// shown, or `-1` when the name is unknown, `part` is not valid UTF-8, or no
+/// animation is set up.
+///
+/// The companion to `ss_player_part_transform`, which reports where a part
+/// *would* be whether or not it is drawn: a host following a part needs both.
+/// Like `ss_player_is_part_skinned_mesh` it returns a value rather than a
+/// status, so it does not touch `ss_last_error`.
+///
+/// # Safety
+/// `handle` must be a live handle or null; `part` must be a valid
+/// null-terminated C string.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn ss_player_is_part_hidden(handle: *mut SsPlayer, part: *const c_char) -> i32 {
+    let Some(player) = (unsafe { player(handle) }) else { return -1 };
+    let Some(part) = (unsafe { c_str(part) }) else { return -1 };
+    match player.is_part_hidden(part) {
+        Some(true) => 1,
+        Some(false) => 0,
+        None => -1,
+    }
+}
+
+/// Index form of `ss_player_is_part_hidden`: `1` hidden, `0` shown, `-1` when
+/// `part` is out of range or no animation is set up.
+///
+/// # Safety
+/// `handle` must be a live handle or null.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn ss_player_is_part_hidden_by_index(handle: *mut SsPlayer, part: u32) -> i32 {
+    let Some(player) = (unsafe { player(handle) }) else { return -1 };
+    match player.is_part_hidden_by_index(part) {
+        Some(true) => 1,
+        Some(false) => 0,
+        None => -1,
+    }
+}
+
 // --- Events ---
 //
 // Polled after `ss_scene_update`, which is what advanced the clock. Everything
@@ -1972,8 +2031,9 @@ pub unsafe extern "C" fn ss_player_animation_count(handle: *mut SsPlayer) -> u32
 
 /// The `index`-th animation name of the main pack, or null if out of range.
 ///
-/// The string is owned by the player and stays valid until the next call to this
-/// function on the same player. Copy it if you need to keep it.
+/// The string is owned by the scene and stays valid until the next call to this
+/// function or `ss_player_cellmap_texture_name` on the same scene. Copy it if
+/// you need to keep it.
 ///
 /// # Safety
 /// `handle` must be a live handle or null.
@@ -1993,6 +2053,137 @@ pub unsafe extern "C" fn ss_player_animation_name(handle: *mut SsPlayer, index: 
     };
     scene.name_scratch = name;
     scene.name_scratch.as_ptr()
+}
+
+/// Hand `name` to C through `scratch`, which owns it until the next call that
+/// refills the same buffer. Null, with `ss_last_error` set, when the name holds
+/// an interior NUL — no C string can carry one.
+fn lend_name(scratch: &mut CString, name: String, what: &str) -> *const c_char {
+    match CString::new(name) {
+        Ok(name) => {
+            *scratch = name;
+            scratch.as_ptr()
+        }
+        Err(_) => {
+            set_last_error(format!("{what} contains an interior NUL"));
+            std::ptr::null()
+        }
+    }
+}
+
+/// The animation currently set up, or null before the first
+/// `ss_player_set_animation` and again after a load replaced the pack. No
+/// animation is not a failure, so that null leaves `ss_last_error` alone.
+///
+/// The string stays valid until the next call to this function on the same
+/// scene. Copy it if you need to keep it.
+///
+/// # Safety
+/// `handle` must be a live handle or null.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn ss_player_current_animation(handle: *mut SsPlayer) -> *const c_char {
+    let Some((scene, id)) = (unsafe { scene_of(handle) }) else {
+        set_last_error("player handle is null or destroyed");
+        return std::ptr::null();
+    };
+    let Some(name) = scene.host.player_mut(id).and_then(|p| p.current_animation().map(str::to_owned)) else {
+        return std::ptr::null();
+    };
+    lend_name(&mut scene.current_scratch, name, "animation name")
+}
+
+/// The name of part `index`, in part-index order — what turns the `part_index`
+/// an event carries back into something a human reads. An unnamed part reads
+/// as an empty string; null past the last part or with no pack bound.
+///
+/// Readable as soon as a pack is bound, unlike `ss_player_part_count`, which
+/// counts from the first update: walk it until it returns null. The string
+/// stays valid until the next call to this function on the same scene.
+///
+/// # Safety
+/// `handle` must be a live handle or null.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn ss_player_part_name(handle: *mut SsPlayer, index: u32) -> *const c_char {
+    let Some((scene, id)) = (unsafe { scene_of(handle) }) else {
+        set_last_error("player handle is null or destroyed");
+        return std::ptr::null();
+    };
+    let Some(name) = scene.host.player_mut(id).and_then(|p| p.part_names()).and_then(|names| names.into_iter().nth(index as usize)) else {
+        set_last_error(format!("no part at index {index}"));
+        return std::ptr::null();
+    };
+    lend_name(&mut scene.part_name_scratch, name, "part name")
+}
+
+/// How many cellmaps the main pack holds (0 if nothing is loaded).
+///
+/// # Safety
+/// `handle` must be a live handle or null.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn ss_player_cellmap_count(handle: *mut SsPlayer) -> u32 {
+    unsafe { player(handle) }.and_then(|p| p.cellmap_names()).map(|names| names.len() as u32).unwrap_or(0)
+}
+
+/// The `index`-th cellmap name of the main pack, without the `.ssce`
+/// extension — the namespace `ss_player_set_part_cell_override` takes. Null if
+/// out of range.
+///
+/// The string stays valid until the next call to this function on the same
+/// scene, so it can be handed straight to `ss_player_cell_name`.
+///
+/// # Safety
+/// `handle` must be a live handle or null.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn ss_player_cellmap_name(handle: *mut SsPlayer, index: u32) -> *const c_char {
+    let Some((scene, id)) = (unsafe { scene_of(handle) }) else {
+        set_last_error("player handle is null or destroyed");
+        return std::ptr::null();
+    };
+    let Some(name) = scene.host.player_mut(id).and_then(|p| p.cellmap_names()).and_then(|names| names.into_iter().nth(index as usize)) else {
+        set_last_error(format!("no cellmap at index {index}"));
+        return std::ptr::null();
+    };
+    lend_name(&mut scene.cellmap_name_scratch, name, "cellmap name")
+}
+
+/// How many cells `cellmap` holds: 0 when no pack is bound, the cellmap is not
+/// in it, or `cellmap` is not valid UTF-8.
+///
+/// # Safety
+/// `handle` must be a live handle or null; `cellmap` must be a valid
+/// null-terminated C string.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn ss_player_cell_count(handle: *mut SsPlayer, cellmap: *const c_char) -> u32 {
+    let Some(player) = (unsafe { player(handle) }) else { return 0 };
+    let Some(cellmap) = (unsafe { c_str(cellmap) }) else { return 0 };
+    player.cell_names(cellmap).map(|names| names.len() as u32).unwrap_or(0)
+}
+
+/// The `index`-th cell name inside `cellmap` — the other half of what
+/// `ss_player_set_part_cell_override` takes. Null if out of range, or when the
+/// cellmap is not in the main pack.
+///
+/// The string stays valid until the next call to this function on the same
+/// scene. Copy it if you need to keep it.
+///
+/// # Safety
+/// `handle` must be a live handle or null; `cellmap` must be a valid
+/// null-terminated C string.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn ss_player_cell_name(handle: *mut SsPlayer, cellmap: *const c_char, index: u32) -> *const c_char {
+    let Some((scene, id)) = (unsafe { scene_of(handle) }) else {
+        set_last_error("player handle is null or destroyed");
+        return std::ptr::null();
+    };
+    let Some(cellmap) = (unsafe { c_str(cellmap) }) else {
+        set_last_error("cellmap is null or not valid UTF-8");
+        return std::ptr::null();
+    };
+    let Some(name) = scene.host.player_mut(id).and_then(|p| p.cell_names(cellmap)).and_then(|names| names.into_iter().nth(index as usize)) else {
+        set_last_error(format!("no cell at index {index} in cellmap {cellmap:?}"));
+        return std::ptr::null();
+    };
+    lend_name(&mut scene.cell_name_scratch, name, "cell name")
 }
 
 // --- placement ------------------------------------------------
