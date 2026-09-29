@@ -91,10 +91,14 @@ Unless you supply a `frame`, the box is the animation's **authored canvas**: the
 composed in, placed against the origin by the animation's pivot.
 
 That is a deliberate choice over measuring the art. A measured box would mean baking every frame of
-the animation at load, it changes size as the animation plays, and it would resize your character
-every time it switched motions. The authored canvas costs nothing to read, is the same for every
-animation in the pack, and is where the author decided the empty space belongs — a character
-authored standing on the ground keeps the headroom above it.
+the animation at load, and it changes size as the animation plays. The authored canvas costs nothing
+to read, holds still while the animation plays, and is where the author decided the empty space
+belongs — a character authored standing on the ground keeps the headroom above it.
+
+Each animation carries its own canvas, and one pack's can differ — Ringo's `dead` is 1300 wide where
+its other animations are 800 — so fitting again after a switch can rescale the character. To keep
+one scale across a pack, read the canvas once after the first `setAnimation` and pass it as the
+`frame` from then on.
 
 === "Rust"
 
