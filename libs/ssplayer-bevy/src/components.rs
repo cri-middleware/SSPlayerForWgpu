@@ -7,6 +7,8 @@
 use bevy::platform::collections::HashMap;
 use bevy::prelude::*;
 
+use ssplayer_wgpu::{PlaybackDirection, PlaybackStyle};
+
 use crate::asset::SsPack;
 
 /// A SpriteStudio character.
@@ -67,11 +69,19 @@ pub struct SsPlayback {
     /// can re-trigger a one-shot at will without having to clear anything, and so
     /// two restarts in a row are two restarts.
     pub restart: u32,
+    /// Which way the playhead walks, as
+    /// [`ssplayer_wgpu::SSPlayer::set_playback_direction`] takes it. The way it
+    /// is actually travelling is [`SsPlaybackState::playing_forward`]: a
+    /// ping-pong's return leg runs backward under `Forward`.
+    pub direction: PlaybackDirection,
+    /// What the playhead does at the far end: `Normal` wraps, `PingPong` turns
+    /// back.
+    pub style: PlaybackStyle,
 }
 
 impl Default for SsPlayback {
     fn default() -> Self {
-        Self { playing: true, speed: 1.0, order: 0, alpha: 1.0, visible: true, restart: 0 }
+        Self { playing: true, speed: 1.0, order: 0, alpha: 1.0, visible: true, restart: 0, direction: PlaybackDirection::Forward, style: PlaybackStyle::Normal }
     }
 }
 
@@ -105,10 +115,23 @@ pub struct SsCellmapTextures {
 /// messages in [`crate::feedback`]. Both are **one frame behind** — what you
 /// read this frame is what playback produced last frame — because playback runs
 /// in the render world. Required by [`SsPlayer`], so it is always present.
-#[derive(Component, Clone, Copy, Debug, Default)]
+#[derive(Component, Clone, Copy, Debug)]
 pub struct SsPlaybackState {
     /// The frame the timeline last landed on.
     pub frame_no: f32,
     /// Whether the animation has reached its end.
     pub finished: bool,
+    /// Which way the playhead is actually travelling: false on a ping-pong's
+    /// return leg as well as under a backward direction. Gate an
+    /// [`SsEvent::Audio`](ssplayer_wgpu::SsEvent::Audio) on it — SpriteStudio
+    /// has no reverse audio, so a key crossed going backward is not meant to
+    /// sound.
+    pub playing_forward: bool,
+}
+
+impl Default for SsPlaybackState {
+    /// Forward at rest, as the player reports it before anything has played.
+    fn default() -> Self {
+        Self { frame_no: 0.0, finished: false, playing_forward: true }
+    }
 }

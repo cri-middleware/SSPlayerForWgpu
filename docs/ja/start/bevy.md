@@ -75,7 +75,7 @@ fn setup(mut commands: Commands, asset_server: Res<AssetServer>) {
 |---|---|---|
 | `SsPlayer` | `pack`, `animation` | 再生ツリーを再構築します — 唯一アロケーションを伴うもの |
 | `SsTransform` | `x`, `y`, `scale_x`, `scale_y`, `rotation` | ゼロ |
-| `SsPlayback` | `playing`, `speed`, `order`, `alpha`, `visible`, `restart` | ゼロ |
+| `SsPlayback` | `playing`, `speed`, `order`, `alpha`, `visible`, `restart`, `direction`, `style` | ゼロ |
 
 Bevy の `Transform` では**ありません**。あちらは 3D アフィンで、Player の 5 つのスカラーへの分解は非可逆だからです。連動させたい場合はコピーするシステムを 1 つ書いてください。どちらを正とするかはあなたが決められます。
 
@@ -112,7 +112,7 @@ fn play_sounds(mut events: MessageReader<SsEventMessage>) {
 
 | 経路 | 種類 | 用途 |
 |---|---|---|
-| `SsPlaybackState` コンポーネント | ポーリング | 現在の `frame_no`、アニメーションが終了したかどうか（`finished`） |
+| `SsPlaybackState` コンポーネント | ポーリング | 現在の `frame_no`、アニメーションが終了したかどうか（`finished`）、前向きに進んでいるか（`playing_forward`） |
 | `SsEventMessage` | `MessageReader` | タイムラインイベント（ユーザーデータ・シグナル・オーディオ） |
 | `SsStarted` / `SsFinished` / `SsLooped` | `MessageReader` | 再生開始・再生完了・ループ境界のエッジ |
 

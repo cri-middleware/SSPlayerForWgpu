@@ -68,6 +68,8 @@ Free to change, every frame if you like.
 | `alpha: f32` | `1.0` | Whole-character fade |
 | `visible: bool` | `true` | False skips **the timeline advance** as well as the draw |
 | `restart: u32` | `0` | **Bump it** (any change of value) to replay from the head, re-arming the loop count |
+| `direction: PlaybackDirection` | `Forward` | Which way the playhead walks |
+| `style: PlaybackStyle` | `Normal` | `Normal` wraps at the far end, `PingPong` turns back |
 
 `restart` is a generation counter rather than a flag so a host can re-trigger a one-shot at will
 with nothing to clear afterwards, and so two restarts in a row are two restarts.
@@ -78,6 +80,7 @@ with nothing to clear afterwards, and so two restarts in a row are two restarts.
 |---|---|
 | `frame_no: f32` | the frame the timeline last landed on |
 | `finished: bool` | whether the animation has reached its end |
+| `playing_forward: bool` | which way the playhead is actually travelling — false on a ping-pong's return leg too. Gate audio on it |
 
 ### `SsCellmapTextures` — runtime texture replacement (optional)
 

@@ -16,7 +16,7 @@ use bevy::render::texture::GpuImage;
 use bevy::render::view::ViewTarget;
 // `AlphaMode` is aliased: `bevy::prelude` has one of its own, and a Bevy image is
 // straight-alpha, which is the form the player must be told about.
-use ssplayer_wgpu::{AlphaMode as SsAlphaMode, MaskBackend, SSPlayer, SSRenderer, SSScene, SceneConfig};
+use ssplayer_wgpu::{AlphaMode as SsAlphaMode, MaskBackend, PlaybackDirection, PlaybackStyle, SSPlayer, SSRenderer, SSScene, SceneConfig};
 use std::collections::{HashMap, HashSet};
 
 use crate::asset::{Keys, RenderSsPack, SsPack};
@@ -45,6 +45,11 @@ struct PlayerSlot {
     started: bool,
     playing: bool,
     restart: u32,
+    /// The direction and style last handed to the player. Set only when they
+    /// change: the runtime puts the playhead back on the configured heading
+    /// every time they are set, so setting them every frame would stop a
+    /// ping-pong from ever turning back. Cleared when the tree rebuilds.
+    heading: Option<(PlaybackDirection, PlaybackStyle)>,
     /// Runtime texture overrides currently bound, cellmap name -> (the image
     /// applied, the GPU texture it had then, the private renderer key it went in
     /// under). Diffed against the character's `SsCellmapTextures` each frame: a
@@ -141,7 +146,7 @@ pub(crate) fn sync_players(mut state: Option<ResMut<SsRenderState>>, extracted: 
         let index = match position {
             Some(index) => index,
             None => {
-                slots.push(PlayerSlot { entity: extracted_player.entity, player: SSPlayer::new(), pack: None, animation: String::new(), started: false, playing: false, restart: 0, applied_overrides: HashMap::new() });
+                slots.push(PlayerSlot { entity: extracted_player.entity, player: SSPlayer::new(), pack: None, animation: String::new(), started: false, playing: false, restart: 0, heading: None, applied_overrides: HashMap::new() });
                 slots.len() - 1
             }
         };
@@ -176,6 +181,7 @@ pub(crate) fn sync_players(mut state: Option<ResMut<SsRenderState>>, extracted: 
             // A different pack means a different tree; transport starts over.
             slot.started = false;
             slot.playing = false;
+            slot.heading = None;
             pack_changed = true;
             packs_changed = true;
         }
@@ -195,6 +201,7 @@ pub(crate) fn sync_players(mut state: Option<ResMut<SsRenderState>>, extracted: 
             // A fresh tree, stopped at its head; transport starts over.
             slot.started = false;
             slot.playing = false;
+            slot.heading = None;
         }
 
         // Allocation-free from here down.
@@ -203,6 +210,11 @@ pub(crate) fn sync_players(mut state: Option<ResMut<SsRenderState>>, extracted: 
 
         let playback = extracted_player.playback;
         slot.player.set_speed_scale(playback.speed);
+        let heading = (playback.direction, playback.style);
+        if slot.heading != Some(heading) {
+            slot.heading = Some(heading);
+            slot.player.set_playback_direction(heading.0, heading.1);
+        }
         slot.player.set_order(playback.order);
         slot.player.set_alpha(playback.alpha);
         slot.player.set_visible(playback.visible);
@@ -442,6 +454,7 @@ pub(crate) fn draw_players(
                     entity: slot.entity.id(),
                     frame_no: player.frame_no(),
                     is_finished: player.is_finished(),
+                    playing_forward: player.is_playing_forward(),
                     started_edge: player.just_started(),
                     finished_edge: player.just_finished(),
                     looped: player.just_looped(),

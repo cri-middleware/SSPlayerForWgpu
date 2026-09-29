@@ -56,7 +56,7 @@ pub use components::{SsCellmapTextures, SsPlayback, SsPlaybackState, SsPlayer, S
 pub use feedback::{SsEventMessage, SsFinished, SsLooped, SsStarted};
 // The event payloads a host matches on, re-exported so it need not also depend
 // on `ssplayer-wgpu` just to name them.
-pub use ssplayer_wgpu::{AudioEvent, SignalEvent, SignalParam, SignalValue, SsEvent, UserDataEvent};
+pub use ssplayer_wgpu::{AudioEvent, PlaybackDirection, PlaybackStyle, SignalEvent, SignalParam, SignalValue, SsEvent, UserDataEvent};
 
 use bevy::app::{App, Plugin, PreUpdate};
 use bevy::asset::AssetApp;

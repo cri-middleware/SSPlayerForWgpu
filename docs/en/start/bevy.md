@@ -80,7 +80,7 @@ at their defaults.
 |---|---|---|
 | `SsPlayer` | `pack`, `animation` | Rebuilds the playback tree — the allocating one |
 | `SsTransform` | `x`, `y`, `scale_x`, `scale_y`, `rotation` | Free |
-| `SsPlayback` | `playing`, `speed`, `order`, `alpha`, `visible`, `restart` | Free |
+| `SsPlayback` | `playing`, `speed`, `order`, `alpha`, `visible`, `restart`, `direction`, `style` | Free |
 
 It is **not** Bevy's `Transform`: that is a 3D affine, and decomposing it into the player's five
 scalars is lossy. If you want the two linked, write the one system that copies across — you keep the
@@ -131,7 +131,7 @@ fn play_sounds(mut events: MessageReader<SsEventMessage>) {
 
 | Surface | Kind | Use it for |
 |---|---|---|
-| `SsPlaybackState` component | Polled | the current `frame_no`, and whether the animation has `finished` |
+| `SsPlaybackState` component | Polled | the current `frame_no`, whether the animation has `finished`, and whether it is `playing_forward` |
 | `SsEventMessage` | `MessageReader` | timeline events — user data, signals, audio cues |
 | `SsStarted` / `SsFinished` / `SsLooped` | `MessageReader` | the one-shot start, completion and loop edges |
 

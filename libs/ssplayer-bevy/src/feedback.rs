@@ -23,6 +23,7 @@ pub(crate) struct PlaybackFeedback {
     pub entity: Entity,
     pub frame_no: f32,
     pub is_finished: bool,
+    pub playing_forward: bool,
     /// The start *edge* — set only on the first tick after a `play()`.
     pub started_edge: bool,
     /// The completion *edge* — set only on the tick the animation finished.
@@ -107,6 +108,7 @@ pub(crate) fn dispatch_feedback(
         if let Ok(mut state) = states.get_mut(feedback.entity) {
             state.frame_no = feedback.frame_no;
             state.finished = feedback.is_finished;
+            state.playing_forward = feedback.playing_forward;
         }
         if feedback.started_edge {
             started.write(SsStarted { entity: feedback.entity });
