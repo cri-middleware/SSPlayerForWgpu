@@ -123,6 +123,7 @@ The rest of the matrix:
 | Fetch the SDK | `git submodule update --init` |
 | Generate the fixtures (required once) | `./scripts/deploy-examples.sh` — the tests read `assets/` |
 | Build the library for this host | `./scripts/build.sh` |
+| A sample from a fresh checkout | `./scripts/run-example.sh` (`example=viewer` / `viewer-bevy` / `overall-bevy` / `web`) — converts and builds only what is missing |
 | Smallest Rust host | `cargo run -p ssplayer-wgpu-hello` |
 | Native viewer | `cargo run -p ssplayer-wgpu-viewer` |
 | Metal C++ viewer (macOS) | `cd examples/viewer-metal-cpp && cmake -B build && cmake --build build && ./build/ssviewer-metal` |
@@ -132,7 +133,7 @@ The rest of the matrix:
 | Preview with a pack in it | `cargo run -p ssplayer-preview-gen -- pack=assets/Ringo/Ringo.ssab open=yes` |
 | npm package | `./scripts/build.sh platform=web` — needs `pnpm` (`corepack enable`) and `wasm-pack` |
 | js layer typecheck | `cd packages/ssplayer-wgpu && pnpm run typecheck`, after a `platform=web` build |
-| Web demo | `./scripts/build.sh platform=web && (cd examples/web && python3 -m http.server)` |
+| Web demo | `./scripts/run-web.sh`, or `./scripts/build.sh platform=web && (cd examples/web && python3 -m http.server)` after changing the Rust |
 | Third-party notices current | `./scripts/generate-licenses.sh`, then `git diff --exit-code THIRD_PARTY_NOTICES.md` |
 
 **Before and after anything that changes how geometry reaches the GPU, take a golden dump.**

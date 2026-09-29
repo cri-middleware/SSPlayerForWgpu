@@ -144,14 +144,21 @@ C と JavaScript のフェイスは名前が違うだけで同じ形をしてお
 |---|---|---|
 | [`examples/hello`](./examples/hello) | Rust, winit — 最小のホスト。キャラクター 1 体 | `cargo run -p ssplayer-wgpu-hello` |
 | [`examples/viewer`](./examples/viewer) | Rust, winit — 開発用ビューア。複数キャラクターを並べたもの | `cargo run -p ssplayer-wgpu-viewer` |
-| [`examples/web`](./examples/web) | ブラウザ上の WebGPU | `./scripts/build.sh platform=web` の後 `cd examples/web && python3 -m http.server` |
+| [`examples/web`](./examples/web) | ブラウザ上の WebGPU | `./scripts/run-web.sh` |
 | [`examples/viewer-metal-cpp`](./examples/viewer-metal-cpp) | C++ / Metal, macOS | `cmake -B build && cmake --build build && ./build/ssviewer-metal` |
 | [`examples/viewer-dx12-cpp`](./examples/viewer-dx12-cpp) | C++ / DX12, Windows | `cmake -B build; cmake --build build --config Release; .\build\Release\ssviewer-dx12.exe` |
 | [`examples/viewer-vulkan-cpp`](./examples/viewer-vulkan-cpp) | C++ / Vulkan, Linux — X11 と Wayland を 1 つのバイナリに | `cmake -B build && cmake --build build && ./build/ssviewer-vulkan` |
 | [`examples/viewer-bevy`](./examples/viewer-bevy) | Bevy — アダプタの開発用ビューア。全キャラクターを並べたもの | `cargo run -p ssplayer-bevy-viewer` |
 | [`examples/overall-bevy`](./examples/overall-bevy) | Bevy — 機能を順に見せるツアー | `cargo run -p ssplayer-bevy-overall` |
 
-再生データは生成物なので、最初に一度これを実行してください:
+clone したばかりの状態からは、スクリプト 1 本で動かせます。初回はデータを変換してからサンプルを起動し、指定しなければ `hello` を動かします（Windows では `.ps1`）:
+
+```bash
+./scripts/run-example.sh                  # example=viewer / viewer-bevy / overall-bevy / web
+./scripts/run-web.sh                      # the browser demo: builds the package if missing, serves and opens it
+```
+
+表のコマンドで手動で動かす場合は、先に再生データを生成してください:
 
 ```bash
 ./scripts/deploy-examples.sh    # builds ssconverter-cli from the SDK, converts the test projects → assets/
@@ -229,6 +236,7 @@ flowchart TD
 | [`examples/`](./examples) | 環境ごとに 1 ホスト。[サンプル](#-サンプル)を参照 |
 | `scripts/build.sh` / `.ps1` | ライブラリを 1 プラットフォーム分ビルドし、`bin/` に集めます |
 | `scripts/deploy-examples.sh` / `.ps1` | SDK のテストプロジェクトを `assets/` へ変換し、両方のエクスポートモードを `examples/web` に配置します |
+| `scripts/run-example.sh` / `.ps1`、`run-web.sh` / `.ps1` | clone したばかりの状態からサンプルを起動します。変換とビルドは、足りないものだけを行います |
 | `bin/` | 集約されたライブラリ成果物。gitignore 対象 |
 | `SpriteStudio-SDK/` | SDK。git submodule で、`ssruntime` と `ssab` はここへの path 依存 |
 
