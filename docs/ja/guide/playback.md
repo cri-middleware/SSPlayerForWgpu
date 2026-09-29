@@ -59,6 +59,10 @@
 
     // 先頭から再生するには世代カウンタを進めます（値が変われば何でも可）。
     playback.restart += 1;
+
+    // 残りは 1 度だけ起こることなので、メッセージで送ります。
+    plays.write(SsPlay { entity, start_frame: Some(12.0) });   // 指定フレームから再生
+    stops.write(SsStop { entity });                             // 停止
     ```
 
 ## 速度・方向・ピンポン

@@ -92,7 +92,7 @@ flowchart TD
 | | Rust | C | JavaScript | Bevy |
 |---|:--:|:--:|:--:|:--:|
 | [ロード（両エクスポートモード・兄弟パック）](./loading.md) | ✅ | ✅ | ✅ | ✅ |
-| [再生制御：play / pause / resume / stop / seek](./playback.md) | ✅ | ✅ | ✅ | 一部 |
+| [再生制御：play / pause / resume / stop / seek](./playback.md) | ✅ | ✅ | ✅ | ✅ |
 | [ループ回数・区間・再生方向・サブフレーム](./playback.md) | ✅ | ✅ | ✅ | ✅ |
 | [イベント：ユーザーデータ・シグナル・オーディオ](./events.md) | ✅ | ✅ | ✅ | ✅ |
 | [パーツオーバーライド：表示・セル・カラー](./part-overrides.md) | ✅ | ✅ | ✅ | — |

@@ -52,7 +52,7 @@ mod feedback;
 mod render;
 
 pub use asset::{SsPack, SsPackLoadError, SsPackLoader};
-pub use components::{SsCellmapTextures, SsPlayback, SsPlaybackState, SsPlayer, SsSeek, SsTransform};
+pub use components::{SsCellmapTextures, SsPlay, SsPlayback, SsPlaybackState, SsPlayer, SsSeek, SsStop, SsTransform};
 pub use feedback::{SsEventMessage, SsFinished, SsLooped, SsStarted};
 // The event payloads a host matches on, re-exported so it need not also depend
 // on `ssplayer-wgpu` just to name them.
@@ -87,6 +87,8 @@ impl Plugin for SsPlayerPlugin {
             .add_message::<SsFinished>()
             .add_message::<SsLooped>()
             .add_message::<SsSeek>()
+            .add_message::<SsPlay>()
+            .add_message::<SsStop>()
             .insert_resource(channel.clone())
             // In `PreUpdate` so a gameplay system reading these in `Update` sees
             // the same frame's batch.

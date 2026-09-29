@@ -5,12 +5,13 @@
 //! reading events and completion edges is its own phase (see the crate docs).
 
 use bevy::asset::RecursiveDependencyLoadState;
+use bevy::ecs::message::MessageCursor;
 use bevy::prelude::*;
 use bevy::render::Extract;
 use bevy::render::sync_world::MainEntity;
 
 use crate::asset::SsPack;
-use crate::components::{SsCellmapTextures, SsPlayback, SsPlayer, SsSeek, SsTransform};
+use crate::components::{SsCellmapTextures, SsPlay, SsPlayback, SsPlayer, SsSeek, SsStop, SsTransform};
 
 /// One character's worth of main-world state, as of this frame.
 pub(crate) struct ExtractedPlayer {
@@ -39,8 +40,17 @@ pub(crate) struct ExtractedPlayer {
 pub(crate) struct ExtractedPlayers {
     pub delta_secs: f32,
     pub players: Vec<ExtractedPlayer>,
-    /// The seeks written this frame, in the order they were written.
+    /// The transport commands written this frame, each kind in the order its
+    /// messages were written.
     pub seeks: Vec<(MainEntity, f32)>,
+    pub plays: Vec<(MainEntity, Option<f32>)>,
+    pub stops: Vec<MainEntity>,
+    /// How far each kind has been read, as a `MessageReader` keeps it. When the
+    /// main world swaps its message buffers is not tied to when extract runs, so
+    /// reading only the newer buffer misses a message written just before a swap.
+    seek_cursor: MessageCursor<SsSeek>,
+    play_cursor: MessageCursor<SsPlay>,
+    stop_cursor: MessageCursor<SsStop>,
 }
 
 // A five-part query with an optional is exactly the shape `type_complexity`
@@ -51,13 +61,18 @@ pub(crate) fn extract_players(
     time: Extract<Res<Time>>,
     asset_server: Extract<Res<AssetServer>>,
     seeks: Extract<Res<Messages<SsSeek>>>,
+    plays: Extract<Res<Messages<SsPlay>>>,
+    stops: Extract<Res<Messages<SsStop>>>,
     query: Extract<Query<(Entity, &SsPlayer, &SsTransform, &SsPlayback, Option<&SsCellmapTextures>)>>,
 ) {
     extracted.delta_secs = time.delta_secs();
-    // The messages written since the main world last swapped its buffers, which
-    // is this frame's: extract runs once per main-world frame, after it.
-    extracted.seeks.clear();
-    extracted.seeks.extend(seeks.iter_current_update_messages().map(|seek| (MainEntity::from(seek.entity), seek.frame)));
+    let ExtractedPlayers { seeks: seek_list, plays: play_list, stops: stop_list, seek_cursor, play_cursor, stop_cursor, .. } = &mut *extracted;
+    seek_list.clear();
+    seek_list.extend(seek_cursor.read(&seeks).map(|seek| (MainEntity::from(seek.entity), seek.frame)));
+    play_list.clear();
+    play_list.extend(play_cursor.read(&plays).map(|play| (MainEntity::from(play.entity), play.start_frame)));
+    stop_list.clear();
+    stop_list.extend(stop_cursor.read(&stops).map(|stop| MainEntity::from(stop.entity)));
     extracted.players.clear();
     extracted.players.extend(query.iter().map(|(entity, player, transform, playback, textures)| ExtractedPlayer {
         entity: MainEntity::from(entity),
