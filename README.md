@@ -172,14 +172,22 @@ the device is lent, and how assets get in.
 |---|---|---|
 | [`examples/hello`](./examples/hello) | Rust, winit — the smallest host, one character | `cargo run -p ssplayer-wgpu-hello` |
 | [`examples/viewer`](./examples/viewer) | Rust, winit — the development viewer, a live cast | `cargo run -p ssplayer-wgpu-viewer` |
-| [`examples/web`](./examples/web) | WebGPU in a browser | `./scripts/build.sh platform=web`, then `cd examples/web && python3 -m http.server` |
+| [`examples/web`](./examples/web) | WebGPU in a browser | `./scripts/run-web.sh` |
 | [`examples/viewer-metal-cpp`](./examples/viewer-metal-cpp) | C++ on Metal, macOS | `cmake -B build && cmake --build build && ./build/ssviewer-metal` |
 | [`examples/viewer-dx12-cpp`](./examples/viewer-dx12-cpp) | C++ on DX12, Windows | `cmake -B build; cmake --build build --config Release; .\build\Release\ssviewer-dx12.exe` |
 | [`examples/viewer-vulkan-cpp`](./examples/viewer-vulkan-cpp) | C++ on Vulkan, Linux — X11 and Wayland in one binary | `cmake -B build && cmake --build build && ./build/ssviewer-vulkan` |
 | [`examples/viewer-bevy`](./examples/viewer-bevy) | Bevy — the adapter's development viewer, a live cast | `cargo run -p ssplayer-bevy-viewer` |
 | [`examples/overall-bevy`](./examples/overall-bevy) | Bevy — the scripted feature tour | `cargo run -p ssplayer-bevy-overall` |
 
-They play generated animation data, so run this once first:
+From a fresh checkout, one script converts the data on its first run and then starts a sample —
+`hello` unless you name another (`.ps1` on Windows):
+
+```bash
+./scripts/run-example.sh                  # example=viewer / viewer-bevy / overall-bevy / web
+./scripts/run-web.sh                      # the browser demo: builds the package if missing, serves and opens it
+```
+
+Running one by hand, as in the table, needs the generated animation data first:
 
 ```bash
 ./scripts/deploy-examples.sh    # builds ssconverter-cli from the SDK, converts the test projects → assets/
@@ -263,6 +271,7 @@ flowchart TD
 | [`examples/`](./examples) | one host per environment; see [Samples](#-samples) |
 | `scripts/build.sh` / `.ps1` | builds the library for one platform, collecting it into `bin/` |
 | `scripts/deploy-examples.sh` / `.ps1` | converts the SDK's test projects into `assets/` and deploys both export modes to `examples/web` |
+| `scripts/run-example.sh` / `.ps1`, `run-web.sh` / `.ps1` | take a fresh checkout to a running sample, converting and building only what is missing |
 | `bin/` | collected library artifacts. Gitignored |
 | `SpriteStudio-SDK/` | the SDK, as a git submodule — `ssruntime` and `ssab` are path dependencies into it |
 
