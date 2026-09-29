@@ -16,8 +16,8 @@ We would like to thank the authors and contributors of these open-source project
 
 ## Overview of Licenses
 
-- [Apache License 2.0](#Apache-2.0) (109)
-- [MIT License](#MIT) (14)
+- [Apache License 2.0](#Apache-2.0) (101)
+- [MIT License](#MIT) (11)
 - [BSD 3-Clause &quot;New&quot; or &quot;Revised&quot; License](#BSD-3-Clause) (3)
 - [zlib License](#Zlib) (3)
 - [Creative Commons Zero v1.0 Universal](#CC0-1.0) (1)
@@ -1312,8 +1312,6 @@ Used by:
 
 Used by:
 - **crc32fast 1.5.2** (https://github.com/srijs/rust-crc32fast)
-- **jni-sys 0.3.1** (https://github.com/jni-rs/jni-sys)
-- **jni-sys 0.4.1** (https://github.com/jni-rs/jni-sys)
 
 ```text
                                  Apache License
@@ -3398,7 +3396,6 @@ limitations under the License.
 
 Used by:
 - **allocator-api2 0.2.21** (https://github.com/zakarumych/allocator-api2)
-- **android_system_properties 0.1.6** (https://github.com/nical/android_system_properties)
 - **document-features 0.2.12** (https://github.com/slint-ui/document-features)
 - **fdeflate 0.3.7** (https://github.com/image-rs/fdeflate)
 - **flatbuffers 25.12.19** (https://github.com/google/flatbuffers)
@@ -3406,19 +3403,15 @@ Used by:
 - **gpu-descriptor 0.3.2** (https://github.com/zakarumych/gpu-descriptor)
 - **half 2.7.1** (https://github.com/VoidStarKat/half-rs)
 - **image 0.25.10** (https://github.com/image-rs/image)
-- **jni-sys-macros 0.4.1** (https://github.com/jni-rs/jni-sys)
 - **libc 0.2.189** (https://github.com/rust-lang/libc)
 - **litrs 1.0.0** (https://github.com/LukasKalbertodt/litrs)
 - **miniz_oxide 0.8.9** (https://github.com/Frommi/miniz_oxide/tree/master/miniz_oxide)
 - **miniz_oxide 0.9.1** (https://github.com/Frommi/miniz_oxide/tree/master/miniz_oxide)
 - **naga 29.0.4** (https://github.com/gfx-rs/wgpu)
-- **ndk-sys 0.6.0+11769913** (https://github.com/rust-mobile/ndk)
 - **objc2-core-foundation 0.3.2** (https://github.com/madsmtm/objc2)
 - **objc2-metal 0.3.2** (https://github.com/madsmtm/objc2)
 - **objc2-quartz-core 0.3.2** (https://github.com/madsmtm/objc2)
 - **pin-project-lite 0.2.17** (https://github.com/taiki-e/pin-project-lite)
-- **portable-atomic-util 0.2.8** (https://github.com/taiki-e/portable-atomic-util)
-- **portable-atomic 1.15.0** (https://github.com/taiki-e/portable-atomic)
 - **proc-macro2 1.0.107** (https://github.com/dtolnay/proc-macro2)
 - **profiling 1.0.18** (https://github.com/aclysma/profiling)
 - **quote 1.0.47** (https://github.com/dtolnay/quote)
@@ -3431,7 +3424,6 @@ Used by:
 - **thiserror 2.0.21** (https://github.com/dtolnay/thiserror)
 - **unicode-ident 1.0.26** (https://github.com/dtolnay/unicode-ident)
 - **wgpu-core-deps-apple 29.0.4** (https://github.com/gfx-rs/wgpu)
-- **wgpu-core-deps-emscripten 29.0.4** (https://github.com/gfx-rs/wgpu)
 - **wgpu-core-deps-windows-linux-android 29.0.4** (https://github.com/gfx-rs/wgpu)
 - **wgpu-core 29.0.4** (https://github.com/gfx-rs/wgpu)
 - **wgpu-hal 29.0.4** (https://github.com/gfx-rs/wgpu)
@@ -3802,38 +3794,6 @@ THE SOFTWARE.
 ### <a id="MIT"></a>MIT License
 
 Used by:
-- **redox_syscall 0.5.18** (https://gitlab.redox-os.org/redox-os/syscall)
-
-```text
-Copyright (c) 2017 Redox OS Developers
-
-MIT License
-
-Permission is hereby granted, free of charge, to any person obtaining
-a copy of this software and associated documentation files (the
-"Software"), to deal in the Software without restriction, including
-without limitation the rights to use, copy, modify, merge, publish,
-distribute, sublicense, and/or sell copies of the Software, and to
-permit persons to whom the Software is furnished to do so, subject to
-the following conditions:
-
-The above copyright notice and this permission notice shall be
-included in all copies or substantial portions of the Software.
-
-THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND,
-EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF
-MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND
-NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE
-LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION
-OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION
-WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
-
-```
-
----
-### <a id="MIT"></a>MIT License
-
-Used by:
 - **slab 0.4.12** (https://github.com/tokio-rs/slab)
 
 ```text
@@ -3901,37 +3861,6 @@ USE OR OTHER DEALINGS IN THE SOFTWARE.
 ### <a id="MIT"></a>MIT License
 
 Used by:
-- **tokio 1.53.1** (https://github.com/tokio-rs/tokio)
-
-```text
-MIT License
-
-Copyright (c) Tokio Contributors
-
-Permission is hereby granted, free of charge, to any person obtaining a copy
-of this software and associated documentation files (the "Software"), to deal
-in the Software without restriction, including without limitation the rights
-to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-copies of the Software, and to permit persons to whom the Software is
-furnished to do so, subject to the following conditions:
-
-The above copyright notice and this permission notice shall be included in all
-copies or substantial portions of the Software.
-
-THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
-AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
-SOFTWARE.
-
-```
-
----
-### <a id="MIT"></a>MIT License
-
-Used by:
 - **simd-adler32 0.3.10** (https://github.com/mcountryman/simd-adler32)
 
 ```text
@@ -3987,37 +3916,6 @@ AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
 LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 THE SOFTWARE.
-
-```
-
----
-### <a id="MIT"></a>MIT License
-
-Used by:
-- **crunchy 0.2.4** (https://github.com/eira-fransham/crunchy)
-
-```text
-The MIT License (MIT)
-
-Copyright 2017-2023 Eira Fransham.
-
-Permission is hereby granted, free of charge, to any person obtaining a copy
-of this software and associated documentation files (the "Software"), to deal
-in the Software without restriction, including without limitation the rights
-to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-copies of the Software, and to permit persons to whom the Software is
-furnished to do so, subject to the following conditions:
-
-The above copyright notice and this permission notice shall be included in all
-copies or substantial portions of the Software.
-
-THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
-AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
-SOFTWARE.
 
 ```
 
