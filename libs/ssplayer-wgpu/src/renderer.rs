@@ -721,6 +721,11 @@ fn vs_effect(@builtin(vertex_index) vi: u32) -> VertexOutput {
     // One colour per particle, and no PartsColor overlay: plain modulate.
     out.color = corner_rgba(pi, 0u);
     out.varg = varg_of((*p).mode, (*p).rates[0]);
+    // The particle's own local point: the effect's coverage block already maps
+    // the effect part's space onto the player's bitmap.
+    out.cov_uv = cov_uv_of(pi, vec2<f32>(px, py));
+    out.mask_info = prims[pi].mask_info;
+    out.cov_base = prims[pi].cov_base;
     out.tint = (*p).tint;
     return out;
 }
@@ -852,7 +857,7 @@ fn mask_passes(in: VertexOutput, info: u32, cov_base: u32) -> bool {
     // This part's place on the tree sequence — the whole instance tree numbered
     // in drawing order, so a sub-animation's parts sit between its instance part
     // and whatever its caller draws next.
-    let this_seq = f32(info >> 16u);
+    let this_seq = f32(info >> 8u);
     // Two accumulators, never one: increment and invert are each self-inverse but
     // do not commute, so mixing them makes coverage depend on the order the
     // writers happened to be drawn in.

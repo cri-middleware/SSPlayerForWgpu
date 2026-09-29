@@ -45,6 +45,10 @@ Where a stencil *is* available it is the cheaper answer, which is why coverage i
     `MaskBackend::Stencil` without a `stencil_format` cannot work, and is refused rather than
     silently drawing every masked part unclipped — the scene falls back to `None`.
 
+    Under `None` a part set to draw only inside a mask draws everywhere as well. With a backend,
+    such a part draws nowhere no mask covers — even in an animation that has no mask at all — but
+    a scene that does not mask draws every part it has.
+
 === "C"
 
     One flag on the scene descriptor. The stencil buffer is allocated for you.
