@@ -79,7 +79,7 @@ finds itself drawing into an sRGB target without it.
 |---|---|---|
 | `SsPlayer` | `src`, `animation` | Rebuilds the playback tree — this is the allocating one |
 | `SsTransform` | `x`, `y`, `scale_x`, `scale_y`, `rotation` | Free |
-| `SsPlayback` | `playing`, `speed`, `order`, `alpha`, `visible`, `restart` | Free |
+| `SsPlayback` | `playing`, `speed`, `order`, `alpha`, `visible`, `restart`, `direction`, `style` | Free |
 
 Deliberately not Bevy's `Transform`: that is a 3D affine whose decomposition into
 the player's five scalars is lossy. An app that wants the two linked can write
@@ -160,7 +160,7 @@ through two surfaces:
 
 | Surface | Kind | Use it for |
 |---|---|---|
-| `SsPlaybackState` component | Polled | The current `frame_no`, and whether the animation has `finished` |
+| `SsPlaybackState` component | Polled | The current `frame_no`, whether the animation has `finished`, and whether it is `playing_forward` |
 | `SsEventMessage` | `MessageReader` | Timeline events — match on `SsEvent` for the user-data marker, the signal, or the audio cue |
 | `SsStarted` / `SsFinished` / `SsLooped` | `MessageReader` | The one-shot start, completion and loop edges |
 

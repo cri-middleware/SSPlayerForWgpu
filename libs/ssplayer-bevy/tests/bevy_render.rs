@@ -25,7 +25,7 @@ use bevy::render::render_resource::{Extent3d, TextureDimension, TextureFormat, T
 use bevy::render::view::Msaa;
 use bevy::sprite::Sprite;
 use bevy::window::WindowPlugin;
-use ssplayer_bevy::{SsPlayback, SsPlaybackState, SsPlayer, SsPlayerPlugin, SsTransform};
+use ssplayer_bevy::{PlaybackDirection, SsPlayback, SsPlaybackState, SsPlayer, SsPlayerPlugin, SsTransform};
 use std::path::Path;
 use std::sync::{Arc, Mutex};
 
@@ -344,6 +344,33 @@ fn playback_state_crosses_back_to_the_main_world() {
 
     let state = app.world().entity(player).get::<SsPlaybackState>().expect("SsPlaybackState is a required component of SsPlayer and must be present");
     assert!(state.frame_no > 0.0, "playback state did not cross back: frame_no is still {} after {FRAMES} frames — the render->main feedback never arrived", state.frame_no);
+    assert!(state.playing_forward, "a character on the default heading reported it was not playing forward");
+}
+
+/// The heading set on `SsPlayback` reaches the player, and the way it is
+/// travelling comes back through `SsPlaybackState` — what a host gates its
+/// audio on.
+#[test]
+fn a_backward_character_reports_it_is_not_playing_forward() {
+    if !fixtures_present() {
+        eprintln!("assets not generated, skipping");
+        return;
+    }
+    let Some((mut app, handle, _captured)) = headless_app() else {
+        eprintln!("no GPU adapter available, skipping");
+        return;
+    };
+
+    app.world_mut().spawn((Camera2d, Camera { clear_color: ClearColorConfig::Custom(Color::BLACK), ..default() }, RenderTarget::Image(handle.into()), Msaa::Off));
+    let (character, transform, playback) = masked_character(app.world());
+    let player = app.world_mut().spawn((character, transform, SsPlayback { direction: PlaybackDirection::Backward, ..playback })).id();
+
+    app.finish();
+    app.cleanup();
+    pump(&mut app);
+
+    let state = app.world().entity(player).get::<SsPlaybackState>().expect("SsPlaybackState is a required component of SsPlayer and must be present");
+    assert!(!state.playing_forward, "a character set to play backward reported it was playing forward");
 }
 
 /// A multisampled view is skipped, not a hard crash.
