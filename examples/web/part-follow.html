@@ -160,10 +160,10 @@
     const DEFAULT_ANIM = 'run';
 
     // The player's own placement (backing px): world == set_transform applied to the
-    // part's animation-local pose. Found once by `autofit`, and the marker uses the
-    // SAME numbers, so following stays correct whatever the fit turns out to be.
+    // part's animation-local pose. Written by `fit`, and the marker uses the SAME
+    // numbers, so following stays correct whatever the fit turns out to be.
     const dpr = window.devicePixelRatio || 1;
-    let scale = 0.5, offX = 0, offY = 0, fitted = false;
+    let scale = 1, offX = 0, offY = 0;
 
     // Fixed CSS size -> stable clientWidth for the marker maths; backing store is
     // that times the device pixel ratio, which is what the projection is set to.
@@ -182,9 +182,20 @@
       throw e;
     }
 
-    // Start it; the transform stays identity until `autofit` runs on the first
-    // posed frame (world matrices are zero until an update has happened).
+    // Fit the authored canvas into the backing store and keep the placement it
+    // wrote. The box is the first animation's canvas, kept across motions so the
+    // character does not shrink for a wider one (Ringo's `dead`).
+    let frame;
+    function fit() {
+      const placed = player.fitInto(canvas.width, canvas.height, { frame });
+      scale = placed.scaleX;
+      offX = placed.x;
+      offY = placed.y;
+    }
+
     player.setAnimation(player.animationNames().includes(DEFAULT_ANIM) ? DEFAULT_ANIM : player.animationNames()[0]);
+    frame = player.canvasRect();
+    fit();
     player.play();
 
     // --- Pickers ---------------------------------------------------------------
@@ -196,10 +207,8 @@
     }
     animSel.addEventListener('change', () => {
       // set_animation rebuilds the tree; part names are stable within the pack, so
-      // the follow target survives the switch. Re-fit, since a new motion has a
-      // different extent, and keep the placement transport-independent.
+      // the follow target survives the switch, and the box `fit` used stays.
       player.setAnimation(animSel.value);
-      fitted = false;
       player.play();
     });
 
@@ -233,27 +242,6 @@
 
     applyLang(lang);   // paint the prose, labels, warning and title once everything exists
 
-    // Frame the character from its posed parts: fit the pivots' bounding box into a
-    // fraction of the canvas (the art overhangs the pivots, so leave margin) and
-    // centre it. Returns false until an update has actually posed the parts.
-    function autofit() {
-      let minx = Infinity, miny = Infinity, maxx = -Infinity, maxy = -Infinity;
-      for (const { name } of parts) {
-        const m = player.partTransform(name);
-        if (!m || m.length !== 6) continue;
-        minx = Math.min(minx, m[4]); maxx = Math.max(maxx, m[4]);
-        miny = Math.min(miny, m[5]); maxy = Math.max(maxy, m[5]);
-      }
-      const w = maxx - minx, h = maxy - miny;
-      if (!(w > 1) && !(h > 1)) return false;          // still all-zero: not posed yet
-      const fill = 0.62;                                // pivots underestimate the art
-      scale = Math.min((canvas.width * fill) / Math.max(w, 1), (canvas.height * fill) / Math.max(h, 1));
-      offX = -scale * (minx + maxx) / 2;               // put the bbox centre at the canvas centre
-      offY = -scale * (miny + maxy) / 2;
-      player.setTransform(offX, offY, scale, scale, 0);
-      return true;
-    }
-
     // --- Frame loop ------------------------------------------------------------
     // Read the pose AFTER surface.frame (the update), compose the player placement,
     // then map world -> canvas CSS pixels: centre of the box, plus the point, over
@@ -264,7 +252,6 @@
       last = now;
       if (!ctx.isDeviceLost()) {
         surface.frame(dt);
-        if (!fitted) fitted = autofit();
         const name = partSel.value;
         const m = player.partTransform(name);
         if (m && m.length === 6) {

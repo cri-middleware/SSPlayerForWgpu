@@ -58,15 +58,13 @@ script — and all three share the same staged package and the same data.
 | Page | What it is for |
 |---|---|
 | [`index.html`](./index.html) | The two shapes of the API side by side: one `<ss-player-webgpu>` element, and one canvas driven directly with several players on it, printing `SceneStats`. Both export modes are selectable, which is what exercises the fetch path as well as the embedded one. |
-| [`element.html`](./element.html) | The Web Component on its own: the declarative markup, a panel over `element.player` for transport / speed / loop count, a copy-pasteable snippet that tracks the panel, and `loadSrc` switching packs at runtime. |
+| [`element.html`](./element.html) | The Web Component on its own: the declarative markup, a panel that sets its attributes live (`src`, `animation`, `speed-scale`, `fit`, `align`), the six events as they arrive, `element.player` for transport and loop count, and a copy-pasteable snippet that tracks the panel. |
 | [`multi.html`](./multi.html) | Many elements on one page, in article flow — block, inline, overlapped with HTML above and below, and styled with `border-radius` / `filter`. The HUD counts elements, canvases and **distinct `SsContextWeb` objects**, so "one device however many elements" is measured rather than claimed; per-animation frame counters make `pause-when-hidden` visible. |
 
-Both new pages fit the animation to the element's box themselves
-(`canvasSize()` + `setTransform`), because the player draws one authored pixel to
-one CSS pixel and puts the animation's **origin** — wherever the artist put it — at
-the centre of the box. Ringo stands on his origin, so those elements ask for it at
-the foot of the box instead; that decision is the host's and the demo shows it
-being made rather than hiding it.
+The element fits the animation's authored canvas into its box by itself, placed by
+the pivot the artist set, so Ringo, who stands on his origin, lands inside the box
+with no page code. `part-follow.html` drives the context directly and does the same
+with `fitInto`, keeping the placement it wrote to map the followed part.
 
 `build=debug` passes `--dev` to wasm-pack, which skips `wasm-opt` — the result is
 several times larger, so never quote its size.
@@ -84,16 +82,26 @@ several times larger, so never quote its size.
 ```
 
 The element makes its own canvas, takes a surface from the page's shared context
-and adds one player to it, then drives `requestAnimationFrame`. Call
-`element.loadSrc(url)` to switch packs at runtime. Put ten of these on a page and
-they still share **one `GPUDevice`** — see below.
+and adds one player to it, then drives `requestAnimationFrame`. Change an attribute
+to switch pack, animation, speed or fit on a live element, or call
+`element.loadSrc(url)` from script. Put ten of these on a page and they still share
+**one `GPUDevice`** — see below.
 
 | Attribute | Default | Meaning |
 |---|---|---|
 | `src` | — | `.ssab` URL, either export mode; its atlases and instance packs come with it |
 | `pack` | from the `.ssab` | Pack name override. Leave it alone — external instance references are resolved by the exporter's name |
-| `anim` | first | Animation to play |
+| `animation` | first | Animation to play. Changing it with `autoplay` on plays the new one from its head |
+| `autoplay` | off | Start playing once loaded, like `<video autoplay>` |
+| `speed-scale` | `1` | A multiple of the authored rate |
+| `fit` | `contain` | `contain` / `cover` fit the authored canvas into the box; `none` draws 1:1 with the origin centred |
+| `align` | `center` | Where the fitted canvas sits: `center`, `top`, `bottom`, `left`, `right`, or a corner such as `bottom-left` |
+| `flip-x`, `flip-y` | off | Mirrors; the alignment follows them |
 | `pause-when-hidden` | on | Stop the rAF loop while the element is scrolled off-screen or the tab is backgrounded. Opt out with `pause-when-hidden="false"` |
+
+It dispatches `animationstarted`, `animationfinished`, `animationlooped`,
+`userdata`, `signal` and `audio` as DOM events (the timeline events carry their
+payload as `detail`), and `load` once a pack has loaded.
 
 ### Several characters — drive the context directly
 

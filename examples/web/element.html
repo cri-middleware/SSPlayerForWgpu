@@ -47,6 +47,7 @@
            `autoplay` on its own. -->
       <ss-player-webgpu id="player" src="assets/Ringo/Ringo.ssab" autoplay></ss-player-webgpu>
       <div class="status" id="status">…</div>
+      <div class="status" id="events">イベント: —</div>
     </div>
 
     <div class="panel">
@@ -71,10 +72,18 @@
       <label for="speed">再生速度 <span id="spd">1.0</span>×</label>
       <input id="speed" type="range" min="0" max="3" step="0.1" value="1" />
 
-      <label for="origin">原点の置きどころ</label>
-      <select id="origin">
-        <option value="bottom">箱の下端（立ち絵向け）</option>
-        <option value="center">箱の中央</option>
+      <label for="fit">fit</label>
+      <select id="fit">
+        <option value="contain">contain（既定・箱に収める）</option>
+        <option value="cover">cover（箱を覆う）</option>
+        <option value="none">none（1:1、原点を中央に）</option>
+      </select>
+
+      <label for="align">align</label>
+      <select id="align">
+        <option value="center">center（既定）</option>
+        <option value="bottom">bottom</option>
+        <option value="top">top</option>
       </select>
 
       <label for="loops">ループ回数</label>
@@ -97,15 +106,17 @@
   </div>
   <pre id="snippet"></pre>
 
-  <h2>属性を書き換えても再ロードはされません</h2>
-  <p><code>src</code> は<strong>初回接続のときだけ</strong>読まれます。実行時にパックを差し替えるのは
-     <code>element.loadSrc(src, pack?, anim?)</code> で、戻り値はアニメーション名の配列です。
-     上の ssab セレクトがやっているのはこれ 1 行です。</p>
-  <pre>const names = await el.loadSrc('assets/overall/Mesh.ssab');
-el.player.setAnimation(names[0]);   // loadSrc が済ませているので通常は不要</pre>
-  <p class="hint">連続で呼んでも安全です — 要素側で直列化していて、最後に呼んだものが画面に残ります。
-     プレイヤー本体はロード中コンテキストから外れるので、<code>SsPlayerWeb</code> を直接使う場合は
-     <code>await</code> してください（2 本同時に走らせると reject されます）。</p>
+  <h2>属性を書き換えるとそのまま反映されます</h2>
+  <p><code>src</code>・<code>pack</code>・<code>animation</code>・<code>speed-scale</code>・<code>fit</code>・<code>align</code>・<code>flip-x</code>・<code>flip-y</code> は、置いた後に書き換えても効きます。上のパネルはどれも <code>setAttribute</code> を 1 行呼んでいるだけです。<code>src</code> を変えたときは、読み込みが済むと <code>load</code> イベントが届きます。</p>
+  <pre>el.setAttribute('src', 'assets/Mesh.ssab');
+el.addEventListener('load', () => console.log(el.player.animationNames()));
+el.setAttribute('animation', 'walk');   // autoplay があれば頭から再生</pre>
+  <p class="hint">スクリプトから切り替えるなら <code>element.loadSrc(src, pack?, animation?)</code> もあります。戻り値はアニメーション名の配列で、連続で呼んでも要素側で直列化され、最後に呼んだものが画面に残ります。</p>
+
+  <h2>イベント</h2>
+  <p>再生が起こしたことは DOM イベントとして届きます。<code>animationstarted</code>・<code>animationfinished</code>・<code>animationlooped</code> と、タイムラインの <code>userdata</code>・<code>signal</code>・<code>audio</code>（中身は <code>event.detail</code>）です。上の「イベント」の行は、この 6 つを表示しています。</p>
+  <pre>el.addEventListener('animationfinished', () => showNextButton());
+el.addEventListener('userdata', (e) => console.log(e.detail.text));</pre>
 
   <h2>プレイヤー API にはここから届きます</h2>
   <pre>el.player    // SsPlayerWeb — トランスポート、パーツ上書き、events()
@@ -144,7 +155,9 @@ el.ctx       // SsContextWeb — ページ共有の device</pre>
     const speed = document.getElementById('speed');
     const spd = document.getElementById('spd');
     const loops = document.getElementById('loops');
-    const origin = document.getElementById('origin');
+    const fitSel = document.getElementById('fit');
+    const alignSel = document.getElementById('align');
+    const events = document.getElementById('events');
     const gate = document.getElementById('gate');
     const status = document.getElementById('status');
     const snippet = document.getElementById('snippet');
@@ -159,8 +172,11 @@ el.ctx       // SsContextWeb — ページ共有の device</pre>
     /** The markup that would produce what is on screen right now. */
     function renderSnippet() {
       const attrs = [`src="${pick.value}"`];
-      if (anim.value) attrs.push(`anim="${anim.value}"`);
+      if (anim.value) attrs.push(`animation="${anim.value}"`);
       attrs.push('autoplay');
+      if (Number(speed.value) !== 1) attrs.push(`speed-scale="${speed.value}"`);
+      if (fitSel.value !== 'contain') attrs.push(`fit="${fitSel.value}"`);
+      if (alignSel.value !== 'center') attrs.push(`align="${alignSel.value}"`);
       if (!gate.checked) attrs.push('pause-when-hidden="false"');
       snippet.textContent =
 `<script type="module">
@@ -170,29 +186,6 @@ el.ctx       // SsContextWeb — ページ共有の device</pre>
 
 <ss-player-webgpu ${attrs.join('\n                  ')}
                   style="width:360px;height:360px"></ss-player-webgpu>`;
-    }
-
-    /**
-     * Scale the player so the authored canvas fits the element's box.
-     *
-     * The element draws 1:1 — one authored pixel is one CSS pixel — and puts the
-     * animation's **origin** at the centre of the box. Fitting is therefore the
-     * page's job, and it takes two decisions: the scale (the pack knows how big it
-     * was authored, `canvasSize`; the page knows how big the box is) and where the
-     * origin goes, because that is a choice the artist made, not a property of the
-     * file. A character authored standing *on* the origin has all of its artwork
-     * above it, so centring the origin hangs its head out of the box; putting the
-     * origin half an artwork below centre lands it in the middle.
-     */
-    function fit() {
-      const p = el.player;
-      if (!p) return;
-      const [aw, ah] = p.canvasSize();
-      if (!aw || !ah) return;
-      const s = Math.min(el.clientWidth / aw, el.clientHeight / ah);
-      // y is measured downward from the centre of the box.
-      const y = origin.value === 'bottom' ? (ah * s) / 2 : 0;
-      p.setTransform(0, y, s, s, 0);
     }
 
     /** Fill the animation dropdown from the pack the element now holds. */
@@ -207,20 +200,37 @@ el.ctx       // SsContextWeb — ページ共有の device</pre>
       renderSnippet();
     }
 
-    // `src` is read once, at connect: switching packs at runtime is `loadSrc`,
-    // which resolves to the animation names so a UI can offer them.
+    // Every control is one attribute: the element loads, switches, re-times and
+    // re-fits itself. `load` says a new pack has arrived, which is when its
+    // animation names can fill the dropdown.
     pick.addEventListener('change', () => {
-      el.loadSrc(pick.value)
-        .then((names) => { fillAnimations(names ?? []); fit(); })
-        .catch((e) => { status.textContent = `⚠️ ${e}`; });
+      el.removeAttribute('animation');
+      el.setAttribute('src', pick.value);
     });
+    el.addEventListener('load', () => fillAnimations(el.player.animationNames(), el.player.currentAnimation()));
 
     anim.addEventListener('change', () => {
-      // Select, then start — two calls, both synchronous.
-      el.player?.setAnimation(anim.value);
-      el.player?.play();
+      // With `autoplay` on the element, a new animation plays from its head.
+      el.setAttribute('animation', anim.value);
       renderSnippet();
     });
+
+    for (const [control, attribute] of [[fitSel, 'fit'], [alignSel, 'align']]) {
+      control.addEventListener('change', () => {
+        el.setAttribute(attribute, control.value);
+        renderSnippet();
+      });
+    }
+
+    // The six the family reports, as the element dispatches them.
+    const seen = [];
+    for (const type of ['animationstarted', 'animationfinished', 'animationlooped', 'userdata', 'signal', 'audio']) {
+      el.addEventListener(type, () => {
+        seen.unshift(type);
+        seen.length = Math.min(seen.length, 4);
+        events.textContent = `イベント: ${seen.join(' ← ')}`;
+      });
+    }
 
     document.getElementById('play').addEventListener('click', () => el.player?.play());
     document.getElementById('pause').addEventListener('click', () => el.player?.pause());
@@ -229,20 +239,17 @@ el.ctx       // SsContextWeb — ページ共有の device</pre>
 
     speed.addEventListener('input', () => {
       spd.textContent = Number(speed.value).toFixed(1);
-      el.player?.setSpeedScale(Number(speed.value));
+      el.setAttribute('speed-scale', speed.value);
+      renderSnippet();
     });
 
     loops.addEventListener('change', () => el.player?.setLoopCount(Number(loops.value)));
-    origin.addEventListener('change', fit);
 
     gate.addEventListener('change', () => {
-      // Attributes are read when the element connects, so re-connecting is what
-      // applies a change to one — and a disconnect releases the surface and the
-      // player, so this is also the round trip a DOM move makes. The other two
-      // attributes come along so the element comes back as what is on screen now
-      // rather than as what the markup said at page load.
-      el.setAttribute('src', pick.value);
-      el.setAttribute('anim', anim.value);
+      // `pause-when-hidden` is read when the element connects, so re-connecting is
+      // what applies it — and a disconnect releases the surface and the player, so
+      // this is also the round trip a DOM move makes. Every other control already
+      // lives in an attribute, so the element comes back as what is on screen now.
       el.setAttribute('pause-when-hidden', gate.checked ? 'true' : 'false');
       const parent = el.parentNode, next = el.nextSibling;
       el.remove();
@@ -250,24 +257,16 @@ el.ctx       // SsContextWeb — ページ共有の device</pre>
       renderSnippet();
     });
 
-    // Polled rather than pushed: an animation frame is the element's own loop, a
-    // status line does not need to run at 60 Hz, and the element has no "ready"
-    // event to wait on — it loads its own `src`, and a re-connected one loads it
-    // again, so the poll is also what re-fills and re-fits after that round trip.
+    // Polled rather than pushed: the frame counter moves every frame, and a
+    // status line does not need to run at 60 Hz.
     setInterval(() => {
       const p = el.player;
       if (!p) { status.textContent = '…起動中'; return; }
-      if (!anim.options.length) fillAnimations(p.animationNames());
-      fit();
       const state = p.isPausing() ? 'paused' : p.isPlaying() ? 'playing' : 'stopped';
       status.textContent =
         `${state}  frame ${p.frameNo().toFixed(1)} / ${p.totalFrames()}  ` +
         `remaining loops ${p.remainingLoops()}`;
     }, 100);
-
-    // The element resizes its own swapchain with the box; the scale that fits the
-    // authored canvas into it is the page's call, so it is re-derived here.
-    addEventListener('resize', fit);
 
     renderSnippet();
     document.getElementById('copy').addEventListener('click', async () => {
