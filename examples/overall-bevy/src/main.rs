@@ -124,10 +124,10 @@ fn controls(keys: Res<ButtonInput<KeyCode>>, asset_server: Res<AssetServer>, mut
         playback.restart = playback.restart.wrapping_add(1);
     }
     if keys.just_pressed(KeyCode::ArrowUp) {
-        playback.speed = (playback.speed + 0.1).min(3.0);
+        playback.speed_scale = (playback.speed_scale + 0.1).min(3.0);
     }
     if keys.just_pressed(KeyCode::ArrowDown) {
-        playback.speed = (playback.speed - 0.1).max(0.1);
+        playback.speed_scale = (playback.speed_scale - 0.1).max(0.1);
     }
 }
 
@@ -173,7 +173,7 @@ fn refresh_hud(tour: Res<Tour>, states: Query<&SsPlaybackState>, playbacks: Quer
     };
     let (label, _, anim) = SCENES[tour.index];
     let frame = states.get(tour.character).map(|state| state.frame_no).unwrap_or(0.0);
-    let (playing, speed) = playbacks.get(tour.character).map(|p| (p.playing, p.speed)).unwrap_or((true, 1.0));
+    let (playing, speed) = playbacks.get(tour.character).map(|p| (p.playing, p.speed_scale)).unwrap_or((true, 1.0));
     **text = format!("scene {}/{}: {label}  ({anim})\n[ ] switch   Space {}   Up/Down speed {:.1}   R restart\nframe {frame:.1}   last event: {}", tour.index + 1, SCENES.len(), if playing { "pause" } else { "resume" }, speed, tour.last_event,);
 }
 

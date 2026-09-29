@@ -25,7 +25,7 @@ use bevy::render::render_resource::{Extent3d, TextureDimension, TextureFormat, T
 use bevy::render::view::Msaa;
 use bevy::sprite::Sprite;
 use bevy::window::WindowPlugin;
-use ssplayer_bevy::{PlaybackDirection, SsPlayback, SsPlaybackState, SsPlayer, SsPlayerPlugin, SsTransform};
+use ssplayer_bevy::{PlaybackDirection, SsPlayback, SsPlaybackState, SsPlayer, SsPlayerPlugin, SsSeek, SsTransform};
 use std::path::Path;
 use std::sync::{Arc, Mutex};
 
@@ -371,6 +371,58 @@ fn a_backward_character_reports_it_is_not_playing_forward() {
 
     let state = app.world().entity(player).get::<SsPlaybackState>().expect("SsPlaybackState is a required component of SsPlayer and must be present");
     assert!(!state.playing_forward, "a character set to play backward reported it was playing forward");
+}
+
+/// A section set on `SsPlayback` reaches the player: with the playhead stopped,
+/// it sits on the section's first frame. The mask fixture's animation runs
+/// frames 0..=10.
+#[test]
+fn a_section_puts_the_playhead_at_its_start() {
+    if !fixtures_present() {
+        eprintln!("assets not generated, skipping");
+        return;
+    }
+    let Some((mut app, handle, _captured)) = headless_app() else {
+        eprintln!("no GPU adapter available, skipping");
+        return;
+    };
+
+    app.world_mut().spawn((Camera2d, Camera { clear_color: ClearColorConfig::Custom(Color::BLACK), ..default() }, RenderTarget::Image(handle.into()), Msaa::Off));
+    let (character, transform, playback) = masked_character(app.world());
+    let player = app.world_mut().spawn((character, transform, SsPlayback { speed_scale: 0.0, animation_section: Some((6, 9)), ..playback })).id();
+
+    app.finish();
+    app.cleanup();
+    pump(&mut app);
+
+    let state = app.world().entity(player).get::<SsPlaybackState>().expect("SsPlaybackState is a required component of SsPlayer and must be present");
+    assert_eq!(state.frame_no, 6.0, "a stopped playhead should sit on the section's first frame");
+}
+
+/// A seek written before the pack has loaded is kept, and lands once the
+/// animation is set up — after its start, which would otherwise rewind it.
+#[test]
+fn a_seek_sent_before_the_pack_loads_lands_once_it_has() {
+    if !fixtures_present() {
+        eprintln!("assets not generated, skipping");
+        return;
+    }
+    let Some((mut app, handle, _captured)) = headless_app() else {
+        eprintln!("no GPU adapter available, skipping");
+        return;
+    };
+
+    app.world_mut().spawn((Camera2d, Camera { clear_color: ClearColorConfig::Custom(Color::BLACK), ..default() }, RenderTarget::Image(handle.into()), Msaa::Off));
+    let (character, transform, playback) = masked_character(app.world());
+    let player = app.world_mut().spawn((character, transform, SsPlayback { speed_scale: 0.0, ..playback })).id();
+    app.world_mut().write_message(SsSeek { entity: player, frame: 5.0 });
+
+    app.finish();
+    app.cleanup();
+    pump(&mut app);
+
+    let state = app.world().entity(player).get::<SsPlaybackState>().expect("SsPlaybackState is a required component of SsPlayer and must be present");
+    assert_eq!(state.frame_no, 5.0, "the seek did not land");
 }
 
 /// A multisampled view is skipped, not a hard crash.

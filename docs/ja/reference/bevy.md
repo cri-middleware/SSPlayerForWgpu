@@ -56,13 +56,18 @@ spawn すれば 4 つとも既定値で付きます。
 | フィールド | 既定 | |
 |---|---|---|
 | `playing: bool` | `true` | **その場で**一時停止・再開。巻き戻さないので、終了したアニメーションは再生できません |
-| `speed: f32` | `1.0` | 既定 fps の倍率 |
+| `speed_scale: f32` | `1.0` | 既定 fps の倍率。`0` と負値は停止 |
 | `order: i32` | `0` | 描画順。小さいほど先。同値なら extract 順 |
 | `alpha: f32` | `1.0` | キャラクター全体のフェード |
 | `visible: bool` | `true` | false は描画だけでなく**タイムラインの前進もスキップ**します |
 | `restart: u32` | `0` | **値を進める**（値が変われば何でも可）と先頭から再生し、ループ回数を張り直します |
 | `direction: PlaybackDirection` | `Forward` | 再生ヘッドが進む向き |
 | `style: PlaybackStyle` | `Normal` | 端に着いたら、`Normal` は先頭へ戻り、`PingPong` は折り返します |
+| `loop_count: i32` | `-1` | 止まるまでの周回数。`-1` か `0` で無限。変えると残り回数を張り直します |
+| `frame_rate: i32` | `0` | 既定 fps を置き換えます。`0` なら既定のまま。通常は `speed_scale` を使ってください |
+| `frame_skip_enabled: bool` | `true` | オフにすると、実時間に合わせず tick ごとに 1 フレームずつ進めます |
+| `sub_frame_enabled: bool` | `true` | オフにすると、描くフレームを整数に切り捨てます |
+| `animation_section: Option<(i32, i32)>` | `None` | 再生ヘッドを現在のアニメーションの `start..=end` に制限します。設定すると再生ヘッドは区間の先頭へ移ります |
 
 `restart` はフラグではなく世代カウンタです。ワンショットを何度でも再トリガーでき、後始末が要らず、
 2 回連続で進めれば 2 回リスタートになります。
@@ -93,6 +98,18 @@ spawn すれば 4 つとも既定値で付きます。
 | `SsStarted` | `entity` — 開始**エッジ**：`playing` 中のアニメーション・パックの切り替え、初めて `playing` を有効にしたとき、`restart` の加算。再開では立ちません |
 | `SsFinished` | `entity` — 完了**エッジ** |
 | `SsLooped` | `entity` — ループ境界エッジ |
+
+逆向き、つまりゲームプレイからキャラクターへ送る命令は seek だけです。キャラクターの状態ではなく 1 度だけ起こることなので、フィールドではなくメッセージにしています。
+
+| メッセージ | 内容 |
+|---|---|
+| `SsSeek` | `entity`、`frame: f32` — 再生ヘッドをそこへ移します。小数フレーム可で、区間の外には出ません。パックの読み込み前に送ったものは、アニメーションの設定が済んだ時点で反映されます |
+
+```rust
+fn jump(mut seeks: MessageWriter<SsSeek>, character: Single<Entity, With<SsPlayer>>) {
+    seeks.write(SsSeek { entity: *character, frame: 18.0 });
+}
+```
 
 ```rust
 fn on_finish(mut finished: MessageReader<SsFinished>, mut commands: Commands) {

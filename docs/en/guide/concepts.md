@@ -103,7 +103,7 @@ for what is planned.
 |---|:--:|:--:|:--:|:--:|
 | [Load, both export modes, sibling packs](./loading.md) | ✅ | ✅ | ✅ | ✅ |
 | [Transport: play / pause / resume / stop / seek](./playback.md) | ✅ | ✅ | ✅ | partial |
-| [Loop count, sections, direction, sub-frame](./playback.md) | ✅ | ✅ | ✅ | — |
+| [Loop count, sections, direction, sub-frame](./playback.md) | ✅ | ✅ | ✅ | ✅ |
 | [Events: user data, signal, audio](./events.md) | ✅ | ✅ | ✅ | ✅ |
 | [Part overrides: visibility, cell, colour](./part-overrides.md) | ✅ | ✅ | ✅ | — |
 | [Texture replacement: a whole cell map](./texture-replacement.md) | ✅ | ✅ | ✅ | ✅ |

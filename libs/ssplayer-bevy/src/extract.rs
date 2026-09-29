@@ -10,7 +10,7 @@ use bevy::render::Extract;
 use bevy::render::sync_world::MainEntity;
 
 use crate::asset::SsPack;
-use crate::components::{SsCellmapTextures, SsPlayback, SsPlayer, SsTransform};
+use crate::components::{SsCellmapTextures, SsPlayback, SsPlayer, SsSeek, SsTransform};
 
 /// One character's worth of main-world state, as of this frame.
 pub(crate) struct ExtractedPlayer {
@@ -39,13 +39,25 @@ pub(crate) struct ExtractedPlayer {
 pub(crate) struct ExtractedPlayers {
     pub delta_secs: f32,
     pub players: Vec<ExtractedPlayer>,
+    /// The seeks written this frame, in the order they were written.
+    pub seeks: Vec<(MainEntity, f32)>,
 }
 
 // A five-part query with an optional is exactly the shape `type_complexity`
 // fires on, and the shape Bevy queries take; naming it would obscure, not clarify.
 #[allow(clippy::type_complexity)]
-pub(crate) fn extract_players(mut extracted: ResMut<ExtractedPlayers>, time: Extract<Res<Time>>, asset_server: Extract<Res<AssetServer>>, query: Extract<Query<(Entity, &SsPlayer, &SsTransform, &SsPlayback, Option<&SsCellmapTextures>)>>) {
+pub(crate) fn extract_players(
+    mut extracted: ResMut<ExtractedPlayers>,
+    time: Extract<Res<Time>>,
+    asset_server: Extract<Res<AssetServer>>,
+    seeks: Extract<Res<Messages<SsSeek>>>,
+    query: Extract<Query<(Entity, &SsPlayer, &SsTransform, &SsPlayback, Option<&SsCellmapTextures>)>>,
+) {
     extracted.delta_secs = time.delta_secs();
+    // The messages written since the main world last swapped its buffers, which
+    // is this frame's: extract runs once per main-world frame, after it.
+    extracted.seeks.clear();
+    extracted.seeks.extend(seeks.iter_current_update_messages().map(|seek| (MainEntity::from(seek.entity), seek.frame)));
     extracted.players.clear();
     extracted.players.extend(query.iter().map(|(entity, player, transform, playback, textures)| ExtractedPlayer {
         entity: MainEntity::from(entity),

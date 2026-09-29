@@ -50,6 +50,15 @@ struct PlayerSlot {
     /// every time they are set, so setting them every frame would stop a
     /// ping-pong from ever turning back. Cleared when the tree rebuilds.
     heading: Option<(PlaybackDirection, PlaybackStyle)>,
+    /// The loop count and section last handed to the player, for the same
+    /// reason as `heading`: setting a count re-arms the cycles left, and setting
+    /// a section puts the playhead at its start, so either set every frame would
+    /// pin playback where it began. Cleared when the tree rebuilds.
+    loop_count: Option<i32>,
+    section: Option<Option<(i32, i32)>>,
+    /// A seek not yet applied: kept until the character has an animation set up
+    /// to seek in.
+    pending_seek: Option<f32>,
     /// Runtime texture overrides currently bound, cellmap name -> (the image
     /// applied, the GPU texture it had then, the private renderer key it went in
     /// under). Diffed against the character's `SsCellmapTextures` each frame: a
@@ -146,7 +155,20 @@ pub(crate) fn sync_players(mut state: Option<ResMut<SsRenderState>>, extracted: 
         let index = match position {
             Some(index) => index,
             None => {
-                slots.push(PlayerSlot { entity: extracted_player.entity, player: SSPlayer::new(), pack: None, animation: String::new(), started: false, playing: false, restart: 0, heading: None, applied_overrides: HashMap::new() });
+                slots.push(PlayerSlot {
+                    entity: extracted_player.entity,
+                    player: SSPlayer::new(),
+                    pack: None,
+                    animation: String::new(),
+                    started: false,
+                    playing: false,
+                    restart: 0,
+                    heading: None,
+                    loop_count: None,
+                    section: None,
+                    pending_seek: None,
+                    applied_overrides: HashMap::new(),
+                });
                 slots.len() - 1
             }
         };
@@ -182,6 +204,8 @@ pub(crate) fn sync_players(mut state: Option<ResMut<SsRenderState>>, extracted: 
             slot.started = false;
             slot.playing = false;
             slot.heading = None;
+            slot.loop_count = None;
+            slot.section = None;
             pack_changed = true;
             packs_changed = true;
         }
@@ -202,6 +226,8 @@ pub(crate) fn sync_players(mut state: Option<ResMut<SsRenderState>>, extracted: 
             slot.started = false;
             slot.playing = false;
             slot.heading = None;
+            slot.loop_count = None;
+            slot.section = None;
         }
 
         // Allocation-free from here down.
@@ -209,11 +235,24 @@ pub(crate) fn sync_players(mut state: Option<ResMut<SsRenderState>>, extracted: 
         slot.player.set_transform(transform.x, transform.y, transform.scale_x, transform.scale_y, transform.rotation);
 
         let playback = extracted_player.playback;
-        slot.player.set_speed_scale(playback.speed);
+        slot.player.set_speed_scale(playback.speed_scale);
+        slot.player.set_frame_rate(playback.frame_rate);
+        slot.player.set_frame_skip_enabled(playback.frame_skip_enabled);
+        slot.player.set_sub_frame_enabled(playback.sub_frame_enabled);
         let heading = (playback.direction, playback.style);
         if slot.heading != Some(heading) {
             slot.heading = Some(heading);
             slot.player.set_playback_direction(heading.0, heading.1);
+        }
+        if slot.loop_count != Some(playback.loop_count) {
+            slot.loop_count = Some(playback.loop_count);
+            slot.player.set_loop_count(playback.loop_count);
+        }
+        if slot.section != Some(playback.animation_section) {
+            slot.section = Some(playback.animation_section);
+            // Out of range is the whole animation, which is what `None` means.
+            let (start, end) = playback.animation_section.unwrap_or((-1, -1));
+            slot.player.set_animation_section(start, end);
         }
         slot.player.set_order(playback.order);
         slot.player.set_alpha(playback.alpha);
@@ -247,6 +286,16 @@ pub(crate) fn sync_players(mut state: Option<ResMut<SsRenderState>>, extracted: 
             }
         }
         slot.playing = want;
+
+        // After the start: `play` rewinds, and would undo a seek made before it.
+        if let Some(&(_, frame)) = extracted.seeks.iter().rev().find(|(entity, _)| *entity == slot.entity) {
+            slot.pending_seek = Some(frame);
+        }
+        if slot.player.current_animation().is_some()
+            && let Some(frame) = slot.pending_seek.take()
+        {
+            slot.player.seek(frame);
+        }
 
         reconcile_overrides(slot, renderer, device, &images, &extracted_player.overrides, pack_changed, warned_srgb_override);
     }

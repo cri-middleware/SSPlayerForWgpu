@@ -103,7 +103,10 @@ not ask it to, this page is why.
 === "Bevy"
 
     ```rust
-    playback.speed = 2.0;   // direction and style are not exposed as components
+    playback.speed_scale = 2.0;
+    playback.direction = PlaybackDirection::Backward;
+    playback.style = PlaybackStyle::PingPong;
+    playback.frame_rate = 30;
     ```
 
 | Wire value | Direction | Style |
@@ -144,6 +147,12 @@ trip.
     const left = player.remainingLoops();
     ```
 
+=== "Bevy"
+
+    ```rust
+    playback.loop_count = 3;   // a change re-arms the count, as a restart does
+    ```
+
 ## Playing part of an animation
 
 A **section** restricts the playhead to a frame range of the current animation; looping and
@@ -177,6 +186,18 @@ measured in, and selecting an animation rebuilds the tree and takes the section 
     player.setAnimationSection(10, 24);
     player.play();
     player.seek(18);
+    ```
+
+=== "Bevy"
+
+    ```rust
+    // The section applies to whichever animation is set up, so change the two
+    // together; setting it puts the playhead at its start.
+    character.animation = "walk".into();
+    playback.animation_section = Some((10, 24));
+
+    // A seek is a message, since it happens once. `seeks` is a MessageWriter<SsSeek>.
+    seeks.write(SsSeek { entity, frame: 18.0 });
     ```
 
 ## What survives switching animation or pack

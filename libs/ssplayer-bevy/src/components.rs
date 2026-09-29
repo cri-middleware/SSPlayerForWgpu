@@ -56,7 +56,8 @@ pub struct SsPlayback {
     /// never rewinds, so it cannot replay a finished animation — that is
     /// [`SsPlayback::restart`]'s job.
     pub playing: bool,
-    pub speed: f32,
+    /// A multiple of the authored rate. `0` and negatives stop the playhead.
+    pub speed_scale: f32,
     /// Draw order within the render target; lower draws first. Ties keep the
     /// order the entities were extracted in.
     pub order: i32,
@@ -77,12 +78,59 @@ pub struct SsPlayback {
     /// What the playhead does at the far end: `Normal` wraps, `PingPong` turns
     /// back.
     pub style: PlaybackStyle,
+    /// Cycles to play before stopping; `-1` (or `0`) loops for ever, which is
+    /// also what an animation does unless told otherwise. A change re-arms the
+    /// count, as a restart does.
+    pub loop_count: i32,
+    /// Replaces the authored frame rate; `0` keeps it. Prefer `speed_scale`,
+    /// which scales the authored timing rather than replacing it.
+    pub frame_rate: i32,
+    /// On (the default) keeps playback on the wall clock by dropping frames
+    /// under load; off advances exactly one frame per tick.
+    pub frame_skip_enabled: bool,
+    /// On (the default) draws between authored frames; off floors the frame
+    /// that is drawn, pinning playback to whole ones.
+    pub sub_frame_enabled: bool,
+    /// Restrict the playhead to `start..=end` of the current animation, so
+    /// looping and ping-pong turn around inside it; `None` is the whole
+    /// animation. Setting or changing it puts the playhead at its start, and it
+    /// applies to whichever animation is set up, so change it with `animation`.
+    pub animation_section: Option<(i32, i32)>,
 }
 
 impl Default for SsPlayback {
     fn default() -> Self {
-        Self { playing: true, speed: 1.0, order: 0, alpha: 1.0, visible: true, restart: 0, direction: PlaybackDirection::Forward, style: PlaybackStyle::Normal }
+        Self {
+            playing: true,
+            speed_scale: 1.0,
+            order: 0,
+            alpha: 1.0,
+            visible: true,
+            restart: 0,
+            direction: PlaybackDirection::Forward,
+            style: PlaybackStyle::Normal,
+            loop_count: -1,
+            frame_rate: 0,
+            frame_skip_enabled: true,
+            sub_frame_enabled: true,
+            animation_section: None,
+        }
     }
+}
+
+/// Move a character's playhead to `frame`, as
+/// [`ssplayer_wgpu::SSPlayer::seek`] does: a fractional frame is honoured, and
+/// the playhead stays inside the section.
+///
+/// A message rather than a field of [`SsPlayback`], because a seek happens once
+/// rather than being a state the character is in: write it with a
+/// `MessageWriter<SsSeek>`. One sent before the character's pack has loaded is
+/// kept and applied once its animation is set up; of several in one frame, the
+/// last wins.
+#[derive(Message, Clone, Copy, Debug)]
+pub struct SsSeek {
+    pub entity: Entity,
+    pub frame: f32,
 }
 
 /// Runtime texture replacement: swap the texture a cellmap binds for a Bevy
