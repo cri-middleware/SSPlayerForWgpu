@@ -26,12 +26,27 @@ defineSsPlayerWebGPUElement('my-ss-player');      // ... 独自の名前で
 |---|---|
 | `src` | `.ssab` の URL。reference / embedded どちらでも可 |
 | `pack` | パック名の上書き。既定は `.ssab` 内の名前 |
-| `anim` | 再生するアニメーション。既定はパックが宣言する最初のもの |
+| `animation` | 再生するアニメーション。既定はパックが宣言する最初のもの |
 | `autoplay` | ロード後に再生開始。**boolean 属性**なので、無ければ再生しません |
+| `speed-scale` | 既定 fps の倍率。`0` と負値は停止 |
+| `fit` | `contain`（既定）と `cover` はオーサリング時のキャンバスを要素に合わせます。`none` は 1:1 で、原点を中央に置きます |
+| `align` | 合わせたキャンバスの置き場所：`center`（既定）、`top`、`bottom`、`left`、`right`、`top-left`、`top-right`、`bottom-left`、`bottom-right` |
+| `flip-x`、`flip-y` | キャラクターを反転します。boolean 属性で、揃え位置も反転に従います |
 | `pause-when-hidden` | 画面外・バックグラウンド時に rAF ループを止める。**既定でオン** — `pause-when-hidden="false"` で解除 |
 
-!!! warning "属性は接続時に読まれるだけで、監視されません"
-    `attributeChangedCallback` はありません。生きている要素に `element.setAttribute('src', …)` しても**何も起きません**。実行時にパックを差し替えるには `loadSrc()` を呼んでください。
+### 置いた後に書き換える
+
+`src`・`pack`・`animation`・`speed-scale`・`fit`・`align`・`flip-x`・`flip-y` は監視されていて、再生中の要素で書き換えても反映されます。
+
+* `src` か `pack` を変えると、`loadSrc()` と同じようにそのパックを読み込み、設定が済むと `load` イベントを送ります。
+* `animation` を変えると、そのアニメーションに切り替えます。`autoplay` があれば先頭から再生し、無ければ 1 フレーム目で止まります。
+* `autoplay` はアニメーションを設定するたびに読まれ、`pause-when-hidden` は要素が接続されたときに 1 度だけ読まれます。
+
+### キャラクターを要素に合わせる
+
+要素は、アニメーションの**オーサリング時のキャンバス**を、作者が決めた pivot で配置したうえで箱に合わせます。原点の上に立つよう作られたキャラクターも、頭がはみ出さずに箱に収まります。`fit` と `align` を指定しなければ `contain` と `center` です。
+
+箱は、パックを**読み込んだときの**アニメーションのキャンバスで、その後に `animation` を切り替えても変えません。同じパックでもアニメーションごとにキャンバスが違うことがあり（Ringo の `dead` は幅 1300、ほかは 800）、モーションを変えるたびに大きさが変わるのは不自然だからです。新しい `src` か `pack` を読むと箱を決め直します。`fit="none"` はこれをすべて行わず、オーサリング時の 1 単位をキャンバスの 1 ピクセルとして、原点を中央に描きます。
 
 ### `autoplay` は `<video>` と同じく opt-in
 
@@ -54,20 +69,40 @@ defineSsPlayerWebGPUElement('my-ss-player');      // ... 独自の名前で
 ```js
 const el = document.querySelector('ss-player-webgpu');
 await el.loadSrc('/assets/Other.ssab');       // アニメーション名の配列が返る
-el.player.setSpeedScale(0.5);
+el.player.setLoopCount(1);
 el.player.setPartVisibilityOverride('hat', true, false);
-for (const e of el.player.events()) { /* ... */ }
 ```
 
-### `loadSrc(src, pack?, anim?)`
+### `loadSrc(src, pack?, animation?)`
 
 `.ssab` を取得して再生します。実行時にパックを差し替える手段でもあります。戻り値はアニメーション名の配列なので、そのまま UI の選択肢にできます。
 
-アニメーション（`anim`、無ければ最初のもの）を選択したあと、初回ロードとまったく同じように `autoplay` を尊重します。つまり `autoplay` の無い要素は、新しいパックでも 1 フレーム目で止まります。
+アニメーション（`animation`、無ければ最初のもの）を選択したあと、初回ロードとまったく同じように `autoplay` を尊重します。つまり `autoplay` の無い要素は、新しいパックでも 1 フレーム目で止まります。要素の属性は書き換えないので、DOM 上で移動した（接続し直した）要素は `src` 属性のパックを読み込みます。要素を移動するページでは、代わりに属性を設定してください。
 
 `pack` を渡すと、要素自身がバイト列を取得してその名前で登録します。`load` は名前の上書きを受け取らないためです。
 
 呼び出しは**直列化**されます。ロード中のプレイヤーは共有コンテキストから取り外されているため、前のロードが完了する前に始めた 2 本目はコンテキストに reject されます。パックの差し替えは多くの場合ユーザー操作で、続けざまに 2 回操作したら 2 回差し替わるべきなので、各呼び出しは 1 つ前を待ち、最後に呼んだものが画面に残ります。そのロード自体が失敗すれば戻り値の Promise は reject するので、catch は呼び出し側の仕事です（要素のエラー表示に流れるのは起動時の失敗だけです）。
+
+## イベント
+
+要素は、再生で起きたことを自分自身への DOM イベントとして送ります。バブルはしません。
+
+| イベント | いつ | `detail` |
+|---|---|---|
+| `animationstarted` | `play` の後に最初に進んだフレーム | — |
+| `animationfinished` | 再生を完了したフレーム。無限ループでは起きず、`stop()` でも起きません | — |
+| `animationlooped` | ループ境界を跨いだフレーム | — |
+| `userdata` | ユーザーデータのキーを跨いだ | `{ partIndex, integer?, rect?, point?, text? }` |
+| `signal` | シグナルのキーを跨いだ | `{ partIndex, commandId, params }` |
+| `audio` | オーディオのキーを跨いだ | `{ partIndex, soundName, loopNum, … }` |
+| `load` | パックを読み込み、アニメーションの設定が済んだ | — |
+
+最初の 6 つはファミリーの必須イベントで、どの SpriteStudio Player も同じ語幹（`animationFinished`、`userData` など）を使っています。DOM のイベント名なので小文字にしています。タイムラインのイベントは [`player.events()`](./js.md) が返すオブジェクトをそのまま運ぶので、tick が飛ばしたフレームのキーも届きます。要素は音を鳴らしません。`audio` イベントで音を鳴らすべきときは [イベント](../guide/events.md) を参照してください。
+
+```js
+el.addEventListener('animationfinished', () => showNextButton());
+el.addEventListener('userdata', (e) => console.log(e.detail.text));
+```
 
 ## レイアウトと解像度
 

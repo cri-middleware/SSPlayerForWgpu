@@ -44,11 +44,14 @@ defineSsPlayerWebGPUElement(); // registers <ss-player-webgpu>
 |---|---|
 | `src` | URL of the `.ssab` (embedded or reference export). |
 | `pack` | Pack-name override; defaults to the name inside the `.ssab`. |
-| `anim` | Animation to play; defaults to the first one. |
+| `animation` | Animation to play; defaults to the first one. |
 | `autoplay` | Start playing once the pack is loaded. A boolean attribute, so **absent means no** — without it the element holds its first frame, poster-like. |
 | `pause-when-hidden` | Stop the rAF loop while scrolled off-screen or backgrounded. On by default — opt out with `"false"`. |
+| `speed-scale` | A multiple of the authored rate. |
+| `fit`, `align`, `flip-x`, `flip-y` | How the authored canvas fits the element: `contain` and `center` by default, `fit="none"` for 1:1. |
 
-`element.loadSrc(src, pack?, anim?)` switches packs at runtime and resolves to the animation names.
+`element.loadSrc(src, pack?, animation?)` switches packs from script and resolves to the animation names.
+It dispatches `animationstarted`, `animationfinished`, `animationlooped`, `userdata`, `signal` and `audio` as DOM events, and `load` once a pack has loaded; the attributes above can be changed on a live element.
 
 Registration is **opt-in** rather than a side effect of the import, so a bundle that only wants the
 API below never carries the element.

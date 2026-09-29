@@ -67,11 +67,13 @@ defineSsPlayerWebGPUElement(); // <ss-player-webgpu> を登録
 |---|---|
 | `src` | `.ssab` の URL。reference / embedded どちらでも可 |
 | `pack` | パック名の上書き。既定は `.ssab` 内の名前 |
-| `anim` | 再生するアニメーション。既定は最初のもの |
+| `animation` | 再生するアニメーション。既定は最初のもの |
 | `autoplay` | ロード後に再生開始。**boolean 属性なので、無ければ再生しません** — ポスターのように 1 フレーム目で止まります |
 | `pause-when-hidden` | 画面外・バックグラウンド時に rAF ループを止める。既定でオン、`"false"` で解除 |
+| `speed-scale` | 既定 fps の倍率 |
+| `fit`、`align`、`flip-x`、`flip-y` | オーサリング時のキャンバスを要素にどう合わせるか。既定は `contain` と `center`、`fit="none"` で 1:1 |
 
-`element.loadSrc(src, pack?, anim?)` で実行時にパックを差し替えられ、アニメーション名の配列が返ります。要素の登録は import の副作用ではなく **opt-in** なので、API だけ使うバンドルに要素は含まれません。
+`element.loadSrc(src, pack?, animation?)` でスクリプトからパックを差し替えられ、アニメーション名の配列が返ります。`animationstarted`・`animationfinished`・`animationlooped`・`userdata`・`signal`・`audio` を DOM イベントとして送り、パックを読み込むと `load` を送ります。上の属性は置いた後に書き換えても反映されます。要素の登録は import の副作用ではなく **opt-in** なので、API だけ使うバンドルに要素は含まれません。
 
 要素の全体（レイアウト、可視性ゲート、デバイスロスト、要素から Player API に触る方法）は
 [`<ss-player-webgpu>`](../reference/web-component.md) にまとめてあります。

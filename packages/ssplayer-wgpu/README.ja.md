@@ -39,10 +39,13 @@ defineSsPlayerWebGPUElement(); // <ss-player-webgpu> を登録
 |---|---|
 | `src` | `.ssab` の URL（embedded / reference どちらでも）。 |
 | `pack` | パック名の上書き。既定は `.ssab` 内の名前。 |
-| `anim` | 再生するアニメーション。既定は先頭。 |
+| `animation` | 再生するアニメーション。既定は先頭。 |
+| `autoplay` | ロード後に再生を始める。boolean 属性なので**無ければ再生しません** — ポスターのように 1 フレーム目で止まります。 |
 | `pause-when-hidden` | 画面外・バックグラウンド中に rAF ループを止める。既定は有効、`"false"` で無効化。 |
+| `speed-scale` | 既定 fps の倍率。 |
+| `fit`、`align`、`flip-x`、`flip-y` | オーサリング時のキャンバスを要素にどう合わせるか。既定は `contain` と `center`、`fit="none"` で 1:1。 |
 
-`element.loadSrc(src, pack?, anim?)` で実行時にパックを差し替えられ、アニメーション名一覧が返ります。
+`element.loadSrc(src, pack?, animation?)` でスクリプトからパックを差し替えられ、アニメーション名一覧が返ります。`animationstarted`・`animationfinished`・`animationlooped`・`userdata`・`signal`・`audio` を DOM イベントとして送り、パックを読み込むと `load` を送ります。上の属性は置いた後に書き換えても反映されます。
 
 登録は import の副作用ではなく **明示呼び出し** です。下の API だけを使うバンドルが、使わない要素を抱え込まないようにするためです。
 
