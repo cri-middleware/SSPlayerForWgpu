@@ -117,8 +117,8 @@ Player that plays audio itself decides by two rules, and on this one they are th
 
 * **Not while playing backward.** SpriteStudio has no reverse audio. Check `is_playing_forward()`
   (`ss_player_is_playing_forward`, `isPlayingForward()`) — it is false on a ping-pong's return leg
-  as well as under a backward direction. Hold back the sound, not the event: a subtitle or a rumble keyed to the same
-  marker still wants it.
+  as well as under a backward direction. Hold back the sound, not the event: a subtitle or a rumble
+  keyed to the same marker still wants it.
 * **Not for where a seek landed.** A `seek` while playing makes the next update report the events of
   the frame it landed on. To keep a seek silent, skip the audio of the first update after it. A seek
   while stopped reports nothing, and the first frame after `play` is meant to sound.
