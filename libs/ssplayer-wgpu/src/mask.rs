@@ -11,15 +11,27 @@
 //! Data sources:
 //! * **Static per-part flags** ([`PartMaskFlags`]) come from ssab `PartData` and
 //!   are read once at node-build time.
-//! * **Per-frame values** (`PartState.mask`, draw order, batches) come from
+//! * **Per-frame values** (`PartState.mask` / `hide`, draw order, batches) come from
 //!   `FrameData` and are re-read every frame here.
 
 use crate::frame::{FrameView, SHAPE_VERTICES_STRIDE};
 use ssruntime::runtime::framedata::ss::runtime::{DrawBatchKind, root_as_frame_data_unchecked};
 
-/// Upper bound on writers per frame (matches the WebGL planner). A single 8-bit
-/// stencil / 24-bit coverage encoding can only distinguish so many writers.
+/// Upper bound on one node's writers per frame (matches the WebGL planner).
 pub const MAX_MASK_WRITERS: usize = 24;
+
+/// Writers one coverage layer tells apart: a bit apiece in R, G and B.
+pub const COVERAGE_LAYER_BITS: usize = 24;
+
+/// Upper bound on writers across one player's whole instance tree per frame.
+///
+/// Every writer of the tree masks from one place — a clipping mask deep inside an
+/// instance keeps clipping its callers — so they are counted together, and a
+/// character built from a few instances with a handful of masks each passes 24
+/// quickly. The coverage backend spends one more layer per
+/// [`COVERAGE_LAYER_BITS`]; the stencil backend could take more but stops here
+/// too, so the two backends draw the same thing. Past this the rest are ignored.
+pub const MAX_TREE_MASK_WRITERS: usize = 96;
 
 /// Stencil test mode baked into a content pipeline. Selected per masked part
 /// from the target's `visible_inside_mask` polarity.
@@ -130,6 +142,23 @@ pub struct MaskWriter {
     pub texture_hash: u32,
     /// Geometry to rasterise.
     pub geom: GeomKind,
+}
+
+/// A writer placed on its player's tree sequence: the whole instance tree
+/// numbered in drawing order, each sub-animation in its instance part's place.
+///
+/// It holds its bit for the parts strictly between `open` and `close`. A clipping
+/// writer opens at itself and closes at the end of the tree, so one written
+/// inside an instance keeps clipping whatever its callers draw after it; a pure
+/// mask opens where its own animation starts and closes at itself, so it never
+/// reaches past the instance that holds it.
+#[derive(Clone, Copy, Debug)]
+pub struct ScopedWriter {
+    /// `op_invert` is already the effective one — the writer's own
+    /// `mask_influence` AND its instance part's.
+    pub writer: MaskWriter,
+    pub open: i32,
+    pub close: i32,
 }
 
 /// A frame's planned writers, held inline.
@@ -276,6 +305,9 @@ pub fn writer_bounds(frame: &FrameView, writers: &[MaskWriter]) -> Option<[f32; 
 /// A writer's `texture_hash` comes from the *batch* it belongs to (like WebGL):
 /// pure `Mask` batches carry `texture_hash == 0` (→ no cutout, whole geometry),
 /// while clipping writers inherit their content batch's real texture.
+///
+/// `op_invert` is the part's own `mask_influence`; inside an instance the caller
+/// ANDs it with the instance part's before the writer is drawn.
 pub fn plan_writers(frame: &FrameView, mask_flags: &[PartMaskFlags]) -> MaskWriters {
     let mut writers = MaskWriters::default();
     if frame.frame_data.is_empty() {
@@ -306,9 +338,12 @@ pub fn plan_writers(frame: &FrameView, mask_flags: &[PartMaskFlags]) -> MaskWrit
                 continue;
             }
 
-            // Per-frame cutout value; `mask == 0` opts the writer out.
-            let mask_val = parts.get(part_idx).mask();
-            if mask_val <= 0.0 {
+            // `mask == 0` or `Hide` opts the writer out. The runtime drops a
+            // hidden part's colour batch but keeps a `draw_as_mask` part's Mask
+            // batch, so Hide has to be read here or a hidden mask shape still cuts.
+            let state = parts.get(part_idx);
+            let mask_val = state.mask();
+            if mask_val <= 0.0 || state.hide() {
                 continue;
             }
 

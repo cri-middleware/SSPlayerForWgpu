@@ -24,8 +24,9 @@ pub struct SceneStats {
     pub mergeable_draws: u32,
     /// Texture bind-group sets that repeat the previous draw's texture.
     pub redundant_texture_binds: u32,
-    /// Coverage bitmaps rasterised this frame — one per masking player, each its
-    /// own render pass. Always zero under the stencil backend, which is the point
+    /// Coverage bitmaps rasterised this frame — one per masking player, and one
+    /// more for each further 24 mask writers in its instance tree, each its own
+    /// render pass. Always zero under the stencil backend, which is the point
     /// of having the number: it is what the coverage backend costs.
     pub coverage_layers: u32,
     /// GPU time for the last render pass whose timestamps came back, in

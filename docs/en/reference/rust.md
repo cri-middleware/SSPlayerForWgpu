@@ -19,7 +19,7 @@ This page is the map: what lives where, and which feature turns it on.
 ```rust
 pub use events::{AudioEvent, SignalEvent, SignalParam, SignalValue, SsEvent, UserDataEvent};
 pub use frame::FrameView;
-pub use mask::{GeomKind, MaskOp, MaskWriter, MaskWriters, PartMaskFlags, StencilTest, plan_writers};
+pub use mask::{GeomKind, MaskOp, MaskWriter, MaskWriters, PartMaskFlags, ScopedWriter, StencilTest, plan_writers};
 pub use metrics::SceneStats;
 pub use pack::{EmbeddedImage, EmbeddedTexture, SSPack, TextureRef};
 pub use player::{AssetLoader, BlendOp, MissingAsset, MissingKind, OverridePriority,

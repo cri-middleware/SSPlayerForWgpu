@@ -71,12 +71,12 @@ fn wgsl_consts() -> String {
         "const SHAPE_FAN_VERTS: u32 = {SHAPE_FAN_VERTS}u;\n\
          const COVERAGE_HEADER: u32 = {}u;\n\
          const COVERAGE_STRIDE: u32 = {}u;\n\
-         const COVERAGE_RANK: u32 = {}u;\n\
-         const MAX_MASK_WRITERS: u32 = {}u;\n",
+         const MAX_MASK_WRITERS: u32 = {}u;\n\
+         const COVERAGE_LAYER_BITS: u32 = {}u;\n",
         crate::scene::COVERAGE_HEADER_F32,
         crate::scene::COVERAGE_WRITER_F32,
-        crate::scene::COVERAGE_RANK_F32,
         crate::mask::MAX_MASK_WRITERS,
+        crate::mask::COVERAGE_LAYER_BITS,
     )
 }
 
@@ -549,7 +549,8 @@ fn cov_clip(uv: vec2<f32>) -> vec4<f32> {
 // nothing else. Alpha is 1 because the bake blends additively and a zero alpha
 // would scale the bit away on backends that premultiply first.
 fn bit_color(info: u32) -> vec4<f32> {
-    let bit = (info >> 8u) & 0xFFu;
+    // The layer was picked by the draw call; this is the bit within it.
+    let bit = ((info >> 8u) & 0xFFu) % COVERAGE_LAYER_BITS;
     let value = f32(1u << (bit % 8u)) / 255.0;
     let channel = bit / 8u;
     var c = vec4<f32>(0.0, 0.0, 0.0, 1.0);
@@ -817,18 +818,18 @@ fn fs_coverage(in: VertexOutput) -> @location(0) vec4<f32> {
 
 // --- replay: reconstruct the mask state for one masked fragment -----------
 
-// Re-runs the writers that are in scope for this part, in draw order, and says
-// whether the fragment survives. This is the stencil's job done per fragment:
-// the bitmap holds every writer's shape at once, and the scope test picks which
-// of them were "applied" by the time this part drew.
+// Re-runs the writers that are in scope for this part and says whether the
+// fragment survives. This is the stencil's job done per fragment: the bitmap
+// holds every writer of the player's instance tree at once, and the scope test
+// picks which of them were "applied" by the time this part drew.
 fn mask_passes(in: VertexOutput, info: u32, cov_base: u32) -> bool {
     let layer = i32(f_arena[cov_base + 6u]);
     let count = u32(f_arena[cov_base + 7u]);
-    let rank_override = f_arena[cov_base + COVERAGE_RANK];
-    if (count == 0u) {
-        return true;
-    }
     let inside = (info & MASK_INFO_INSIDE) != 0u;
+    // No writer covers anything: a part drawn only inside a mask draws nowhere.
+    if (count == 0u) {
+        return !inside;
+    }
 
     // Outside the bbox there is no writer to be inside of. Answering from the
     // polarity alone keeps the sampler's edge clamp from reading the border
@@ -842,11 +843,16 @@ fn mask_passes(in: VertexOutput, info: u32, cov_base: u32) -> bool {
     // `textureLoad`, not a sampler: a filtered read would blend one writer's bit
     // into the next and decode as coverage nobody wrote.
     let texel = vec2<i32>(clamp(uv * dims, vec2<f32>(0.0), dims - 1.0));
-    let cov = textureLoad(t_coverage, texel, layer, 0);
+    // A tree with more writers than one layer holds spills into the layers after
+    // it, `COVERAGE_LAYER_BITS` at a time. Records are in bit order, so each
+    // layer is loaded once.
+    var loaded = 0u;
+    var cov = textureLoad(t_coverage, texel, layer, 0);
 
-    // A sub-animation is scoped by the rank of the instance part it hangs off,
-    // not by its own internal ranks.
-    let this_rank = select(f32(info >> 16u), rank_override, rank_override >= 0.0);
+    // This part's place on the tree sequence — the whole instance tree numbered
+    // in drawing order, so a sub-animation's parts sit between its instance part
+    // and whatever its caller draws next.
+    let this_seq = f32(info >> 16u);
     // Two accumulators, never one: increment and invert are each self-inverse but
     // do not commute, so mixing them makes coverage depend on the order the
     // writers happened to be drawn in.
@@ -854,20 +860,24 @@ fn mask_passes(in: VertexOutput, info: u32, cov_base: u32) -> bool {
     var counter = 0u;
     for (var i = 0u; i < count; i = i + 1u) {
         let rec = cov_base + COVERAGE_HEADER + i * COVERAGE_STRIDE;
-        let rank = f_arena[rec];
-        let is_clipping = f_arena[rec + 3u] > 0.5;
-        // Scope: a clipping writer covers what draws after it, a pure mask
-        // what draws before.
-        let in_scope = select(this_rank < rank, (this_rank > rank), is_clipping);
-        if (!in_scope) {
+        // Scope, open at both ends: a clipping writer holds from itself to the
+        // end of the tree, a pure mask from the start of its own animation up to
+        // itself. The player worked both out; here it is one comparison.
+        if (!(f_arena[rec] < this_seq && this_seq < f_arena[rec + 1u])) {
             continue;
         }
-        let bit = u32(f_arena[rec + 1u]);
+        let tree_bit = u32(f_arena[rec + 2u]);
+        let spill = tree_bit / COVERAGE_LAYER_BITS;
+        if (spill != loaded) {
+            cov = textureLoad(t_coverage, texel, layer + i32(spill), 0);
+            loaded = spill;
+        }
+        let bit = tree_bit % COVERAGE_LAYER_BITS;
         let byte = u32(cov[bit / 8u] * 255.0 + 0.5);
         if (((byte >> (bit % 8u)) & 1u) == 0u) {
             continue;
         }
-        if (f_arena[rec + 2u] > 0.5) {
+        if (f_arena[rec + 3u] > 0.5) {
             parity = parity ^ 1u;
         } else {
             counter = counter + 1u;
