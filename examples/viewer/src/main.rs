@@ -35,7 +35,7 @@
 // The pack, animation, visibility and alpha keys act on the **focused** member;
 // focus starts at "all", so they drive the whole cast until you press Tab.
 
-use ssplayer_wgpu::{MaskBackend, SSPack, SSPlayer, SSRenderer, SSScene, SceneConfig, TrackBlend};
+use ssplayer_wgpu::{MaskBackend, Placement, SSPack, SSPlayer, SSRenderer, SSScene, SceneConfig, TrackBlend};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
@@ -55,10 +55,6 @@ const INITIAL_CAST: usize = 2;
 /// Most players `+` will go to. Throughput is `tests/scale.rs`'s job; this is
 /// for looking at interference, and past a handful there is nothing to see.
 const MAX_CAST: usize = 8;
-
-/// Canvas size assumed for a member with no animation selected yet, so the
-/// layout has something to fit.
-const FALLBACK_CANVAS: (f32, f32) = (320.0, 320.0);
 
 /// How the cast is arranged on screen.
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -523,27 +519,25 @@ impl AppState {
         let last = (count - 1) as f32;
 
         for (i, member) in self.cast.iter_mut().enumerate() {
-            // Fit each member to the space it has: the demo packs disagree about
-            // canvas size, and showing them all at authored scale puts some of
-            // them off-screen.
-            let (cw, ch) = member.player.canvas_size().unwrap_or(FALLBACK_CANVAS);
-            let (cw, ch) = (cw.max(1.0), ch.max(1.0));
+            // Fit each member into the space it has: the demo packs disagree
+            // about canvas size, and showing them all at authored scale puts some
+            // of them off-screen. The box is the authored canvas, placed by its
+            // pivot; the offset moves it off the view's centre.
             let offset = i as f32 - last * 0.5;
-
-            let (x, y, scale) = match layout {
+            let (box_width, box_height, placement) = match layout {
                 Layout::Row => {
                     let slot = width / count as f32;
-                    (offset * slot, 0.0, (slot * 0.9 / cw).min(height * 0.9 / ch).clamp(0.05, 1.0))
+                    (slot, height, Placement { scale: 0.9, offset: (offset * slot, 0.0), ..Default::default() })
                 }
                 Layout::Stack => {
                     // Enough stagger to tell them apart, little enough that they
-                    // still cover each other. `set_transform`'s y runs downward,
-                    // so a later member steps down-right rather than up-right.
+                    // still cover each other. Player-local y runs downward, so a
+                    // later member steps down-right rather than up-right.
                     let step = (width * 0.04).min(48.0);
-                    (offset * step, offset * step, (width * 0.5 / cw).min(height * 0.8 / ch).clamp(0.05, 1.5))
+                    (width * 0.5, height * 0.8, Placement { offset: (offset * step, offset * step), ..Default::default() })
                 }
             };
-            member.player.set_transform(x, y, scale, scale, 0.0);
+            member.player.fit_into(box_width, box_height, &placement);
             member.player.set_order(if reverse { (count - 1 - i) as i32 } else { i as i32 });
         }
     }

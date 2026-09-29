@@ -71,9 +71,6 @@
 static const size_t kInitialPlayers = 2;
 /// Most players the +/- keys will go to.
 static const size_t kMaxPlayers = 6;
-/// Stand-in canvas for a player that has not been given an animation yet, so the
-/// first lay-out has something to divide by. Same value the Rust viewer uses.
-static const float kFallbackCanvas = 320.0f;
 /// Window size asked for at startup, in pixels. Both window systems may be given
 /// something else by the compositor, and both report what they got.
 static const uint32_t kDefaultWidth = 960;
@@ -280,26 +277,15 @@ void Viewer::LayOutPlayers() {
     }
     float slot = (float)width_ / (float)count;
     float last = (float)(count - 1);
+    SsPlacement placement;
+    ss_placement_default(&placement);
+    placement.scale = 0.9f;
     for (size_t i = 0; i < count; i++) {
-        // Each pack names its own canvas. Before a pack is loaded there is none,
-        // and the stand-in keeps the first lay-out finite.
-        float cw = 0.0f, ch = 0.0f;
-        if (ss_player_canvas_size(players_[i], &cw, &ch) != SS_OK) {
-            cw = ch = kFallbackCanvas;
-        }
-        cw = cw > 1.0f ? cw : 1.0f;
-        ch = ch > 1.0f ? ch : 1.0f;
-
-        // The tighter of the two axes wins, so a tall pack stays on screen.
-        float scale = slot * 0.9f / cw;
-        float fitHeight = (float)height_ * 0.9f / ch;
-        if (fitHeight < scale) {
-            scale = fitHeight;
-        }
-        scale = scale < 0.05f ? 0.05f : (scale > 1.0f ? 1.0f : scale);
-
-        float offset = (float)i - last * 0.5f;
-        ss_player_set_transform(players_[i], offset * slot, 0.0f, scale, scale, 0.0f);
+        // The pack's authored canvas, placed by its pivot, contained in this
+        // member's column at 90%; the offset moves the column's centre off the
+        // view's. A player with no animation yet lands centred and unscaled.
+        placement.offset_x = ((float)i - last * 0.5f) * slot;
+        ss_player_fit_into(players_[i], slot, (float)height_, &placement, NULL);
         ss_player_set_order(players_[i], (int32_t)i);
     }
 }
