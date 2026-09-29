@@ -79,7 +79,7 @@ finds itself drawing into an sRGB target without it.
 |---|---|---|
 | `SsPlayer` | `src`, `animation` | Rebuilds the playback tree — this is the allocating one |
 | `SsTransform` | `x`, `y`, `scale_x`, `scale_y`, `rotation` | Free |
-| `SsPlayback` | `playing`, `speed`, `order`, `alpha`, `visible`, `restart`, `direction`, `style` | Free |
+| `SsPlayback` | `playing`, `speed_scale`, `order`, `alpha`, `visible`, `restart`, `direction`, `style`, `loop_count`, `frame_rate`, `frame_skip_enabled`, `sub_frame_enabled`, `animation_section` | Free |
 
 Deliberately not Bevy's `Transform`: that is a 3D affine whose decomposition into
 the player's five scalars is lossy. An app that wants the two linked can write

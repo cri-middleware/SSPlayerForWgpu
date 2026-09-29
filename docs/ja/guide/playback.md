@@ -97,7 +97,10 @@
 === "Bevy"
 
     ```rust
-    playback.speed = 2.0;   // 方向とスタイルはコンポーネントとして公開されていません
+    playback.speed_scale = 2.0;
+    playback.direction = PlaybackDirection::Backward;
+    playback.style = PlaybackStyle::PingPong;
+    playback.frame_rate = 30;
     ```
 
 | 値 | 方向 | スタイル |
@@ -135,6 +138,12 @@
     const left = player.remainingLoops();
     ```
 
+=== "Bevy"
+
+    ```rust
+    playback.loop_count = 3;   // 変えるとリスタートと同じく回数を張り直す
+    ```
+
 ## アニメーションの一部だけを再生する
 
 **区間**は現在のアニメーションのフレーム範囲に再生ヘッドを制限します。ループもピンポンもその中で折り返します。
@@ -166,6 +175,18 @@
     player.setAnimationSection(10, 24);
     player.play();
     player.seek(18);
+    ```
+
+=== "Bevy"
+
+    ```rust
+    // 区間はその時点のアニメーションに掛かるので、2 つは一緒に変える。
+    // 設定すると再生ヘッドは区間の先頭へ移る。
+    character.animation = "walk".into();
+    playback.animation_section = Some((10, 24));
+
+    // seek は 1 度だけ起こることなのでメッセージ。seeks は MessageWriter<SsSeek>。
+    seeks.write(SsSeek { entity, frame: 18.0 });
     ```
 
 ## アニメーションやパックを切り替えて何が残るか

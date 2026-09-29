@@ -63,13 +63,18 @@ Free to change, every frame if you like.
 | Field | Default | |
 |---|---|---|
 | `playing: bool` | `true` | Pauses and resumes **in place**. Never rewinds, so it cannot replay a finished animation |
-| `speed: f32` | `1.0` | A multiple of the authored rate |
+| `speed_scale: f32` | `1.0` | A multiple of the authored rate. `0` and negatives stop |
 | `order: i32` | `0` | Draw order; lower draws first. Ties keep extraction order |
 | `alpha: f32` | `1.0` | Whole-character fade |
 | `visible: bool` | `true` | False skips **the timeline advance** as well as the draw |
 | `restart: u32` | `0` | **Bump it** (any change of value) to replay from the head, re-arming the loop count |
 | `direction: PlaybackDirection` | `Forward` | Which way the playhead walks |
 | `style: PlaybackStyle` | `Normal` | `Normal` wraps at the far end, `PingPong` turns back |
+| `loop_count: i32` | `-1` | Cycles before stopping; `-1` or `0` loops for ever. A change re-arms the count |
+| `frame_rate: i32` | `0` | Replaces the authored rate; `0` keeps it. Prefer `speed_scale` |
+| `frame_skip_enabled: bool` | `true` | Off advances one frame per tick instead of keeping to the wall clock |
+| `sub_frame_enabled: bool` | `true` | Off floors the frame that is drawn |
+| `animation_section: Option<(i32, i32)>` | `None` | Restrict the playhead to `start..=end` of the current animation. Setting it puts the playhead at its start |
 
 `restart` is a generation counter rather than a flag so a host can re-trigger a one-shot at will
 with nothing to clear afterwards, and so two restarts in a row are two restarts.
@@ -104,6 +109,19 @@ draws too dark, and the adapter warns once. Only characters that swap textures n
 | `SsStarted` | `entity` — the start **edge**: a new animation or pack while `playing`, `playing` turned on for the first time, or a bumped `restart`. Not a resume |
 | `SsFinished` | `entity` — the completion **edge** |
 | `SsLooped` | `entity` — the loop boundary edge |
+
+A seek is the one command that goes the other way, from gameplay to the character. It is a message
+rather than a field, because it happens once rather than being a state the character is in:
+
+| Message | Carries |
+|---|---|
+| `SsSeek` | `entity`, `frame: f32` — move the playhead there. Fractional frames are honoured, and it stays inside the section. One sent before the pack has loaded lands once the animation is set up |
+
+```rust
+fn jump(mut seeks: MessageWriter<SsSeek>, character: Single<Entity, With<SsPlayer>>) {
+    seeks.write(SsSeek { entity: *character, frame: 18.0 });
+}
+```
 
 ```rust
 fn on_finish(mut finished: MessageReader<SsFinished>, mut commands: Commands) {
