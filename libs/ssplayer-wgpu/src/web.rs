@@ -1424,12 +1424,12 @@ impl SsPlayerWeb {
     /// The playhead keeps its fraction either way (`frameNo` reports it
     /// unrounded), and so does the stepping of instance and effect children.
     /// This affects only what is drawn.
-    #[wasm_bindgen(js_name = setSubFrame)]
+    #[wasm_bindgen(js_name = setSubFrameEnabled)]
     pub fn set_sub_frame_enabled(&self, enabled: bool) -> Result<(), JsValue> {
         with_player!(self, |p| p.set_sub_frame_enabled(enabled))
     }
 
-    /// See `setSubFrame`.
+    /// See `setSubFrameEnabled`.
     #[wasm_bindgen(js_name = subFrameEnabled)]
     pub fn sub_frame_enabled(&self) -> Result<bool, JsValue> {
         with_player!(self, |p| p.sub_frame_enabled())
@@ -1437,13 +1437,13 @@ impl SsPlayerWeb {
 
     /// On (the default) keeps playback on the wall clock by dropping frames;
     /// off advances exactly one frame per `frame()` call.
-    #[wasm_bindgen(js_name = setSkipFrames)]
+    #[wasm_bindgen(js_name = setFrameSkipEnabled)]
     pub fn set_frame_skip_enabled(&self, skip: bool) -> Result<(), JsValue> {
         with_player!(self, |p| p.set_frame_skip_enabled(skip))
     }
 
-    /// See `setSkipFrames`.
-    #[wasm_bindgen(js_name = skipFrames)]
+    /// See `setFrameSkipEnabled`.
+    #[wasm_bindgen(js_name = frameSkipEnabled)]
     pub fn frame_skip_enabled(&self) -> Result<bool, JsValue> {
         with_player!(self, |p| p.frame_skip_enabled())
     }

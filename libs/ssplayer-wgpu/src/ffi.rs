@@ -1319,13 +1319,13 @@ pub unsafe extern "C" fn ss_player_playback_style(handle: *mut SsPlayer) -> i32 
 /// # Safety
 /// `handle` must be a live handle or null.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn ss_player_set_sub_frame(handle: *mut SsPlayer, enabled: bool) {
+pub unsafe extern "C" fn ss_player_set_sub_frame_enabled(handle: *mut SsPlayer, enabled: bool) {
     if let Some(player) = unsafe { player(handle) } {
         player.set_sub_frame_enabled(enabled);
     }
 }
 
-/// See `ss_player_set_sub_frame`.
+/// See `ss_player_set_sub_frame_enabled`.
 ///
 /// # Safety
 /// `handle` must be a live handle or null.
@@ -1340,18 +1340,18 @@ pub unsafe extern "C" fn ss_player_sub_frame_enabled(handle: *mut SsPlayer) -> b
 /// # Safety
 /// `handle` must be a live handle or null.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn ss_player_set_skip_frames(handle: *mut SsPlayer, skip: bool) {
+pub unsafe extern "C" fn ss_player_set_frame_skip_enabled(handle: *mut SsPlayer, skip: bool) {
     if let Some(player) = unsafe { player(handle) } {
         player.set_frame_skip_enabled(skip);
     }
 }
 
-/// See `ss_player_set_skip_frames`.
+/// See `ss_player_set_frame_skip_enabled`.
 ///
 /// # Safety
 /// `handle` must be a live handle or null.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn ss_player_skip_frames(handle: *mut SsPlayer) -> bool {
+pub unsafe extern "C" fn ss_player_frame_skip_enabled(handle: *mut SsPlayer) -> bool {
     unsafe { player(handle) }.map(|p| p.frame_skip_enabled()).unwrap_or(true)
 }
 

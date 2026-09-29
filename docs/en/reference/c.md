@@ -82,8 +82,8 @@ window sees it, and a pack shown five times is uploaded once.
 | `ss_player_set_animation_section(player, start, end)` | Restrict the playhead. Call it **after** `set_animation` |
 | `ss_player_set_playback_direction(player, dir, style)` | `0`/`1` = forward/backward, normal/ping-pong |
 | `ss_player_playback_direction` / `ss_player_playback_style` | Read them back |
-| `ss_player_set_sub_frame(player, on)` / `ss_player_sub_frame_enabled` | Interpolate between authored frames |
-| `ss_player_set_skip_frames(player, on)` / `ss_player_skip_frames` | Cross several frames in one long tick |
+| `ss_player_set_sub_frame_enabled(player, on)` / `ss_player_sub_frame_enabled` | Interpolate between authored frames |
+| `ss_player_set_frame_skip_enabled(player, on)` / `ss_player_frame_skip_enabled` | Cross several frames in one long tick |
 
 See [Playback and transport](../guide/playback.md) — in particular why `play` is not how you lift a
 `pause`.

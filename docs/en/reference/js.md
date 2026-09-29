@@ -75,8 +75,8 @@ the calls.
 | `setAnimationSection(start, end)` | After `setAnimation` |
 | `setPlaybackDirection(dir, style)` / `playbackDirection()` / `playbackStyle()` | `0`/`1` each |
 | `setFrameRate(fps)` / `frameRate()` | Replace the authored rate |
-| `setSubFrame(on)` / `subFrameEnabled()` | Interpolate between authored frames |
-| `setSkipFrames(on)` / `skipFrames()` | Cross several frames in one long tick |
+| `setSubFrameEnabled(on)` / `subFrameEnabled()` | Interpolate between authored frames |
+| `setFrameSkipEnabled(on)` / `frameSkipEnabled()` | Cross several frames in one long tick |
 | `startFrame()` / `endFrame()` / `totalFrames()` | The current range |
 | `isPlaying()` / `isPausing()` / `isPlayingForward()` / `isFinished()` | State |
 | `justStarted()` / `justLooped()` / `justFinished()` | Edges from the last `frame()`. `justStarted` is not raised by `resume()` |

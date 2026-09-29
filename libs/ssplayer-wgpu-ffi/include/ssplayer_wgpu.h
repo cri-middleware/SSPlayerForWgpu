@@ -1046,10 +1046,10 @@ int32_t ss_player_playback_style(ss_player_t *handle);
  # Safety
  `handle` must be a live handle or null.
  */
-void ss_player_set_sub_frame(ss_player_t *handle, bool enabled);
+void ss_player_set_sub_frame_enabled(ss_player_t *handle, bool enabled);
 
 /*
- See `ss_player_set_sub_frame`.
+ See `ss_player_set_sub_frame_enabled`.
 
  # Safety
  `handle` must be a live handle or null.
@@ -1063,15 +1063,15 @@ bool ss_player_sub_frame_enabled(ss_player_t *handle);
  # Safety
  `handle` must be a live handle or null.
  */
-void ss_player_set_skip_frames(ss_player_t *handle, bool skip);
+void ss_player_set_frame_skip_enabled(ss_player_t *handle, bool skip);
 
 /*
- See `ss_player_set_skip_frames`.
+ See `ss_player_set_frame_skip_enabled`.
 
  # Safety
  `handle` must be a live handle or null.
  */
-bool ss_player_skip_frames(ss_player_t *handle);
+bool ss_player_frame_skip_enabled(ss_player_t *handle);
 
 /*
  Resolve a part name to its index in the current animation, or -1 when the

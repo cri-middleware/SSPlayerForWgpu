@@ -78,8 +78,8 @@ title: C API リファレンス
 | `ss_player_set_animation_section(player, start, end)` | 再生範囲を制限。`set_animation` の**後**に |
 | `ss_player_set_playback_direction(player, dir, style)` | `0`/`1` = 順/逆、通常/ピンポン |
 | `ss_player_playback_direction` / `ss_player_playback_style` | 読み戻し |
-| `ss_player_set_sub_frame(player, on)` / `ss_player_sub_frame_enabled` | フレーム間を補間 |
-| `ss_player_set_skip_frames(player, on)` / `ss_player_skip_frames` | 長い tick で複数フレームを跨ぐ |
+| `ss_player_set_sub_frame_enabled(player, on)` / `ss_player_sub_frame_enabled` | フレーム間を補間 |
+| `ss_player_set_frame_skip_enabled(player, on)` / `ss_player_frame_skip_enabled` | 長い tick で複数フレームを跨ぐ |
 
 [再生と再生制御](../guide/playback.md)も参照してください。特に `pause` の解除に `play` を使えない理由を。
 

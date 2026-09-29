@@ -72,8 +72,8 @@ import { defineSsPlayerWebGPUElement } from '@spritestudio/ssplayer-wgpu/element
 | `setAnimationSection(start, end)` | `setAnimation` の後に |
 | `setPlaybackDirection(dir, style)` / `playbackDirection()` / `playbackStyle()` | それぞれ `0` / `1` |
 | `setFrameRate(fps)` / `frameRate()` | 既定 fps を置き換える |
-| `setSubFrame(on)` / `subFrameEnabled()` | フレーム間を補間 |
-| `setSkipFrames(on)` / `skipFrames()` | 長い tick で複数フレームを跨ぐ |
+| `setSubFrameEnabled(on)` / `subFrameEnabled()` | フレーム間を補間 |
+| `setFrameSkipEnabled(on)` / `frameSkipEnabled()` | 長い tick で複数フレームを跨ぐ |
 | `startFrame()` / `endFrame()` / `totalFrames()` | 現在の範囲 |
 | `isPlaying()` / `isPausing()` / `isPlayingForward()` / `isFinished()` | 状態 |
 | `justStarted()` / `justLooped()` / `justFinished()` | 直前の `frame()` のエッジ。`justStarted` は `resume()` では立ちません |
