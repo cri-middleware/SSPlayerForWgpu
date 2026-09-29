@@ -46,11 +46,11 @@ struct PlayerSlot {
     playing: bool,
     restart: u32,
     /// Runtime texture overrides currently bound, cellmap name -> (the image
-    /// applied, the private renderer key it went in under). Diffed against the
-    /// character's `SsCellmapTextures` each frame: a new or changed image is
-    /// registered, a removed one is restored, and the whole set is dropped when
-    /// the pack changes (its cellmaps do).
-    applied_overrides: HashMap<String, (AssetId<Image>, u32)>,
+    /// applied, the GPU texture it had then, the private renderer key it went in
+    /// under). Diffed against the character's `SsCellmapTextures` each frame: a
+    /// new or changed image is registered, a removed one is restored, and the
+    /// whole set is dropped when the pack changes (its cellmaps do).
+    applied_overrides: HashMap<String, (AssetId<Image>, TextureId, u32)>,
 }
 
 /// Everything the render world owns on this crate's behalf.
@@ -277,11 +277,14 @@ fn lend_atlases(renderer: &mut SSRenderer, device: &wgpu::Device, lent: &mut Has
 /// this registers each new or changed image in the device-scoped renderer under
 /// the player's own private key, restores the ones it dropped, and — when the
 /// pack changed under it — clears the lot, because the new pack's cellmaps are not
-/// the old one's. An image Bevy has not finished preparing is left for a later
-/// frame, so binding a freshly-loaded handle is safe.
+/// the old one's. An image is re-registered, as an atlas is re-lent, when Bevy
+/// replaces its texture: a reload that changes its size or format gets a new one,
+/// and the renderer would otherwise keep drawing the old. An image Bevy has not
+/// finished preparing is left for a later frame, so binding a freshly-loaded
+/// handle is safe.
 fn reconcile_overrides(slot: &mut PlayerSlot, renderer: &mut SSRenderer, device: &wgpu::Device, images: &RenderAssets<GpuImage>, wanted: &[(String, Handle<Image>)], pack_changed: bool, warned_srgb: &mut bool) {
     if pack_changed && !slot.applied_overrides.is_empty() {
-        for (name, (_, key)) in std::mem::take(&mut slot.applied_overrides) {
+        for (name, (_, _, key)) in std::mem::take(&mut slot.applied_overrides) {
             slot.player.restore_cellmap_texture(None, &name);
             renderer.forget_texture(key);
         }
@@ -292,10 +295,10 @@ fn reconcile_overrides(slot: &mut PlayerSlot, renderer: &mut SSRenderer, device:
     // repair (it re-prepares the image and this re-binds it next frame).
     for (name, handle) in wanted {
         let id = handle.id();
-        if slot.applied_overrides.get(name).is_some_and(|(applied, _)| *applied == id) {
+        let Some(gpu) = images.get(id) else { continue };
+        if slot.applied_overrides.get(name).is_some_and(|&(applied, texture, _)| applied == id && texture == gpu.texture.id()) {
             continue;
         }
-        let Some(gpu) = images.get(id) else { continue };
         let Some(key) = slot.player.override_cellmap_texture_key(None, name) else { continue };
         // The player takes atlas bytes as authored; sampling an sRGB texture hands
         // it linear values instead, and the costume comes out visibly darker than
@@ -309,14 +312,14 @@ fn reconcile_overrides(slot: &mut PlayerSlot, renderer: &mut SSRenderer, device:
         }
         let size = gpu.texture.size();
         renderer.set_texture(device, key, &gpu.texture_view, (size.width, size.height), SsAlphaMode::Straight);
-        slot.applied_overrides.insert(name.clone(), (id, key));
+        slot.applied_overrides.insert(name.clone(), (id, gpu.texture.id(), key));
     }
 
     // Restore any override the character dropped from its component.
     let wanted_names: HashSet<&str> = wanted.iter().map(|(name, _)| name.as_str()).collect();
     let stale: Vec<String> = slot.applied_overrides.keys().filter(|name| !wanted_names.contains(name.as_str())).cloned().collect();
     for name in stale {
-        if let Some((_, key)) = slot.applied_overrides.remove(&name) {
+        if let Some((_, _, key)) = slot.applied_overrides.remove(&name) {
             slot.player.restore_cellmap_texture(None, &name);
             renderer.forget_texture(key);
         }
