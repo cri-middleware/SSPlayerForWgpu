@@ -1513,9 +1513,7 @@ impl SsPlayerWeb {
             return Err(JsValue::from_str("corners must be 16 bytes (4 corners x RGBA)"));
         }
         let mut rgba = [[0u8; 4]; 4];
-        for (corner, chunk) in rgba.iter_mut().zip(corners.chunks_exact(4)) {
-            corner.copy_from_slice(chunk);
-        }
+        rgba.copy_from_slice(corners.as_chunks::<4>().0);
         with_player!(self, |p| p.set_part_color_override_corners_by_index(part, rgba, blend_op, priority).map_err(js_err)?)
     }
 
@@ -1576,9 +1574,7 @@ impl SsPlayerWeb {
             return Err(JsValue::from_str("corners must be 16 bytes (4 corners x RGBA)"));
         }
         let mut rgba = [[0u8; 4]; 4];
-        for (corner, chunk) in rgba.iter_mut().zip(corners.chunks_exact(4)) {
-            corner.copy_from_slice(chunk);
-        }
+        rgba.copy_from_slice(corners.as_chunks::<4>().0);
         with_player!(self, |p| p.set_part_color_override_corners(part, rgba, blend_op, priority).map_err(js_err)?)
     }
 
