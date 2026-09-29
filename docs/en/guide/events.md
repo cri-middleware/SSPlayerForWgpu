@@ -25,7 +25,7 @@ Read after the update that produced them. What you get is **the events the last 
         match event {
             SsEvent::UserData(u) => println!("user data on frame {}: {:?}", u.frame_no, u.text),
             SsEvent::Signal(s)   => println!("signal {} with {} params", s.command_id, s.params.len()),
-            SsEvent::Audio(a)    => audio.play(&a.sound_name, a.loop_num),
+            SsEvent::Audio(a)    => if player.is_playing_forward() { audio.play(&a.sound_name, a.loop_num) },
         }
     }
     ```
@@ -52,7 +52,7 @@ Read after the update that produced them. What you get is **the events the last 
             }
             break;
         case SS_EVENT_AUDIO:
-            play_sound(e.text, e.loop_num);
+            if (ss_player_is_playing_forward(player)) play_sound(e.text, e.loop_num);
             break;
         }
     }
@@ -67,7 +67,7 @@ Read after the update that produced them. What you get is **the events the last 
       switch (e.kind) {
         case 'userData': console.log(e.integer, e.rect, e.point, e.text); break;
         case 'signal':   console.log(e.commandId, e.params); break;
-        case 'audio':    audio.play(e.soundName, e.loopNum); break;
+        case 'audio':    if (player.isPlayingForward()) audio.play(e.soundName, e.loopNum); break;
       }
     }
     ```
@@ -109,6 +109,22 @@ frame it was noticed on.
 | A paused player | empty, for the same reason |
 
 A host that plays a sound per event therefore cannot hear it twice because a character was culled.
+
+## Playing an audio event
+
+The player reports the key it crossed; whether it sounds is yours to decide. Every SpriteStudio
+Player that plays audio itself decides by two rules, and on this one they are the host's:
+
+* **Not while playing backward.** SpriteStudio has no reverse audio. Check `is_playing_forward()`
+  (`ss_player_is_playing_forward`, `isPlayingForward()`) — it is false on a ping-pong's return leg
+  as well as under a backward direction. Hold back the sound, not the event: a subtitle or a rumble keyed to the same
+  marker still wants it.
+* **Not for where a seek landed.** A `seek` while playing makes the next update report the events of
+  the frame it landed on. To keep a seek silent, skip the audio of the first update after it. A seek
+  while stopped reports nothing, and the first frame after `play` is meant to sound.
+
+A sound plays to its end. `pause`, `stop` and a new animation stop the *animation*, not the sounds it
+already started; stop those only when the character itself goes away.
 
 ## What is in a user-data event
 

@@ -25,7 +25,7 @@
         match event {
             SsEvent::UserData(u) => println!("user data on frame {}: {:?}", u.frame_no, u.text),
             SsEvent::Signal(s)   => println!("signal {} with {} params", s.command_id, s.params.len()),
-            SsEvent::Audio(a)    => audio.play(&a.sound_name, a.loop_num),
+            SsEvent::Audio(a)    => if player.is_playing_forward() { audio.play(&a.sound_name, a.loop_num) },
         }
     }
     ```
@@ -52,7 +52,7 @@
             }
             break;
         case SS_EVENT_AUDIO:
-            play_sound(e.text, e.loop_num);
+            if (ss_player_is_playing_forward(player)) play_sound(e.text, e.loop_num);
             break;
         }
     }
@@ -67,7 +67,7 @@
       switch (e.kind) {
         case 'userData': console.log(e.integer, e.rect, e.point, e.text); break;
         case 'signal':   console.log(e.commandId, e.params); break;
-        case 'audio':    audio.play(e.soundName, e.loopNum); break;
+        case 'audio':    if (player.isPlayingForward()) audio.play(e.soundName, e.loopNum); break;
       }
     }
     ```
@@ -105,6 +105,15 @@
 | 一時停止中のプレイヤー | 同じ理由で空 |
 
 したがって、イベントごとに音を鳴らすホストで、キャラクターがカリングされたせいで同じ音が二重に鳴ることはありません。
+
+## オーディオイベントを鳴らす
+
+Player は通過したキーを報告するだけで、鳴らすかどうかはホストが決めます。音を自前で鳴らす SpriteStudio の Player はどれも次の 2 つの規則で判断しており、この Player ではそれがホストの仕事になります。
+
+* **逆向きに再生しているときは鳴らさない。** SpriteStudio には逆再生の音がありません。`is_playing_forward()`（`ss_player_is_playing_forward`、`isPlayingForward()`）で判断してください。ピンポンの戻りの脚でも、逆方向の設定でも false になります。止めるのは音で、イベントではありません。同じマーカーで字幕や振動を出しているなら、そちらには届ける必要があります。
+* **seek の移動先では鳴らさない。** 再生中に `seek` すると、次の update が移動先のフレームのイベントを報告します。seek で音を出したくなければ、seek の後の最初の update のオーディオを飛ばしてください。停止中の seek は何も報告せず、`play` の直後の開始フレームの音は鳴らすものです。
+
+音は最後まで鳴らします。`pause`・`stop`・アニメーションの切り替えが止めるのは*アニメーション*で、すでに鳴り始めた音ではありません。それを止めるのは、キャラクターそのものがいなくなるときだけです。
 
 ## ユーザーデータの中身
 
