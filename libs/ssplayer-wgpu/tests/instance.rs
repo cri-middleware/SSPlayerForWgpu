@@ -34,12 +34,7 @@ fn probe(anim: &str, frames: usize) {
 
     let mut parent = Context::new();
     parent.bind_resource(unsafe { &*parent_res.resource_static_ptr() });
-    // Skip (not fail) when the fixture pack lacks this animation, so the probe
-    // harness is a no-op on the minimal fixtures but runs on richer ssab.
-    if parent.setup_animation(anim).is_err() {
-        eprintln!("=== {anim}: not in Instance.ssab, skipping ===");
-        return;
-    }
+    parent.setup_animation(anim).unwrap_or_else(|e| panic!("{anim} is not in Instance.ssab: {e:?}"));
     parent.play();
 
     let (part_idx, ref_pack, ref_anime) = instance_ref(&parent).expect("instance part");
@@ -74,18 +69,6 @@ fn probe(anim: &str, frames: usize) {
 #[test]
 fn probe_anime_1() {
     probe("anime_1", 200);
-}
-
-// These run only if the fixture Instance.ssab contains richer animations
-// (full ssae conversion); otherwise they skip. Use to diagnose INDEP glitches.
-#[test]
-fn probe_indep_label_pingpong() {
-    probe("INDEP_LABEL_PINGPONG", 400);
-}
-
-#[test]
-fn probe_indep_speed_2x() {
-    probe("INDEP_SPEED_2x", 120);
 }
 
 #[test]
