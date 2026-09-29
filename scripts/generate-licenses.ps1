@@ -2,23 +2,34 @@
 #
 # Regenerate THIRD_PARTY_NOTICES.md from the dependency tree.
 # The PowerShell twin of generate-licenses.sh — see that file for the reasoning.
-
-param(
-    # Where to write the notices. Defaults to the committed THIRD_PARTY_NOTICES.md.
-    [string]$Out
-)
+#
+# Usage:
+#   scripts/generate-licenses.ps1              # -> THIRD_PARTY_NOTICES.md
+#   scripts/generate-licenses.ps1 out=/tmp/x   # somewhere else
+#   scripts/generate-licenses.ps1 --help
 
 $ErrorActionPreference = "Stop"
 
+$APP = Split-Path -Leaf $PSCommandPath
 $baseDirectory = Split-Path -Parent $PSCommandPath
 $rootDirectory = Split-Path -Parent $baseDirectory
 
+$Out = Join-Path $rootDirectory "THIRD_PARTY_NOTICES.md"
+
+foreach ($item in $args) {
+    if ($item -in "-h", "--help") {
+        Get-Content $PSCommandPath | Select-Object -Skip 1 -First 8 | ForEach-Object { $_ -replace '^# ?', '' }
+        exit 0
+    } elseif ($item -like "out=*") {
+        $Out = $item.Substring(4)
+    } else {
+        [Console]::Error.WriteLine("${APP}: unknown option '$item' (try --help)")
+        exit 2
+    }
+}
+
 Push-Location $rootDirectory
 try {
-    if (-not $Out) {
-        $Out = Join-Path $rootDirectory "THIRD_PARTY_NOTICES.md"
-    }
-
     if (-not (Get-Command "cargo-about" -ErrorAction SilentlyContinue)) {
         Write-Host "cargo-about is not installed. Installing it now..."
         cargo install cargo-about --locked --features cli
