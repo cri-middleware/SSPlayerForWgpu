@@ -202,8 +202,8 @@ fn instance_internal_clip_carries_out_and_both_backends_agree() {
     // replay vs the hardware stencil — so on this fixture their interiors must
     // agree; only the mask edges may land on different pixels (the same 5% budget
     // `coverage.rs` allows). A backend that clips an instance differently — e.g.
-    // applying a sub-animation's own masks to its own parts, which SpriteStudio 7.5
-    // does not — blows far past this.
+    // one that lets a sub-animation's own masks miss its own parts, which
+    // SpriteStudio 7.5 clips — blows far past this.
     let budget = drawn(&sten) / 20;
     assert!(differing <= budget, "coverage and stencil disagree on {differing} pixels (budget {budget}) — the instance mask is not treated the same on both backends");
 }

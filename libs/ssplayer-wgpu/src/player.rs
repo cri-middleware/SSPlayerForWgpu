@@ -10,7 +10,7 @@
 
 use crate::events::{SsEvent, decode_events};
 use crate::frame::FrameView;
-use crate::mask::{GeomKind, MaskOp, MaskWriter, MaskWriters, PartMaskFlags, StencilTest, plan_writers};
+use crate::mask::{GeomKind, MaskOp, MaskWriter, MaskWriters, PartMaskFlags, ScopedWriter, StencilTest, plan_writers};
 use crate::pack::{EmbeddedImage, SSPack, TextureRef};
 use crate::renderer::{Retention, SSRenderer};
 use crate::scene::{BatchInfo, FrameChunk, NodeSlot, pack_tint};
@@ -2534,9 +2534,9 @@ impl SSPlayer {
         // reason — see `step_slots`.
         step_slots(root, frame_no, delta_secs, looped);
 
-        let draw = NodeDraw { transform: &self.transform, alpha: self.alpha, tint: pack_tint(self.tint) };
+        let draw = NodeDraw { alpha: self.alpha, tint: pack_tint(self.tint) };
         let mut build = FrameBuild { scene, renderer, sub_frame: self.sub_frame };
-        render_node(root, &mut build, draw, frame_no, false, InheritedMask::ROOT, None);
+        render_tree(root, &mut build, &self.transform, frame_no, draw);
     }
 
     /// What frame each instance child of the root is on, keyed by part index.
@@ -2710,35 +2710,6 @@ fn step_slots(node: &mut PlaybackNode, frame_no: f32, delta_secs: f32, node_loop
     }
 }
 
-/// `DrawBatch.flags` bit set when a content batch is a masked target
-/// (mirrors `FLAG_MASK_INFLUENCE` in the runtime).
-const FLAG_MASK_INFLUENCE: u8 = 0x01;
-
-/// Advance the mask cursor to `up_to_rank`, appending stencil writes for every
-/// planned writer whose rank is below it (WebGL `syncMasksTo`):
-/// a pure mask's backward scope has ended → remove it (Decr/Invert); a clipping
-/// writer's forward scope has begun → add it (Incr/Invert). Monotonic in
-/// `cursor`; ops are baked per pipeline, so ref is always 0.
-fn sync_masks_to(build: &mut FrameBuild<'_>, plan: &[SWrite], cursor: &mut usize, up_to_rank: usize) {
-    // The coverage backend keeps no running state to advance: every writer was
-    // baked once and the replay decides scope per fragment.
-    if build.scene.mask_backend() == crate::MaskBackend::Coverage {
-        return;
-    }
-    while *cursor < plan.len() && plan[*cursor].w.rank < up_to_rank {
-        let sw = &plan[*cursor];
-        let op = if sw.w.is_clipping {
-            if sw.w.op_invert { MaskOp::Invert } else { MaskOp::Incr }
-        } else if sw.w.op_invert {
-            MaskOp::Invert
-        } else {
-            MaskOp::Decr
-        };
-        build.scene.append_mask_writer(sw.frame, &sw.slot, &sw.w, op);
-        *cursor += 1;
-    }
-}
-
 /// The two halves of layer 2, bundled for the tree walk: the scene being
 /// filled, and the device-scoped renderer it reads texture
 /// sizes from. Only the scene is mutated — pipelines are compiled later, in
@@ -2752,150 +2723,222 @@ struct FrameBuild<'a> {
     sub_frame: bool,
 }
 
-/// How one node of the tree is drawn: where it sits and how opaque it is.
+/// How one node of the tree is drawn: how opaque it is and how it is tinted.
 ///
-/// `transform` changes per recursion level (each instance child composes its
-/// part's world matrix onto its parent's), `alpha` is the owning player's and is
-/// constant for the whole walk. They travel together so `render_node` keeps a
-/// readable signature as more player-level properties land.
+/// `alpha` changes per recursion level (each instance child folds in its
+/// part's opacity), `tint` is the owning player's and is constant for the whole
+/// walk. Where a node sits is decided before the walk, in [`prepare_node`].
 #[derive(Clone, Copy)]
-struct NodeDraw<'a> {
-    transform: &'a [f32; 16],
+struct NodeDraw {
     /// Player-level fade; see [`BatchInfo::alpha`]. Never applied to mask
     /// coverage — a faded player clips exactly as it would at full opacity.
     alpha: f32,
     /// Player-level tint, already in the shader's byte order; see
-    /// [`BatchInfo::tint`]. Constant for the whole walk, like `alpha`.
+    /// [`BatchInfo::tint`]. Constant for the whole walk.
     tint: u32,
 }
 
-/// Recursively append a node's geometry to the renderer, composing transforms.
+/// The mask flags an instance part hands the sub-animation it draws.
 ///
-/// Draw only: every slot was advanced by [`step_slots`] before this walk began,
-/// so this reads what the step left behind rather than driving it. The node's
-/// context is already at `frame_no` (root by `update`, children by their
-/// parent's `InstanceSlot::step`).
-///
-/// Masking: when the renderer has a stencil buffer and this is the
-/// root scope (`inherited_stencil == None`), pure masks are pre-written and the
-/// coverage is scoped-replayed as content is drawn in rank order; masked content
-/// is tested per part by its polarity. When `inherited_stencil` is set, this
-/// node is a sub-animation clipped by a parent mask (screen-space, single level):
-/// it runs no masks of its own and every content batch is
-/// tested with the inherited polarity.
-///
-/// `draw` carries the owning player's placement and fade down the tree; whatever
-/// coverage this scope writes, it takes back before returning (see
-/// [`unwind_masks`]).
-/// A parent's coverage bitmap, as a sub-animation reads it.
-///
-/// The bitmap and its writers belong to the animation that owns the mask; a
-/// child only ever borrows them, so this carries no ownership — just enough to
-/// point at the same layer through the child's own coordinates.
-#[derive(Clone, Copy)]
-struct InheritedCoverage {
-    /// Player-local -> coverage UV, in *this* node's local space.
-    uv: [f32; 6],
-    /// The layer the parent baked into.
-    layer: u32,
-    /// The rank the scope test uses: the instance part's, in the parent's order.
-    rank: usize,
-    writers: MaskWriters,
-}
-
-impl InheritedCoverage {
-    /// Push this down through one instance placement.
-    ///
-    /// `slot` is the instance part's world matrix — child-local to parent-local —
-    /// so composing it onto the affine keeps the child's own coordinates landing
-    /// where the parent's writers were baked. Only the 2D part matters: coverage
-    /// is a flat bitmap and the runtime's local Z is zero.
-    fn compose(self, slot: &[f32; 16], rank: usize) -> Self {
-        let [a, b, c, d, tx, ty] = self.uv;
-        let (m0, m1, m4, m5, m12, m13) = (slot[0], slot[1], slot[4], slot[5], slot[12], slot[13]);
-        Self { uv: [a * m0 + c * m1, b * m0 + d * m1, a * m4 + c * m5, b * m4 + d * m5, a * m12 + c * m13 + tx, b * m12 + d * m13 + ty], layer: self.layer, rank, writers: self.writers }
-    }
-}
-
-/// A visible instance child's clipping writers, gathered so the *parent* can
-/// carry them past the instance boundary (clipping scope, extended
-/// across an instance; the fix ForUnity #133 / ForGodot #295 landed). A clipping
-/// mask written inside a sub-animation must keep clipping the parent's parts
-/// drawn *after* the instance, so the parent folds each such writer into its own
-/// coverage: baked from the child's geometry through the slot placement, and
-/// ranked at the instance part so the replay's forward scope (`rank > slot`)
-/// reaches exactly the parent parts after it. Pure masks do not bubble — they
-/// close inside the child (backward scope). Only the coverage backend uses
-/// this today; the stencil path is a separate step.
-struct Bubble<'a> {
-    /// The instance part's rank in the parent's draw order — the scope point.
-    rank: usize,
-    /// The instance placement, child-local to parent-local (the slot matrix).
-    slot: [f32; 16],
-    /// The child's own current frame, decoupled from its context (raw slices).
-    frame: FrameView<'a>,
-    /// The child's clipping writers (only), in child part-index space.
-    clip: Vec<MaskWriter>,
-    /// The instance part's effective `mask_influence`, composed down the chain
-    /// (AND). A writer inside a `mask_influence == 0` instance is
-    /// forced onto the union/counter plane so it composes with an outer mask as a
-    /// union instead of cancelling it.
-    eff_influence: bool,
-}
-
-/// The mask context a sub-animation inherits from the instance part that draws
-/// it, composed down the hierarchy. A masked instance does NOT
-/// replace the child's own masking — it is *added* to it: the child keeps running
-/// its own writers, and every child part composes these inherited values with its
-/// own (`ForUnity` is the reference; `ForGodot` drops the child's own masking).
-/// The identity — a top-level
-/// animation called by no instance — is [`InheritedMask::ROOT`].
+/// **One level, never a chain**: a sub-animation's parts compose with their own
+/// instance part's `mask_influence` (AND) and `visible_inside_mask` (OR), and
+/// with nothing above it — a grandparent instance part that opts out of masking
+/// does not opt its grandchildren out. And the flags reach the sub-animation
+/// whether or not anything above masks. SpriteStudio 7.5 draws it this way; the
+/// data that tells the two apart nests an instance that opts out around one that
+/// opts in. The identity — a top-level animation called by no instance — is
+/// [`InheritedMask::ROOT`].
 #[derive(Clone, Copy)]
 struct InheritedMask {
-    /// An ancestor instance part is a mask target, so the inherited outer mask
-    /// reaches this sub-animation's parts.
-    active: bool,
-    /// AND-chain of every ancestor instance part's `mask_influence` (identity
-    /// `true`). Once it reaches `false` the whole subtree is unmasked.
     influence: bool,
-    /// OR-chain of every ancestor instance part's `visible_inside_mask` (identity
-    /// `false`). Once `true`, everything below draws inside.
     visible_inside: bool,
 }
 
 impl InheritedMask {
     /// The identity a top-level animation starts from.
-    const ROOT: Self = Self { active: false, influence: true, visible_inside: false };
+    const ROOT: Self = Self { influence: true, visible_inside: false };
 
-    /// Push this context down through one instance part: the
-    /// instance part's own flags compose with the inherited ones — `mask_influence`
-    /// with AND, `visible_inside_mask` with OR — and `active` records whether the
-    /// mask reaches below at all (the instance part is a target: composed influence,
-    /// or it writes a mask of its own).
-    fn compose(self, part: &PartMaskFlags) -> Self {
-        let influence = self.influence && part.mask_influence;
-        Self { active: influence || part.mask_write, influence, visible_inside: self.visible_inside || part.visible_inside_mask }
-    }
-
-    /// The effective polarity for a part with its own `visible_inside_mask`,
-    /// OR-composed with the inherited value.
-    fn polarity(self, part: &PartMaskFlags) -> StencilTest {
-        if self.visible_inside || part.visible_inside_mask { StencilTest::Inside } else { StencilTest::Outside }
+    /// What `part`, an instance part, hands its sub-animation: its own flags,
+    /// and none of what its own animation inherited.
+    fn of_instance(part: &PartMaskFlags) -> Self {
+        Self { influence: part.mask_influence, visible_inside: part.visible_inside_mask }
     }
 
     /// Whether a drawn part is a mask target — its effective `mask_influence`
-    /// (own AND inherited) is set. `mask_write` does not make
-    /// it a target here; that is the writer's own local fact.
+    /// (own AND inherited) is set. `mask_write` does not make it a target; that
+    /// is the writer's own fact.
     fn targets(self, part: &PartMaskFlags) -> bool {
         self.influence && part.mask_influence
     }
+
+    /// Whether a target draws inside the coverage (own OR inherited).
+    fn inside(self, part: &PartMaskFlags) -> bool {
+        self.visible_inside || part.visible_inside_mask
+    }
 }
 
-/// Transform a player-local bounding rectangle by an instance's slot matrix,
-/// returning the parent-local rectangle that encloses it. Only the affine 2D part
-/// of `slot` matters (the runtime's local Z is zero).
-fn transform_bounds(bounds: [f32; 4], slot: &[f32; 16]) -> [f32; 4] {
-    let (m0, m1, m4, m5, m12, m13) = (slot[0], slot[1], slot[4], slot[5], slot[12], slot[13]);
+/// One node of the instance tree, made ready for this frame before anything is
+/// drawn.
+///
+/// The whole tree is prepared first because the mask state is the tree's, not a
+/// node's: a clipping mask written inside an instance keeps clipping its callers'
+/// later parts however deep it sits, so every writer and every part's place in
+/// the drawing order has to be known before the first part draws. Preparing is
+/// also where each node's frame is fetched and copied into the arena, **once** —
+/// fetching a frame again rebuilds the runtime's buffers under any slice still
+/// pointing into them.
+struct NodePrep<'r> {
+    frame: FrameView<'r>,
+    slot: NodeSlot,
+    /// Where the node draws: the player's placement composed with every instance
+    /// part above it.
+    transform: [f32; 16],
+    /// Node-local to player-local: the chain of instance placements alone. The
+    /// coverage bitmap is pinned to the player, not to the screen.
+    to_root: [f32; 16],
+    ctx: InheritedMask,
+    /// Each rank's place on the tree sequence (see [`ScopedWriter`]). Empty when
+    /// the scene does not mask.
+    seq: Vec<i32>,
+    /// `(instance part index, prep index)` for each visible instance child.
+    children: Vec<(usize, usize)>,
+}
+
+/// Where a pure mask of the top animation opens: before the first part.
+const TREE_START: i32 = -1;
+/// Where every clipping writer closes: past the last part of the tree.
+const TREE_END: i32 = i32::MAX;
+
+/// How one drawn part meets the mask this frame.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum PartMask {
+    /// Not tested: no mask reaches it, or it opts out.
+    Plain,
+    /// Tested with this polarity.
+    Tested(StencilTest),
+    /// Draws only inside a mask and no mask covers it, so it draws nowhere —
+    /// also in an animation with no mask at all.
+    Hidden,
+}
+
+/// The player's mask state for one frame: every writer of the instance tree,
+/// placed on the tree sequence, and — for the stencil — how far the drawing has
+/// got through adding and removing them.
+struct TreeMask {
+    backend: crate::MaskBackend,
+    /// Capped at [`crate::mask::MAX_TREE_MASK_WRITERS`], in drawing order.
+    writers: Vec<ScopedWriter>,
+    /// The prep each writer's geometry comes from, parallel to `writers`.
+    writer_nodes: Vec<usize>,
+    /// Stencil only: `(seq, writer, add)`, applied once the drawing passes `seq`.
+    events: Vec<(i32, usize, bool)>,
+    cursor: usize,
+}
+
+impl TreeMask {
+    fn new(backend: crate::MaskBackend) -> Self {
+        Self { backend, writers: Vec::new(), writer_nodes: Vec::new(), events: Vec::new(), cursor: 0 }
+    }
+
+    fn masking(&self) -> bool {
+        self.backend != crate::MaskBackend::None
+    }
+
+    /// Place one of a node's writers, found at `seq`, on the tree sequence.
+    /// `open` is where the node's own animation starts.
+    fn place(&mut self, writer: &MaskWriter, seq: i32, open: i32, node: usize, ctx: InheritedMask) {
+        if self.writers.len() >= crate::mask::MAX_TREE_MASK_WRITERS {
+            return;
+        }
+        // The op follows the effective `mask_influence` — one level, like a
+        // target's: inside a `mask_influence == 0` instance a writer lands on the
+        // counter plane and adds to its caller's masks instead of cancelling them.
+        let writer = MaskWriter { op_invert: writer.op_invert && ctx.influence, ..*writer };
+        let (open, close) = if writer.is_clipping { (seq, TREE_END) } else { (open, seq) };
+        self.writers.push(ScopedWriter { writer, open, close });
+        self.writer_nodes.push(node);
+    }
+
+    /// Whether any writer holds its bit at `seq`.
+    fn covers(&self, seq: i32) -> bool {
+        self.writers.iter().any(|w| w.open < seq && seq < w.close)
+    }
+
+    /// How the part at `seq` meets the mask, given its own flags and the ones its
+    /// instance part handed down.
+    fn part(&self, flags: &PartMaskFlags, ctx: InheritedMask, seq: i32) -> PartMask {
+        if !self.masking() || !ctx.targets(flags) {
+            return PartMask::Plain;
+        }
+        let inside = ctx.inside(flags);
+        if self.covers(seq) {
+            PartMask::Tested(if inside { StencilTest::Inside } else { StencilTest::Outside })
+        } else if inside {
+            PartMask::Hidden
+        } else {
+            PartMask::Plain
+        }
+    }
+
+    /// Stencil only: order every writer's add and removal along the tree.
+    ///
+    /// A single hardware stencil holds one state at a time, so each writer is
+    /// added when the drawing passes its `open` and removed when it passes its
+    /// `close`: a pure mask is written before its own animation's first part and
+    /// taken out at itself, a clipping mask put in at itself and left for
+    /// [`TreeMask::finish`]. Incr/Decr and Invert each stay in their own plane and
+    /// commute within it, so writers that share a point may go in any order.
+    fn schedule(&mut self) {
+        for (i, w) in self.writers.iter().enumerate() {
+            self.events.push((w.open, i, true));
+            self.events.push((w.close, i, false));
+        }
+        self.events.sort_by_key(|&(seq, _, _)| seq);
+    }
+
+    /// Stencil only: apply every add and removal that falls before `seq`, so the
+    /// buffer holds exactly the writers in scope for the part drawn there.
+    fn sync(&mut self, build: &mut FrameBuild<'_>, preps: &[NodePrep<'_>], seq: i32) {
+        while self.cursor < self.events.len() && self.events[self.cursor].0 < seq {
+            self.apply_next(build, preps);
+        }
+    }
+
+    /// Draw the next scheduled add or removal into the stencil.
+    fn apply_next(&mut self, build: &mut FrameBuild<'_>, preps: &[NodePrep<'_>]) {
+        let (_, i, add) = self.events[self.cursor];
+        let w = &self.writers[i].writer;
+        // Increment pairs with decrement; invert is its own inverse.
+        let op = match (w.op_invert, add) {
+            (true, _) => MaskOp::Invert,
+            (false, true) => MaskOp::Incr,
+            (false, false) => MaskOp::Decr,
+        };
+        let prep = &preps[self.writer_nodes[i]];
+        build.scene.append_mask_writer(&prep.frame, &prep.slot, w, op);
+        self.cursor += 1;
+    }
+
+    /// Stencil only: take back everything still applied — the clipping writers,
+    /// which hold to the end of the tree, and whatever the drawing never reached.
+    ///
+    /// Every writer is added once and removed once, so the player leaves the
+    /// stencil buffer as it found it. Without this the invariant only holds by
+    /// accident: one player per render pass, with `LoadOp::Clear(0)` wiping the
+    /// residue between frames. Stack a second player into the same pass and the
+    /// first one's mask clips it.
+    fn finish(&mut self, build: &mut FrameBuild<'_>, preps: &[NodePrep<'_>]) {
+        while self.cursor < self.events.len() {
+            self.apply_next(build, preps);
+        }
+    }
+}
+
+/// Transform a node-local bounding rectangle by `m`, returning the rectangle
+/// that encloses it. Only the affine 2D part of `m` matters (the runtime's local
+/// Z is zero).
+fn transform_bounds(bounds: [f32; 4], m: &[f32; 16]) -> [f32; 4] {
+    let (m0, m1, m4, m5, m12, m13) = (m[0], m[1], m[4], m[5], m[12], m[13]);
     let [min_x, min_y, max_x, max_y] = bounds;
     let mut out = [f32::INFINITY, f32::INFINITY, f32::NEG_INFINITY, f32::NEG_INFINITY];
     for (x, y) in [(min_x, min_y), (max_x, min_y), (min_x, max_y), (max_x, max_y)] {
@@ -2909,227 +2952,156 @@ fn transform_bounds(bounds: [f32; 4], slot: &[f32; 16]) -> [f32; 4] {
     out
 }
 
-/// A column-major 4x4 identity; the placement a coverage-only bake needs, since
-/// the coverage vertex stage positions from the writers' player-local geometry
-/// and the coverage affine, never from the node's world transform.
+/// A player-local -> coverage-UV affine, pulled back through `m` (node-local to
+/// player-local) so a node's own coordinates land where the writers were baked.
+/// Only the 2D part matters: coverage is a flat bitmap and the runtime's local Z
+/// is zero.
+fn compose_uv(uv: &[f32; 6], m: &[f32; 16]) -> [f32; 6] {
+    let [a, b, c, d, tx, ty] = *uv;
+    let (m0, m1, m4, m5, m12, m13) = (m[0], m[1], m[4], m[5], m[12], m[13]);
+    [a * m0 + c * m1, b * m0 + d * m1, a * m4 + c * m5, b * m4 + d * m5, a * m12 + c * m13 + tx, b * m12 + d * m13 + ty]
+}
+
+/// A column-major 4x4 identity: where the top node sits relative to itself.
 const IDENTITY_MATRIX: [f32; 16] = [1.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 1.0];
 
-/// One planned stencil writer paired with the geometry it bakes from. The stencil
-/// backend interleaves writers into the buffer during the draw walk and unwinds
-/// them at the end, so unlike the coverage backend (which bakes everything up
-/// front) it needs, per writer, both the frame to validate against and the arena
-/// slot to read: this node's own for its own writers, and a bubbled child's for a
-/// writer carried out past an instance boundary (see [`Bubble`]).
-struct SWrite<'a> {
-    w: MaskWriter,
-    frame: &'a FrameView<'a>,
-    slot: NodeSlot,
+/// Draw one player's instance tree: prepare every node, settle the tree's mask,
+/// then walk it in drawing order.
+fn render_tree(root: &mut PlaybackNode, build: &mut FrameBuild<'_>, transform: &[f32; 16], frame_no: f32, draw: NodeDraw) {
+    let mut mask = TreeMask::new(build.scene.mask_backend());
+    let mut preps = Vec::new();
+    let mut next_seq = 0;
+    let Some(top) = prepare_node(root, build, frame_no, *transform, IDENTITY_MATRIX, InheritedMask::ROOT, TREE_START, &mut next_seq, &mut preps, &mut mask) else { return };
+
+    match mask.backend {
+        crate::MaskBackend::Coverage => bake_coverage(build, &mut preps, &mut mask),
+        crate::MaskBackend::Stencil => mask.schedule(),
+        crate::MaskBackend::None => {}
+    }
+
+    render_node(root, top, &preps, build, draw, &mut mask);
+
+    if mask.backend == crate::MaskBackend::Stencil {
+        mask.finish(build, &preps);
+    }
 }
 
-/// Collect every visible instance child's clipping writers so this node can carry
-/// them past the instance boundary (see [`Bubble`]). Reads each child's current
-/// frame, decoupled from its context like the parent's, and keeps only the
-/// clipping writers (`mask_write && !pure_mask`) — a pure mask closes inside the
-/// child. `'r` is the parent frame's lifetime; the child frames live at least as
-/// long, because their contexts hang off `node` for the whole draw walk.
-fn gather_bubbles<'r>(node: &mut PlaybackNode, frame: &FrameView<'r>) -> Vec<Bubble<'r>> {
-    let mut out = Vec::new();
-    if frame.frame_data.is_empty() {
-        return out;
-    }
-    // SAFETY: same contract as the render walk's `FrameData`.
-    let fd = unsafe { root_as_frame_data_unchecked(frame.frame_data) };
-    let draw_order = fd.draw_order();
-    // Snapshot the instance parts first, so iterating the parent's batches does
-    // not overlap the per-child borrows below.
-    let mut instances: Vec<(usize, usize, [f32; 16])> = Vec::new();
-    for batch in fd.draw_batches() {
-        if batch.kind() != DrawBatchKind::Instance {
-            continue;
-        }
-        let start = batch.start_rank() as usize;
-        for rank in start..start + batch.count() as usize {
-            let part_idx = draw_order.get(rank) as usize;
-            if (part_idx + 1) * 16 > frame.world_matrices.len() {
-                continue;
-            }
-            let slot: [f32; 16] = frame.world_matrices[part_idx * 16..part_idx * 16 + 16].try_into().unwrap();
-            instances.push((part_idx, rank, slot));
-        }
-    }
-    for (part_idx, rank, slot) in instances {
-        // The instance part's own influence composes with the identity a top-level
-        // owner starts from (AND). A masked sub-animation never bakes
-        // coverage — only the top owner does — so the inherited term is 1 here.
-        let eff_influence = node.mask_flags.get(part_idx).map(|f| f.mask_influence).unwrap_or(false);
-        let Some(child) = node.instances.get_mut(&part_idx) else { continue };
-        if !child.visible {
-            continue;
-        }
-        let Ok(bytes) = child.node.context.get_frame_data(child.frame_no) else { continue };
-        // SAFETY: the child's context outlives `'r` (it hangs off `node` for the
-        // whole walk), so its frame bytes and runtime buffers are valid for `'r`;
-        // this is the same raw-slice decoupling the parent frame uses.
-        let cfd: &'r [u8] = unsafe { std::slice::from_raw_parts(bytes.as_ptr(), bytes.len()) };
-        let cframe = frame_view(&mut child.node.context, cfd);
-        let mut cwriters = plan_writers(&cframe, &child.node.mask_flags);
-        retarget(&mut cwriters, &child.node.atlas_keys);
-        let clip: Vec<MaskWriter> = cwriters.iter().filter(|w| w.is_clipping).copied().collect();
-        if clip.is_empty() {
-            continue;
-        }
-        out.push(Bubble { rank, slot, frame: cframe, clip, eff_influence });
-    }
-    out
-}
-
-fn render_node(node: &mut PlaybackNode, build: &mut FrameBuild<'_>, draw: NodeDraw, frame_no: f32, parent_driven: bool, inherited: InheritedMask, inherited_coverage: Option<InheritedCoverage>) {
-    let NodeDraw { transform, alpha, tint } = draw;
+/// Fetch a node's frame, copy it into the arena, number its ranks on the tree
+/// sequence and place its writers — then the same for each visible instance
+/// child, in its instance part's place. Returns the node's index in `preps`.
+///
+/// `open` is where this node's animation starts on the sequence: the top
+/// animation's before its first part, a sub-animation's at its instance part.
+#[allow(clippy::too_many_arguments)]
+fn prepare_node<'r>(node: &mut PlaybackNode, build: &mut FrameBuild<'_>, frame_no: f32, transform: [f32; 16], to_root: [f32; 16], ctx: InheritedMask, open: i32, next_seq: &mut i32, preps: &mut Vec<NodePrep<'r>>, mask: &mut TreeMask) -> Option<usize> {
     // The DISPLAY frame. The playhead keeps its fraction whatever this is set to;
     // flooring it here is the whole of what turning sub-frame off does.
     let frame_no = if build.sub_frame { frame_no } else { frame_no.floor() };
-    let frame_data = match node.context.get_frame_data(frame_no) {
+    let frame_data: &'r [u8] = match node.context.get_frame_data(frame_no) {
         Ok(bytes) => unsafe { std::slice::from_raw_parts(bytes.as_ptr(), bytes.len()) },
-        Err(_) => return,
+        Err(_) => return None,
     };
     let frame = frame_view(&mut node.context, frame_data);
     // Hand this node's runtime buffers to the scene once, up front: everything
-    // below refers to them by arena offset rather than expanding them.
-    let mut node_slot = build.scene.begin_node(&frame, transform);
+    // after refers to them by arena offset rather than expanding them.
+    let slot = build.scene.begin_node(&frame, &transform);
+    let index = preps.len();
+    preps.push(NodePrep { frame, slot, transform, to_root, ctx, seq: Vec::new(), children: Vec::new() });
 
-    // A node runs its OWN masking only at the top (player) scope. Every instance
-    // sub-animation is *parent-driven*: it never rasterises its own coverage, so
-    // its own clipping masks do NOT clip its own parts (SpriteStudio 7.5 renders an
-    // instance's parts un-clipped by their siblings — verified against the tool's
-    // output; the ForGodot player is parent-driven the same way). What a
-    // sub-animation still gets is the outer mask it inherited, composed per part
-    // (below), and its clipping writers still carry OUT to the parent
-    // (`gather_bubbles`). Backend-agnostic on purpose — only what a writer is
-    // *appended as* differs, and that is the scene's business.
-    let masking = build.scene.mask_backend() != crate::MaskBackend::None && !parent_driven;
-    let mut writers = if masking { plan_writers(&frame, &node.mask_flags) } else { MaskWriters::default() };
-    retarget(&mut writers, &node.atlas_keys);
+    let mut own = if mask.masking() { plan_writers(&frame, &node.mask_flags) } else { MaskWriters::default() };
+    retarget(&mut own, &node.atlas_keys);
+    // `plan_writers` hands them back in ascending rank.
+    let mut own = own.iter().peekable();
 
-    // A sub-animation clipped by its parent's mask reads the parent's bitmap
-    // rather than baking one: same layer, same writers, an affine composed with
-    // the instance placement, and the instance part's rank.
-    let mut own_coverage = None;
-    if let Some(parent) = inherited_coverage {
-        build.scene.inherit_node_coverage(&mut node_slot, &parent.uv, parent.layer, parent.rank, &parent.writers);
-        own_coverage = Some(parent);
-    }
-
-    // The coverage backend bakes every writer once, up front, and lets the replay
-    // in the fragment stage work out which of them were in scope for a given part.
-    // Nothing is pre-written, nothing is unwound, and the draw walk below carries
-    // no running mask state — `cursor` simply never advances.
-    let coverage = masking && build.scene.mask_backend() == crate::MaskBackend::Coverage;
-
-    // Carry-out: gather each visible instance child's clipping writers so this
-    // node keeps clipping the parent parts drawn after the instance (see
-    // [`Bubble`]). Both backends consume these — coverage bakes
-    // them below, the stencil path folds them into its write plan. The children
-    // are read now, before either, because a coverage block's writer metadata is
-    // fixed the moment it is baked.
-    let bubbles = if masking { gather_bubbles(node, &frame) } else { Vec::new() };
-
-    // A node with no writers of its own still bakes when a visible child bubbles a
-    // clipping writer up into it (the "coverage stays open" case), so masked
-    // targets below can be tested against it.
-    let has_writers = !writers.is_empty() || !bubbles.is_empty();
-
-    if coverage && has_writers {
-        // Bounds enclose every writer this node bakes: its own, plus each bubbled
-        // child writer mapped through its instance placement into this node's local
-        // space, so the bitmap covers them all.
-        let mut bounds = crate::mask::writer_bounds(&frame, &writers);
-        for b in &bubbles {
-            if let Some(cb) = crate::mask::writer_bounds(&b.frame, &b.clip) {
-                let cb = transform_bounds(cb, &b.slot);
-                bounds = Some(match bounds {
-                    Some([a, bb, c, d]) => [a.min(cb[0]), bb.min(cb[1]), c.max(cb[2]), d.max(cb[3])],
-                    None => cb,
-                });
-            }
+    let fd = unsafe { root_as_frame_data_unchecked(frame.frame_data) };
+    let draw_order = fd.draw_order();
+    let mut seq = Vec::with_capacity(if mask.masking() { draw_order.len() } else { 0 });
+    let mut children = Vec::new();
+    for rank in 0..draw_order.len() {
+        let here = *next_seq;
+        *next_seq += 1;
+        if mask.masking() {
+            seq.push(here);
         }
-        if let Some([min_x, min_y, max_x, max_y]) = bounds {
-            let (w, h) = ((max_x - min_x).max(f32::EPSILON), (max_y - min_y).max(f32::EPSILON));
-            let uv = [1.0 / w, 0.0, 0.0, 1.0 / h, -min_x / w, -min_y / h];
+        while let Some(w) = own.next_if(|w| w.rank <= rank) {
+            mask.place(w, here, open, index, ctx);
+        }
 
-            // One writer list — own first, then bubbled — drives both the block's
-            // replay metadata and the bit each writer bakes into. A bubbled writer
-            // is re-ranked at its instance part (so its forward scope reaches the
-            // parent parts after it) and its OP composed with the effective
-            // influence.
-            let mut all = writers;
-            for b in &bubbles {
-                for cw in &b.clip {
-                    if all.len() >= crate::mask::MAX_MASK_WRITERS {
-                        break;
-                    }
-                    all.push(MaskWriter { rank: b.rank, op_invert: cw.op_invert && b.eff_influence, ..*cw });
-                }
-            }
-            build.scene.set_node_coverage(&mut node_slot, &uv, (w, h), &all);
-            let layer = build.scene.node_coverage_layer(&node_slot);
-            own_coverage = Some(InheritedCoverage { uv, layer, rank: 0, writers: all });
-
-            // Own writers bake into the leading bits; then each bubbled child's
-            // writers into the bits that follow, in the same order they were pushed
-            // above so the bit each bakes matches its metadata slot.
-            let mut bit = 0usize;
-            for cw in &writers {
-                build.scene.append_coverage_writer(&frame, &node_slot, cw, bit);
-                bit += 1;
-            }
-            for b in &bubbles {
-                // The child bakes through a coverage block whose affine folds its
-                // slot placement onto this node's, so its own local coordinates
-                // land where this node's writers were baked.
-                let child_uv = own_coverage.unwrap().compose(&b.slot, b.rank).uv;
-                let mut child_slot = build.scene.begin_node(&b.frame, &IDENTITY_MATRIX);
-                build.scene.inherit_node_coverage(&mut child_slot, &child_uv, layer, b.rank, &MaskWriters::default());
-                for cw in &b.clip {
-                    if bit >= crate::mask::MAX_MASK_WRITERS {
-                        break;
-                    }
-                    let bw = MaskWriter { rank: b.rank, op_invert: cw.op_invert && b.eff_influence, ..*cw };
-                    build.scene.append_coverage_writer(&b.frame, &child_slot, &bw, bit);
-                    bit += 1;
-                }
-            }
+        // A visible instance's sub-animation is drawn in its instance part's
+        // place, so it is numbered right there, ahead of the next part.
+        let part_idx = draw_order.get(rank) as usize;
+        let Some(child) = node.instances.get_mut(&part_idx) else { continue };
+        if !child.visible || (part_idx + 1) * 16 > frame.world_matrices.len() {
+            continue;
+        }
+        let m: [f32; 16] = frame.world_matrices[part_idx * 16..part_idx * 16 + 16].try_into().unwrap();
+        let child_ctx = InheritedMask::of_instance(&node.mask_flags.get(part_idx).copied().unwrap_or_default());
+        let child_frame_no = child.frame_no;
+        if let Some(ci) = prepare_node(&mut child.node, build, child_frame_no, mat4_mul(&transform, &m), mat4_mul(&to_root, &m), child_ctx, here, next_seq, preps, mask) {
+            children.push((part_idx, ci));
         }
     }
-    // The stencil backend interleaves and unwinds writers during the walk, so it
-    // needs one rank-ordered plan that pairs each writer with the geometry it bakes
-    // from: this node's own writers from this node's frame, and each bubbled child
-    // writer from the child's frame through the slot placement (world space — the
-    // child's own render transform). The coverage backend baked everything above,
-    // so its plan is only this node's own writers and is never replayed here.
-    let mut write_plan: Vec<SWrite> = writers.iter().map(|w| SWrite { w: *w, frame: &frame, slot: node_slot }).collect();
-    if !coverage {
-        for b in &bubbles {
-            let child_slot = build.scene.begin_node(&b.frame, &mat4_mul(transform, &b.slot));
-            for cw in &b.clip {
-                let bw = MaskWriter { rank: b.rank, op_invert: cw.op_invert && b.eff_influence, ..*cw };
-                write_plan.push(SWrite { w: bw, frame: &b.frame, slot: child_slot });
-            }
-        }
-        // `sync_masks_to` / `unwind_masks` walk this in ascending rank order.
-        write_plan.sort_by_key(|sw| sw.w.rank);
-    }
+    preps[index].seq = seq;
+    preps[index].children = children;
+    Some(index)
+}
 
-    // Pre-write pure masks so they are active for lower-rank content. Bubbled
-    // writers are all clipping, so none of them are pre-written here.
-    if !coverage {
-        for sw in &write_plan {
-            if !sw.w.is_clipping {
-                let op = if sw.w.op_invert { MaskOp::Invert } else { MaskOp::Incr };
-                build.scene.append_mask_writer(sw.frame, &sw.slot, &sw.w, op);
-            }
-        }
+/// Rasterise every writer of the tree into one coverage bitmap, owned by the top
+/// node, and point every other node at it through its own placement.
+///
+/// The replay needs no running state: each writer's record carries its scope on
+/// the tree sequence, and a masked part carries its own place on it.
+fn bake_coverage(build: &mut FrameBuild<'_>, preps: &mut [NodePrep<'_>], mask: &mut TreeMask) {
+    // Bounds enclose every writer, each mapped through its node's instance
+    // placements into the player's local space, so the bitmap covers them all.
+    let mut bounds: Option<[f32; 4]> = None;
+    for (w, &n) in mask.writers.iter().zip(&mask.writer_nodes) {
+        let Some(b) = crate::mask::writer_bounds(&preps[n].frame, std::slice::from_ref(&w.writer)) else { continue };
+        let b = transform_bounds(b, &preps[n].to_root);
+        bounds = Some(match bounds {
+            Some([a, bb, c, d]) => [a.min(b[0]), bb.min(b[1]), c.max(b[2]), d.max(b[3])],
+            None => b,
+        });
     }
-    let mut cursor = 0usize;
+    let Some([min_x, min_y, max_x, max_y]) = bounds else {
+        // Nothing to rasterise, so nothing covers anything: parts drawn only
+        // inside a mask must draw nowhere rather than untested.
+        mask.writers.clear();
+        mask.writer_nodes.clear();
+        return;
+    };
+    let (w, h) = ((max_x - min_x).max(f32::EPSILON), (max_y - min_y).max(f32::EPSILON));
+    let uv = [1.0 / w, 0.0, 0.0, 1.0 / h, -min_x / w, -min_y / h];
+
+    let (top, rest) = preps.split_first_mut().expect("the top node is prepared first");
+    build.scene.set_node_coverage(&mut top.slot, &uv, (w, h), &mask.writers);
+    let layer = build.scene.node_coverage_layer(&top.slot);
+    for prep in rest {
+        build.scene.inherit_node_coverage(&mut prep.slot, &compose_uv(&uv, &prep.to_root), layer, &mask.writers);
+    }
+    // Each writer bakes through its own node's block, whose affine lands its
+    // node-local geometry in the player's bitmap; the bit is its record's index.
+    for (bit, (w, &n)) in mask.writers.iter().zip(&mask.writer_nodes).enumerate() {
+        build.scene.append_coverage_writer(&preps[n].frame, &preps[n].slot, &w.writer, bit);
+    }
+}
+
+/// Append one prepared node's geometry, recursing into its instance children in
+/// their instance parts' places.
+///
+/// Draw only: every slot was advanced by [`step_slots`] and every node prepared
+/// by [`prepare_node`] before this walk began, so this reads what they left
+/// behind rather than driving it.
+///
+/// Masking is decided per part, the same way at every depth: whether it is a
+/// target and its polarity from its own flags and its instance part's
+/// ([`InheritedMask`]), and whether any writer of the tree is in scope from its
+/// place on the tree sequence ([`TreeMask::part`]).
+fn render_node(node: &mut PlaybackNode, index: usize, preps: &[NodePrep<'_>], build: &mut FrameBuild<'_>, draw: NodeDraw, mask: &mut TreeMask) {
+    let NodeDraw { alpha, tint } = draw;
+    let prep = &preps[index];
+    let (frame, node_slot, transform, ctx) = (&prep.frame, &prep.slot, &prep.transform, prep.ctx);
+    let seq_of = |rank: usize| prep.seq.get(rank).copied().unwrap_or(0);
 
     let fd = unsafe { root_as_frame_data_unchecked(frame.frame_data) };
     let draw_order = fd.draw_order();
@@ -3137,89 +3109,48 @@ fn render_node(node: &mut PlaybackNode, build: &mut FrameBuild<'_>, draw: NodeDr
         let start_rank = batch.start_rank() as usize;
         let count = batch.count() as usize;
         let kind = batch.kind();
-        // A masked target only clips when writers are actually active this frame
-        // (WebGL gates the masked path on maskWriterCount > 0). With no writers the
-        // mask_influence opt-in is inert, so the content draws normally — crucially
-        // via the stencil=None path, which is where shader dispatch happens.
-        let masked_target = masking && has_writers && (batch.flags() & FLAG_MASK_INFLUENCE) != 0;
         match kind {
             DrawBatchKind::Normal | DrawBatchKind::Mesh | DrawBatchKind::Shape => {
                 // Pure masks (PartTypeMask / draw_as_mask) contribute coverage but
                 // never draw their own colour. The runtime still
                 // emits a content batch for them, so skip it here.
                 let is_pure = |pi: usize| node.mask_flags.get(pi).map(|f| f.pure_mask()).unwrap_or(false);
-                let has_pure = (start_rank..start_rank + count).any(|r| is_pure(draw_order.get(r) as usize));
+                let part_mask = |rank: usize, mask: &TreeMask| {
+                    let f = node.mask_flags.get(draw_order.get(rank) as usize).copied().unwrap_or_default();
+                    mask.part(&f, ctx, seq_of(rank))
+                };
+                let texture_hash = node.atlas_keys.resolve(batch.texture_hash());
+                let whole = (start_rank..start_rank + count).all(|r| !is_pure(draw_order.get(r) as usize) && part_mask(r, mask) == PartMask::Plain);
 
-                if masked_target {
-                    // Polarity and active coverage vary per part → draw one at a time.
-                    for rank in start_rank..start_rank + count {
-                        let part_idx = draw_order.get(rank) as usize;
-                        sync_masks_to(build, &write_plan, &mut cursor, rank);
-                        if is_pure(part_idx) {
-                            continue;
-                        }
-                        let stencil = node.mask_flags.get(part_idx).map(|f| f.polarity()).unwrap_or(StencilTest::None);
-                        let info = BatchInfo { start_rank: rank, count: 1, texture_hash: node.atlas_keys.resolve(batch.texture_hash()), blend_type: batch.blend_type(), kind, stencil, alpha, tint };
-                        build.scene.append_batch(build.renderer, &frame, &node_slot, &info);
+                if whole {
+                    let info = BatchInfo { start_rank, count, texture_hash, blend_type: batch.blend_type(), kind, stencil: StencilTest::None, mask_seq: 0, alpha, tint };
+                    build.scene.append_batch(build.renderer, frame, node_slot, &info);
+                    continue;
+                }
+                // Polarity and the writers in scope vary per part → draw one at a time.
+                for rank in start_rank..start_rank + count {
+                    if is_pure(draw_order.get(rank) as usize) {
+                        continue;
                     }
-                } else if inherited.active {
-                    // Clipped by an inherited outer mask. Each part composes its OWN
-                    // polarity and target with the inherited context:
-                    // polarity = own `visible_inside` OR inherited; a part whose
-                    // effective `mask_influence` (own AND inherited) is 0 opts out and
-                    // draws unclipped. The instance part's setting no longer applies
-                    // to the whole sub-animation uniformly.
-                    for rank in start_rank..start_rank + count {
-                        let part_idx = draw_order.get(rank) as usize;
-                        if is_pure(part_idx) {
-                            continue;
+                    let seq = seq_of(rank);
+                    let stencil = match part_mask(rank, mask) {
+                        PartMask::Hidden => continue,
+                        PartMask::Plain => StencilTest::None,
+                        PartMask::Tested(test) => {
+                            mask.sync(build, preps, seq);
+                            test
                         }
-                        let f = node.mask_flags.get(part_idx).copied().unwrap_or_default();
-                        let stencil = if inherited.targets(&f) { inherited.polarity(&f) } else { StencilTest::None };
-                        let info = BatchInfo { start_rank: rank, count: 1, texture_hash: node.atlas_keys.resolve(batch.texture_hash()), blend_type: batch.blend_type(), kind, stencil, alpha, tint };
-                        build.scene.append_batch(build.renderer, &frame, &node_slot, &info);
-                    }
-                } else if has_pure {
-                    // Non-masked batch that still contains a pure mask: draw the
-                    // non-mask parts individually, skipping the mask's own colour.
-                    for rank in start_rank..start_rank + count {
-                        let part_idx = draw_order.get(rank) as usize;
-                        if is_pure(part_idx) {
-                            continue;
-                        }
-                        let info = BatchInfo { start_rank: rank, count: 1, texture_hash: node.atlas_keys.resolve(batch.texture_hash()), blend_type: batch.blend_type(), kind, stencil: StencilTest::None, alpha, tint };
-                        build.scene.append_batch(build.renderer, &frame, &node_slot, &info);
-                    }
-                } else {
-                    let info = BatchInfo { start_rank, count, texture_hash: node.atlas_keys.resolve(batch.texture_hash()), blend_type: batch.blend_type(), kind, stencil: StencilTest::None, alpha, tint };
-                    build.scene.append_batch(build.renderer, &frame, &node_slot, &info);
+                    };
+                    let info = BatchInfo { start_rank: rank, count: 1, texture_hash, blend_type: batch.blend_type(), kind, stencil, mask_seq: seq.max(0) as u32, alpha, tint };
+                    build.scene.append_batch(build.renderer, frame, node_slot, &info);
                 }
             }
             DrawBatchKind::Instance => {
                 for rank in start_rank..start_rank + count {
                     let part_idx = draw_order.get(rank) as usize;
-
-                    // The context this sub-animation inherits: compose this instance
-                    // part's own flags onto what THIS node inherited
-                    // (`mask_influence` AND / `visible_inside_mask` OR). At a root owner
-                    // this starts from ROOT, so the child inherits this node's own mask
-                    // through the instance part; nested, it chains. Advance the stencil
-                    // cursor so the child tests against this node's writers up to the
-                    // instance's rank when this node owns a mask that reaches it.
-                    let f = node.mask_flags.get(part_idx).copied().unwrap_or_default();
-                    let child_ctx = inherited.compose(&f);
-                    if masking && has_writers && child_ctx.active {
-                        sync_masks_to(build, &write_plan, &mut cursor, rank);
-                    }
-
+                    // Prepared only when visible; the prep is the draw's go-ahead.
+                    let Some(&(_, child_index)) = prep.children.iter().find(|&&(p, _)| p == part_idx) else { continue };
                     let Some(child) = node.instances.get_mut(&part_idx) else { continue };
-                    if !child.visible {
-                        continue;
-                    }
-                    // Compose the instance part's world matrix onto the parent transform.
-                    let child_frame_no = child.frame_no;
-                    let m: [f32; 16] = frame.world_matrices[part_idx * 16..part_idx * 16 + 16].try_into().unwrap();
-                    let child_transform = mat4_mul(transform, &m);
                     // Fold the instance part's own opacity into the chain the child
                     // draws with. SpriteStudio modulates a sub-animation by its
                     // instance part's effective alpha (SS6/SS7.5 `RateOpacity`, an
@@ -3227,29 +3158,20 @@ fn render_node(node: &mut PlaybackNode, build: &mut FrameBuild<'_>, draw: NodeDr
                     // hierarchical value. Colour deliberately does not cross the
                     // boundary — no player propagates an instance part's tint.
                     let child_alpha = alpha * fd.parts().get(part_idx).alpha();
-                    let child_draw = NodeDraw { transform: &child_transform, alpha: child_alpha, tint };
-                    // Hand the bitmap down only when the mask actually reaches this
-                    // instance part (`child_ctx.active`); the AND means an
-                    // unmasked instance part leaves its whole subtree unmasked.
-                    let child_coverage = child_ctx.active.then(|| own_coverage.map(|parent| parent.compose(&m, rank))).flatten();
-                    render_node(&mut child.node, build, child_draw, child_frame_no, true, child_ctx, child_coverage);
+                    render_node(&mut child.node, child_index, preps, build, NodeDraw { alpha: child_alpha, tint }, mask);
                 }
             }
             DrawBatchKind::Effect => {
-                // A masked effect (or one inside an inherited-masked subtree) tests
-                // against the screen-space stencil; sync coverage once at its rank.
-                let eff_stencil = if masked_target {
-                    let part_idx = draw_order.get(start_rank) as usize;
-                    sync_masks_to(build, &write_plan, &mut cursor, start_rank);
-                    node.mask_flags.get(part_idx).map(|f| f.polarity()).unwrap_or(StencilTest::None)
-                } else if inherited.active {
-                    // Same composition as a drawn part: the emitter's own flags
-                    // OR/AND the inherited context; opt out (no test) when not a target.
-                    let part_idx = draw_order.get(start_rank) as usize;
-                    let f = node.mask_flags.get(part_idx).copied().unwrap_or_default();
-                    if inherited.targets(&f) { inherited.polarity(&f) } else { StencilTest::None }
-                } else {
-                    StencilTest::None
+                // The batch's first emitter stands for all of it.
+                let first = draw_order.get(start_rank) as usize;
+                let f = node.mask_flags.get(first).copied().unwrap_or_default();
+                let eff_stencil = match mask.part(&f, ctx, seq_of(start_rank)) {
+                    PartMask::Hidden => continue,
+                    PartMask::Plain => StencilTest::None,
+                    PartMask::Tested(test) => {
+                        mask.sync(build, preps, seq_of(start_rank));
+                        test
+                    }
                 };
                 for rank in start_rank..start_rank + count {
                     let part_idx = draw_order.get(rank) as usize;
@@ -3268,48 +3190,10 @@ fn render_node(node: &mut PlaybackNode, build: &mut FrameBuild<'_>, draw: NodeDr
                     build.scene.append_effect(plan, &eff_slot, eff_stencil, eff_alpha, tint, &node.atlas_keys);
                 }
             }
-            // Mask batches emit no colour (coverage is handled by the writer
-            // pre-write / scoped replay above). Text / Nines: not yet handled.
+            // Mask batches emit no colour (coverage is handled by the writers
+            // above). Text / Nines: not yet handled.
             _ => {}
         }
-    }
-
-    if masking {
-        unwind_masks(build, &write_plan, cursor);
-    }
-}
-
-/// Take back every bit of stencil coverage this scope wrote.
-///
-/// The batch loop leaves the buffer unbalanced in two ways, because the scoped
-/// replay only runs as far as the last masked target it met:
-///
-/// * a pure mask whose rank the cursor never reached is still pre-written, and
-/// * a clipping writer the cursor *did* reach is still applied.
-///
-/// Both are undone here — increment pairs with decrement, invert is its own
-/// inverse — so the scope returns the buffer in the state it found it. Without
-/// this the invariant only holds by accident: one player per render pass, with
-/// `LoadOp::Clear(0)` wiping the residue between frames. Stack a second player
-/// into the same pass and the first one's mask clips it.
-///
-/// The extra draw calls are bounded by the writer count (at most
-/// [`crate::mask::MAX_MASK_WRITERS`]) and write no colour.
-fn unwind_masks(build: &mut FrameBuild<'_>, plan: &[SWrite], cursor: usize) {
-    // Nothing to take back: the coverage backend never wrote into shared state.
-    if build.scene.mask_backend() == crate::MaskBackend::Coverage {
-        return;
-    }
-    let remove = |w: &MaskWriter| if w.op_invert { MaskOp::Invert } else { MaskOp::Decr };
-    // Consumed clipping writers (own and bubbled): `sync_masks_to` added their
-    // coverage. A bubbled clipping writer is unwound here, at the *parent's* end
-    // rather than at the instance boundary — that deferral is what carries it out.
-    for sw in plan[..cursor].iter().filter(|sw| sw.w.is_clipping) {
-        build.scene.append_mask_writer(sw.frame, &sw.slot, &sw.w, remove(&sw.w));
-    }
-    // Unconsumed pure masks: pre-written before the batch loop, never removed.
-    for sw in plan[cursor..].iter().filter(|sw| !sw.w.is_clipping) {
-        build.scene.append_mask_writer(sw.frame, &sw.slot, &sw.w, remove(&sw.w));
     }
 }
 

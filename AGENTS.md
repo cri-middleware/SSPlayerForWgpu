@@ -78,7 +78,7 @@ an agent would otherwise break silently.
     `build_frame` clears `events` / `looped` / `finished_edge` / `started_edge`, while `prev_finished` and
     `start_pending` stay: the latch that stops a consumed completion edge firing twice, and a `play` no tick
     has reported yet.
-*   **Each player leaves the stencil buffer as it found it** (`unwind_masks`), or the first player's mask
+*   **Each player leaves the stencil buffer as it found it** (`TreeMask::finish`), or the first player's mask
     clips the second in a shared pass. **The two mask backends must agree**: which one a scene uses is the
     host's property, never the animation's, so keep the coverage path inside the mask doc's numbers —
     deviating forks a spec the Godot Player implements too. It **bakes and samples in one encoder, never

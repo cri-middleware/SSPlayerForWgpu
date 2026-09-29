@@ -11,7 +11,7 @@ The same `.ssab` looks the same either way; what changes is what you have to pro
 | Backend | Needs from you | Costs | Available on |
 |---|---|---|---|
 | **Stencil** | a depth/stencil attachment on every pass you draw into | nothing extra | Rust, C, JavaScript |
-| **Coverage bitmap** | one call between update and draw | **one render pass per masking character per frame** | Rust, Bevy |
+| **Coverage bitmap** | one call between update and draw | **one render pass per masking character per frame**, one more per 24 mask writers past the first 24 | Rust, Bevy |
 
 Coverage exists for a render pass that has no stencil to lend. Bevy's 2D depth texture is
 `Depth32Float`, which carries none; an engine composing its own passes may expose no depth at all.
@@ -100,8 +100,10 @@ the day you merge your cast into a single pass.
 
 ## Limits
 
-* The coverage bitmap carries **one bit per mask writer, 24 writers** — the same limit the other
-  SpriteStudio players implement.
+* A character masks with **at most 96 mask writers at once**, counted across its whole instance
+  tree — a mask inside an instance keeps clipping the parts its callers draw after it, so every
+  writer of the tree counts together. Both backends stop there, so they draw the same thing; the
+  coverage bitmap carries one bit per writer, 24 to a layer.
 * Mask parts are clipping shapes, not colours: what they draw is the clip, never pixels.
 
 ## Next

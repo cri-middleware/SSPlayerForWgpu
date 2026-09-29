@@ -8,7 +8,7 @@
 //! device-scoped [`SSRenderer`] — all three are lent per frame.
 
 use crate::frame::FrameView;
-use crate::mask::{MaskOp, MaskWriter, MaskWriters, StencilTest};
+use crate::mask::{MaskOp, MaskWriter, ScopedWriter, StencilTest};
 use crate::metrics::{GpuTimer, SceneStats};
 use crate::renderer::{COVERAGE_FORMAT, GeomClass, PipelineKey, PipelineKind, SHADER_PARAM_STRIDE, SHADER_PARAM_STRIDE_F32, SHAPE_FAN_VERTS, SSRenderer, blend_index, ss_shader_entry};
 
@@ -112,6 +112,11 @@ pub struct BatchInfo {
     pub kind: DrawBatchKind,
     /// Stencil test to apply (masked content). `None` for ordinary content.
     pub stencil: StencilTest,
+    /// The part's place on its player's tree sequence — every part of the
+    /// instance tree numbered in drawing order, a sub-animation in its instance
+    /// part's place. What the coverage replay scopes writers against; read only
+    /// for a masked target (`count == 1`) under [`MaskBackend::Coverage`].
+    pub mask_seq: u32,
     /// Player-level alpha, folded into every vertex's colour alpha.
     /// The shader's final coverage is `tex.a * color.a` and the blend table is
     /// premultiplied throughout, so a plain multiply here fades the part
@@ -194,7 +199,7 @@ struct Prim {
     /// | 1 | 1 = writer (baking a bit), 0 = masked target (replaying) |
     /// | 2 | target polarity: 1 = visible inside the coverage |
     /// | 8..16 | writer: which bit of the bitmap it writes (0..23) |
-    /// | 16..32 | target: its own `draw_order` rank, for the scope test |
+    /// | 16..32 | target: its place on the tree sequence, for the scope test |
     mask_info: u32,
     /// Player-level tint (see [`BatchInfo::tint`]), in [`pack_rgb`]'s byte order.
     /// Unlike every other field, zero is not the neutral value here — it is
@@ -233,13 +238,13 @@ fn writer_mask_info(bit: usize) -> u32 {
 
 /// Pack a masked target's [`Prim::mask_info`].
 ///
-/// Ranks past 65535 would alias, which no real `draw_order` reaches — a pack that
-/// large would have exhausted other limits long before. Clamped rather than
-/// wrapped so the failure, if it ever happened, is a mask that stops scoping
+/// Sequence numbers past 65535 would alias, which no real instance tree reaches —
+/// one that large would have exhausted other limits long before. Clamped rather
+/// than wrapped so the failure, if it ever happened, is a mask that stops scoping
 /// rather than one that scopes backwards.
-fn target_mask_info(rank: usize, inside: bool) -> u32 {
+fn target_mask_info(seq: u32, inside: bool) -> u32 {
     let polarity = if inside { MASK_INFO_INSIDE } else { 0 };
-    MASK_INFO_ACTIVE | polarity | ((rank.min(0xFFFF) as u32) << 16)
+    MASK_INFO_ACTIVE | polarity | (seq.min(0xFFFF) << 16)
 }
 
 /// Where one node's slice of the frame arena starts.
@@ -280,8 +285,10 @@ pub struct NodeSlot {
 #[derive(Clone, Copy, Debug)]
 struct CoverageNode {
     /// Arena offset of the node's coverage block, so [`FrameChunk::absorb`] can
-    /// reach in and rewrite the layer the block advertises.
-    block_base: u32,
+    /// reach in and rewrite the layer the block advertises. `None` on a layer a
+    /// tree with more writers than one layer holds spills into: the block names
+    /// only its first layer, and the replay counts on from there.
+    block_base: Option<u32>,
     /// Player-local width and height of the writer group, which is what decides
     /// the bitmap's size class — a mask twice as wide wants twice the texels.
     extent: (f32, f32),
@@ -300,25 +307,12 @@ impl Default for NodeSlot {
 }
 
 /// Floats before the writer records in a node's coverage block: the six of the
-/// player-local -> coverage-UV affine, the array layer the bitmap lives in, the
-/// writer count, and the rank override.
-pub(crate) const COVERAGE_HEADER_F32: usize = 9;
+/// node-local -> coverage-UV affine, the array layer the bitmap lives in, and
+/// the writer count.
+pub(crate) const COVERAGE_HEADER_F32: usize = 8;
 
 /// Offset of the layer index inside a coverage block header.
 const COVERAGE_LAYER_F32: usize = 6;
-
-/// Rank override in a block header: the scope test uses this rank for every part
-/// of the node instead of the part's own.
-///
-/// A sub-animation clipped by its parent's mask sits at the parent's instance
-/// part in the parent's draw order, and that is the rank the scope has to be
-/// judged against — the child's internal ranks belong to a
-/// different order entirely and mean nothing to the parent's writers.
-/// [`NO_RANK_OVERRIDE`] means "use the part's own rank", which is every root
-/// scope.
-pub(crate) const COVERAGE_RANK_F32: usize = 8;
-/// A block header's [`COVERAGE_RANK_F32`] when the node uses its own ranks.
-const NO_RANK_OVERRIDE: f32 = -1.0;
 
 /// Smallest coverage bitmap edge. Below this the quantisation costs more in
 /// reallocation than the texels are worth.
@@ -344,7 +338,8 @@ struct CoverageTargets {
     size: u32,
     layers: u32,
 }
-/// Floats per writer record in a coverage block: rank, bit, op_invert, is_clipping.
+/// Floats per writer record in a coverage block: the open and close of its scope
+/// on the tree sequence, its bit, and op_invert.
 pub(crate) const COVERAGE_WRITER_F32: usize = 4;
 
 /// Layer 2b: the per-target, per-frame half — what one render target's worth of
@@ -989,8 +984,10 @@ impl FrameChunk {
         // masking in the same frame share one bitmap.
         let layer_base = self.coverage_nodes.len() as u32;
         for node in &other.coverage_nodes {
-            let block_base = node.block_base + arena_base;
-            self.arena[block_base as usize + COVERAGE_LAYER_F32] += layer_base as f32;
+            let block_base = node.block_base.map(|base| base + arena_base);
+            if let Some(base) = block_base {
+                self.arena[base as usize + COVERAGE_LAYER_F32] += layer_base as f32;
+            }
             self.coverage_nodes.push(CoverageNode { block_base, ..*node });
         }
         // Sub-animation blocks borrow a parent's layer instead of owning one, so
@@ -1055,7 +1052,8 @@ impl FrameChunk {
         }
     }
 
-    /// Attach this node's coverage block, once its writers are planned.
+    /// Attach the player's coverage block to its top node, once the whole tree's
+    /// writers are planned.
     ///
     /// `uv` is the affine that takes a **player-local** point to coverage UV
     /// `[0,1]` — the bbox normalisation, as
@@ -1064,23 +1062,28 @@ impl FrameChunk {
     /// samples with it) read this one transform, so the two cannot disagree about
     /// where the bitmap is — the mismatch that costs Godot's implementation a
     /// frame of lag cannot be represented here.
-    pub fn set_node_coverage(&mut self, node: &mut NodeSlot, uv: &[f32; 6], extent: (f32, f32), writers: &MaskWriters) {
+    pub fn set_node_coverage(&mut self, node: &mut NodeSlot, uv: &[f32; 6], extent: (f32, f32), writers: &[ScopedWriter]) {
         let layer = self.coverage_nodes.len() as u32;
-        let base = self.push_coverage_block(uv, layer, NO_RANK_OVERRIDE, writers);
-        self.coverage_nodes.push(CoverageNode { block_base: base, extent });
+        let base = self.push_coverage_block(uv, layer, writers);
+        self.coverage_nodes.push(CoverageNode { block_base: Some(base), extent });
+        // One more layer per `COVERAGE_LAYER_BITS` writers, consecutive, so a
+        // writer's layer is the block's plus its bit's quotient.
+        for _ in 1..writers.len().div_ceil(crate::mask::COVERAGE_LAYER_BITS) {
+            self.coverage_nodes.push(CoverageNode { block_base: None, extent });
+        }
         node.coverage = base;
         node.coverage_layer = layer;
     }
 
-    /// Point a sub-animation at its parent's bitmap.
+    /// Point a sub-animation at its player's bitmap.
     ///
-    /// No new layer and no new writers: the child reads the same bitmap the
-    /// parent baked. What differs is the affine — composed with the instance
-    /// part's placement, so the child's own local coordinates land in the parent's
-    /// coverage — and the rank, which is the instance part's, because that is
-    /// where the sub-animation sits in the parent's draw order.
-    pub fn inherit_node_coverage(&mut self, node: &mut NodeSlot, uv: &[f32; 6], layer: u32, rank: usize, writers: &MaskWriters) {
-        let base = self.push_coverage_block(uv, layer, rank as f32, writers);
+    /// No new layer: the child reads the one bitmap the top node baked, and the
+    /// same writer records — their scopes are on the tree sequence, which the
+    /// whole tree shares. Only the affine differs, composed with the chain of
+    /// instance placements so the child's own local coordinates land in the top
+    /// node's coverage.
+    pub fn inherit_node_coverage(&mut self, node: &mut NodeSlot, uv: &[f32; 6], layer: u32, writers: &[ScopedWriter]) {
+        let base = self.push_coverage_block(uv, layer, writers);
         // Not a `coverage_node` — it owns no layer — but `absorb` must still find
         // it to rebase the borrowed layer when players merge.
         self.coverage_shared.push(base);
@@ -1088,24 +1091,23 @@ impl FrameChunk {
         node.coverage_layer = layer;
     }
 
-    /// Which layer a node's coverage went to, for handing down to its instance
-    /// children.
+    /// Which layer a node's coverage went to, for pointing the rest of its tree
+    /// at it.
     pub fn node_coverage_layer(&self, node: &NodeSlot) -> u32 {
         node.coverage_layer
     }
 
     /// Append a coverage block and return where it landed.
-    fn push_coverage_block(&mut self, uv: &[f32; 6], layer: u32, rank_override: f32, writers: &MaskWriters) -> u32 {
+    fn push_coverage_block(&mut self, uv: &[f32; 6], layer: u32, writers: &[ScopedWriter]) -> u32 {
         let base = self.arena.len() as u32;
         self.arena.extend_from_slice(uv);
         self.arena.push(layer as f32);
         self.arena.push(writers.len() as f32);
-        self.arena.push(rank_override);
         for (bit, w) in writers.iter().enumerate() {
-            self.arena.push(w.rank as f32);
+            self.arena.push(w.open as f32);
+            self.arena.push(w.close as f32);
             self.arena.push(bit as f32);
-            self.arena.push(if w.op_invert { 1.0 } else { 0.0 });
-            self.arena.push(if w.is_clipping { 1.0 } else { 0.0 });
+            self.arena.push(if w.writer.op_invert { 1.0 } else { 0.0 });
         }
         base
     }
@@ -1156,7 +1158,7 @@ impl FrameChunk {
     /// interleave instance recursion at the right rank. `batch.stencil` selects
     /// the stencil-test content pipeline for masked parts.
     pub fn append_batch(&mut self, renderer: &SSRenderer, frame: &FrameView, node: &NodeSlot, batch: &BatchInfo) {
-        let BatchInfo { start_rank, count, texture_hash, blend_type, kind, stencil, alpha, tint } = *batch;
+        let BatchInfo { start_rank, count, texture_hash, blend_type, kind, stencil, mask_seq, alpha, tint } = *batch;
         if frame.frame_data.is_empty() {
             return;
         }
@@ -1170,15 +1172,16 @@ impl FrameChunk {
         }
 
         // Under the coverage backend a masked target carries its own scope test:
-        // which bitmap to read, its rank, and its polarity. The stencil backend
-        // leaves this zero because the pipeline state does the testing for it.
+        // which bitmap to read, its place on the tree sequence, and its polarity.
+        // The stencil backend leaves this zero because the pipeline state does
+        // the testing for it.
         //
-        // `start_rank` is the part's own rank here — the walk splits masked
-        // batches to one part each precisely so this is true.
+        // `mask_seq` is the part's own — the walk splits masked batches to one
+        // part each precisely so this is true.
         let (cov_base, mask_info) = match stencil {
             _ if self.mask_backend() != MaskBackend::Coverage || node.coverage == NO_COVERAGE => (0, 0),
-            StencilTest::Inside => (node.coverage, target_mask_info(start_rank, true)),
-            StencilTest::Outside => (node.coverage, target_mask_info(start_rank, false)),
+            StencilTest::Inside => (node.coverage, target_mask_info(mask_seq, true)),
+            StencilTest::Outside => (node.coverage, target_mask_info(mask_seq, false)),
             StencilTest::None => (0, 0),
         };
 
@@ -1387,7 +1390,11 @@ impl FrameChunk {
         }
         // Only a bake call picks a layer; masked content reads the layer its
         // primitive's coverage block names, so one bind group serves them all.
-        let cov_layer = matches!(dest, MaskWriterDest::Coverage(_)).then_some(node.coverage_layer);
+        // Past the first layer's bits a writer lands in the next layer along.
+        let cov_layer = match dest {
+            MaskWriterDest::Coverage(bit) => Some(node.coverage_layer + (bit / crate::mask::COVERAGE_LAYER_BITS) as u32),
+            MaskWriterDest::Stencil(_) => None,
+        };
         let first_prim = self.prims.len() as u32;
 
         let class = match writer.geom {

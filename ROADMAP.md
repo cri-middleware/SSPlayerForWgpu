@@ -63,15 +63,15 @@ breaks are in [CONTRIBUTING.md](./CONTRIBUTING.md#technical-constraints--guiding
       would charge every stencil host an extra pass and a coverage array per
       masking player, so the fold waits for that constant to gain a stencil, and
       goes the other way: dropping coverage takes the extra pass with it, while
-      `SceneConfig::stencil_format` and `unwind_masks` stay. Check the constant on
+      `SceneConfig::stencil_format` and `TreeMask::finish` stay. Check the constant on
       each Bevy bump. Until then every mask feature lands in both.
 - [ ] **Exact masks, past what the stencil can express.** Mixed INCR / INVERT
       overlaps are approximated and nesting is limited by 8 bits. The coverage
       backend already lifts the nesting limit — its accumulators are shader
-      variables, not stencil bits — but both backends still stop at the planner's
-      24 writers, which is the coverage encoding's own budget (RGBA8, one bit
-      each). Going past 24 means a wider encoding, and doing it here alone would
-      fork a limit the other Players share.
+      variables, not stencil bits — but both backends still stop at 96 writers
+      across a player's instance tree, the limit the Godot Player shares; the
+      coverage backend spends one more RGBA8 layer per 24 of them. Going past 96
+      alone would fork that limit.
 - [ ] **An offscreen path, for group alpha first.** `set_alpha` composites each
       part at that alpha in turn, so coverage accumulates where parts overlap —
       two halves of a character at 0.5 leave the overlap at 0.75. Drawing the
@@ -245,7 +245,7 @@ player, where every host and the C ABI reach it, and the host half belongs in an
   *be* its output wants neither — render once into a texture it owns and present
   that texture in both places.
 - **A counter for dropped mask writers.** Player safety stays minimal here: a pack
-  past the 24 writers both backends share (*Exact masks* above) is the data's to
+  past the 96 writers both backends share (*Exact masks* above) is the data's to
   fix, not a tally for the player to keep.
 - **Discarding transparent texels instead of writing zero.** Parity with the
   WebGL player, which does the same.
