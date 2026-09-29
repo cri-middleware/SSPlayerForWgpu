@@ -17,7 +17,7 @@ We would like to thank the authors and contributors of these open-source project
 ## Overview of Licenses
 
 - [Apache License 2.0](#Apache-2.0) (109)
-- [MIT License](#MIT) (13)
+- [MIT License](#MIT) (14)
 - [BSD 3-Clause &quot;New&quot; or &quot;Revised&quot; License](#BSD-3-Clause) (3)
 - [zlib License](#Zlib) (3)
 - [Creative Commons Zero v1.0 Universal](#CC0-1.0) (1)
@@ -29,7 +29,7 @@ We would like to thank the authors and contributors of these open-source project
 ### <a id="Apache-2.0"></a>Apache License 2.0
 
 Used by:
-- **wide 1.7.0** (https://github.com/Lokathor/wide)
+- **wide 1.7.1** (https://github.com/Lokathor/wide)
 
 ```text
 
@@ -675,8 +675,8 @@ Used by:
 ### <a id="Apache-2.0"></a>Apache License 2.0
 
 Used by:
-- **zerocopy-derive 0.8.57** (https://github.com/google/zerocopy)
-- **zerocopy 0.8.57** (https://github.com/google/zerocopy)
+- **zerocopy-derive 0.8.59** (https://github.com/google/zerocopy)
+- **zerocopy 0.8.59** (https://github.com/google/zerocopy)
 
 ```text
                                  Apache License
@@ -1311,7 +1311,7 @@ Used by:
 ### <a id="Apache-2.0"></a>Apache License 2.0
 
 Used by:
-- **crc32fast 1.5.1** (https://github.com/srijs/rust-crc32fast)
+- **crc32fast 1.5.2** (https://github.com/srijs/rust-crc32fast)
 - **jni-sys 0.3.1** (https://github.com/jni-rs/jni-sys)
 - **jni-sys 0.4.1** (https://github.com/jni-rs/jni-sys)
 
@@ -1953,14 +1953,14 @@ Used by:
 - **arrayvec 0.7.8** (https://github.com/bluss/arrayvec)
 - **bitflags 2.13.2** (https://github.com/bitflags/bitflags)
 - **bumpalo 3.20.3** (https://github.com/fitzgen/bumpalo)
-- **cfg-if 1.0.4** (https://github.com/rust-lang/cfg-if)
+- **cfg-if 1.0.5** (https://github.com/rust-lang/cfg-if)
 - **equivalent 1.0.2** (https://github.com/indexmap-rs/equivalent)
 - **flate2 1.1.10** (https://github.com/rust-lang/flate2-rs)
 - **hashbrown 0.15.5** (https://github.com/rust-lang/hashbrown)
 - **hashbrown 0.16.1** (https://github.com/rust-lang/hashbrown)
 - **hashbrown 0.17.1** (https://github.com/rust-lang/hashbrown)
 - **indexmap 2.14.2** (https://github.com/indexmap-rs/indexmap)
-- **js-sys 0.3.105** (https://github.com/wasm-bindgen/wasm-bindgen/tree/master/crates/js-sys)
+- **js-sys 0.3.106** (https://github.com/wasm-bindgen/wasm-bindgen/tree/master/crates/js-sys)
 - **khronos-egl 6.0.0** (https://github.com/timothee-haudebourg/khronos-egl)
 - **lock_api 0.4.14** (https://github.com/Amanieu/parking_lot)
 - **log 0.4.34** (https://github.com/rust-lang/log)
@@ -1973,14 +1973,14 @@ Used by:
 - **renderdoc-sys 1.1.0** (https://github.com/ebkalderon/renderdoc-rs)
 - **rustc-hash 1.1.0** (https://github.com/rust-lang-nursery/rustc-hash)
 - **scopeguard 1.2.0** (https://github.com/bluss/scopeguard)
-- **smallvec 1.16.0** (https://github.com/servo/rust-smallvec)
+- **smallvec 1.16.2** (https://github.com/servo/rust-smallvec)
 - **unicode-width 0.2.2** (https://github.com/unicode-rs/unicode-width)
-- **wasm-bindgen-futures 0.4.78** (https://github.com/wasm-bindgen/wasm-bindgen/tree/master/crates/futures)
-- **wasm-bindgen-macro-support 0.2.128** (https://github.com/wasm-bindgen/wasm-bindgen/tree/main/crates/macro-support)
-- **wasm-bindgen-macro 0.2.128** (https://github.com/wasm-bindgen/wasm-bindgen/tree/master/crates/macro)
-- **wasm-bindgen-shared 0.2.128** (https://github.com/wasm-bindgen/wasm-bindgen/tree/master/crates/shared)
-- **wasm-bindgen 0.2.128** (https://github.com/wasm-bindgen/wasm-bindgen)
-- **web-sys 0.3.105** (https://github.com/wasm-bindgen/wasm-bindgen/tree/master/crates/web-sys)
+- **wasm-bindgen-futures 0.4.79** (https://github.com/wasm-bindgen/wasm-bindgen/tree/master/crates/futures)
+- **wasm-bindgen-macro-support 0.2.129** (https://github.com/wasm-bindgen/wasm-bindgen/tree/main/crates/macro-support)
+- **wasm-bindgen-macro 0.2.129** (https://github.com/wasm-bindgen/wasm-bindgen/tree/master/crates/macro)
+- **wasm-bindgen-shared 0.2.129** (https://github.com/wasm-bindgen/wasm-bindgen/tree/master/crates/shared)
+- **wasm-bindgen 0.2.129** (https://github.com/wasm-bindgen/wasm-bindgen)
+- **web-sys 0.3.106** (https://github.com/wasm-bindgen/wasm-bindgen/tree/master/crates/web-sys)
 
 ```text
                               Apache License
@@ -3325,7 +3325,7 @@ Apache License
 
 Used by:
 - **bytemuck 1.25.2** (https://github.com/Lokathor/bytemuck)
-- **bytemuck_derive 1.12.0** (https://github.com/Lokathor/bytemuck)
+- **bytemuck_derive 1.12.1** (https://github.com/Lokathor/bytemuck)
 - **safe_arch 1.2.0** (https://github.com/Lokathor/safe_arch)
 
 ```text
@@ -3426,10 +3426,10 @@ Used by:
 - **raw-window-handle 0.6.2** (https://github.com/rust-windowing/raw-window-handle)
 - **spirv 0.4.0+sdk-1.4.341.0** (https://github.com/gfx-rs/rspirv)
 - **syn 2.0.119** (https://github.com/dtolnay/syn)
-- **syn 3.0.5** (https://github.com/dtolnay/syn)
-- **thiserror-impl 2.0.20** (https://github.com/dtolnay/thiserror)
-- **thiserror 2.0.20** (https://github.com/dtolnay/thiserror)
-- **unicode-ident 1.0.24** (https://github.com/dtolnay/unicode-ident)
+- **syn 3.0.6** (https://github.com/dtolnay/syn)
+- **thiserror-impl 2.0.21** (https://github.com/dtolnay/thiserror)
+- **thiserror 2.0.21** (https://github.com/dtolnay/thiserror)
+- **unicode-ident 1.0.26** (https://github.com/dtolnay/unicode-ident)
 - **wgpu-core-deps-apple 29.0.4** (https://github.com/gfx-rs/wgpu)
 - **wgpu-core-deps-emscripten 29.0.4** (https://github.com/gfx-rs/wgpu)
 - **wgpu-core-deps-windows-linux-android 29.0.4** (https://github.com/gfx-rs/wgpu)
@@ -3901,6 +3901,37 @@ USE OR OTHER DEALINGS IN THE SOFTWARE.
 ### <a id="MIT"></a>MIT License
 
 Used by:
+- **tokio 1.53.1** (https://github.com/tokio-rs/tokio)
+
+```text
+MIT License
+
+Copyright (c) Tokio Contributors
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+
+```
+
+---
+### <a id="MIT"></a>MIT License
+
+Used by:
 - **simd-adler32 0.3.10** (https://github.com/mcountryman/simd-adler32)
 
 ```text
@@ -3994,7 +4025,7 @@ SOFTWARE.
 ### <a id="Unicode-3.0"></a>Unicode License v3
 
 Used by:
-- **unicode-ident 1.0.24** (https://github.com/dtolnay/unicode-ident)
+- **unicode-ident 1.0.26** (https://github.com/dtolnay/unicode-ident)
 
 ```text
 UNICODE LICENSE V3
