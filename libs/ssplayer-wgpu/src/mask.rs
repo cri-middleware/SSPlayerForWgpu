@@ -17,21 +17,20 @@
 use crate::frame::{FrameView, SHAPE_VERTICES_STRIDE};
 use ssruntime::runtime::framedata::ss::runtime::{DrawBatchKind, root_as_frame_data_unchecked};
 
-/// Upper bound on one node's writers per frame (matches the WebGL planner).
-pub const MAX_MASK_WRITERS: usize = 24;
-
 /// Writers one coverage layer tells apart: a bit apiece in R, G and B.
 pub const COVERAGE_LAYER_BITS: usize = 24;
 
-/// Upper bound on writers across one player's whole instance tree per frame.
+/// Upper bound on writers per frame, across one player's whole instance tree —
+/// and so on any one animation in it too.
 ///
 /// Every writer of the tree masks from one place — a clipping mask deep inside an
 /// instance keeps clipping its callers — so they are counted together, and a
 /// character built from a few instances with a handful of masks each passes 24
 /// quickly. The coverage backend spends one more layer per
 /// [`COVERAGE_LAYER_BITS`]; the stencil backend could take more but stops here
-/// too, so the two backends draw the same thing. Past this the rest are ignored.
-pub const MAX_TREE_MASK_WRITERS: usize = 96;
+/// too, so the two backends draw the same thing, and so does every other Player
+/// holding the same limit. Past this the rest are ignored.
+pub const MAX_MASK_WRITERS: usize = 96;
 
 /// Stencil test mode baked into a content pipeline. Selected per masked part
 /// from the target's `visible_inside_mask` polarity.
@@ -165,8 +164,8 @@ pub struct ScopedWriter {
 ///
 /// The plan is capped at [`MAX_MASK_WRITERS`] and [`plan_writers`] runs once per
 /// node per frame, so a `Vec` here spent its life growing from empty to a bound
-/// it already knew — six reallocations to reach a buffer under a kilobyte, on
-/// every masking node of every frame. A fixed array costs the same bytes and
+/// it already knew — a string of reallocations to reach a buffer of a few
+/// kilobytes, on every masking node of every frame. A fixed array costs the same bytes and
 /// none of the allocator. Everything that reads a plan reads it as a slice
 /// (`Deref`), which is what it read when this was a `Vec`.
 #[derive(Clone, Copy, Debug)]
@@ -300,7 +299,7 @@ pub fn writer_bounds(frame: &FrameView, writers: &[MaskWriter]) -> Option<[f32; 
 /// Plan the frame's stencil writers by walking `draw_batches`, mirroring the
 /// WebGL `MaskPlanner.plan`. `mask_flags` is indexed by part index (static
 /// ssab data). Returns writers in ascending rank order, capped at
-/// `MAX_MASK_WRITERS` (this module's cap on writers per frame).
+/// `MAX_MASK_WRITERS`.
 ///
 /// A writer's `texture_hash` comes from the *batch* it belongs to (like WebGL):
 /// pure `Mask` batches carry `texture_hash == 0` (→ no cutout, whole geometry),

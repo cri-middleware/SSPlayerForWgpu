@@ -198,8 +198,8 @@ struct Prim {
     /// | 0 | set when this primitive takes part in coverage masking |
     /// | 1 | 1 = writer (baking a bit), 0 = masked target (replaying) |
     /// | 2 | target polarity: 1 = visible inside the coverage |
-    /// | 8..16 | writer: which bit of the bitmap it writes (0..23) |
-    /// | 16..32 | target: its place on the tree sequence, for the scope test |
+    /// | 8..16 | writer: which bit of the bitmap it writes (0..95) |
+    /// | 8..32 | target: its place on the tree sequence, for the scope test |
     mask_info: u32,
     /// Player-level tint (see [`BatchInfo::tint`]), in [`pack_rgb`]'s byte order.
     /// Unlike every other field, zero is not the neutral value here — it is
@@ -238,13 +238,15 @@ fn writer_mask_info(bit: usize) -> u32 {
 
 /// Pack a masked target's [`Prim::mask_info`].
 ///
-/// Sequence numbers past 65535 would alias, which no real instance tree reaches —
-/// one that large would have exhausted other limits long before. Clamped rather
-/// than wrapped so the failure, if it ever happened, is a mask that stops scoping
-/// rather than one that scopes backwards.
+/// A target has no writer bit, so its sequence number takes all 24 bits above
+/// the flags — which is also as far as the replay's f32 comparison is exact.
+/// The stencil backend numbers the same tree without a limit, so the two only
+/// part ways past 2^24 parts in one tree. Clamped rather than wrapped so the
+/// failure, if it ever happened, is a mask that stops scoping rather than one
+/// that scopes backwards.
 fn target_mask_info(seq: u32, inside: bool) -> u32 {
     let polarity = if inside { MASK_INFO_INSIDE } else { 0 };
-    MASK_INFO_ACTIVE | polarity | (seq.min(0xFFFF) << 16)
+    MASK_INFO_ACTIVE | polarity | (seq.min(0xFF_FFFF) << 8)
 }
 
 /// Where one node's slice of the frame arena starts.
@@ -1522,10 +1524,21 @@ impl FrameChunk {
     /// (inherited from a parent mask); `None` for ordinary effects. `alpha` and
     /// `tint` are the player-level fade and colour (see [`BatchInfo::alpha`] and
     /// [`BatchInfo::tint`]).
-    pub fn append_effect(&mut self, plan_buf: &[u8], node: &NodeSlot, stencil: StencilTest, alpha: f32, tint: u32, keys: &crate::AtlasKeys) {
+    ///
+    /// Under the coverage backend a masked effect tests like any other part:
+    /// `node` carries the coverage block, pulled back to the effect's own local
+    /// space, and `mask_seq` is the emitter's place on the tree sequence.
+    #[allow(clippy::too_many_arguments)]
+    pub fn append_effect(&mut self, plan_buf: &[u8], node: &NodeSlot, stencil: StencilTest, mask_seq: u32, alpha: f32, tint: u32, keys: &crate::AtlasKeys) {
         if plan_buf.is_empty() {
             return;
         }
+        let (cov_base, mask_info) = match stencil {
+            _ if self.mask_backend() != MaskBackend::Coverage || node.coverage == NO_COVERAGE => (0, 0),
+            StencilTest::Inside => (node.coverage, target_mask_info(mask_seq, true)),
+            StencilTest::Outside => (node.coverage, target_mask_info(mask_seq, false)),
+            StencilTest::None => (0, 0),
+        };
         let plan = unsafe { root_as_effect_draw_plan_unchecked(plan_buf) };
         let stride = plan.vert_stride() as usize;
         let verts = plan.verts();
@@ -1580,6 +1593,8 @@ impl FrameChunk {
                     colors: [color; 4],
                     alphas: [colors.get(vi * 4 + 3); 4],
                     rates: [1.0; 4],
+                    cov_base,
+                    mask_info,
                     ..Default::default()
                 });
             }

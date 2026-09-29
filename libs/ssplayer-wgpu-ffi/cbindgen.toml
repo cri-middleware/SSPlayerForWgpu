@@ -25,7 +25,7 @@ parse_deps = false
 [export]
 # cbindgen sweeps up every `pub const` in the crate, including ones that have
 # nothing to do with the C API. Keep the header to `src/ffi.rs`'s surface.
-exclude = ["IDENTITY_TRANSFORM", "MAX_MASK_WRITERS", "COVERAGE_LAYER_BITS", "MAX_TREE_MASK_WRITERS"]
+exclude = ["IDENTITY_TRANSFORM", "MAX_MASK_WRITERS", "COVERAGE_LAYER_BITS"]
 
 # Types keep idiomatic Rust names in the source and take their C names here, so
 # the header reads like the hand-written API sketch in SPEC §11.

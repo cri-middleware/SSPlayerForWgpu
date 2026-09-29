@@ -2826,18 +2826,21 @@ enum PartMask {
 /// got through adding and removing them.
 struct TreeMask {
     backend: crate::MaskBackend,
-    /// Capped at [`crate::mask::MAX_TREE_MASK_WRITERS`], in drawing order.
+    /// Capped at [`crate::mask::MAX_MASK_WRITERS`], in drawing order.
     writers: Vec<ScopedWriter>,
     /// The prep each writer's geometry comes from, parallel to `writers`.
     writer_nodes: Vec<usize>,
     /// Stencil only: `(seq, writer, add)`, applied once the drawing passes `seq`.
     events: Vec<(i32, usize, bool)>,
     cursor: usize,
+    /// Coverage only: the player-local -> coverage-UV affine and the layer the
+    /// tree baked into, for the effect slots the walk points at them.
+    coverage: Option<([f32; 6], u32)>,
 }
 
 impl TreeMask {
     fn new(backend: crate::MaskBackend) -> Self {
-        Self { backend, writers: Vec::new(), writer_nodes: Vec::new(), events: Vec::new(), cursor: 0 }
+        Self { backend, writers: Vec::new(), writer_nodes: Vec::new(), events: Vec::new(), cursor: 0, coverage: None }
     }
 
     fn masking(&self) -> bool {
@@ -2847,7 +2850,7 @@ impl TreeMask {
     /// Place one of a node's writers, found at `seq`, on the tree sequence.
     /// `open` is where the node's own animation starts.
     fn place(&mut self, writer: &MaskWriter, seq: i32, open: i32, node: usize, ctx: InheritedMask) {
-        if self.writers.len() >= crate::mask::MAX_TREE_MASK_WRITERS {
+        if self.writers.len() >= crate::mask::MAX_MASK_WRITERS {
             return;
         }
         // The op follows the effective `mask_influence` — one level, like a
@@ -3076,6 +3079,7 @@ fn bake_coverage(build: &mut FrameBuild<'_>, preps: &mut [NodePrep<'_>], mask: &
     let (top, rest) = preps.split_first_mut().expect("the top node is prepared first");
     build.scene.set_node_coverage(&mut top.slot, &uv, (w, h), &mask.writers);
     let layer = build.scene.node_coverage_layer(&top.slot);
+    mask.coverage = Some((uv, layer));
     for prep in rest {
         build.scene.inherit_node_coverage(&mut prep.slot, &compose_uv(&uv, &prep.to_root), layer, &mask.writers);
     }
@@ -3162,32 +3166,43 @@ fn render_node(node: &mut PlaybackNode, index: usize, preps: &[NodePrep<'_>], bu
                 }
             }
             DrawBatchKind::Effect => {
-                // The batch's first emitter stands for all of it.
-                let first = draw_order.get(start_rank) as usize;
-                let f = node.mask_flags.get(first).copied().unwrap_or_default();
-                let eff_stencil = match mask.part(&f, ctx, seq_of(start_rank)) {
-                    PartMask::Hidden => continue,
-                    PartMask::Plain => StencilTest::None,
-                    PartMask::Tested(test) => {
-                        mask.sync(build, preps, seq_of(start_rank));
-                        test
-                    }
-                };
                 for rank in start_rank..start_rank + count {
                     let part_idx = draw_order.get(rank) as usize;
                     // Whatever `step_slots` produced for this part earlier in the
                     // frame; empty when the effect had nothing to draw.
                     let Some(plan) = node.effects.get(&part_idx).map(|e| e.plan.as_slice()).filter(|p| !p.is_empty()) else { continue };
+                    // Each emitter meets the mask on its own flags and place, like
+                    // any drawn part — it draws into its own slot anyway.
+                    let seq = seq_of(rank);
+                    let f = node.mask_flags.get(part_idx).copied().unwrap_or_default();
+                    let eff_stencil = match mask.part(&f, ctx, seq) {
+                        PartMask::Hidden => continue,
+                        PartMask::Plain => StencilTest::None,
+                        PartMask::Tested(test) => {
+                            mask.sync(build, preps, seq);
+                            test
+                        }
+                    };
                     let m: [f32; 16] = frame.world_matrices[part_idx * 16..part_idx * 16 + 16].try_into().unwrap();
                     let eff_transform = mat4_mul(transform, &m);
                     // The effect draws from its own plan, so it needs its own
                     // arena slot rather than this node's.
-                    let eff_slot = build.scene.push_transform(&eff_transform);
+                    let mut eff_slot = build.scene.push_transform(&eff_transform);
+                    // Under coverage the slot needs its own view of the bitmap too:
+                    // the particles are in the effect part's local space, one
+                    // placement below this node's. Without it the replay has no
+                    // block to read, and the effect draws unclipped — unlike the
+                    // stencil, which clips it by pipeline state alone.
+                    if eff_stencil != StencilTest::None
+                        && let Some((uv, layer)) = mask.coverage
+                    {
+                        build.scene.inherit_node_coverage(&mut eff_slot, &compose_uv(&uv, &mat4_mul(&prep.to_root, &m)), layer, &mask.writers);
+                    }
                     // Same opacity fold as an instance part: the effect emitter's own
                     // alpha scales every particle it draws (the particles carry their
                     // own per-vertex alpha on top).
                     let eff_alpha = alpha * fd.parts().get(part_idx).alpha();
-                    build.scene.append_effect(plan, &eff_slot, eff_stencil, eff_alpha, tint, &node.atlas_keys);
+                    build.scene.append_effect(plan, &eff_slot, eff_stencil, seq.max(0) as u32, eff_alpha, tint, &node.atlas_keys);
                 }
             }
             // Mask batches emit no colour (coverage is handled by the writers
