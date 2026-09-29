@@ -99,6 +99,7 @@ an agent would otherwise break silently.
 *   **Atlas decoding at load time is threaded; the per-frame walk is not.** It is a `std::thread::scope`
     gone before the call returns, never a pool beside the host's, and `flush_textures` settles which hash
     wins before dispatching.
-*   **Beware green rendering tests.** `tests/render.rs` skips itself when no GPU adapter is present, so a
-    pass there verified nothing. When changing rasterisation, dump the readback to a PNG and look at it —
-    pixel counts alone have hidden real regressions.
+*   **Beware green rendering tests.** Every GPU test returns early and reports `ok` when no adapter is
+    present; `tests/gpu_adapter.rs` is the one that fails then, so a run without it passing verified
+    nothing. When changing rasterisation, dump the readback to a PNG and look at it — pixel counts alone
+    have hidden real regressions.
