@@ -57,6 +57,7 @@ import { defineSsPlayerWebGPUElement } from '@spritestudio/ssplayer-wgpu/element
 | `missingAssets()` | 届かなかったもの。**reject ではありません** |
 | `textureRefs(pack?)` / `embeddedTextures(pack?)` | パックが要求するアトラス |
 | `animationNames()` / `partNames()` / `cellmapNames()` / `cellNames(cellmap)` | パックが持つもの |
+| `currentAnimation()` | 設定中のアニメーション。無ければ `undefined` |
 | `canvasSize()` | オーサリング時のキャンバス |
 
 **再生制御** — [再生と再生制御](../guide/playback.md)を参照。
@@ -67,7 +68,7 @@ import { defineSsPlayerWebGPUElement } from '@spritestudio/ssplayer-wgpu/element
 | `play()` / `playFrom(frame)` | **先頭出し** — 巻き戻してループ回数を張り直します |
 | `pause()` / `resume()` / `stop()` | 保持、その場から継続、終了 |
 | `seek(frame)` / `frameNo()` | 小数フレーム可 |
-| `setSpeedScale(s)` | 既定 fps の倍率。`0` と負値は停止 |
+| `setSpeedScale(s)` / `speedScale()` | 既定 fps の倍率。`0` と負値は停止 |
 | `setLoopCount(n)` / `loopCount()` / `remainingLoops()` | `n` 回。`-1` / `0` で無限 |
 | `setAnimationSection(start, end)` | `setAnimation` の後に |
 | `setPlaybackDirection(dir, style)` / `playbackDirection()` / `playbackStyle()` | それぞれ `0` / `1` |

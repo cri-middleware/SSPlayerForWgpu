@@ -1085,6 +1085,13 @@ impl SsPlayerWeb {
         with_player!(self, |p| p.animation_names().unwrap_or_default())
     }
 
+    /// The animation currently set up, or `undefined` before the first
+    /// `setAnimation` and again after a load replaced the pack.
+    #[wasm_bindgen(js_name = currentAnimation)]
+    pub fn current_animation(&self) -> Result<Option<String>, JsValue> {
+        with_player!(self, |p| p.current_animation().map(str::to_owned))
+    }
+
     /// The atlases a registered pack asks for, as `{ hash, path, embedded }[]`
     /// in pack order. `pack` undefined selects the main pack.
     ///
@@ -1299,6 +1306,13 @@ impl SsPlayerWeb {
     #[wasm_bindgen(js_name = setSpeedScale)]
     pub fn set_speed_scale(&self, speed: f32) -> Result<(), JsValue> {
         with_player!(self, |p| p.set_speed_scale(speed))
+    }
+
+    /// The speed in effect: `0` for a speed that was set to zero or below,
+    /// since that is the stop it became.
+    #[wasm_bindgen(js_name = speedScale)]
+    pub fn speed_scale(&self) -> Result<f32, JsValue> {
+        with_player!(self, |p| p.speed_scale())
     }
 
     /// Whether this player is currently advancing.
