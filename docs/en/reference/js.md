@@ -116,7 +116,7 @@ the calls.
 | `restoreCellmapTexture(pack, name)` | Put the original atlas back |
 | `isCellmapOverridden(pack, name)` | Whether one is currently overridden |
 
-## `<ss-player-webgpu>`
+## `<ss-player-webgpu>` { #ss-player-webgpu }
 
 Documented in full on [its own page](./web-component.md); the attributes, in short:
 

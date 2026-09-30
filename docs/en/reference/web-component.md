@@ -1,4 +1,4 @@
-# `<ss-player-webgpu>`
+# `<ss-player-webgpu>` { #ss-player-webgpu }
 
 The custom element is the **convenience wrapper**: one element = one canvas = one character, which
 is the shortest path for a single-character use — an ad creative, a mascot in the corner of a page,

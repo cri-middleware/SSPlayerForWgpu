@@ -112,7 +112,7 @@ import { defineSsPlayerWebGPUElement } from '@spritestudio/ssplayer-wgpu/element
 | `restoreCellmapTexture(pack, name)` | 元のアトラスに戻す |
 | `isCellmapOverridden(pack, name)` | 現在オーバーライドされているか |
 
-## `<ss-player-webgpu>`
+## `<ss-player-webgpu>` { #ss-player-webgpu }
 
 詳細は[専用ページ](./web-component.md)にあります。属性だけ再掲すると：
 
