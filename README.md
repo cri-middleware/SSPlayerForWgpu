@@ -25,6 +25,7 @@ of its own.
 - [**Limitations & Scope**](./docs/en/limitations.md) — what this player draws today, and what it leaves to the host
 - [**Migrating from SS6Player for CPP**](./docs/en/migration/from-ss6-cpp.md)
 - [**ROADMAP**](./ROADMAP.md) — what is implemented, what is planned, and what was deliberately declined
+- [**For AI assistants**](https://cri-middleware.github.io/SSPlayerForWgpu/llms.txt) — these docs as Markdown: `llms.txt` indexes the pages and `llms-full.txt` holds all of them in one file — 🚧 live after the first release
 - [**SpriteStudio Docs (portal)**](https://cri-middleware.github.io/SpriteStudio-Docs/) — the SDK and every
   official player in one place — 🚧 live after the first release
 
