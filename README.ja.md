@@ -19,6 +19,7 @@
 - [**制限事項と対応範囲**](./docs/ja/limitations.md) — 現在描けるもの、ホスト側に委ねているもの
 - [**SS6Player for CPP からの移行**](./docs/ja/migration/from-ss6-cpp.md)
 - [**ROADMAP**](./ROADMAP.md) — 実装済みのもの、予定しているもの、意図的に見送ったもの
+- [**AI アシスタント向け**](https://cri-middleware.github.io/SSPlayerForWgpu/ja/llms.txt) — このドキュメントを Markdown で提供します。`llms.txt` はページの目次、`llms-full.txt` は全ページを 1 ファイルにまとめたものです — 🚧 初回リリース後に公開
 - [**SpriteStudio Docs（ポータル）**](https://cri-middleware.github.io/SpriteStudio-Docs/ja/) — SDK と全公式 Player の入口 — 🚧 初回リリース後に公開
 
 ## 📦 インストール
