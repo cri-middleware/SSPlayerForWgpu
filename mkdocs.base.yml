@@ -62,6 +62,8 @@ theme:
     - search.suggest
     - search.highlight
     - content.code.copy
+    # "Copy as Markdown" on every page. It fetches the Markdown the `llmstxt` plugin writes.
+    - content.action.copy
     # The load-bearing one for this site. Every reader arrives writing exactly one of
     # Rust / C / JavaScript, and the Guide pages carry all three side by side in tabs;
     # `content.tabs.link` makes picking a language once stick for the whole site, so
