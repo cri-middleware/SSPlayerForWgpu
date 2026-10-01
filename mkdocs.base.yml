@@ -62,6 +62,8 @@ theme:
     - search.suggest
     - search.highlight
     - content.code.copy
+    # "Copy as Markdown" on every page. It fetches the Markdown the `llmstxt` plugin writes.
+    - content.action.copy
     # The load-bearing one for this site. Every reader arrives writing exactly one of
     # Rust / C / JavaScript, and the Guide pages carry all three side by side in tabs;
     # `content.tabs.link` makes picking a language once stick for the whole site, so
@@ -76,6 +78,16 @@ plugins:
   # the old URL working, anchors and all. Sources are relative to `docs_dir`, and the two
   # locales mirror each other, so a single entry covers en and ja.
   - redirects
+
+  # Writes `llms.txt` and `llms-full.txt` at each locale's root, and a Markdown copy of every
+  # page beside its HTML, for readers who hand the docs to an AI assistant. Needs `site_url`,
+  # which both locale configs set. `sections` takes globs relative to `docs_dir`, so one entry
+  # covers every page in both locales and a new page is picked up without editing it.
+  - llmstxt:
+      full_output: llms-full.txt
+      sections:
+        Docs:
+          - "*.md"
 
 markdown_extensions:
   - toc:
