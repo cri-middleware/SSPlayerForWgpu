@@ -83,8 +83,18 @@ plugins:
   # page beside its HTML, for readers who hand the docs to an AI assistant. Needs `site_url`,
   # which both locale configs set. `sections` takes globs relative to `docs_dir`, so one entry
   # covers every page in both locales and a new page is picked up without editing it.
+  # `markdown_description` opens both files. It is English for both locales: a per-locale text
+  # would move `llmstxt` into the locale files and split `plugins` across three files, which
+  # the sequence rule at the top forbids.
   - llmstxt:
       full_output: llms-full.txt
+      markdown_description: |
+        wgpu player with one library behind several faces: Rust (`start/rust`), Bevy
+        (`start/bevy`), C / C++ (`start/cpp`) and the browser (`start/web`); `start/assets`
+        prepares the `.ssab`. `guide/` explains behaviour shared by all faces, and `reference/`
+        is the API reference per face. The generated Rust API is rustdoc HTML for `ssplayer-wgpu`
+        and `ssplayer-bevy` under `api/` at the site root; it is not part of this file, and
+        `reference/rust` is only its entry point. `limitations` lists what is not supported.
       sections:
         Docs:
           - "*.md"
