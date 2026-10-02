@@ -59,7 +59,7 @@ breaks are in [CONTRIBUTING.md](./CONTRIBUTING.md#technical-constraints--guiding
       exist because each is the cheap answer somewhere: a host that lends a
       stencil pays nothing extra for it, while coverage (mask doc §5) is the only
       answer for a pass with none to lend — and Bevy's is one, `bevy_core_pipeline`
-      0.19 fixing `CORE_2D_DEPTH_FORMAT` at `Depth32Float`. Folding onto coverage
+      0.20 fixing `CORE_2D_DEPTH_FORMAT` at `Depth32Float`. Folding onto coverage
       would charge every stencil host an extra pass and a coverage array per
       masking player, so the fold waits for that constant to gain a stencil, and
       goes the other way: dropping coverage takes the extra pass with it, while

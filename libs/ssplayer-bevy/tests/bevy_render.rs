@@ -103,7 +103,7 @@ fn run(mut app: App, handle: Handle<Image>, captured: Captured, setup: impl FnOn
     app.world_mut().spawn((
         Camera2d,
         Camera { clear_color: ClearColorConfig::Custom(Color::BLACK), ..default() },
-        // In 0.19 the target is its own component beside `Camera`, not a field on it.
+        // The target is its own component beside `Camera`, not a field on it.
         RenderTarget::Image(handle.into()),
         // The player's pipelines are single-sampled.
         Msaa::Off,
@@ -640,7 +640,7 @@ mod reference {
         });
         device.poll(wgpu::PollType::Wait { submission_index: None, timeout: None }).unwrap();
         rx.recv().unwrap().unwrap();
-        let padded = readback.slice(..).get_mapped_range().to_vec();
+        let padded = readback.slice(..).get_mapped_range().unwrap().to_vec();
         readback.unmap();
 
         let mut tight = Vec::with_capacity((size * size * 4) as usize);

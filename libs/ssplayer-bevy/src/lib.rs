@@ -22,8 +22,8 @@
 //!
 //! # Supported Bevy
 //!
-//! Bevy **0.19.x**, and no other line. Bevy and this player must resolve to one
-//! `wgpu` — 0.19 wants `^29.0.3` and the player is pinned to 29 — because two
+//! Bevy **0.20.x**, and no other line. Bevy and this player must resolve to one
+//! `wgpu` — 0.20 wants `^30` and the player is pinned to 30 — because two
 //! majors of `wgpu` are two unrelated sets of types, and no amount of glue
 //! bridges them. npm would express this as a peer dependency; cargo has no such
 //! thing, so it is stated here and enforced by the workspace resolving one

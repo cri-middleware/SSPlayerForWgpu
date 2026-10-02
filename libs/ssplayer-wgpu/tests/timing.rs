@@ -93,7 +93,7 @@ fn depth_stencil_attachment(view: &wgpu::TextureView) -> wgpu::RenderPassDepthSt
 #[test]
 fn gpu_pass_time_comes_back() {
     let instance = wgpu::Instance::new(wgpu::InstanceDescriptor::new_without_display_handle());
-    let Ok(adapter) = pollster::block_on(instance.request_adapter(&wgpu::RequestAdapterOptions { power_preference: wgpu::PowerPreference::default(), compatible_surface: None, force_fallback_adapter: false })) else {
+    let Ok(adapter) = pollster::block_on(instance.request_adapter(&wgpu::RequestAdapterOptions { power_preference: wgpu::PowerPreference::default(), compatible_surface: None, force_fallback_adapter: false, apply_limit_buckets: false })) else {
         eprintln!("no GPU adapter available, skipping headless render test");
         return;
     };

@@ -71,7 +71,8 @@ pub struct NativeHost {
 /// without it there and rely on the capability query that follows.
 fn request_adapter(instance: &wgpu::Instance, surface: &wgpu::Surface<'static>) -> Result<wgpu::Adapter, String> {
     let compatible_surface = if cfg!(target_vendor = "apple") { None } else { Some(surface) };
-    pollster::block_on(instance.request_adapter(&wgpu::RequestAdapterOptions { power_preference: wgpu::PowerPreference::default(), compatible_surface, force_fallback_adapter: false })).map_err(|e| format!("no GPU adapter for the requested backend: {e}"))
+    pollster::block_on(instance.request_adapter(&wgpu::RequestAdapterOptions { power_preference: wgpu::PowerPreference::default(), compatible_surface, force_fallback_adapter: false, apply_limit_buckets: false }))
+        .map_err(|e| format!("no GPU adapter for the requested backend: {e}"))
 }
 
 /// Build a device+queue, and the flag wgpu raises if it is ever lost.
@@ -113,6 +114,7 @@ impl NativeHost {
         let surface_config = wgpu::SurfaceConfiguration {
             usage: wgpu::TextureUsages::RENDER_ATTACHMENT,
             format,
+            color_space: wgpu::SurfaceColorSpace::Auto,
             width: config.width.max(1),
             height: config.height.max(1),
             present_mode: wgpu::PresentMode::Fifo,
@@ -245,7 +247,7 @@ impl NativeHost {
         }
         self.scene.resolve_timestamps(&mut encoder);
         self.queue.submit(std::iter::once(encoder.finish()));
-        output.present();
+        self.queue.present(output);
         Ok(())
     }
 

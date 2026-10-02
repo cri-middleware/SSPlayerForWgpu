@@ -107,7 +107,7 @@ fn readback(device: &wgpu::Device, queue: &wgpu::Queue, renderer: &SSRenderer, s
     });
     device.poll(wgpu::PollType::Wait { submission_index: None, timeout: None }).unwrap();
     rx.recv().unwrap().unwrap();
-    let data = buffer.slice(..).get_mapped_range().to_vec();
+    let data = buffer.slice(..).get_mapped_range().unwrap().to_vec();
     buffer.unmap();
     data
 }

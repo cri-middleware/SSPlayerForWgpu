@@ -33,7 +33,7 @@ that is useful information, not a problem.
 - [ ] `SSPlayer` gains no wgpu-typed field; `Device` / `Queue` / `Surface` / `SSRenderer` stay the host's.
 - [ ] No vertex buffer: one `Prim` per part, nothing per vertex on the CPU.
 - [ ] The three faces stay in step: `ffi.rs` holds no logic, and `include/ssplayer_wgpu.h` is regenerated and committed.
-- [ ] wgpu stays on the 29 line, and no engine appears in `ssplayer-wgpu`.
+- [ ] wgpu stays on the 30 line, and no engine appears in `ssplayer-wgpu`.
 
 ## Anything reviewers should know? / レビュー時の注意点
 

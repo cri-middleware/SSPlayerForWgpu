@@ -16,7 +16,7 @@ this for you.
 | | |
 |---|---|
 | Rust | 1.99 or newer, edition 2024 |
-| wgpu | the **29** line — your app and the player must resolve to one `wgpu`, so a different major is a compile error |
+| wgpu | the **30** line — your app and the player must resolve to one `wgpu`, so a different major is a compile error |
 | SDK access | while [SpriteStudio-SDK](https://github.com/cri-middleware/SpriteStudio-SDK) is private, whoever builds needs access to it |
 
 ## Install

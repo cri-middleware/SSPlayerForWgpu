@@ -120,7 +120,7 @@ impl GpuTimer {
         let period = self.period_ns;
         self.readback.slice(..).map_async(wgpu::MapMode::Read, move |result| {
             if result.is_ok() {
-                let view = buffer.slice(..).get_mapped_range();
+                let view = buffer.slice(..).get_mapped_range().expect("the read map just succeeded, and nothing else views it");
                 let mut ticks = [0u64; 2];
                 bytemuck::cast_slice_mut(&mut ticks).copy_from_slice(&view[..16]);
                 drop(view);

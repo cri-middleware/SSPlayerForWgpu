@@ -10,10 +10,10 @@ line without dragging the player along.
 
 ## Supported Bevy
 
-**0.19.x, and no other line.**
+**0.20.x, and no other line.**
 
-Bevy and the player must resolve to one `wgpu`: `bevy_render` 0.19 requires
-`wgpu ^29.0.3` and the player is pinned to the 29 line. Two majors of `wgpu` are
+Bevy and the player must resolve to one `wgpu`: `bevy_render` 0.20 requires
+`wgpu ^30` and the player is pinned to the 30 line. Two majors of `wgpu` are
 two unrelated sets of types, and no glue bridges them — a mismatch is a compile
 error, not a runtime surprise. npm would call this a peer dependency; cargo has
 no such thing, so the range is stated here and the workspace resolving a single

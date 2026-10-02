@@ -61,7 +61,7 @@ an agent would otherwise break silently.
     texture *file name*'s for one carrying a TextureChange, and missing that second table fails quietly: the
     hash falls back to the 1x1 white texture and the part draws as a white silhouette. One file may be named
     twice, so dedupe by path, never by hash.
-*   **The workspace has two fixed points, and one exclusion.** wgpu is pinned to the 29 line, because
+*   **The workspace has two fixed points, and one exclusion.** wgpu is pinned to the 30 line, because
     Slint's `unstable-wgpu-NN` wants an exact major and one workspace resolves exactly one wgpu;
     `[workspace] exclude = ["SpriteStudio-SDK"]` stops cargo claiming the SDK crates as members here; and no
     engine may appear in `ssplayer-wgpu`, adapters being separate crates under `libs/`. **`ffi.rs` holds no

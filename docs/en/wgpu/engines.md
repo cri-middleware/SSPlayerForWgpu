@@ -17,14 +17,14 @@ does the same.
 
 ## The wgpu pin
 
-**wgpu is pinned to the 29 line, repository-wide.**
+**wgpu is pinned to the 30 line, repository-wide.**
 
 A Cargo workspace resolves exactly one `wgpu`, and two majors of wgpu are two unrelated sets of
 types with no glue between them. So the pin is not a preference, it is the compatibility contract:
 
 | Constraint | |
 |---|---|
-| `bevy_render` 0.19 | requires `wgpu ^29.0.3` |
+| `bevy_render` 0.20 | requires `wgpu ^30` |
 | Slint's `unstable-wgpu-NN` | requires an **exact** wgpu major, and a Vtuber application composes a Slint UI and this player on one device |
 
 Check Slint's supported major before bumping. A mismatch is a compile error rather than a runtime

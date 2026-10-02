@@ -261,7 +261,7 @@ async fn request_device(adapter: &wgpu::Adapter) -> Result<(wgpu::Device, wgpu::
 /// first canvas would constrain nothing and would force surface creation to come first.
 async fn request_adapter(instance: &wgpu::Instance) -> Result<wgpu::Adapter, JsValue> {
     instance
-        .request_adapter(&wgpu::RequestAdapterOptions { power_preference: wgpu::PowerPreference::default(), compatible_surface: None, force_fallback_adapter: false })
+        .request_adapter(&wgpu::RequestAdapterOptions { power_preference: wgpu::PowerPreference::default(), compatible_surface: None, force_fallback_adapter: false, apply_limit_buckets: false })
         .await
         .map_err(|_| JsValue::from_str("no WebGPU adapter (this browser/GPU may not support WebGPU)"))
 }
@@ -317,7 +317,17 @@ impl WebContext {
         let &first = caps.formats.first().ok_or_else(|| JsValue::from_str("the adapter cannot present to this canvas"))?;
         // Prefer a non-sRGB format so the premultiplied pipeline composites as authored.
         let format = caps.formats.iter().copied().find(|f| !f.is_srgb()).unwrap_or(first);
-        let config = wgpu::SurfaceConfiguration { usage: wgpu::TextureUsages::RENDER_ATTACHMENT, format, width, height, present_mode: wgpu::PresentMode::Fifo, alpha_mode: PAGE_ALPHA_MODE, view_formats: vec![], desired_maximum_frame_latency: 2 };
+        let config = wgpu::SurfaceConfiguration {
+            usage: wgpu::TextureUsages::RENDER_ATTACHMENT,
+            format,
+            color_space: wgpu::SurfaceColorSpace::Auto,
+            width,
+            height,
+            present_mode: wgpu::PresentMode::Fifo,
+            alpha_mode: PAGE_ALPHA_MODE,
+            view_formats: vec![],
+            desired_maximum_frame_latency: 2,
+        };
         surface.configure(&self.device, &config);
 
         // The scene is format-specific; the renderer is not, which is
@@ -645,7 +655,7 @@ impl SsSurfaceWeb {
         }
         entry.scene.resolve_timestamps(&mut encoder);
         queue.submit(std::iter::once(encoder.finish()));
-        frame.present();
+        queue.present(frame);
         Ok(())
     }
 

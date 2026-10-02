@@ -87,5 +87,5 @@ loaded or the name does not resolve.
 `ssplayer-wgpu` and `ssplayer-bevy` are versioned **independently**, because they track
 different things: the player tracks the SDK, and the adapter tracks Bevy's release line.
 
-wgpu is pinned to the **29** line repository-wide. See
+wgpu is pinned to the **30** line repository-wide. See
 [Engine integration](../wgpu/engines.md#the-wgpu-pin).

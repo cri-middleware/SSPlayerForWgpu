@@ -95,12 +95,12 @@ a Rust dependency, a browser and a native shared library.
 ## Requirements
 
 - Rust 1.99+
-- A GPU backend supported by wgpu **29**
+- A GPU backend supported by wgpu **30**
 - For the web face: `wasm-pack` and `rustup target add wasm32-unknown-unknown`
 
 ## wgpu version
 
-wgpu is pinned to the **29** line, because the Vtuber application composes a
+wgpu is pinned to the **30** line, because the Vtuber application composes a
 Slint UI and this player on one device and Slint's `unstable-wgpu-NN` feature
 requires an exact wgpu major. A workspace resolves exactly one wgpu, so this is a
 repository-wide constraint: check Slint's supported major before bumping it.
