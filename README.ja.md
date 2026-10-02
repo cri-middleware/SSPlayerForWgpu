@@ -184,7 +184,7 @@ C++ ビューアは CMake 経由でライブラリを駆動し、その CMake �
 | `ffi` | `yes`（既定）, `no` | `host` のみ。`ssplayer-wgpu-ffi` クレートもビルドし、cbindgen で `libs/ssplayer-wgpu-ffi/include/ssplayer_wgpu.h` を再生成します |
 | `deploy` | `yes`（既定）, `no` | `web` のみ。ビルドした npm パッケージを `examples/web/ssplayer-wgpu` へコピーします |
 
-cargo を直接使っても構いません。`cargo build -p ssplayer-wgpu-ffi` は収集ステップを除けば同じものです。要件は Rust 1.98 以降、wgpu 29 が対応する GPU バックエンド、web フェイスの場合は加えて
+cargo を直接使っても構いません。`cargo build -p ssplayer-wgpu-ffi` は収集ステップを除けば同じものです。要件は Rust 1.99 以降、wgpu 29 が対応する GPU バックエンド、web フェイスの場合は加えて
 `wasm-pack`・`pnpm`・`rustup target add wasm32-unknown-unknown` です。
 
 **`scripts/deploy-examples.sh`** がもう半分で、再生データを端から端まで受け持ちます。SDK submodule から
