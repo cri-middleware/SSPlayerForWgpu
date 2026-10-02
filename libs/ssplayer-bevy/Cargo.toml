@@ -4,6 +4,7 @@ name = "ssplayer-bevy"
 # the player tracks the SDK's.
 version = "7.0.0-alpha.1"
 edition.workspace = true
+rust-version.workspace = true
 authors.workspace = true
 license.workspace = true
 repository.workspace = true
