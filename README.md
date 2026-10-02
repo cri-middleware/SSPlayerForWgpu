@@ -216,7 +216,7 @@ a `.ssab`, and it does not need the SDK for anything but the checkout cargo alre
 | `deploy` | `yes` (default), `no` | `web` only: copy the built npm package into `examples/web/ssplayer-wgpu` |
 
 Cargo works directly too — `cargo build -p ssplayer-wgpu-ffi` is the same thing without the
-collect step. Requirements are Rust 1.98+, a GPU backend supported by wgpu 29, and for the web face
+collect step. Requirements are Rust 1.99+, a GPU backend supported by wgpu 29, and for the web face
 `wasm-pack`, `pnpm` and `rustup target add wasm32-unknown-unknown`.
 
 **`scripts/deploy-examples.sh`** is the other half, and owns the playback data end to end: it builds

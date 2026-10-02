@@ -94,7 +94,7 @@ a Rust dependency, a browser and a native shared library.
 
 ## Requirements
 
-- Rust 1.98+
+- Rust 1.99+
 - A GPU backend supported by wgpu **29**
 - For the web face: `wasm-pack` and `rustup target add wasm32-unknown-unknown`
 

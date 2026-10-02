@@ -26,7 +26,7 @@ exclude = ["SpriteStudio-SDK"]
 # a time. `examples/*` publish nowhere and stay at `0.1.0` on purpose.
 [workspace.package]
 edition = "2024"
-rust-version = "1.98"
+rust-version = "1.99"
 authors = ["CRI Middleware Co., Ltd."]
 license = "BSD-3-Clause"
 repository = "https://github.com/cri-middleware/SSPlayerForWgpu"
