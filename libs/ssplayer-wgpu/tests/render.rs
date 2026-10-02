@@ -127,7 +127,7 @@ fn render_to_rgba(device: &wgpu::Device, queue: &wgpu::Queue, renderer: &mut SSR
     });
     device.poll(wgpu::PollType::Wait { submission_index: None, timeout: None }).unwrap();
     rx.recv().unwrap().unwrap();
-    let data = readback.slice(..).get_mapped_range().to_vec();
+    let data = readback.slice(..).get_mapped_range().unwrap().to_vec();
     readback.unmap();
     data
 }
@@ -140,7 +140,7 @@ fn drawn_pixels(rgba: &[u8]) -> usize {
 #[test]
 fn render_mask_stencil_effect() {
     let instance = wgpu::Instance::new(wgpu::InstanceDescriptor::new_without_display_handle());
-    let adapter = match pollster::block_on(instance.request_adapter(&wgpu::RequestAdapterOptions { power_preference: wgpu::PowerPreference::default(), compatible_surface: None, force_fallback_adapter: false })) {
+    let adapter = match pollster::block_on(instance.request_adapter(&wgpu::RequestAdapterOptions { power_preference: wgpu::PowerPreference::default(), compatible_surface: None, force_fallback_adapter: false, apply_limit_buckets: false })) {
         Ok(a) => a,
         Err(_) => {
             eprintln!("no GPU adapter available, skipping headless render test");
@@ -167,7 +167,7 @@ fn render_mask_stencil_effect() {
 #[test]
 fn render_shape_content_visible() {
     let instance = wgpu::Instance::new(wgpu::InstanceDescriptor::new_without_display_handle());
-    let adapter = match pollster::block_on(instance.request_adapter(&wgpu::RequestAdapterOptions { power_preference: wgpu::PowerPreference::default(), compatible_surface: None, force_fallback_adapter: false })) {
+    let adapter = match pollster::block_on(instance.request_adapter(&wgpu::RequestAdapterOptions { power_preference: wgpu::PowerPreference::default(), compatible_surface: None, force_fallback_adapter: false, apply_limit_buckets: false })) {
         Ok(a) => a,
         Err(_) => {
             eprintln!("no GPU adapter available, skipping headless render test");
@@ -193,7 +193,7 @@ fn render_shape_content_visible() {
 #[test]
 fn render_integration_shaders() {
     let instance = wgpu::Instance::new(wgpu::InstanceDescriptor::new_without_display_handle());
-    let adapter = match pollster::block_on(instance.request_adapter(&wgpu::RequestAdapterOptions { power_preference: wgpu::PowerPreference::default(), compatible_surface: None, force_fallback_adapter: false })) {
+    let adapter = match pollster::block_on(instance.request_adapter(&wgpu::RequestAdapterOptions { power_preference: wgpu::PowerPreference::default(), compatible_surface: None, force_fallback_adapter: false, apply_limit_buckets: false })) {
         Ok(a) => a,
         Err(_) => {
             eprintln!("no GPU adapter available, skipping headless render test");
@@ -231,7 +231,7 @@ fn render_integration_shaders() {
 #[test]
 fn a_player_tint_multiplies_the_finished_colour() {
     let instance = wgpu::Instance::new(wgpu::InstanceDescriptor::new_without_display_handle());
-    let adapter = match pollster::block_on(instance.request_adapter(&wgpu::RequestAdapterOptions { power_preference: wgpu::PowerPreference::default(), compatible_surface: None, force_fallback_adapter: false })) {
+    let adapter = match pollster::block_on(instance.request_adapter(&wgpu::RequestAdapterOptions { power_preference: wgpu::PowerPreference::default(), compatible_surface: None, force_fallback_adapter: false, apply_limit_buckets: false })) {
         Ok(a) => a,
         Err(_) => {
             eprintln!("no GPU adapter available, skipping headless render test");
@@ -268,7 +268,7 @@ fn a_player_tint_multiplies_the_finished_colour() {
 #[test]
 fn restore_device_rebuilds_gpu_state() {
     let instance = wgpu::Instance::new(wgpu::InstanceDescriptor::new_without_display_handle());
-    let adapter = match pollster::block_on(instance.request_adapter(&wgpu::RequestAdapterOptions { power_preference: wgpu::PowerPreference::default(), compatible_surface: None, force_fallback_adapter: false })) {
+    let adapter = match pollster::block_on(instance.request_adapter(&wgpu::RequestAdapterOptions { power_preference: wgpu::PowerPreference::default(), compatible_surface: None, force_fallback_adapter: false, apply_limit_buckets: false })) {
         Ok(a) => a,
         Err(_) => {
             eprintln!("no GPU adapter available, skipping headless render test");
@@ -357,7 +357,7 @@ fn restore_device_rebuilds_gpu_state() {
 #[test]
 fn render_embedded_ssab() {
     let instance = wgpu::Instance::new(wgpu::InstanceDescriptor::new_without_display_handle());
-    let adapter = match pollster::block_on(instance.request_adapter(&wgpu::RequestAdapterOptions { power_preference: wgpu::PowerPreference::default(), compatible_surface: None, force_fallback_adapter: false })) {
+    let adapter = match pollster::block_on(instance.request_adapter(&wgpu::RequestAdapterOptions { power_preference: wgpu::PowerPreference::default(), compatible_surface: None, force_fallback_adapter: false, apply_limit_buckets: false })) {
         Ok(a) => a,
         Err(_) => {
             eprintln!("no GPU adapter available, skipping headless render test");

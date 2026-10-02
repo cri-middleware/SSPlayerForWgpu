@@ -1824,7 +1824,7 @@ pub(crate) fn premultiply(rgba: &mut [u8]) {
 /// not lend it a queue that early.
 fn tex_info_buffer(device: &wgpu::Device, info: TexInfo) -> wgpu::Buffer {
     let buffer = device.create_buffer(&wgpu::BufferDescriptor { label: Some("SpriteStudio Texture Info"), size: std::mem::size_of::<TexInfo>() as u64, usage: wgpu::BufferUsages::UNIFORM, mapped_at_creation: true });
-    buffer.slice(..).get_mapped_range_mut().copy_from_slice(bytemuck::bytes_of(&info));
+    buffer.slice(..).get_mapped_range_mut().expect("a buffer created mapped, viewed once").copy_from_slice(bytemuck::bytes_of(&info));
     buffer.unmap();
     buffer
 }

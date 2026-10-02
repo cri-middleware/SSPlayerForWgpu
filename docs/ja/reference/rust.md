@@ -79,4 +79,4 @@ pub use ssruntime::TrackBlend;
 
 `ssplayer-wgpu` と `ssplayer-bevy` は**独立**にバージョン管理されています。追いかける対象が違うからです（Player は SDK、アダプタは Bevy のリリース系列）。
 
-wgpu はリポジトリ全体で **29** 系に固定されています。[エンジンへの組み込み](../wgpu/engines.md#the-wgpu-pin)を参照。
+wgpu はリポジトリ全体で **30** 系に固定されています。[エンジンへの組み込み](../wgpu/engines.md#the-wgpu-pin)を参照。

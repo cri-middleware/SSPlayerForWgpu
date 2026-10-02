@@ -50,17 +50,18 @@ ssab = { path = "SpriteStudio-SDK/libs/ssab", default-features = false }
 ssplayer-wgpu = { path = "libs/ssplayer-wgpu" }
 
 # The engine an adapter crate targets, pinned here beside `wgpu` because the two
-# constraints are one: `bevy_render` 0.19 requires wgpu ^29.0.3, so a Bevy bump
-# that moves to a new wgpu major breaks the pin above. Keeping both in this file
+# constraints are one: `bevy_render` 0.20 requires wgpu ^30, so a Bevy bump
+# that moves to a new wgpu major breaks the pin below. Keeping both in this file
 # makes that a compile error in CI rather than something to remember. npm would
 # call this a peerDependency; cargo has no such thing, so the supported range is
-# stated here and in the adapter's README.
-bevy = { version = "0.19", default-features = false }
+# stated here and in the adapter's README. 0.20 is a release candidate until it
+# ships; move this to `"0.20"` then.
+bevy = { version = "0.20.0-rc.2", default-features = false }
 # Versions centralized here so core, the viewer, and the wasm build never drift.
-# Pinned to the 29 line to stay compatible with Slint's `unstable-wgpu-29`: the
+# Pinned to the 30 line to stay compatible with Slint's `unstable-wgpu-30`: the
 # Vtuber app composes Slint UI and this player on one device, and Slint requires
 # an exact wgpu major. Do not bump without checking Slint's supported major.
-wgpu = "29"
+wgpu = "30"
 wasm-bindgen = { version = "0.2.126", default-features = false }
 wasm-bindgen-futures = "0.4"
 js-sys = "0.3"

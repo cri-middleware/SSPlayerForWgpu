@@ -162,7 +162,7 @@ const FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Rgba8Unorm;
 
 fn gpu() -> Option<(wgpu::Device, wgpu::Queue)> {
     let instance = wgpu::Instance::new(wgpu::InstanceDescriptor::new_without_display_handle());
-    let adapter = pollster::block_on(instance.request_adapter(&wgpu::RequestAdapterOptions { power_preference: wgpu::PowerPreference::default(), compatible_surface: None, force_fallback_adapter: false })).ok()?;
+    let adapter = pollster::block_on(instance.request_adapter(&wgpu::RequestAdapterOptions { power_preference: wgpu::PowerPreference::default(), compatible_surface: None, force_fallback_adapter: false, apply_limit_buckets: false })).ok()?;
     let (device, queue) = pollster::block_on(adapter.request_device(&wgpu::DeviceDescriptor::default())).ok()?;
     Some((device, queue))
 }
@@ -214,7 +214,7 @@ fn render(device: &wgpu::Device, queue: &wgpu::Queue, renderer: &mut SSRenderer,
     });
     device.poll(wgpu::PollType::Wait { submission_index: None, timeout: None }).unwrap();
     rx.recv().unwrap().unwrap();
-    let data = buffer.slice(..).get_mapped_range().to_vec();
+    let data = buffer.slice(..).get_mapped_range().unwrap().to_vec();
     buffer.unmap();
     data
 }

@@ -6,7 +6,7 @@
 | 制約 | 対象 | 詳しくは |
 |---|---|---|
 | C Face は**自分でデバイスを構築し所有します**。あなたのレンダーパスへは描き込めません | C / C++ | [下記](#no-device-sharing-across-the-c-abi) |
-| **`wgpu` は 29 系に固定**。アプリケーションと Player は 1 つの `wgpu` に解決する必要があります | Rust, Bevy | [前提](./start/rust.md#requirements) |
+| **`wgpu` は 30 系に固定**。アプリケーションと Player は 1 つの `wgpu` に解決する必要があります | Rust, Bevy | [前提](./start/rust.md#requirements) |
 | **MSAA はオフ必須**。sRGB ターゲットではアトラスが二重にエンコードされます | Rust, Bevy | [レンダーパスに求められること](./wgpu/borrow-model.md#what-your-render-pass-has-to-be) |
 | **1 キャラクターにつき 1 フレーム 1 回の `update`**。1 つのキャストを 2 つのビューには描けません | Rust, Bevy | [複数ターゲット、1 デバイス](./wgpu/borrow-model.md#several-targets-one-device) |
 | **WebGPU のみ**。OpenGL / WebGL バックエンドは無く、非対応ブラウザにはフォールバックが要ります | Web | [前提](./start/web.md#requirements) |

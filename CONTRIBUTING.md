@@ -38,7 +38,7 @@ rather than the invariant. The four that catch newcomers most often:
   gets it too.
 
 Two more worth knowing before proposing a dependency change: **wgpu is pinned to
-the 29 line** (a Cargo workspace resolves exactly one wgpu, and a Slint UI
+the 30 line** (a Cargo workspace resolves exactly one wgpu, and a Slint UI
 composes with this player on one device), and **no engine may appear in
 `ssplayer-wgpu`** — adapters such as `ssplayer-bevy` are separate crates under
 `libs/`.
@@ -72,7 +72,7 @@ to whoever reads it next.
 ## Development Environment
 
 ### Prerequisites
-- **Rust 1.99+** and a GPU backend wgpu 29 supports (Vulkan / Metal / DX12 /
+- **Rust 1.99+** and a GPU backend wgpu 30 supports (Vulkan / Metal / DX12 /
   WebGPU). On Linux with no GPU driver, Mesa's software Vulkan device (lavapipe,
   `mesa-vulkan-drivers`) is enough. The tests that draw return early without an
   adapter and report `ok`, so `tests/gpu_adapter.rs` fails instead to say so.
@@ -204,7 +204,7 @@ SSPlayerForWgpu にご関心をお寄せいただき、ありがとうござい�
 - **SDK との分離。** アニメーションのロジックは `SpriteStudio-SDK` submodule (`ssruntime`・`ssab`) にあります。アルゴリズムやコアロジックの変更は**あちらへの**プルリクエストと、こちらでの submodule 更新の組で行います。このリポジトリはレンダラーと、ホストに面した 3 つのフェイスです。
 - **3 つのフェイスは歩調を揃えます。** API の本体は Rust で、C (`cbindgen`) と JavaScript (`wasm-bindgen`) はその薄いラッパーです。`ffi.rs` にロジックは置きません（引数検証・型変換・エラーコード対応のみ）。必要なものは `host.rs` か `player.rs` に置き、Rust API 側にも行き渡らせてください。
 
-依存関係の変更を提案する前に、あと 2 点。**wgpu は 29 系に固定**されています（Cargo ワークスペースは wgpu を 1 つしか解決せず、Slint の UI がこのプレイヤーと 1 デバイス上で同居するためです）。また **`ssplayer-wgpu` にエンジンを登場させないでください** — `ssplayer-bevy` のようなアダプタは `libs/` 以下の別クレートです。
+依存関係の変更を提案する前に、あと 2 点。**wgpu は 30 系に固定**されています（Cargo ワークスペースは wgpu を 1 つしか解決せず、Slint の UI がこのプレイヤーと 1 デバイス上で同居するためです）。また **`ssplayer-wgpu` にエンジンを登場させないでください** — `ssplayer-bevy` のようなアダプタは `libs/` 以下の別クレートです。
 
 ### バグの報告
 バグを見つけた場合は、以下を含めて issue を作成してください。
@@ -229,7 +229,7 @@ SSPlayerForWgpu にご関心をお寄せいただき、ありがとうござい�
 ## 開発環境のセットアップ
 
 ### 前提条件
-- **Rust 1.99 以降**と、wgpu 29 が対応する GPU バックエンド（Vulkan / Metal / DX12 / WebGPU）。GPU ドライバの無い Linux では、Mesa のソフトウェア Vulkan（lavapipe、`mesa-vulkan-drivers`）で足ります。描画するテストはアダプタが無いと早期 return して `ok` と報告するので、代わりに `tests/gpu_adapter.rs` が失敗してそれを知らせます
+- **Rust 1.99 以降**と、wgpu 30 が対応する GPU バックエンド（Vulkan / Metal / DX12 / WebGPU）。GPU ドライバの無い Linux では、Mesa のソフトウェア Vulkan（lavapipe、`mesa-vulkan-drivers`）で足ります。描画するテストはアダプタが無いと早期 return して `ok` と報告するので、代わりに `tests/gpu_adapter.rs` が失敗してそれを知らせます
 - **SDK submodule。** `ssruntime` と `ssab` は `SpriteStudio-SDK/` への path 依存なので、`--recursive` 付きで clone する（または `git submodule update --init` を実行する）必要があります
 - web フェイスの場合のみ: `wasm-pack`、`pnpm`（`corepack enable`）、`rustup target add wasm32-unknown-unknown`
 

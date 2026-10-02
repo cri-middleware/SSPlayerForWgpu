@@ -8,7 +8,7 @@ and what each face exposes today is the matrix in
 | Constraint | Affects | Explained in |
 |---|---|---|
 | The C face **builds and owns its device**, and cannot draw into a render pass of yours | C / C++ | [below](#no-device-sharing-across-the-c-abi) |
-| **`wgpu` is pinned to the 29 line** — your application and the player resolve to one `wgpu` | Rust, Bevy | [Requirements](./start/rust.md#requirements) |
+| **`wgpu` is pinned to the 30 line** — your application and the player resolve to one `wgpu` | Rust, Bevy | [Requirements](./start/rust.md#requirements) |
 | **MSAA must be off**, and an sRGB target encodes the atlas a second time | Rust, Bevy | [What your render pass has to be](./wgpu/borrow-model.md#what-your-render-pass-has-to-be) |
 | **One `update` per character per frame** — one cast cannot be drawn into two views | Rust, Bevy | [Several targets, one device](./wgpu/borrow-model.md#several-targets-one-device) |
 | **WebGPU only**, with no OpenGL / WebGL backend — a browser without it needs a fallback | Web | [Requirements](./start/web.md#requirements) |
