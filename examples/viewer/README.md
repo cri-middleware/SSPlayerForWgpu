@@ -70,7 +70,8 @@ Three details worth copying:
 | `+` / `-` | add / remove a character (1–8), all in one scene and one pass |
 | L | layout: Row (side by side) or Stack (overlapping in the centre) |
 | O | reverse draw order |
-| V | toggle `set_visible` on the focused character |
+| V | toggle `set_visible` on the focused character — hidden, it keeps playing |
+| X | toggle `set_culled` on the focused character — culled, its clock stops |
 | `[` / `]` | lower / raise `set_alpha` on the focused character |
 | F | flip the Y axis (Y-up ↔ Y-down projection) |
 | Escape | quit |

@@ -119,9 +119,10 @@ parameter's `value_type` is one of `SS_SIGNAL_VALUE_NONE` / `_BOOL` / `_INDEX` /
 | | |
 |---|---|
 | `ss_player_set_transform(player, x, y, sx, sy, rotation)` | Position, scale, rotation |
-| `ss_player_set_order(player, order)` | Draw order within the scene, ascending |
-| `ss_player_set_visible(player, visible)` | Hidden characters **do not advance** and report no events |
-| `ss_player_set_alpha(player, a)` / `ss_player_set_tint(player, rgb)` | Whole-character alpha and tint |
+| `ss_player_set_order(player, order)` / `ss_player_order(player)` | Draw order within the scene, ascending |
+| `ss_player_set_visible(player, visible)` / `ss_player_is_visible(player)` | Hidden characters draw nothing but keep playing and reporting events |
+| `ss_player_set_culled(player, culled)` / `ss_player_is_culled(player)` | Culled characters **do not advance** and report no events |
+| `ss_player_set_alpha(player, a)` / `ss_player_set_tint(player, rgb)` | Whole-character alpha and tint. Read back with `ss_player_alpha` / `ss_player_tint` |
 
 ## Parts and overrides
 

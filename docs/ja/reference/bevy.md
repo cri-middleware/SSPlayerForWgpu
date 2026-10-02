@@ -59,7 +59,8 @@ spawn すれば 4 つとも既定値で付きます。
 | `speed_scale: f32` | `1.0` | 既定 fps の倍率。`0` と負値は停止 |
 | `order: i32` | `0` | 描画順。小さいほど先。同値なら extract 順 |
 | `alpha: f32` | `1.0` | キャラクター全体のフェード |
-| `visible: bool` | `true` | false は描画だけでなく**タイムラインの前進もスキップ**します |
+| `visible: bool` | `true` | false は描画をスキップします。タイムラインは進みます |
+| `culled: bool` | `false` | true は描画だけでなく**タイムラインの前進もスキップ**します。画面外のキャラクター用 |
 | `restart: u32` | `0` | **値を進める**（値が変われば何でも可）と先頭から再生し、ループ回数を張り直します |
 | `direction: PlaybackDirection` | `Forward` | 再生ヘッドが進む向き |
 | `style: PlaybackStyle` | `Normal` | 端に着いたら、`Normal` は先頭へ戻り、`PingPong` は折り返します |

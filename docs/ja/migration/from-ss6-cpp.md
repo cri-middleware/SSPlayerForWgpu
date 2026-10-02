@@ -125,7 +125,8 @@ SSScene -> update(&renderer, &device, &queue, dt, &mut [a, b])
 | `Entity::RateSetOpacity` | `set_alpha(f32)` | `ss_player_set_alpha` | |
 | `RateSetScaleLocal` / `Draw` の `matrixWorld` | `set_transform(x, y, sx, sy, rot)` | `ss_player_set_transform` | 回転はラジアン |
 | *(描画順は呼び出し順)* | `set_order(i32)` | `ss_player_set_order` | シーン内で昇順 |
-| *(なし)* | `set_visible(bool)` | `ss_player_set_visible` | 非表示は**タイムラインの前進もスキップ** |
+| *(なし)* | `set_visible(bool)` | `ss_player_set_visible` | 非表示は描画だけをスキップ。タイムラインは進みます |
+| *(なし)* | `set_culled(bool)` | `ss_player_set_culled` | カリングは**タイムラインの前進もスキップ**。画面外のキャラクター用 |
 | `CanvasGet()` | `canvas_size()` | `ss_player_canvas_size` | |
 
 ### ループ回数

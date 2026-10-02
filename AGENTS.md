@@ -74,7 +74,7 @@ an agent would otherwise break silently.
     `draw_order` and a slot would stall the moment its part is hidden; the pulse they re-arm on is
     `Context::is_looped()`. **A pack outlives every tree built from it** — `build_node` binds each `Context`
     to its pack's resource by raw pointer, so re-registering a name never changes what is already playing.
-    And **a tick that did not run reports nothing**: `set_visible(false)` skips the advance, so
+    And **a tick that did not run reports nothing**: `set_culled(true)` skips the advance, so
     `build_frame` clears `events` / `looped` / `finished_edge` / `started_edge`, while `prev_finished` and
     `start_pending` stay: the latch that stops a consumed completion edge firing twice, and a `play` no tick
     has reported yet.

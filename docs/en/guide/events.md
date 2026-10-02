@@ -105,7 +105,8 @@ frame it was noticed on.
 | Situation | What `events()` gives you |
 |---|---|
 | A tick that crossed no marker | empty |
-| A hidden player (`set_visible(false)`) | **empty** — the timeline did not advance, so the player reports nothing rather than repeating its last visible tick |
+| A culled player (`set_culled(true)`) | **empty** — the timeline did not advance, so the player reports nothing rather than repeating the last tick that ran |
+| A hidden player (`set_visible(false)`) | reported as usual — hiding skips the draw, not the timeline |
 | A paused player | empty, for the same reason |
 
 A host that plays a sound per event therefore cannot hear it twice because a character was culled.

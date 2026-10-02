@@ -143,17 +143,24 @@ fn a_start_is_reported_by_the_first_tick_that_runs() {
     };
     let mut tick = |player: &mut SSPlayer| scene.update(&mut renderer, &device, &queue, 1.0 / 60.0, &mut [player]);
 
-    // A hidden player's ticks do not run, so they report nothing — and the
+    // A culled player's ticks do not run, so they report nothing — and the
     // start waits for the first one that does.
-    player.set_visible(false);
+    player.set_culled(true);
     player.play();
     for n in 0..3 {
         tick(&mut player);
-        assert!(!player.just_started(), "a hidden player reported a start (tick {n})");
+        assert!(!player.just_started(), "a culled player reported a start (tick {n})");
     }
-    player.set_visible(true);
+    player.set_culled(false);
     tick(&mut player);
-    assert!(player.just_started(), "the play made while hidden must reach the first visible tick");
+    assert!(player.just_started(), "the play made while culled must reach the first tick that runs");
+
+    // A hidden player's ticks do run, so its start is reported straight away.
+    player.set_visible(false);
+    player.play();
+    tick(&mut player);
+    assert!(player.just_started(), "a hidden player keeps playing, so its start must be reported");
+    player.set_visible(true);
 
     player.play();
     player.stop();
@@ -352,15 +359,15 @@ fn events_describe_only_the_tick_that_just_ran() {
     assert!(peak < 64, "events accumulated across ticks (peaked at {peak} in one tick)");
 }
 
-/// A hidden player reports nothing, rather than the last tick it was visible for.
+/// A culled player reports nothing, rather than the last tick that ran.
 ///
-/// `set_visible(false)` skips the timeline advance entirely (SPEC §9.3), so there
-/// is no tick to describe — but the report fields used to be left as they were,
-/// and `events()` then answered with the same event on every update for as long
-/// as the player stayed hidden. A host that plays a sound per event hears it
+/// `set_culled(true)` skips the timeline advance entirely, so there is no tick
+/// to describe — but the report fields used to be left as they were, and
+/// `events()` then answered with the same event on every update for as long as
+/// the player stayed culled. A host that plays a sound per event hears it
 /// repeat once the player is culled, which is the whole point of polling per tick.
 #[test]
-fn a_hidden_player_reports_no_events() {
+fn a_culled_player_reports_no_events() {
     let Some((device, queue)) = gpu() else {
         eprintln!("no adapter — skipping");
         return;
@@ -385,18 +392,18 @@ fn a_hidden_player_reports_no_events() {
             break;
         }
     }
-    assert!(reported > 0, "no tick of {} raised an event — nothing to hide", EVENT_PACKS[0]);
+    assert!(reported > 0, "no tick of {} raised an event — nothing to cull", EVENT_PACKS[0]);
 
-    player.set_visible(false);
+    player.set_culled(true);
     for tick in 0..5 {
         scene.update(&mut renderer, &device, &queue, 1.0 / 60.0, &mut [&mut player]);
-        assert!(player.events().is_empty(), "a hidden player replayed the last visible tick's events (tick {tick})");
-        assert!(!player.just_looped(), "a hidden player reported a loop it did not cross (tick {tick})");
-        assert!(!player.just_finished(), "a hidden player reported a completion it did not reach (tick {tick})");
+        assert!(player.events().is_empty(), "a culled player replayed the last tick's events (tick {tick})");
+        assert!(!player.just_looped(), "a culled player reported a loop it did not cross (tick {tick})");
+        assert!(!player.just_finished(), "a culled player reported a completion it did not reach (tick {tick})");
     }
 
-    // Visible again, the reports come from the ticks that do run.
-    player.set_visible(true);
+    // Unculled, the reports come from the ticks that do run.
+    player.set_culled(false);
     let mut reported_again = false;
     for _ in 0..2000 {
         scene.update(&mut renderer, &device, &queue, 1.0 / 60.0, &mut [&mut player]);
@@ -405,5 +412,39 @@ fn a_hidden_player_reports_no_events() {
             break;
         }
     }
-    assert!(reported_again, "events stopped coming after the player was made visible again");
+    assert!(reported_again, "events stopped coming after the player was unculled");
+}
+
+/// A hidden player keeps playing, so it keeps reporting.
+///
+/// `set_visible(false)` only skips the draw. A host that blinks a character by
+/// toggling it must still hear its footsteps on time — the timeline is the same
+/// one a visible player runs, so the events are the same ones too.
+#[test]
+fn a_hidden_player_keeps_reporting_events() {
+    let Some((device, queue)) = gpu() else {
+        eprintln!("no adapter — skipping");
+        return;
+    };
+    let mut renderer = SSRenderer::new(&device);
+    let mut scene = scene(&device, &queue);
+    let (Some(mut hidden), Some(mut shown)) = (player_for(EVENT_PACKS[0]), player_for(EVENT_PACKS[0])) else {
+        eprintln!("{} missing — skipping", EVENT_PACKS[0]);
+        return;
+    };
+
+    for player in [&mut hidden, &mut shown] {
+        player.set_loop_count(-1);
+        player.play();
+    }
+    hidden.set_visible(false);
+
+    let mut reported = 0;
+    for tick in 0..2000 {
+        scene.update(&mut renderer, &device, &queue, 1.0 / 60.0, &mut [&mut hidden, &mut shown]);
+        assert_eq!(hidden.frame_no(), shown.frame_no(), "a hidden player fell behind a visible one (tick {tick})");
+        assert_eq!(hidden.events().len(), shown.events().len(), "a hidden player reported different events (tick {tick})");
+        reported += hidden.events().len();
+    }
+    assert!(reported > 0, "no tick of {} raised an event — nothing was compared", EVENT_PACKS[0]);
 }

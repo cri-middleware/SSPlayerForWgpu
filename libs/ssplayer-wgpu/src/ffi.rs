@@ -2344,9 +2344,19 @@ pub unsafe extern "C" fn ss_player_set_order(handle: *mut SsPlayer, order: i32) 
     }
 }
 
-/// Skip this player entirely when `false`: its timeline does not advance and it
-/// produces no geometry. For a player the caller knows cannot be seen; use
-/// `ss_player_set_alpha(0)` for a fade that keeps playing.
+/// The draw order `ss_player_set_order` set; `0` for a null handle.
+///
+/// # Safety
+/// `handle` must be a live handle or null.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn ss_player_order(handle: *mut SsPlayer) -> i32 {
+    unsafe { player(handle) }.map(|p| p.order()).unwrap_or(0)
+}
+
+/// Draw nothing when `false`, while the timeline keeps running: the playhead
+/// advances and events are reported, so hiding a character for a moment does not
+/// slow it down. Use `ss_player_set_culled` to stop paying for a player that
+/// cannot be seen at all.
 ///
 /// # Safety
 /// `handle` must be a live handle or null.
@@ -2355,6 +2365,40 @@ pub unsafe extern "C" fn ss_player_set_visible(handle: *mut SsPlayer, visible: b
     if let Some(player) = unsafe { player(handle) } {
         player.set_visible(visible);
     }
+}
+
+/// Whether the player draws, as `ss_player_set_visible` set it; `true` for a
+/// null handle.
+///
+/// # Safety
+/// `handle` must be a live handle or null.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn ss_player_is_visible(handle: *mut SsPlayer) -> bool {
+    unsafe { player(handle) }.map(|p| p.is_visible()).unwrap_or(true)
+}
+
+/// Skip this player entirely when `true`: its timeline does not advance and it
+/// produces no geometry, and the time spent culled is dropped. For a player the
+/// caller knows cannot be seen; use `ss_player_set_visible(false)` to hide one
+/// that should keep playing.
+///
+/// # Safety
+/// `handle` must be a live handle or null.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn ss_player_set_culled(handle: *mut SsPlayer, culled: bool) {
+    if let Some(player) = unsafe { player(handle) } {
+        player.set_culled(culled);
+    }
+}
+
+/// Whether the player is culled, as `ss_player_set_culled` set it; `false` for a
+/// null handle.
+///
+/// # Safety
+/// `handle` must be a live handle or null.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn ss_player_is_culled(handle: *mut SsPlayer) -> bool {
+    unsafe { player(handle) }.map(|p| p.is_culled()).unwrap_or(false)
 }
 
 /// Player-level fade, clamped to 0..1. Mask coverage is unaffected: a faded
@@ -2369,6 +2413,16 @@ pub unsafe extern "C" fn ss_player_set_alpha(handle: *mut SsPlayer, alpha: f32) 
     }
 }
 
+/// The player-level fade in effect, after `ss_player_set_alpha` clamped it to
+/// 0..1; `1` for a null handle.
+///
+/// # Safety
+/// `handle` must be a live handle or null.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn ss_player_alpha(handle: *mut SsPlayer) -> f32 {
+    unsafe { player(handle) }.map(|p| p.alpha()).unwrap_or(1.0)
+}
+
 /// Player-level tint, `0xRRGGBB`, multiplied into every part after the PartColor
 /// blend. `0xFFFFFF` — the default — leaves colours untouched. Mask coverage is
 /// unaffected, as with `ss_player_set_alpha`.
@@ -2380,6 +2434,15 @@ pub unsafe extern "C" fn ss_player_set_tint(handle: *mut SsPlayer, rgb: u32) {
     if let Some(player) = unsafe { player(handle) } {
         player.set_tint(rgb);
     }
+}
+
+/// The player-level tint as `0xRRGGBB`; `0xFFFFFF` for a null handle.
+///
+/// # Safety
+/// `handle` must be a live handle or null.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn ss_player_tint(handle: *mut SsPlayer) -> u32 {
+    unsafe { player(handle) }.map(|p| p.tint()).unwrap_or(0x00FF_FFFF)
 }
 
 /// Canvas size of the animation currently playing. Either out-pointer may be null.
@@ -2516,5 +2579,20 @@ mod tests {
         let short = slot.set("x");
         assert_eq!(long.addr(), short.addr(), "the slot was reallocated instead of refilled");
         assert_eq!(unsafe { CStr::from_ptr(short) }.to_str().unwrap(), "x");
+    }
+
+    /// A null handle reads as a freshly created player, so a caller that skips
+    /// the null check sees the defaults rather than a value that hides something.
+    #[test]
+    fn placement_reads_on_a_null_handle_are_the_defaults() {
+        let null = std::ptr::null_mut();
+        let fresh = crate::SSPlayer::new();
+        unsafe {
+            assert_eq!(ss_player_is_visible(null), fresh.is_visible());
+            assert_eq!(ss_player_is_culled(null), fresh.is_culled());
+            assert_eq!(ss_player_alpha(null), fresh.alpha());
+            assert_eq!(ss_player_order(null), fresh.order());
+            assert_eq!(ss_player_tint(null), fresh.tint());
+        }
     }
 }

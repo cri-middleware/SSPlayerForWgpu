@@ -9,7 +9,7 @@
 //! construction, so it is the reference the one-pass arrangement has to match.
 //!
 //! The rest cover the per-player placement API (`set_transform` / `set_visible`
-//! / `set_alpha`), which is what makes putting several players on one target
+//! / `set_culled` / `set_alpha`), which is what makes putting several players on one target
 //! useful in the first place.
 //!
 //! Every test skips cleanly when no GPU adapter is available.
@@ -338,10 +338,10 @@ fn set_transform_moves_the_player() {
     assert_eq!(render(&device, &queue, &renderer, &scene), at_origin, "reset_transform did not restore the original placement");
 }
 
-/// `set_visible(false)` skips the player entirely — no timeline advance, no
-/// geometry — and turning it back on resumes drawing.
+/// Both `set_visible(false)` and `set_culled(true)` leave nothing on screen, and
+/// undoing either resumes drawing.
 #[test]
-fn invisible_player_draws_nothing() {
+fn hidden_and_culled_players_draw_nothing() {
     let Some((device, queue)) = gpu() else {
         eprintln!("no GPU adapter available, skipping headless render test");
         return;
@@ -355,11 +355,50 @@ fn invisible_player_draws_nothing() {
 
     player.set_visible(false);
     rebuild(&mut scene, &mut renderer, &device, &queue, &mut [&mut player]);
-    assert_eq!(drawn_pixels(&render(&device, &queue, &renderer, &scene)), 0, "an invisible player still drew");
+    assert_eq!(drawn_pixels(&render(&device, &queue, &renderer, &scene)), 0, "a hidden player still drew");
 
     player.set_visible(true);
     rebuild(&mut scene, &mut renderer, &device, &queue, &mut [&mut player]);
     assert!(drawn_pixels(&render(&device, &queue, &renderer, &scene)) > 0, "the player did not come back when made visible again");
+
+    player.set_culled(true);
+    rebuild(&mut scene, &mut renderer, &device, &queue, &mut [&mut player]);
+    assert_eq!(drawn_pixels(&render(&device, &queue, &renderer, &scene)), 0, "a culled player still drew");
+
+    player.set_culled(false);
+    rebuild(&mut scene, &mut renderer, &device, &queue, &mut [&mut player]);
+    assert!(drawn_pixels(&render(&device, &queue, &renderer, &scene)) > 0, "the player did not come back when unculled");
+}
+
+/// What tells the two apart is the clock. A hidden player keeps time with a
+/// visible one — playhead and part poses both, so a follower pinned to a hidden
+/// character does not freeze — while a culled one stops where it was.
+#[test]
+fn a_hidden_player_keeps_time_and_a_culled_one_stops() {
+    let Some((device, queue)) = gpu() else {
+        eprintln!("no GPU adapter available, skipping headless render test");
+        return;
+    };
+    let mut renderer = SSRenderer::new(&device);
+    let mut scene = make_scene(&device, &queue, true);
+    let mut shown = make_player(&device, &queue, &mut renderer, "Basic");
+    let mut hidden = make_player(&device, &queue, &mut renderer, "Basic");
+    let mut culled = make_player(&device, &queue, &mut renderer, "Basic");
+    hidden.set_visible(false);
+    culled.set_culled(true);
+
+    let start = culled.frame_no();
+    advance(&mut scene, &mut renderer, &device, &queue, &mut [&mut shown, &mut hidden, &mut culled], 30);
+
+    assert!(shown.frame_no() > start, "the visible player did not advance — fixture problem");
+    assert_eq!(hidden.frame_no(), shown.frame_no(), "a hidden player fell behind a visible one");
+    assert_eq!(culled.frame_no(), start, "a culled player advanced");
+
+    let parts = shown.part_count() as u32;
+    assert!(parts > 0, "Basic has no parts — fixture problem");
+    for part in 0..parts {
+        assert_eq!(hidden.part_transform_by_index(part), shown.part_transform_by_index(part), "part {part} of a hidden player is not where the visible one has it");
+    }
 }
 
 /// SPEC §5.2: pipelines are compiled on first use, not up front. Eager
@@ -492,12 +531,20 @@ fn a_frame_reports_what_it_cost() {
     let hidden = scene.stats();
 
     two.set_visible(true);
+    two.set_culled(true);
+    rebuild(&mut scene, &mut renderer, &device, &queue, &mut [&mut one, &mut two]);
+    let culled = scene.stats();
+
+    two.set_culled(false);
     rebuild(&mut scene, &mut renderer, &device, &queue, &mut [&mut one]);
     let solo = scene.stats();
 
-    assert_eq!(hidden.players, 1, "an invisible player was still counted as drawing");
-    assert_eq!(hidden.prims, solo.prims, "an invisible player still contributed primitives");
-    assert_eq!(hidden.uploaded_bytes, solo.uploaded_bytes, "an invisible player still uploaded geometry");
+    assert_eq!(hidden.players, 1, "a hidden player was still counted as drawing");
+    assert_eq!(hidden.prims, solo.prims, "a hidden player still contributed primitives");
+    assert_eq!(hidden.uploaded_bytes, solo.uploaded_bytes, "a hidden player still uploaded geometry");
+    assert_eq!(culled.players, 1, "a culled player was still counted as drawing");
+    assert_eq!(culled.prims, solo.prims, "a culled player still contributed primitives");
+    assert_eq!(culled.uploaded_bytes, solo.uploaded_bytes, "a culled player still uploaded geometry");
 }
 
 /// `set_alpha` fades the whole player. The target is cleared to opaque black and
