@@ -84,9 +84,10 @@ import { defineSsPlayerWebGPUElement } from '@spritestudio/ssplayer-wgpu/element
 | | |
 |---|---|
 | `setTransform(x, y, scaleX, scaleY, rotation)` / `resetTransform()` | |
-| `setOrder(n)` | キャンバス内の描画順（昇順） |
-| `setVisible(v)` | 非表示のキャラクターは**進みません**。イベントも出しません |
-| `setAlpha(a)` / `setTint(rgb)` | キャラクター全体 |
+| `setOrder(n)` / `order()` | キャンバス内の描画順（昇順） |
+| `setVisible(v)` / `isVisible()` | 非表示のキャラクターは描画されませんが、再生は続きイベントも出します |
+| `setCulled(c)` / `isCulled()` | カリング中のキャラクターは**進みません**。イベントも出しません |
+| `setAlpha(a)` / `setTint(rgb)` | キャラクター全体。`alpha()` / `tint()` で読み出せます |
 | `destroy()` | 明示的かつ冪等 |
 
 **パーツ・オーバーライド・イベント** — 各オーバーライドには `ByIndex` 版があります。

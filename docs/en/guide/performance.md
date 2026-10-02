@@ -63,7 +63,7 @@ the pipeline.
 | **The coverage mask backend** | one extra render pass **per masking character per frame**, and one more per 24 mask writers past the first 24 — the largest per-character cost here, and why [coverage is not used where a stencil exists](./masks.md) |
 | **Many distinct atlases** | each one is a bind group change. `redundant_texture_binds` says whether draw order is working against you |
 | **Very many characters** | the per-character CPU walk is single-threaded |
-| **Off-screen characters** | `set_visible(false)` skips the timeline advance as well as the draw, so a culled character costs nothing. Use it for cast members that are off-screen |
+| **Off-screen characters** | `set_culled(true)` skips the timeline advance as well as the draw, so a culled character costs nothing. Use it for cast members that are off-screen. `set_visible(false)` is not a substitute: it skips only the draw, and the timeline keeps running |
 
 ## If the numbers look wrong
 
@@ -77,4 +77,4 @@ non-goals*. If those two counters are large for your content, that is worth an i
 ## Next
 
 * [Masks](./masks.md) — the backend choice that dominates the table above
-* [Playback and transport](./playback.md) — `set_visible` and what a hidden character skips
+* [Playback and transport](./playback.md) — `set_visible`, `set_culled` and what each one skips

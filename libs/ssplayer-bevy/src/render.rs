@@ -262,6 +262,7 @@ pub(crate) fn sync_players(mut state: Option<ResMut<SsRenderState>>, extracted: 
         slot.player.set_order(playback.order);
         slot.player.set_alpha(playback.alpha);
         slot.player.set_visible(playback.visible);
+        slot.player.set_culled(playback.culled);
         // An explicit replay: `play()` rewinds but is otherwise only the initial
         // start, and the `playing` toggle only pauses/resumes — so a bumped
         // restart counter is the one way to re-trigger a finished animation.
@@ -523,8 +524,8 @@ pub(crate) fn draw_players(
     scene.update(renderer, device, queue, extracted.delta_secs, &mut players);
 
     // Read back what the advance produced, before drawing, and hand it to the
-    // main world. `update` cleared the events of any culled player, so an
-    // invisible character reports nothing — reading every slot is still correct.
+    // main world. `update` cleared the events of any culled player, so a culled
+    // character reports nothing — reading every slot is still correct.
     drop(players);
     channel.store(
         slots

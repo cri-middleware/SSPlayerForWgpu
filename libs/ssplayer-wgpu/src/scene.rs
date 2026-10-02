@@ -693,7 +693,7 @@ impl SSScene {
             let (merged, chunk) = (&mut self.frame, &self.pool[chunk_index]);
             merged.absorb(chunk);
         }
-        self.stats.players = players.iter().filter(|p| p.is_visible()).count() as u32;
+        self.stats.players = players.iter().filter(|p| p.draws()).count() as u32;
         self.end_frame(renderer, device, queue);
     }
 

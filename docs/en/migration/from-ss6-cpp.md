@@ -139,7 +139,8 @@ first `update` — and a missing atlas is **not** an error, it is an entry in
 | `Entity::RateSetOpacity` | `set_alpha(f32)` | `ss_player_set_alpha` | |
 | `RateSetScaleLocal` / `Draw`'s `matrixWorld` | `set_transform(x, y, sx, sy, rot)` | `ss_player_set_transform` | Rotation in radians |
 | *(draw order was call order)* | `set_order(i32)` | `ss_player_set_order` | Ascending, within the scene |
-| *(none)* | `set_visible(bool)` | `ss_player_set_visible` | Hiding **skips the timeline advance** |
+| *(none)* | `set_visible(bool)` | `ss_player_set_visible` | Hiding skips the draw; the timeline keeps running |
+| *(none)* | `set_culled(bool)` | `ss_player_set_culled` | Culling **skips the timeline advance** as well, for an off-screen character |
 | `CanvasGet()` | `canvas_size()` | `ss_player_canvas_size` | |
 
 ### Loop counts

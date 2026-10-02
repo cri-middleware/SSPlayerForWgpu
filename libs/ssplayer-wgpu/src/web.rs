@@ -1808,10 +1808,35 @@ impl SsPlayerWeb {
         with_player!(self, |p| p.set_order(order))
     }
 
-    /// Hide this player. A hidden player is skipped by both update and draw.
+    /// The draw order `setOrder` set.
+    pub fn order(&self) -> Result<i32, JsValue> {
+        with_player!(self, |p| p.order())
+    }
+
+    /// Hide this player. A hidden player draws nothing but keeps playing: its
+    /// playhead advances and its events are reported.
     #[wasm_bindgen(js_name = setVisible)]
     pub fn set_visible(&self, visible: bool) -> Result<(), JsValue> {
         with_player!(self, |p| p.set_visible(visible))
+    }
+
+    /// Whether this player draws, as `setVisible` set it.
+    #[wasm_bindgen(js_name = isVisible)]
+    pub fn is_visible(&self) -> Result<bool, JsValue> {
+        with_player!(self, |p| p.is_visible())
+    }
+
+    /// Cull this player. A culled player is skipped by both update and draw, so
+    /// it costs nothing and its playhead stops where it was.
+    #[wasm_bindgen(js_name = setCulled)]
+    pub fn set_culled(&self, culled: bool) -> Result<(), JsValue> {
+        with_player!(self, |p| p.set_culled(culled))
+    }
+
+    /// Whether this player is culled, as `setCulled` set it.
+    #[wasm_bindgen(js_name = isCulled)]
+    pub fn is_culled(&self) -> Result<bool, JsValue> {
+        with_player!(self, |p| p.is_culled())
     }
 
     /// Player-level fade in 0..1, multiplied into every part.
@@ -1820,12 +1845,22 @@ impl SsPlayerWeb {
         with_player!(self, |p| p.set_alpha(alpha))
     }
 
+    /// The player-level fade in effect, after `setAlpha` clamped it to 0..1.
+    pub fn alpha(&self) -> Result<f32, JsValue> {
+        with_player!(self, |p| p.alpha())
+    }
+
     /// Player-level tint as `0xRRGGBB`, multiplied into every part after the
     /// PartColor blend. `0xffffff` (the default) leaves colours untouched — the
     /// same property `tint` names on `@spritestudio/ssplayer-webgl`.
     #[wasm_bindgen(js_name = setTint)]
     pub fn set_tint(&self, rgb: u32) -> Result<(), JsValue> {
         with_player!(self, |p| p.set_tint(rgb))
+    }
+
+    /// The player-level tint as `0xRRGGBB`.
+    pub fn tint(&self) -> Result<u32, JsValue> {
+        with_player!(self, |p| p.tint())
     }
 
     /// The authored canvas size of the selected animation, as `[width, height]`,

@@ -61,7 +61,7 @@ scene.draw(&renderer, &mut rpass);
 `set_animation` builds the instance tree and is the allocating step; `play` /
 `pause` / `resume` / `stop` / `set_speed_scale` are allocation-free transport. Players are drawn
 in ascending `set_order`, and `set_transform` / `set_visible` / `set_alpha` place
-each one in the scene.
+each one in the scene. `set_culled` drops one that cannot be seen, timeline and all.
 
 Hosts that supply their own textures — an engine with an asset system — lend a
 `TextureView` through `SSRenderer::set_texture` instead of letting the player

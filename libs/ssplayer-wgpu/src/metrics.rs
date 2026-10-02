@@ -11,7 +11,7 @@ use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 /// is a profiling counter rather than this frame's number.
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
 pub struct SceneStats {
-    /// Players that contributed geometry (invisible ones are skipped entirely).
+    /// Players that contributed geometry (hidden and culled ones do not).
     pub players: u32,
     /// Primitives in the frame's table — parts, shape fans and effect particles.
     pub prims: u32,

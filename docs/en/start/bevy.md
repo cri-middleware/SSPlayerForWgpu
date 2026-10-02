@@ -80,7 +80,7 @@ at their defaults.
 |---|---|---|
 | `SsPlayer` | `pack`, `animation` | Rebuilds the playback tree — the allocating one |
 | `SsTransform` | `x`, `y`, `scale_x`, `scale_y`, `rotation` | Free |
-| `SsPlayback` | `playing`, `speed_scale`, `order`, `alpha`, `visible`, `restart`, `direction`, `style`, `loop_count`, `frame_rate`, `frame_skip_enabled`, `sub_frame_enabled`, `animation_section` | Free |
+| `SsPlayback` | `playing`, `speed_scale`, `order`, `alpha`, `visible`, `culled`, `restart`, `direction`, `style`, `loop_count`, `frame_rate`, `frame_skip_enabled`, `sub_frame_enabled`, `animation_section` | Free |
 
 It is **not** Bevy's `Transform`: that is a 3D affine, and decomposing it into the player's five
 scalars is lossy. If you want the two linked, write the one system that copies across — you keep the

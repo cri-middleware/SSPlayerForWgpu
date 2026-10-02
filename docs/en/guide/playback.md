@@ -232,10 +232,14 @@ it does not consume it; two reads in the same frame both see it. It is the *tick
 not the *read*.
 
 !!! note "A tick that did not run reports nothing"
-    Hiding a character (`set_visible(false)`) skips the timeline advance, and the player clears its
+    Culling a character (`set_culled(true)`) skips the timeline advance, and the player clears its
     events and its start, loop and completion edges for that frame rather than repeating the last
-    visible tick's answers. A host that plays a sound per event will not hear it twice. A `play`
-    made while hidden is not lost: the first tick that runs reports its start.
+    answers of a tick that ran. A host that plays a sound per event will not hear it twice. A `play`
+    made while culled is not lost: the first tick that runs reports its start.
+
+    Hiding a character (`set_visible(false)`) is different: only the draw is skipped. The timeline
+    keeps running and every tick reports as usual, so a character blinked by toggling it keeps its
+    timing.
 
 ## Smoothness: sub-frame and frame skip
 

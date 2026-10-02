@@ -113,9 +113,10 @@ title: C API リファレンス
 | | |
 |---|---|
 | `ss_player_set_transform(player, x, y, sx, sy, rotation)` | 位置・スケール・回転 |
-| `ss_player_set_order(player, order)` | シーン内の描画順（昇順） |
-| `ss_player_set_visible(player, visible)` | 非表示のキャラクターは**進まず**、イベントも出しません |
-| `ss_player_set_alpha(player, a)` / `ss_player_set_tint(player, rgb)` | キャラクター全体 |
+| `ss_player_set_order(player, order)` / `ss_player_order(player)` | シーン内の描画順（昇順） |
+| `ss_player_set_visible(player, visible)` / `ss_player_is_visible(player)` | 非表示のキャラクターは描画されませんが、再生は続きイベントも出します |
+| `ss_player_set_culled(player, culled)` / `ss_player_is_culled(player)` | カリング中のキャラクターは**進まず**、イベントも出しません |
+| `ss_player_set_alpha(player, a)` / `ss_player_set_tint(player, rgb)` | キャラクター全体。`ss_player_alpha` / `ss_player_tint` で読み出せます |
 
 ## パーツとオーバーライド
 

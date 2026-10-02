@@ -14,6 +14,7 @@
 // Space pause / resume +/- add / remove a player
 // Left/Right previous / next .ssab Tab cycle focus (all / #1 / #2 …)
 // Up/Down previous / next animation V toggle visibility
+// X           toggle culling (hidden keeps playing; culled stops)
 // R           restart animation [ / ] alpha down / up
 // L           layout: Row / Stack O       reverse draw order
 // F           toggle Y-axis flip K       mask backend (stencil / coverage)
@@ -32,7 +33,7 @@
 // 0           fade track 0 to the rest pose and back
 // , / .       scrub track 1's frame — how a tracking-driven axis is driven
 //
-// The pack, animation, visibility and alpha keys act on the **focused** member;
+// The pack, animation, visibility, culling and alpha keys act on the **focused** member;
 // focus starts at "all", so they drive the whole cast until you press Tab.
 
 use ssplayer_wgpu::{MaskBackend, Placement, SSPack, SSPlayer, SSRenderer, SSScene, SceneConfig, TrackBlend};
@@ -583,7 +584,11 @@ impl AppState {
             let marker = if self.focus == Some(i) { '>' } else { ' ' };
             let pack = self.packs.get(member.pack_idx).map(SSPack::name).unwrap_or("none");
             let anim = self.pack_anims.get(member.pack_idx).and_then(|names| names.get(member.anim_idx)).map(String::as_str).unwrap_or("none");
-            let hidden = if member.player.is_visible() { "" } else { " [hidden]" };
+            let hidden = match (member.player.is_visible(), member.player.is_culled()) {
+                (_, true) => " [culled]",
+                (false, false) => " [hidden]",
+                (true, false) => "",
+            };
             println!(" {marker} #{} {pack} / {anim} order {} alpha {:.2} nodes {}{hidden}", i + 1, member.player.order(), member.player.alpha(), member.player.instance_node_count());
 
             // The track stack, when there is one to show.
@@ -620,11 +625,12 @@ impl AppState {
         println!(" Y-Axis Mode: {}", if self.y_down { "Y-Down (flipped)" } else { "Y-Up (standard)" });
         println!(" Mask backend: {:?} ({} coverage bitmaps last frame)", self.scene.config().mask, stats.coverage_layers);
         println!("----------------------------------------------------");
-        println!(" Controls (pack / animation / V / [ ] act on the focus):");
+        println!(" Controls (pack / animation / V / X / [ ] act on the focus):");
         println!(" Space - Pause / Resume +/- - Add / Remove player");
         println!(" K - Mask backend (stencil / coverage)");
         println!(" Right/Left - Next / Prev SSAB Tab - Cycle focus");
         println!(" Up/Down - Next / Prev animation V - Toggle visibility");
+        println!(" X           - Toggle culling (stops the clock, unlike V)");
         println!(" R           - Restart animation [ / ] - Alpha down / up");
         println!(" L           - Row / Stack layout O     - Reverse draw order");
         println!(" F           - Toggle Y-Axis Flip Esc - Exit");
@@ -866,6 +872,14 @@ impl ApplicationHandler for App {
                         let member = &mut state.cast[idx];
                         let visible = member.player.is_visible();
                         member.player.set_visible(!visible);
+                    }
+                    state.refresh_status();
+                }
+                winit::keyboard::Key::Character(ref c) if c.eq_ignore_ascii_case("x") => {
+                    for idx in state.targets() {
+                        let member = &mut state.cast[idx];
+                        let culled = member.player.is_culled();
+                        member.player.set_culled(!culled);
                     }
                     state.refresh_status();
                 }

@@ -630,7 +630,7 @@ pub struct SSPlayer {
     /// Whether the last update was the first to run after a `play`.
     started_edge: bool,
     /// A `play` that no tick has run since. The tick reports it, not the call,
-    /// so a hidden player's skipped tick leaves it for the first one that runs.
+    /// so a culled player's skipped tick leaves it for the first one that runs.
     start_pending: bool,
     /// Where this player sits in the scene — the root transform of its tree. Composed by [`SSPlayer::set_transform`]; only the matrix is
     /// kept because nothing yet re-composes it. A future `box` (§9.3, the
@@ -640,8 +640,11 @@ pub struct SSPlayer {
     /// Draw order within a scene; lower draws first. Nothing in this file reads
     /// it — it exists so the host and [`crate::SSScene`] can sort by it.
     order: i32,
-    /// Skip this player entirely when false (see [`SSPlayer::set_visible`]).
+    /// Draw nothing when false, while the timeline keeps running (see
+    /// [`SSPlayer::set_visible`]).
     visible: bool,
+    /// Skip this player entirely when true (see [`SSPlayer::set_culled`]).
+    culled: bool,
     /// Player-level fade folded into every vertex (see [`BatchInfo::alpha`]).
     alpha: f32,
     /// Player-level tint as the API gives it, `0xRRGGBB` (see
@@ -778,6 +781,7 @@ impl SSPlayer {
             transform: IDENTITY,
             order: 0,
             visible: true,
+            culled: false,
             alpha: 1.0,
             tint: WHITE_TINT,
             loop_count: None,
@@ -1817,8 +1821,8 @@ impl SSPlayer {
     ///
     /// **Not raised by [`SSPlayer::resume`]**: lifting a pause carries on, it
     /// does not start. The tick reports it rather than the call, so a `play` on
-    /// a hidden player is reported by the first tick that runs once it is
-    /// visible, and a `play` that [`SSPlayer::stop`] or
+    /// a [culled](SSPlayer::set_culled) player is reported by the first tick that
+    /// runs once it is unculled, and a `play` that [`SSPlayer::stop`] or
     /// [`SSPlayer::set_animation`] overtook before any tick ran is not reported.
     ///
     /// After a `play` of your own the call site already knows. This is for a
@@ -1862,8 +1866,10 @@ impl SSPlayer {
     /// jumped past still appears here — which it would not if the host looked
     /// only at the frame that was landed on.
     ///
-    /// Empty on a tick that crossed nothing, and on a player that is not
-    /// [`visible`](SSPlayer::set_visible), which does not advance at all.
+    /// Empty on a tick that crossed nothing, and on a
+    /// [culled](SSPlayer::set_culled) player, which does not advance at all. A
+    /// player that is merely not [`visible`](SSPlayer::set_visible) still advances,
+    /// so it reports its events as usual.
     pub fn events(&self) -> &[SsEvent] {
         &self.events
     }
@@ -2033,18 +2039,43 @@ impl SSPlayer {
         self.order
     }
 
-    /// Skip this player entirely when false: `SSScene::update` advances no
-    /// timeline and produces no geometry, so `SSScene::draw` records nothing.
+    /// Draw nothing when false, **while the timeline keeps running**: the
+    /// playhead advances, events, loops and completions are reported, and the
+    /// part read-outs ([`SSPlayer::part_transform`], [`SSPlayer::is_part_hidden`])
+    /// follow the animation. Only the geometry is skipped.
     ///
-    /// Distinct from `set_alpha(0.0)`, which is an author-facing fade that keeps
-    /// the timeline running. This one is for a host that knows the player cannot
-    /// be seen — culled, or scrolled out of the viewport.
+    /// This is what `visible` means on the other Players, so hiding a character
+    /// for a moment — a blink, a flicker — does not slow its animation down.
+    /// To stop paying for a character that cannot be seen at all, use
+    /// [`SSPlayer::set_culled`] instead.
     pub fn set_visible(&mut self, visible: bool) {
         self.visible = visible;
     }
 
     pub fn is_visible(&self) -> bool {
         self.visible
+    }
+
+    /// Skip this player entirely when true: `SSScene::update` advances no
+    /// timeline and produces no geometry, so `SSScene::draw` records nothing and
+    /// the player costs nothing. The time spent culled is dropped, not caught up:
+    /// uncull it and it carries on from where it stopped.
+    ///
+    /// For a host that knows the player cannot be seen — outside the viewport, or
+    /// scrolled away. Because the timeline stops, it is the wrong tool for an
+    /// effect: a character blinked with it plays in slow motion. Use
+    /// [`SSPlayer::set_visible`] for that, or [`SSPlayer::set_alpha`] for a fade.
+    pub fn set_culled(&mut self, culled: bool) {
+        self.culled = culled;
+    }
+
+    pub fn is_culled(&self) -> bool {
+        self.culled
+    }
+
+    /// Whether `SSScene::update` builds geometry for this player.
+    pub(crate) fn draws(&self) -> bool {
+        self.visible && !self.culled
     }
 
     /// Player-level fade, clamped to 0..=1 and multiplied into every part's
@@ -2489,14 +2520,14 @@ impl SSPlayer {
     /// owns the frame boundary (`begin_frame` / `end_frame`), because one frame
     /// now spans every player sharing the target.
     pub(crate) fn build_frame(&mut self, scene: &mut FrameChunk, renderer: &SSRenderer, delta_secs: f32) {
-        // `visible == false` means "this player cannot be seen": no timeline
-        // advance and no geometry. Textures are still flushed above, so it can be
-        // made visible again without re-loading anything.
-        if !self.visible {
-            // What the last visible tick reported is not this tick's news. Leaving
-            // it in place made a hidden player answer `events()` with the same
+        // `culled` means "this player cannot be seen": no timeline advance and no
+        // geometry. Textures are still flushed above, so it can be unculled
+        // without re-loading anything.
+        if self.culled {
+            // What the last tick that ran reported is not this tick's news. Leaving
+            // it in place made a culled player answer `events()` with the same
             // footstep on every update — a host that plays a sound per event fires
-            // it for as long as the player stays hidden — and kept a loop or finish
+            // it for as long as the player stays culled — and kept a loop or finish
             // edge readable long after it was crossed.
             self.events.clear();
             self.looped = false;
@@ -2533,6 +2564,17 @@ impl SSPlayer {
         // Advance every slot first, then draw. The two are separate walks for a
         // reason — see `step_slots`.
         step_slots(root, frame_no, delta_secs, looped);
+
+        if !self.visible {
+            // Hidden, not culled: the clocks above have moved, but nothing is drawn.
+            // The root's frame is still built, because the part read-outs read the
+            // world matrices it leaves behind — without it a follower pinned to a
+            // hidden character would freeze where the character was last drawn.
+            // The display frame, as `prepare_node` asks for it.
+            let frame_no = if self.sub_frame { frame_no } else { frame_no.floor() };
+            let _ = root.context.get_frame_data(frame_no);
+            return;
+        }
 
         let draw = NodeDraw { alpha: self.alpha, tint: pack_tint(self.tint) };
         let mut build = FrameBuild { scene, renderer, sub_frame: self.sub_frame };

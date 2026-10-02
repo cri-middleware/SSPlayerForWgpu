@@ -87,9 +87,10 @@ the calls.
 | | |
 |---|---|
 | `setTransform(x, y, scaleX, scaleY, rotation)` / `resetTransform()` | |
-| `setOrder(n)` | Draw order within the canvas, ascending |
-| `setVisible(v)` | Hidden characters **do not advance** and report no events |
-| `setAlpha(a)` / `setTint(rgb)` | Whole-character |
+| `setOrder(n)` / `order()` | Draw order within the canvas, ascending |
+| `setVisible(v)` / `isVisible()` | Hidden characters draw nothing but keep playing and reporting events |
+| `setCulled(c)` / `isCulled()` | Culled characters **do not advance** and report no events |
+| `setAlpha(a)` / `setTint(rgb)` | Whole-character. Read back with `alpha()` / `tint()` |
 | `destroy()` | Explicit and idempotent |
 
 **Parts, overrides and events** — every override has a `ByIndex` twin; resolve once with

@@ -1602,14 +1602,52 @@ int32_t ss_player_fit_into(ss_player_t *handle,
 void ss_player_set_order(ss_player_t *handle, int32_t order);
 
 /*
- Skip this player entirely when `false`: its timeline does not advance and it
- produces no geometry. For a player the caller knows cannot be seen; use
- `ss_player_set_alpha(0)` for a fade that keeps playing.
+ The draw order `ss_player_set_order` set; `0` for a null handle.
+
+ # Safety
+ `handle` must be a live handle or null.
+ */
+int32_t ss_player_order(ss_player_t *handle);
+
+/*
+ Draw nothing when `false`, while the timeline keeps running: the playhead
+ advances and events are reported, so hiding a character for a moment does not
+ slow it down. Use `ss_player_set_culled` to stop paying for a player that
+ cannot be seen at all.
 
  # Safety
  `handle` must be a live handle or null.
  */
 void ss_player_set_visible(ss_player_t *handle, bool visible);
+
+/*
+ Whether the player draws, as `ss_player_set_visible` set it; `true` for a
+ null handle.
+
+ # Safety
+ `handle` must be a live handle or null.
+ */
+bool ss_player_is_visible(ss_player_t *handle);
+
+/*
+ Skip this player entirely when `true`: its timeline does not advance and it
+ produces no geometry, and the time spent culled is dropped. For a player the
+ caller knows cannot be seen; use `ss_player_set_visible(false)` to hide one
+ that should keep playing.
+
+ # Safety
+ `handle` must be a live handle or null.
+ */
+void ss_player_set_culled(ss_player_t *handle, bool culled);
+
+/*
+ Whether the player is culled, as `ss_player_set_culled` set it; `false` for a
+ null handle.
+
+ # Safety
+ `handle` must be a live handle or null.
+ */
+bool ss_player_is_culled(ss_player_t *handle);
 
 /*
  Player-level fade, clamped to 0..1. Mask coverage is unaffected: a faded
@@ -1621,6 +1659,15 @@ void ss_player_set_visible(ss_player_t *handle, bool visible);
 void ss_player_set_alpha(ss_player_t *handle, float alpha);
 
 /*
+ The player-level fade in effect, after `ss_player_set_alpha` clamped it to
+ 0..1; `1` for a null handle.
+
+ # Safety
+ `handle` must be a live handle or null.
+ */
+float ss_player_alpha(ss_player_t *handle);
+
+/*
  Player-level tint, `0xRRGGBB`, multiplied into every part after the PartColor
  blend. `0xFFFFFF` — the default — leaves colours untouched. Mask coverage is
  unaffected, as with `ss_player_set_alpha`.
@@ -1629,6 +1676,14 @@ void ss_player_set_alpha(ss_player_t *handle, float alpha);
  `handle` must be a live handle or null.
  */
 void ss_player_set_tint(ss_player_t *handle, uint32_t rgb);
+
+/*
+ The player-level tint as `0xRRGGBB`; `0xFFFFFF` for a null handle.
+
+ # Safety
+ `handle` must be a live handle or null.
+ */
+uint32_t ss_player_tint(ss_player_t *handle);
 
 /*
  Canvas size of the animation currently playing. Either out-pointer may be null.

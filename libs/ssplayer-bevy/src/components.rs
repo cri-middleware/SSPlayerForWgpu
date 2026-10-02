@@ -64,8 +64,12 @@ pub struct SsPlayback {
     pub order: i32,
     /// Player-level fade, folded into every vertex.
     pub alpha: f32,
-    /// False skips the timeline advance as well as the draw.
+    /// False draws nothing while the timeline keeps running, so hiding a
+    /// character for a moment does not slow it down.
     pub visible: bool,
+    /// True skips the timeline advance as well as the draw — for a character
+    /// that cannot be seen at all. The time spent culled is dropped.
+    pub culled: bool,
     /// Bump this (any change in value) to replay the animation from its head,
     /// re-arming the loop count. A generation counter rather than a flag so a host
     /// can re-trigger a one-shot at will without having to clear anything, and so
@@ -107,6 +111,7 @@ impl Default for SsPlayback {
             order: 0,
             alpha: 1.0,
             visible: true,
+            culled: false,
             restart: 0,
             direction: PlaybackDirection::Forward,
             style: PlaybackStyle::Normal,
