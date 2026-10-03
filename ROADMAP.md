@@ -1,8 +1,8 @@
 # SpriteStudio Player for wgpu — Roadmap
 
 The wgpu Player's roadmap. Runtime and converter work lives in the
-[SpriteStudio-SDK roadmap](https://github.com/cri-middleware/SpriteStudio-SDK/blob/main/ROADMAP.md);
-items marked **needs SDK** wait on a capability from there.
+[SpriteStudio-SDK roadmap](https://github.com/cri-middleware/SpriteStudio-SDK/blob/HEAD/ROADMAP.md);
+items under *Needs SDK* wait on a capability from there.
 
 This player is first and foremost a **Rust** API, with WebGPU (`wasm-bindgen`) and
 C/C++ (`cbindgen`) as thin wrappers over it. The constraints a change most often
@@ -66,7 +66,7 @@ breaks are in [CONTRIBUTING.md](./CONTRIBUTING.md#technical-constraints--guiding
       (`SSPlayer::set_instances` or a separate `SSCrowd`), which attributes vary
       per member, and how the js and C faces expose it. Members at *different*
       playback positions are not this design; they belong to the SDK's
-      [Animation Instancing](https://github.com/cri-middleware/SpriteStudio-SDK/blob/main/ROADMAP.md#phase-3-feature-expansion-post-release),
+      [Animation Instancing](https://github.com/cri-middleware/SpriteStudio-SDK/blob/HEAD/ROADMAP.md#phase-3-feature-expansion-post-release),
       one evaluation driving many instances. That item has two possible faces —
       one playhead drawn at N placements (this) and N members at N phases (not
       this) — and which of them it covers decides how much of this is local.
@@ -173,7 +173,7 @@ player, where every host and the C ABI reach it, and the host half belongs in an
   Vtuber tool's preview beside its output. `SSScene::update` fuses the timeline
   advance with the geometry build, so handing one player to two scenes plays it at
   double speed, and splitting the two here would build half of the SDK's
-  [Animation Instancing](https://github.com/cri-middleware/SpriteStudio-SDK/blob/main/ROADMAP.md#phase-3-feature-expansion-post-release)
+  [Animation Instancing](https://github.com/cri-middleware/SpriteStudio-SDK/blob/HEAD/ROADMAP.md#phase-3-feature-expansion-post-release)
   — one evaluation driving many instances — a second time. Two players over one
   `.ssab` is what serves it meanwhile: `SSPack` is three `Arc`s, the renderer
   uploads an atlas once, and two trees fed the same `dt` stay identical down to
