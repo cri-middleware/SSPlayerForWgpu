@@ -12,6 +12,11 @@ breaks are in [CONTRIBUTING.md](./CONTRIBUTING.md#technical-constraints--guiding
 
 ## Playback & rendering
 
+- [ ] **Motion blending / crossfade on the C, JavaScript and Bevy faces** — the Rust API
+      layers animations on tracks and crossfades between them (`set_track_animation`,
+      `crossfade`, `fade_track`; see [Motion blending](./docs/en/guide/motion-blending.md)).
+      Missing: the C and JavaScript faces and the Bevy components expose none of it, so
+      from there the only route is several characters ordered with `set_order`.
 - [ ] **9-slice parts.** The runtime already emits the batches and the geometry
       (`get_nines_*`), so this is one WGSL vertex entry, one `GeomClass`, one
       `GeomKind` — which also gives Nines mask coverage — and the `FrameView`
