@@ -92,9 +92,9 @@ Windows, one Vulkan on Linux, and each is self-contained enough to copy out whol
 
 > 🚧 **No prebuilt downloads yet.** The intended route is a per-platform archive of that same `bin/`
 > tree on [GitHub Releases](https://github.com/cri-middleware/SSPlayerForWgpu/releases), matching how
-> the SDK and the other players ship. The layout above is already what a release would package;
-> what is missing is the release workflow, a macOS signing and notarization step, and the checksums —
-> see [ROADMAP](./ROADMAP.md).
+> the SDK and the other players ship. The layout above is already what a release would package, and
+> the release workflow and its `SHA256SUMS` already exist; what is missing is a macOS signing and
+> notarization step and the first release itself — see [ROADMAP](./ROADMAP.md).
 
 ### Browser (WebGPU)
 

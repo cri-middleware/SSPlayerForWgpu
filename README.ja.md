@@ -77,7 +77,7 @@ Linux では Vulkan を駆動し、それぞれ丸ごとコピーして持ち出
 
 > 🚧 **ビルド済みバイナリの配布はまだありません。** 想定している経路は、同じ `bin/` ツリーをプラットフォームごとのアーカイブにして
 > [GitHub Releases](https://github.com/cri-middleware/SSPlayerForWgpu/releases) へ置く形で、SDK や他の
-> Player の配布方法に揃えます。上記のレイアウトはすでにリリースが同梱する形そのもので、足りていないのはリリースワークフロー、macOS の署名と notarization、そしてチェックサムです。
+> Player の配布方法に揃えます。上記のレイアウトはすでにリリースが同梱する形そのもので、リリースワークフローと `SHA256SUMS` はすでにあります。足りていないのは macOS の署名と notarization、そして最初のリリースです。
 > [ROADMAP](./ROADMAP.md) を参照してください。
 
 ### ブラウザ (WebGPU)
