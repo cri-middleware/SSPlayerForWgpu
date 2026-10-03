@@ -1,7 +1,7 @@
-//! Transport controls on `SSPlayer` (SPEC §9.3).
+//! Transport controls on `SSPlayer`.
 //!
-//! Almost none of this needs a GPU: `SSPlayer` holds no wgpu types (SPEC §1.2)
-//! and `load` borrows no `Device` (§8.1), so seeking, sectioning and the
+//! Almost none of this needs a GPU: `SSPlayer` holds no wgpu types
+//! and `load` borrows no `Device`, so seeking, sectioning and the
 //! playback shape are all reachable without an adapter. Only the one test that
 //! has to *advance* time takes a device, because stepping the tree is
 //! `SSScene::update`'s job.

@@ -1,4 +1,4 @@
-//! Timeline events and the end-of-playback notifications (SPEC §9.5).
+//! Timeline events and the end-of-playback notifications.
 //!
 //! These pin two things, because
 //! both are invisible until they are wrong and both have bitten sibling Players:

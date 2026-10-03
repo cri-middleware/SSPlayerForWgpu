@@ -1,4 +1,4 @@
-//! What `SSPlayer::load_with` promises an [`AssetLoader`] (SPEC §8.1, §8.2).
+//! What `SSPlayer::load_with` promises an [`AssetLoader`].
 //!
 //! The walk is shared by every face; the loader is the only part that differs.
 //! So the contract between them is the one thing that, if each face reads it
@@ -154,8 +154,7 @@ fn the_pack_is_read_before_the_base_moves() {
 /// Rule 2: everything after the pack is a **bare name**, relative to the base.
 ///
 /// The walk joins nothing, so every question about separators belongs to one
-/// place: a caller's path vocabulary reaches only the loader that speaks it
-/// (SPEC §8.1).
+/// place: a caller's path vocabulary reaches only the loader that speaks it.
 #[test]
 fn everything_after_the_pack_is_named_relative_to_the_base() {
     let mut recorder = Recorder::new(asset_root());
@@ -237,7 +236,7 @@ fn what_is_asked_for_does_not_depend_on_how_src_is_spelled() {
 }
 
 /// One file, one request — however many hashes name it. `external_textures()`
-/// can name the image a cellmap already named, under a second hash (SPEC §8.1),
+/// can name the image a cellmap already named, under a second hash,
 /// and on a face where a read is a network round trip that must not double.
 #[test]
 fn a_file_named_twice_is_read_once() {
@@ -274,7 +273,7 @@ fn a_level_is_requested_in_one_call() {
 }
 
 /// An embedded pack asks for nothing beyond itself, and still offers every
-/// atlas — the bytes were inside the file all along (SPEC §8.1).
+/// atlas — the bytes were inside the file all along.
 ///
 /// This one found a real bug on its first run. `embedded_images()` required
 /// **both** `cellmaps()` and `embedded_assets()` to be present, so a pack with no
@@ -306,7 +305,7 @@ fn an_embedded_pack_asks_for_nothing_else() {
 }
 
 /// A file that does not arrive costs that file and nothing else: the load still
-/// succeeds, and everything readable is still offered (SPEC §8.1).
+/// succeeds, and everything readable is still offered.
 #[test]
 fn one_missing_file_does_not_fail_the_load() {
     /// Serves nothing at all.
@@ -343,8 +342,7 @@ fn one_missing_file_does_not_fail_the_load() {
 }
 
 /// A load that succeeds but did not get everything says so — the half of a
-/// partial load a program can branch on, where `warn` is the half a human reads
-/// (SPEC §8.1).
+/// partial load a program can branch on, where `warn` is the half a human reads.
 #[test]
 fn a_partial_load_is_reported_without_failing() {
     /// Serves the packs and refuses every image.
@@ -396,7 +394,7 @@ fn a_partial_load_is_reported_without_failing() {
 }
 
 /// A sub-pack that does not arrive is reported too, and as a pack rather than as
-/// the path it was looked for under (SPEC §7.1).
+/// the path it was looked for under.
 #[test]
 fn a_missing_sub_pack_is_reported_by_name() {
     /// Serves the root pack and its images, and no sibling `.ssab`.
@@ -439,7 +437,7 @@ fn a_missing_sub_pack_is_reported_by_name() {
 }
 
 /// A pack that has a name but no path is resolvable through `read_pack`, and the
-/// walk never goes looking for it as a file (SPEC §7.1).
+/// walk never goes looking for it as a file.
 #[test]
 fn a_provider_answers_for_packs_with_no_path() {
     /// Serves the root pack and its images by path, and every sibling `.ssab` by

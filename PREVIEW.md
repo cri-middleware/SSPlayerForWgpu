@@ -196,7 +196,7 @@ const ctx     = await wasm_bindgen.SsContextWeb.create();   // once per page
 const surface = ctx.createSurface(canvas);
 const player  = surface.createPlayer();
 await player.loadSsab(ssabBytes, undefined, undefined);
-player.setAnimation(name);   // selection and transport are separate calls (SPEC §9.3)
+player.setAnimation(name);   // selection and transport are separate calls
 player.play();
 // then per rAF: surface.frame(dt)
 ```

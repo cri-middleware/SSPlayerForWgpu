@@ -1,4 +1,4 @@
-//! One call loads everything (SPEC §8.1, §7.1).
+//! One call loads everything.
 //!
 //! `SSPlayer::load_with` is the walk both faces share — the js face plugs the
 //! browser into it, `SSPlayer::load` plugs in the filesystem. Nothing in `web.rs`
@@ -7,7 +7,7 @@
 //! everything else.
 //!
 //! Every assertion runs **after a frame**, because that is when a load's atlases
-//! reach the GPU: `load` borrows no `Device` (SPEC §8.1), so the first
+//! reach the GPU: `load` borrows no `Device`, so the first
 //! `SSScene::update` is what flushes them — the same timeline an embedded atlas
 //! has always taken.
 //!
@@ -69,7 +69,7 @@ fn one_call_loads_the_pack_its_atlases_and_the_packs_it_plays_from() {
     flush(&mut renderer, &device, &queue, &mut [&mut player]);
 
     // The name came out of the `.ssab`, not from the file stem the caller passed —
-    // which is what makes `ref_anime_pack` resolve (SPEC §7.1).
+    // which is what makes `ref_anime_pack` resolve.
     assert!(player.has_pack("Instance"), "the loaded pack did not keep its own name");
     // And the pack it plays from arrived without anyone asking for it.
     assert!(player.has_pack("Instance_SourceAnime"), "the referenced instance pack was not fetched; its parts would not appear");
@@ -109,7 +109,7 @@ fn an_embedded_pack_needs_no_sibling_files() {
 }
 
 /// TextureChange binds by texture *file name* hash, so `load` has to have read
-/// `external_textures()` as well as the cellmaps (SPEC §8.1) — and to have read
+/// `external_textures()` as well as the cellmaps — and to have read
 /// one file once even though two hashes name it.
 #[test]
 fn one_call_covers_both_texture_tables() {
@@ -141,7 +141,7 @@ fn one_call_covers_both_texture_tables() {
 
 /// A second player of the same pack uploads nothing: the texture map is
 /// device-scoped, so the flush finds every hash already registered and drops what
-/// the second load read (SPEC §8.2).
+/// the second load read.
 #[test]
 fn a_second_player_of_one_pack_loads_nothing() {
     let Some((device, queue)) = gpu() else {

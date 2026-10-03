@@ -151,7 +151,7 @@ fn absolute_url(url: &str, base_url: Option<&str>) -> Option<String> {
 /// document's URL).
 ///
 /// Used for both of the things a pack asks the host to go and get: its atlases
-/// and the sibling `.ssab`s its instance parts play from (§7.1).
+/// and the sibling `.ssab`s its instance parts play from.
 ///
 /// One request per path rather than per requester: `external_textures()` can
 /// name an image a cellmap already named, under a different hash, and two packs
@@ -523,7 +523,7 @@ impl SsContextWeb {
 
         let encoded: Vec<(u32, Rc<[u8]>)> = {
             let ctx = &mut *self.inner.borrow_mut();
-            // Device-scoped first, then each target, then each player's atlases (§14).
+            // Device-scoped first, then each target, then each player's atlases.
             ctx.renderer.restore_device(&device, &queue);
             for surface in ctx.surfaces.iter_mut() {
                 let caps = surface.surface.get_capabilities(&adapter);

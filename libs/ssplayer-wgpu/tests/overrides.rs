@@ -1,4 +1,4 @@
-//! Per-part overrides on `SSPlayer` (SPEC §9.5).
+//! Per-part overrides on `SSPlayer`.
 //!
 //! None of this needs a GPU: an override is a write into the runtime's override
 //! table, which `SSPlayer` reaches through the root context alone.

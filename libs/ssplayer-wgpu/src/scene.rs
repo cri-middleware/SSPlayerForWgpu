@@ -378,7 +378,7 @@ pub struct SSScene {
     /// GPU.
     frame: FrameChunk,
     /// Per-player chunks, recycled across frames. One per player, filled
-    /// independently — in parallel where the platform has threads (§14.2 item 6).
+    /// independently — in parallel where the platform has threads.
     pool: Vec<FrameChunk>,
 
     // --- Integration shaders (`ss-*`). Only touched when a frame has
@@ -487,7 +487,7 @@ impl SSScene {
     /// Timestamp writes for the host's `RenderPassDescriptor`, or `None` when the
     /// device cannot time.
     ///
-    /// The host opens the pass (borrow model, §1), so it is the only place these
+    /// The host opens the pass (borrow model), so it is the only place these
     /// can be attached — the scene can only hand them over.
     pub fn timestamp_writes(&self) -> Option<wgpu::RenderPassTimestampWrites<'_>> {
         self.timer.as_ref().map(|t| t.writes())

@@ -11,8 +11,8 @@
 // that changed `src` learns the new pack's animation names.
 //
 // This is the **convenience wrapper**: one element = one canvas = one player,
-// which is the shortest path for a single-character use like an ad creative
-// (SPEC §10). It is not the shape of the API — underneath, the element takes a
+// which is the shortest path for a single-character use like an ad creative.
+// It is not the shape of the API — underneath, the element takes a
 // surface from the page's shared context and adds one player to it, so putting
 // ten of these on a page still costs one `GPUDevice` and one atlas upload. For a
 // canvas with several characters, drive `SsContextWeb` directly.
@@ -85,7 +85,7 @@ export class SsPlayerWebGPUElement extends HTMLElement {
       this._ro.observe(this);
     }
 
-    // --- Visibility gating (SPEC §14) -------------------------------------
+    // --- Visibility gating -------------------------------------
     // Assume on-screen until the observer says otherwise, so a host without
     // IntersectionObserver (or with the gating off) always runs.
     this._intersecting = true;
@@ -352,7 +352,7 @@ export class SsPlayerWebGPUElement extends HTMLElement {
   private async _loadSrc(src: string, pack?: string | null, animation?: string | null): Promise<string[] | undefined> {
     if (!this.player) return;
     // One call fetches the pack, its atlases and any sibling `.ssab` its instance
-    // parts play from (SPEC §8.1, §7.1) — a URL answers both "what bytes" and
+    // parts play from — a URL answers both "what bytes" and
     // "what do its siblings resolve against". `pack` is a name override, which
     // `load` deliberately does not take; the rare host that needs one goes
     // through `loadSsab` with its own bytes.
@@ -368,7 +368,7 @@ export class SsPlayerWebGPUElement extends HTMLElement {
     // worth raising over an element that is no longer on the page.
     if (!this.player) return;
     const names = this.player.animationNames();
-    // Selecting and starting are separate calls (SPEC §9.3): `setAnimation` is
+    // Selecting and starting are separate calls: `setAnimation` is
     // the allocating step, `play` is transport. The old single `play(name)` is
     // deliberately not carried over.
     this.player.setAnimation(animation || names[0]!);

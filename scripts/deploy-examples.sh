@@ -22,7 +22,7 @@
 #
 # Both modes go out because the demo page has a selector for the two: an embedded
 # pack carries its atlas, a reference pack names sibling files that `loadSsab`
-# fetches relative to the .ssab's own URL (SPEC 8.1), and nothing else on the page
+# fetches relative to the .ssab's own URL, and nothing else on the page
 # covers that second branch.
 #
 # assets/ is gitignored. libs/ssplayer-wgpu's tests read assets/overall and

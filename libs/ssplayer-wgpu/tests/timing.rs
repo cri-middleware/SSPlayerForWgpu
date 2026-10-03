@@ -1,4 +1,4 @@
-//! GPU pass timing (SPEC §14.2 item 10).
+//! GPU pass timing.
 //!
 //! Alone in its own test binary on purpose. Cargo runs the tests inside one
 //! binary concurrently, and a Metal device asked to sample pass-boundary
@@ -82,7 +82,7 @@ fn depth_stencil_attachment(view: &wgpu::TextureView) -> wgpu::RenderPassDepthSt
     wgpu::RenderPassDepthStencilAttachment { view, depth_ops: Some(wgpu::Operations { load: wgpu::LoadOp::Clear(1.0), store: wgpu::StoreOp::Store }), stencil_ops: Some(wgpu::Operations { load: wgpu::LoadOp::Clear(0), store: wgpu::StoreOp::Store }) }
 }
 
-/// SPEC §14.2 item 10, GPU half: a device created with `TIMESTAMP_QUERY` must
+/// GPU half: a device created with `TIMESTAMP_QUERY` must
 /// actually produce a pass time.
 ///
 /// The counters in [`a_frame_reports_what_it_cost`] would look identical if the

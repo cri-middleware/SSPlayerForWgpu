@@ -309,7 +309,7 @@ impl SSPack {
     ///
     /// Decoding is not cached: the pixels are handed over so the caller can put
     /// them wherever GPU memory is owned (`upload_texture`, or an engine's asset
-    /// system, §8.2). Call it once per pack, not once per player.
+    /// system). Call it once per pack, not once per player.
     pub fn decode_embedded(&self) -> Vec<EmbeddedTexture> {
         self.decode_embedded_where(|_| true)
     }

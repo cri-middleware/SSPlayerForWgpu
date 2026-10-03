@@ -1,4 +1,4 @@
-//! Whole-corpus regression net for rendering changes (SPEC §13).
+//! Whole-corpus regression net for rendering changes.
 //!
 //! The suite's other rendering tests assert on drawn-pixel counts and on
 //! specific invariants; neither notices a part quietly moving by a pixel or a

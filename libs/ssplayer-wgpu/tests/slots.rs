@@ -1,4 +1,4 @@
-//! Instance / effect **slot stepping** (SPEC §7.1).
+//! Instance / effect **slot stepping**.
 //!
 //! Whose clock moves and what gets drawn are different questions, and the player
 //! answers them in two separate walks for a reason: the runtime drops `Hide`-ed

@@ -81,7 +81,7 @@ jobs:
           VK_ICD_FILENAMES: /usr/share/vulkan/icd.d/lvp_icd.x86_64.json
         # `golden_corpus` stays out of this: it byte-compares against a dump from
         # the same machine, so it is `#[ignore]`d and remains a local before/after
-        # tool (SPEC §13). What CI now covers is everything that asserts on an
+        # tool. What CI now covers is everything that asserts on an
         # invariant rather than on a reference image.
         run: cargo test --workspace
 
@@ -130,7 +130,7 @@ jobs:
       # `SS_WINDOW_WIN32` arm and the whole of examples/viewer-dx12-cpp are
       # `cfg`-ed or `#include`-d out everywhere else. The runner has no GPU, so
       # this is a compile check and nothing more — DX12 itself still has to be
-      # exercised by running the viewer on real hardware (SPEC §14).
+      # exercised by running the viewer on real hardware.
       - name: Build the ffi face (MSVC)
         run: cargo build -p ssplayer-wgpu-ffi --release
 

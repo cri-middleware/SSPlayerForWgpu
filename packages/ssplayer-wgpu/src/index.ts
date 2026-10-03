@@ -1,4 +1,4 @@
-// The page's shared WebGPU context (SPEC §1.2, §10).
+// The page's shared WebGPU context.
 //
 // `SsContextWeb` owns the adapter, the device and the device-scoped `SSRenderer`
 // — pipelines and the atlas cache. There must be exactly **one per page**: two
@@ -85,7 +85,7 @@ export function sharedContext(): Promise<SsContextWeb> {
 let restorePromise: Promise<void> | null = null;
 
 /**
- * Recover from a lost WebGPU device (SPEC §14).
+ * Recover from a lost WebGPU device.
  *
  * The loss is the *device's*, so it hits every canvas on the page at once and the
  * recovery is one call — but every canvas notices independently, so the calls are

@@ -162,7 +162,7 @@ struct TextureEntry {
 
 /// How a texture's colour channels relate to its alpha.
 ///
-/// The whole pipeline composites premultiplied (§5.2), so the fragment stage has
+/// The whole pipeline composites premultiplied, so the fragment stage has
 /// to know which form it is sampling: a premultiplied texel is divided back to
 /// straight RGB before the PartsColor maths, a straight one is used as is. The
 /// flag rides in the texture's own bind group, so it costs no extra pipeline.
@@ -994,7 +994,7 @@ pub(crate) fn ss_shader_entry(id_hash: u32) -> Option<&'static str> {
 /// `fs_main` (varg mix/mul/add-sub) and re-premultiplies — except `ss-blur`,
 /// which multiplies by the part colour directly (mirrors the SS6 reference).
 ///
-/// `ssTex` un-premultiplies (textures are premultiplied, §5.2) and samples at LOD
+/// `ssTex` un-premultiplies (textures are premultiplied) and samples at LOD
 /// 0 via `textureSampleLevel` so sampling is legal inside loops / after `discard`
 /// (WGSL forbids implicit-derivative `textureSample` in non-uniform control flow).
 /// Per-part uniforms live in group(2): `param_a`=param0..3, `param_b`=param4..7,
@@ -1012,7 +1012,7 @@ const PI: f32 = 3.141592653589793;
 
 fn ssTex(uv: vec2<f32>) -> vec4<f32> {
     let c = textureSampleLevel(t_diffuse, s_diffuse, uv, 0.0);
-    // Straight-alpha sample; only premultiplied sources need the divide (§8.2).
+    // Straight-alpha sample; only premultiplied sources need the divide.
     let rgb = select(c.rgb, c.rgb / max(c.a, 0.0001), tex_info.flags.x > 0.5);
     return vec4<f32>(rgb, c.a);
 }
@@ -1285,7 +1285,7 @@ impl SSRenderer {
 
         // group(0) is the scene: the projection, plus the frame's SoA
         // arena, primitive table and mesh stream — everything the vertex stages
-        // read instead of a vertex buffer (§5.5). Only the layout is shared; the
+        // read instead of a vertex buffer. Only the layout is shared; the
         // buffers behind it belong to the render target.
         let storage = |binding: u32| wgpu::BindGroupLayoutEntry {
             binding,
@@ -1305,7 +1305,7 @@ impl SSRenderer {
             ],
         });
 
-        // group(1): atlas texture + sampler + the per-texture facts (§8.2).
+        // group(1): atlas texture + sampler + the per-texture facts.
         // The uniform is visible to the vertex stage too, so UV normalisation can
         // move there without reshaping the layout.
         let texture_bind_group_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {

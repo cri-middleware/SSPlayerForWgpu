@@ -225,7 +225,7 @@ if (!(Get-Command pnpm -ErrorAction SilentlyContinue)) {
     Fail "pnpm not found (corepack enable, or npm i -g pnpm) - needed to build the js layer"
 }
 
-# --dev skips wasm-opt, so the output is several times larger. SPEC 14.1's size
+# --dev skips wasm-opt, so the output is several times larger. Size
 # figures are release figures; never quote a --dev build for them.
 $wasmProfile = if ($opts.build -eq "debug") { "--dev" } else { "--release" }
 
