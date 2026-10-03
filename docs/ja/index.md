@@ -83,7 +83,7 @@ Windows のゲームも、macOS のアプリも、4 本の移植版ではなく�
 |---|---|---|
 | Rust | crates.io の `ssplayer-wgpu` | 🚧 先に SDK のクレート公開が必要 |
 | Bevy | crates.io の `ssplayer-bevy` | 🚧 同上（＋ Player 本体の公開） |
-| C / C++ | GitHub Releases の `ssplayer-wgpu-<platform>.zip`（`include/` `lib/` `LICENSE.md` `LICENSE.ja.md` `THIRD_PARTY_NOTICES.md`） | 🚧 ワークフローはあるがリリース未実施 |
+| C / C++ | GitHub Releases の `ssplayer-wgpu-<platform>-<arch>.zip`（`include/` `lib/` `LICENSE.md` `LICENSE.ja.md` `THIRD_PARTY_NOTICES.md`） | 🚧 ワークフローはあるがリリース未実施 |
 | Web | npm の `@spritestudio/ssplayer-wgpu` | 🚧 npm 未公開 |
 
 ## 🗺️ エディタから画面まで
@@ -105,7 +105,7 @@ flowchart LR
 
 ## 🔗 関連
 
-- [SpriteStudio Docs](https://cri-middleware.github.io/SpriteStudio-Docs/) — SDK と全公式 Player のポータル。
+- [SpriteStudio Docs](https://cri-middleware.github.io/SpriteStudio-Docs/ja/) — SDK と全公式 Player のポータル。
 - [SpriteStudio-SDK](https://github.com/cri-middleware/SpriteStudio-SDK) — この Player が直接リンクする共通コア（`ssruntime` / `ssab`）。
 - [SSPlayerForWeb](https://github.com/cri-middleware/SSPlayerForWeb) — WebGL Player。本 Player の描画パリティの基準であり、WebGPU が無い環境での答えでもあります。
 - [SSConverterGUI](https://github.com/cri-middleware/SSConverterGUI) — デスクトップ版コンバータ。

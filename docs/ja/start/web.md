@@ -13,7 +13,7 @@ Player を WebAssembly にコンパイルし、**WebGPU** で描画します。1
 ## 前提 { #requirements }
 
 WebGPU 対応ブラウザ：**Chrome / Edge 113+、Safari 26+、Firefox 141+**（対応プラットフォーム上）。未対応環境では `sharedContext()` が読めるエラーで reject するので、フォールバック（静止画や
-[WebGL Player](https://www.npmjs.com/package/@spritestudio/ssplayer-webgl)）は `catch` 一つで書けます。
+[SpriteStudio Player for Web の WebGL パッケージ](https://www.npmjs.com/package/@spritestudio/ssplayer-webgl)）は `catch` 一つで書けます。
 
 ## 導入 { #install }
 

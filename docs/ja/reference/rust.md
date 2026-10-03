@@ -18,15 +18,19 @@ title: Rust API リファレンス
 
 ```rust
 pub use events::{AudioEvent, SignalEvent, SignalParam, SignalValue, SsEvent, UserDataEvent};
+pub use fit::{Align, Fit, Placed, Placement, Rect};
 pub use frame::FrameView;
 pub use mask::{GeomKind, MaskOp, MaskWriter, MaskWriters, PartMaskFlags, ScopedWriter, StencilTest, plan_writers};
 pub use metrics::SceneStats;
 pub use pack::{EmbeddedImage, EmbeddedTexture, SSPack, TextureRef};
-pub use player::{AssetLoader, BlendOp, MissingAsset, MissingKind, OverridePriority,
+pub use player::{AssetLoader, AtlasKeys, BlendOp, MissingAsset, MissingKind, OverridePriority,
                  PlaybackDirection, PlaybackStyle, SSPlayer};
 pub use renderer::{AlphaMode, Retention, SSRenderer};
 pub use scene::{BatchInfo, FrameChunk, IDENTITY_TRANSFORM, MaskBackend, NodeSlot, SSScene, SceneConfig};
 pub use ssruntime::TrackBlend;
+pub use ssruntime::error::SSRuntimeError;
+#[cfg(feature = "web")]
+pub use web::{SsContextWeb, SsPlayerWeb, SsSurfaceWeb};
 ```
 
 ほとんどのアプリが触るのはこのうち 6 つです：`SSRenderer` / `SSScene` / `SceneConfig` / `SSPlayer` /
@@ -50,6 +54,7 @@ pub use ssruntime::TrackBlend;
 | `scene` | ターゲットスコープ：投影、フレームアリーナ、ドローリスト、GPU 計測 |
 | `player` | 再生ノードツリー、ロード、再生制御、パーツオーバーライド |
 | `pack` | `SSPack` — キャラクター間で共有される `.ssab`。CPU データのみ |
+| `fit` | オーサリング時のキャンバスを箱に合わせる：`Fit`、`Align`、`Placement` |
 | `assets` / `decode` | ローダーの継ぎ目と、アトラスの一括デコード |
 | `mask` | ステンシルプランナ |
 | `events` / `metrics` / `roster` | タイムラインイベント、フレームカウンタ、世代付きハンドル |

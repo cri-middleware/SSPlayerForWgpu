@@ -90,10 +90,11 @@ Point your build at those two directories. The C++ viewers under [`examples/`](#
 that through CMake and are the shortest working reference — one drives Metal on macOS, one DX12 on
 Windows, one Vulkan on Linux, and each is self-contained enough to copy out whole.
 
-> 🚧 **No prebuilt downloads yet.** The intended route is a per-platform archive of that same `bin/`
-> tree on [GitHub Releases](https://github.com/cri-middleware/SSPlayerForWgpu/releases), matching how
-> the SDK and the other players ship. The layout above is already what a release would package, and
-> the release workflow and its `SHA256SUMS` already exist; what is missing is a macOS signing and
+> 🚧 **No prebuilt downloads yet.** The intended route is a per-platform archive on
+> [GitHub Releases](https://github.com/cri-middleware/SSPlayerForWgpu/releases),
+> `ssplayer-wgpu-<platform>-<arch>.zip`, matching how the SDK and the other players ship: the same
+> header and licenses, with the library directly under `lib/`. The release workflow and its
+> `SHA256SUMS` already exist; what is missing is a macOS signing and
 > notarization step and the first release itself — see [ROADMAP](./ROADMAP.md).
 
 ### Browser (WebGPU)
@@ -197,7 +198,7 @@ Running one by hand, as in the table, needs the generated animation data first:
 The C++ viewers drive the library through CMake, which runs cargo itself, so they need no separate build
 step.
 
-## 🔨 Building from source
+## 🛠️ Building from Source
 
 `scripts/build.sh` (`build.ps1` on Windows) builds the **library** and nothing else — it never converts
 a `.ssab`, and it does not need the SDK for anything but the checkout cargo already did.
@@ -225,7 +226,7 @@ modes, deploying them to `examples/web` as `assets/` (reference, plus its siblin
 `assets_emb/` (embedded, atlas baked in). The tests read `assets/`, so it is a prerequisite for
 `cargo test`, not an optional step.
 
-## 🧭 Repository layout
+## 🧭 Repository Layout
 
 A single Cargo workspace. The library is one crate carrying all three faces, which a second crate only
 builds into binaries; everything else is a host that drives it.

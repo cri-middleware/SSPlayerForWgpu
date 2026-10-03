@@ -16,7 +16,7 @@
   WebGPU のライブデモがあります。🚧 このリポジトリの Pages ワークフローが公開されてから有効になります。それまでは `./scripts/build-pages.sh serve=yes` でローカルにビルドするか、
   [`docs/ja/`](./docs/ja/index.md) を直接お読みください
 - [**English documentation**](https://cri-middleware.github.io/SSPlayerForWgpu/) — 同じサイトの英語版（リポジトリ内では [`docs/en/`](./docs/en/index.md)）
-- [**制限事項と対応範囲**](./docs/ja/limitations.md) — 現在描けるもの、ホスト側に委ねているもの
+- [**制約と適用範囲**](./docs/ja/limitations.md) — 現在描けるもの、ホスト側に委ねているもの
 - [**SS6Player for CPP からの移行**](./docs/ja/migration/from-ss6-cpp.md)
 - [**ROADMAP**](./ROADMAP.md) — 実装済みのもの、予定しているもの、意図的に見送ったもの
 - [**AI アシスタント向け**](https://cri-middleware.github.io/SSPlayerForWgpu/ja/llms.txt) — このドキュメントを Markdown で提供します。`llms.txt` はページの目次、`llms-full.txt` は全ページを 1 ファイルにまとめたものです — 🚧 初回リリース後に公開
@@ -75,9 +75,9 @@ bin/libs/<platform>/<arch>/libssplayer_wgpu.{a,dylib}    # Windows では .lib/.
 ビルド設定をこの 2 つのディレクトリに向けてください。[`examples/`](#-サンプル) 以下の C++ ビューアがまさにそれを CMake で行っており、動く実例としては最短です。macOS では Metal、Windows では DX12、
 Linux では Vulkan を駆動し、それぞれ丸ごとコピーして持ち出せる程度に自己完結しています。
 
-> 🚧 **ビルド済みバイナリの配布はまだありません。** 想定している経路は、同じ `bin/` ツリーをプラットフォームごとのアーカイブにして
+> 🚧 **ビルド済みバイナリの配布はまだありません。** 想定している経路は、プラットフォームごとのアーカイブ `ssplayer-wgpu-<platform>-<arch>.zip` を
 > [GitHub Releases](https://github.com/cri-middleware/SSPlayerForWgpu/releases) へ置く形で、SDK や他の
-> Player の配布方法に揃えます。上記のレイアウトはすでにリリースが同梱する形そのもので、リリースワークフローと `SHA256SUMS` はすでにあります。足りていないのは macOS の署名と notarization、そして最初のリリースです。
+> Player の配布方法に揃えます。中身は同じヘッダとライセンスで、ライブラリは `lib/` 直下に入ります。リリースワークフローと `SHA256SUMS` はすでにあります。足りていないのは macOS の署名と notarization、そして最初のリリースです。
 > [ROADMAP](./ROADMAP.md) を参照してください。
 
 ### ブラウザ (WebGPU)
@@ -149,7 +149,7 @@ C と JavaScript のフェイスは名前が違うだけで同じ形をしてお
 | [`examples/viewer-metal-cpp`](./examples/viewer-metal-cpp) | C++ / Metal, macOS | `cmake -B build && cmake --build build && ./build/ssviewer-metal` |
 | [`examples/viewer-dx12-cpp`](./examples/viewer-dx12-cpp) | C++ / DX12, Windows | `cmake -B build; cmake --build build --config Release; .\build\Release\ssviewer-dx12.exe` |
 | [`examples/viewer-vulkan-cpp`](./examples/viewer-vulkan-cpp) | C++ / Vulkan, Linux — X11 と Wayland を 1 つのバイナリに | `cmake -B build && cmake --build build && ./build/ssviewer-vulkan` |
-| [`examples/viewer-bevy`](./examples/viewer-bevy) | Bevy — アダプタの開発用ビューア。全キャラクターを並べたもの | `cargo run -p ssplayer-bevy-viewer` |
+| [`examples/viewer-bevy`](./examples/viewer-bevy) | Bevy — アダプタの開発用ビューア。複数キャラクターを並べたもの | `cargo run -p ssplayer-bevy-viewer` |
 | [`examples/overall-bevy`](./examples/overall-bevy) | Bevy — 機能を順に見せるツアー | `cargo run -p ssplayer-bevy-overall` |
 
 clone したばかりの状態からは、スクリプト 1 本で動かせます。初回はデータを変換してからサンプルを起動し、指定しなければ `hello` を動かします（Windows では `.ps1`）:
@@ -167,7 +167,7 @@ clone したばかりの状態からは、スクリプト 1 本で動かせま�
 
 C++ ビューアは CMake 経由でライブラリを駆動し、その CMake が cargo 自体を実行するので、別途ビルド手順は要りません。
 
-## 🔨 ソースからのビルド
+## 🛠️ ソースからのビルド
 
 `scripts/build.sh`（Windows では `build.ps1`）が作るのは**ライブラリだけ**です。`.ssab` の変換は一切行わず、cargo がすでに済ませたチェックアウト以外に SDK を必要としません。
 

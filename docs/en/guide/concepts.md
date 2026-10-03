@@ -96,7 +96,7 @@ Draw order inside a target is `set_order`, ascending. It is a plain integer, not
 ## What each face can do
 
 The library is one; the faces expose different amounts of it. Nothing here is a permanent
-boundary except the wgpu column — see the [ROADMAP](https://github.com/cri-middleware/SSPlayerForWgpu/blob/main/ROADMAP.md)
+boundary except the last row, since the C and JavaScript faces own their render pass by design — see the [ROADMAP](https://github.com/cri-middleware/SSPlayerForWgpu/blob/main/ROADMAP.md)
 for what is planned.
 
 | | Rust | C | JavaScript | Bevy |

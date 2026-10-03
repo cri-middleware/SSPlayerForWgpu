@@ -18,15 +18,19 @@ This page is the map: what lives where, and which feature turns it on.
 
 ```rust
 pub use events::{AudioEvent, SignalEvent, SignalParam, SignalValue, SsEvent, UserDataEvent};
+pub use fit::{Align, Fit, Placed, Placement, Rect};
 pub use frame::FrameView;
 pub use mask::{GeomKind, MaskOp, MaskWriter, MaskWriters, PartMaskFlags, ScopedWriter, StencilTest, plan_writers};
 pub use metrics::SceneStats;
 pub use pack::{EmbeddedImage, EmbeddedTexture, SSPack, TextureRef};
-pub use player::{AssetLoader, BlendOp, MissingAsset, MissingKind, OverridePriority,
+pub use player::{AssetLoader, AtlasKeys, BlendOp, MissingAsset, MissingKind, OverridePriority,
                  PlaybackDirection, PlaybackStyle, SSPlayer};
 pub use renderer::{AlphaMode, Retention, SSRenderer};
 pub use scene::{BatchInfo, FrameChunk, IDENTITY_TRANSFORM, MaskBackend, NodeSlot, SSScene, SceneConfig};
 pub use ssruntime::TrackBlend;
+pub use ssruntime::error::SSRuntimeError;
+#[cfg(feature = "web")]
+pub use web::{SsContextWeb, SsPlayerWeb, SsSurfaceWeb};
 ```
 
 Most applications touch six of these: `SSRenderer`, `SSScene`, `SceneConfig`, `SSPlayer`,
@@ -51,6 +55,7 @@ one upload of a pack's atlases. See [The borrow model](../wgpu/borrow-model.md).
 | `scene` | target-scoped: projection, the frame arena, the draw list, GPU timing |
 | `player` | the playback node tree, loading, transport, per-part overrides |
 | `pack` | `SSPack` — a `.ssab` shared between characters. CPU data only |
+| `fit` | fitting the authored canvas into a box: `Fit`, `Align`, `Placement` |
 | `assets` / `decode` | the loader seam, and bulk atlas decoding |
 | `mask` | the stencil planner |
 | `events` / `metrics` / `roster` | timeline events, frame counters, generation-tagged handles |

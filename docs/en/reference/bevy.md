@@ -4,8 +4,8 @@ title: Bevy API reference
 
 # Bevy API reference
 
-The whole authoring surface is one plugin, three components, one state component and three
-messages. Generated docs:
+The whole authoring surface is one plugin, four components (one of them optional), one state
+component, four feedback messages and three command messages. Generated docs:
 <a href="../api/ssplayer_bevy/index.html" target="_blank" rel="noreferrer">**rustdoc for `ssplayer_bevy`**</a>.
 
 **Bevy 0.20.x, and no other line** — see [Get started with Bevy](../start/bevy.md#supported-bevy).
@@ -150,7 +150,7 @@ fn on_finish(mut finished: MessageReader<SsFinished>, mut commands: Commands) {
 |---|---|
 | Main world | the components above — the whole authoring surface |
 | `ExtractSchedule` | copies them, plus the frame delta, into the render world |
-| `Render` / `RenderSystems::Prepare` | applies them to the playback trees; loads a pack whose `src` changed |
+| `Render` / `RenderSystems::Prepare` | applies them to the playback trees; rebuilds a character whose `pack` or `animation` changed |
 | `Core2d` / `Core2dSystems::MainPass` | advances, builds and draws — ordered **after** `main_transparent_pass_2d` |
 
 That last ordering is an explicit edge, not a coincidence of set membership: two systems that each
