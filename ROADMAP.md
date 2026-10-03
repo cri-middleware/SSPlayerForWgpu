@@ -142,9 +142,9 @@ player, where every host and the C ABI reach it, and the host half belongs in an
         is already on the registry.
 - [ ] **macOS signing and notarization** for the cdylib. Portable from the sibling
       players, using the existing organisation secrets.
-- [ ] **Version stamping.** Versions are hand-written, and the SDK is a submodule
-      rather than a release zip, so artifacts need to record the SDK commit they
-      were built from.
+- [ ] **Version stamping.** Versions are hand-written and the SDK is a submodule rather
+      than a release zip, so the release zips, the C library and the npm package need to
+      record the SDK commit they were built from. Only the preview shell does.
 - [ ] ⛔ **crates.io.** `ssruntime` and `ssab` are path dependencies into the
       submodule; cargo will not publish a crate that depends on paths only.
 - [ ] **Browser-side measurement.** `surface.stats()` is wired through to
