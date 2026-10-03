@@ -40,9 +40,10 @@
 //!
 //! # Limits of this version
 //!
-//! * **One view.** `SSScene::update` fuses the timeline advance with the
-//!   geometry build, so a second view would advance every animation twice per
-//!   frame. Later views are skipped, with a warning.
+//! * **One view.** The adapter holds one `SSScene` with every character in it,
+//!   and `SSScene::update` fuses the timeline advance with the geometry build,
+//!   so a second view would advance every animation twice per frame. Later views
+//!   are skipped, with a warning.
 //! * **MSAA must be off.** The player's pipelines are single-sampled.
 
 mod asset;
