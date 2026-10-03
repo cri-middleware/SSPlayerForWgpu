@@ -12,36 +12,6 @@ breaks are in [CONTRIBUTING.md](./CONTRIBUTING.md#technical-constraints--guiding
 
 ## Playback & rendering
 
-- [x] Draw kinds — Normal, Mesh, Shape, Instance, Effect, Mask.
-- [x] Part colours and blend modes, premultiplied throughout. Seven blend states
-      serve ten of the twelve modes: Mulalpha and Mul2 share Mul's and Screen2
-      shares Screen's, as in `ssplayer-pixi`, and no fixture has confirmed those
-      three exact. `Div2` / `Overlay2` fall back to `Mix` — see *Backdrop-reading
-      blends* below.
-- [x] Player-level tint — `set_tint` / `ss_player_set_tint` / `setTint`, taking
-      `0xRRGGBB` like `ssplayer-webgl`'s `tint`. It applies after the PartsColor
-      mix, so it could not fold into vertex colour: it rides on `Prim` beside the
-      player alpha and multiplies the finished colour in every fragment path.
-- [x] Stencil masking, including clipping writers and per-player unwind.
-- [x] Coverage-bitmap masking (mask doc §5), for hosts whose pass lends no
-      stencil. Same semantics, no one-frame lag, one extra pass per masking
-      player. `MaskBackend` picks between the two.
-- [x] The 13 `ss_shader` integration shaders (the `SHDR` part attribute).
-- [x] Playback control — play / pause / stop, seek, section, reverse, ping-pong,
-      speed, frame rate, loop counts.
-- [x] Per-part runtime overrides — colour, cell, visibility.
-- [x] Runtime texture replacement — swap the texture a cellmap binds from the
-      program (SDK `30_external_resources.md`), `set_cellmap_texture` /
-      `ss_player_set_cellmap_texture` / `setCellmapTexture`, plus the Bevy
-      `SsCellmapTextures` component. A Player-side override, distinct from the
-      per-part Override Layer. Where the sibling Players overwrite an entry in a
-      per-player texture map, this one keeps that map in the device-scoped
-      renderer, so an override is a *redirect* of the player's own atlas-key table
-      to a private key — per player, an instance child (its own pack) does not
-      inherit it, and a restore points back at the untouched atlas rather than
-      reloading it.
-- [x] Events — user data, signal, audio, and the started / finished / looped edges.
-- [x] Many players per render target, drawn in one pass in ascending `order`.
 - [ ] **9-slice parts.** The runtime already emits the batches and the geometry
       (`get_nines_*`), so this is one WGSL vertex entry, one `GeomClass`, one
       `GeomKind` — which also gives Nines mask coverage — and the `FrameView`
@@ -98,24 +68,12 @@ breaks are in [CONTRIBUTING.md](./CONTRIBUTING.md#technical-constraints--guiding
 
 ## Hosts & platforms
 
-- [x] Rust — `examples/viewer` (winit).
-- [x] WebGPU / js — one device per page, any number of canvases and players.
-- [x] C / C++ — verified on macOS (Metal) and Windows (DX12).
-- [x] Device-loss recovery on every face.
 - [ ] **Vulkan C++ viewer** (Linux) — `examples/viewer-vulkan-cpp`. Written, and
       never built or run: it was written on macOS, where neither the X11 nor the
       Wayland code compiles. It carries both window paths in one binary because
       Xwayland means an X11 window never reaches the `SS_WINDOW_WAYLAND` arm, so
       closing this needs one run per path on a Linux desktop. Until then the Xlib
       and Wayland arms of `surface_target` stay unverified.
-- [x] Bevy — `libs/ssplayer-bevy`, with `examples/viewer-bevy` and
-      `examples/overall-bevy` as its hosts. A separate crate, so the core never
-      depends on Bevy and the adapter can follow its own wgpu major; it tracks one
-      Bevy line at a time, because Bevy and the player must resolve to a single
-      `wgpu`. A `.ssab` is an `SsPack` asset loaded through the `AssetServer`,
-      parsed once however many characters play it, with its atlases as Bevy
-      images lent to the player — so the renderer holds no pixels of its own for
-      them, and a hot reload rebuilds the characters from the new file.
 - [ ] **Bevy: more than one camera.** The adapter holds one `SSScene`, binds it to
       the first view that renders and skips the rest with a warning
       (`ssplayer-bevy/src/render.rs`, `bound_view`), so a UI camera, a
@@ -152,19 +110,11 @@ player, where every host and the C ABI reach it, and the host half belongs in an
       `anchor` and `pivot` — `part_rect` over those and the part transform, then
       `hit_test_part(x, y)` over that, in player-local coordinates. Portable: it is C-ABI
       shaped, needs no GPU work, and every adapter crate inherits it.
-- [x] **`fit` / `align`** — `SSPlayer::fit_into` / `ss_player_fit_into` / `fitInto`, over the
-      family's vocabulary (`contain` / `cover` / `none` and nine alignments). Pure arithmetic in
-      `fit.rs`, so the three faces are translation only and an adapter inherits it; the contract
-      it ports is the porting guide's [Placement: Fit and Align](https://github.com/cri-middleware/SpriteStudio-SDK/blob/HEAD/libs/ssruntime/docs/50_features/70_placement.md). The box is the animation's authored canvas
-      (`canvas_rect`, the canvas placed against the origin by its pivot) unless the caller supplies
-      one — **measured boxes are not built**: `frameScope: animation | pack` would mean baking every
-      frame at load, and nothing needs it yet. Not wired into `ssplayer-bevy`, which is the first
-      half of *Bevy UI* below.
 - [ ] **Bevy UI (`Node`).** `ssplayer-bevy` gives Bevy a player in the world; a player inside
       Bevy's UI tree is a different thing — it has to size from `ComputedNode`, respect the UI
-      camera's stacking and clipping, and answer `Interaction` picking. The two primitives
-      above are what it would be built on, and it is the only Rust UI target that costs
-      nothing new to reach.
+      camera's stacking and clipping, and answer `Interaction` picking. The part rect above
+      and `SSPlayer::fit_into` — not yet wired into `ssplayer-bevy` — are what it would be
+      built on, and it is the only Rust UI target that costs nothing new to reach.
 
 ## Resource management
 
@@ -199,14 +149,6 @@ player, where every host and the C ABI reach it, and the host half belongs in an
 - [ ] **Version stamping.** Versions are hand-written, and the SDK is a submodule
       rather than a release zip, so artifacts need to record the SDK commit they
       were built from.
-- [x] **`THIRD_PARTY_NOTICES.md`.** `scripts/generate-licenses.sh` runs `cargo about`
-      over `libs/ssplayer-wgpu` with `--features embedded,ffi,web` — the union of what
-      the Rust library, the C face and the npm package link, which is exactly what the
-      archives carry. `libs/ssplayer-bevy` sits outside that set, so the `accepted`
-      list stays the SDK's own: Bevy's tree pulls `MPL-2.0` (the symphonia family),
-      `BSD-2-Clause`, `MIT-0` and one `(MIT OR Apache-2.0) AND NCSA`. The adapter is
-      consumed as source, so that tree is the host's to account for; putting it in an
-      archive would need the review first.
 - [ ] ⛔ **crates.io.** `ssruntime` and `ssab` are path dependencies into the
       submodule; cargo will not publish a crate that depends on paths only.
 - [ ] **Browser-side measurement.** `surface.stats()` is wired through to
