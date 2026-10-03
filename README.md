@@ -197,7 +197,7 @@ Running one by hand, as in the table, needs the generated animation data first:
 The C++ viewers drive the library through CMake, which runs cargo itself, so they need no separate build
 step.
 
-## 🔨 Building from source
+## 🛠️ Building from Source
 
 `scripts/build.sh` (`build.ps1` on Windows) builds the **library** and nothing else — it never converts
 a `.ssab`, and it does not need the SDK for anything but the checkout cargo already did.
@@ -225,7 +225,7 @@ modes, deploying them to `examples/web` as `assets/` (reference, plus its siblin
 `assets_emb/` (embedded, atlas baked in). The tests read `assets/`, so it is a prerequisite for
 `cargo test`, not an optional step.
 
-## 🧭 Repository layout
+## 🧭 Repository Layout
 
 A single Cargo workspace. The library is one crate carrying all three faces, which a second crate only
 builds into binaries; everything else is a host that drives it.
