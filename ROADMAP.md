@@ -179,10 +179,6 @@ player, where every host and the C ABI reach it, and the host half belongs in an
 
 ## Distribution & verification
 
-- [ ] **Release automation.** `release.yml` builds every platform and
-      `build-release.sh` assembles the zips, but CI has no macOS job — so the
-      Metal viewer is never built there. Cross-compilation is unsupported, so each
-      platform needs its own runner.
 - [ ] **Nothing publishes the npm package yet.** `packages/ssplayer-wgpu` is
       `@spritestudio/ssplayer-wgpu` in its shipping shape — scoped name, the
       custom element as its own `./element` entry point, its own JavaScript-facing
@@ -203,9 +199,6 @@ player, where every host and the C ABI reach it, and the host half belongs in an
 - [ ] **Version stamping.** Versions are hand-written, and the SDK is a submodule
       rather than a release zip, so artifacts need to record the SDK commit they
       were built from.
-- [ ] **`CHANGELOG.md`** — with the first release, not before it. Entries written
-      now would describe a version nobody can install, and the shape of the
-      first one is decided by what actually ships.
 - [x] **`THIRD_PARTY_NOTICES.md`.** `scripts/generate-licenses.sh` runs `cargo about`
       over `libs/ssplayer-wgpu` with `--features embedded,ffi,web` — the union of what
       the Rust library, the C face and the npm package link, which is exactly what the
