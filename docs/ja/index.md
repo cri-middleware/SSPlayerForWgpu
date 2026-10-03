@@ -83,7 +83,7 @@ Windows のゲームも、macOS のアプリも、4 本の移植版ではなく�
 |---|---|---|
 | Rust | crates.io の `ssplayer-wgpu` | 🚧 先に SDK のクレート公開が必要 |
 | Bevy | crates.io の `ssplayer-bevy` | 🚧 同上（＋ Player 本体の公開） |
-| C / C++ | GitHub Releases の `ssplayer-wgpu-<platform>.zip`（`include/` `lib/` `LICENSE.md` `LICENSE.ja.md` `THIRD_PARTY_NOTICES.md`） | 🚧 ワークフローはあるがリリース未実施 |
+| C / C++ | GitHub Releases の `ssplayer-wgpu-<platform>-<arch>.zip`（`include/` `lib/` `LICENSE.md` `LICENSE.ja.md` `THIRD_PARTY_NOTICES.md`） | 🚧 ワークフローはあるがリリース未実施 |
 | Web | npm の `@spritestudio/ssplayer-wgpu` | 🚧 npm 未公開 |
 
 ## 🗺️ エディタから画面まで

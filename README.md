@@ -90,10 +90,11 @@ Point your build at those two directories. The C++ viewers under [`examples/`](#
 that through CMake and are the shortest working reference — one drives Metal on macOS, one DX12 on
 Windows, one Vulkan on Linux, and each is self-contained enough to copy out whole.
 
-> 🚧 **No prebuilt downloads yet.** The intended route is a per-platform archive of that same `bin/`
-> tree on [GitHub Releases](https://github.com/cri-middleware/SSPlayerForWgpu/releases), matching how
-> the SDK and the other players ship. The layout above is already what a release would package, and
-> the release workflow and its `SHA256SUMS` already exist; what is missing is a macOS signing and
+> 🚧 **No prebuilt downloads yet.** The intended route is a per-platform archive on
+> [GitHub Releases](https://github.com/cri-middleware/SSPlayerForWgpu/releases),
+> `ssplayer-wgpu-<platform>-<arch>.zip`, matching how the SDK and the other players ship: the same
+> header and licenses, with the library directly under `lib/`. The release workflow and its
+> `SHA256SUMS` already exist; what is missing is a macOS signing and
 > notarization step and the first release itself — see [ROADMAP](./ROADMAP.md).
 
 ### Browser (WebGPU)

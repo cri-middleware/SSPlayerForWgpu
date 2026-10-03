@@ -75,9 +75,9 @@ bin/libs/<platform>/<arch>/libssplayer_wgpu.{a,dylib}    # Windows では .lib/.
 ビルド設定をこの 2 つのディレクトリに向けてください。[`examples/`](#-サンプル) 以下の C++ ビューアがまさにそれを CMake で行っており、動く実例としては最短です。macOS では Metal、Windows では DX12、
 Linux では Vulkan を駆動し、それぞれ丸ごとコピーして持ち出せる程度に自己完結しています。
 
-> 🚧 **ビルド済みバイナリの配布はまだありません。** 想定している経路は、同じ `bin/` ツリーをプラットフォームごとのアーカイブにして
+> 🚧 **ビルド済みバイナリの配布はまだありません。** 想定している経路は、プラットフォームごとのアーカイブ `ssplayer-wgpu-<platform>-<arch>.zip` を
 > [GitHub Releases](https://github.com/cri-middleware/SSPlayerForWgpu/releases) へ置く形で、SDK や他の
-> Player の配布方法に揃えます。上記のレイアウトはすでにリリースが同梱する形そのもので、リリースワークフローと `SHA256SUMS` はすでにあります。足りていないのは macOS の署名と notarization、そして最初のリリースです。
+> Player の配布方法に揃えます。中身は同じヘッダとライセンスで、ライブラリは `lib/` 直下に入ります。リリースワークフローと `SHA256SUMS` はすでにあります。足りていないのは macOS の署名と notarization、そして最初のリリースです。
 > [ROADMAP](./ROADMAP.md) を参照してください。
 
 ### ブラウザ (WebGPU)
