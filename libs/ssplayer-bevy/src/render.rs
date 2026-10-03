@@ -72,12 +72,14 @@ struct PlayerSlot {
 
 /// Everything the render world owns on this crate's behalf.
 ///
-/// `SSRenderer` is device-scoped and `SSScene` is target-scoped, so there is one
-/// renderer for the whole app and one scene per view it draws into.
-/// There is one scene here, and a second view is refused rather than silently
-/// double-advancing every timeline: `SSScene::update` fuses the timeline advance
-/// with the geometry build, so running it twice a frame would play every
-/// animation at double speed.
+/// `SSRenderer` is device-scoped and `SSScene` is target-scoped, so the player's
+/// shape is one renderer for the whole app and one scene per view it draws into.
+/// This adapter keeps one scene with every character in it, and refuses a second
+/// view rather than silently double-advancing every timeline: `SSScene::update`
+/// fuses the timeline advance with the geometry build, so running it twice a
+/// frame over the same characters would play every animation at double speed.
+/// A scene per view would advance nothing twice, provided each character is in
+/// only one of them.
 #[derive(Resource)]
 pub(crate) struct SsRenderState {
     renderer: SSRenderer,
@@ -469,7 +471,7 @@ pub(crate) fn draw_players(
                 state.warned_second_view = true;
                 warn!(
                     "ssplayer-bevy: more than one view is rendering; only the first draws. \
-                     A scene per view needs the timeline advance split off from the geometry build."
+                     One scene holds every character, so a second view would advance each of them twice."
                 );
             }
             return;
