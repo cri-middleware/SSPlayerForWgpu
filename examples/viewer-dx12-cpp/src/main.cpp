@@ -1,4 +1,4 @@
-// DX12 (Windows) verification viewer for the ssplayer-wgpu C API (SPEC §12 P5, §13).
+// DX12 (Windows) verification viewer for the ssplayer-wgpu C API.
 //
 // This is the "③ ffi" face end to end: Win32 owns the window, hands its `HWND`
 // to `ss_scene_create`, and drives the scene with `ss_scene_update` /
@@ -8,7 +8,7 @@
 //
 // It is the Windows twin of `examples/viewer-metal-cpp`, and the twins
 // deliberately duplicate the playback loop instead of sharing it: the point of
-// the sample is that one directory is self-contained (SPEC §2). What actually
+// the sample is that one directory is self-contained. What actually
 // differs is the first twenty lines of `WinMain` — HWND instead of CAMetalLayer,
 // `SS_WINDOW_WIN32` instead of `SS_WINDOW_METAL_LAYER`. The C-API calls below
 // are the same calls in the same order.
@@ -20,9 +20,9 @@
 // it was exported. `ss_player_load(player, path)` is the whole of loading — the
 // pack, its atlases in either export mode, and the sibling .ssab files its
 // instance parts play from, all resolved against the directory the drop came
-// from (SPEC §8.1, §7.1).
+// from.
 //
-// **It shows two characters at once by default** (SPEC §11, phase P7-7): the
+// **It shows two characters at once by default**: the
 // window is `ss_scene_t` and each character is an `ss_player_t` placed with
 // `ss_player_set_transform`, sharing one device, one renderer and one atlas
 // upload.
@@ -110,7 +110,7 @@ static std::wstring Wide(const std::string &utf8) {
 
 // Path questions go to `std::filesystem::path`, not to a scan for separators —
 // the same call the player makes when it hands `src` to the loader instead of
-// cutting it itself (SPEC §8.1). It already knows that both `\` and `/` separate
+// cutting it itself. It already knows that both `\` and `/` separate
 // here, that a trailing one must not be doubled, and where a `\\?\` prefix or a
 // drive letter ends; a `find_last_of` has to be told each of those by hand.
 
@@ -308,7 +308,7 @@ bool Viewer::Start(HWND hwnd) {
     desc.clear_color[1] = 0.08f;
     desc.clear_color[2] = 0.12f;
     desc.clear_color[3] = 1.0f;
-    desc.enable_mask = true; // stencil buffer, so Mask.ssab renders (SPEC §6)
+    desc.enable_mask = true; // stencil buffer, so Mask.ssab renders
     desc.y_down = false;
 
     scene_ = ss_scene_create(&desc);
@@ -335,7 +335,7 @@ bool Viewer::Start(HWND hwnd) {
 
 void Viewer::Shutdown() {
     // Destroying the scene takes its players with it; the handles must not be
-    // touched afterwards (SPEC §11).
+    // touched afterwards.
     if (scene_ != nullptr) {
         ss_scene_destroy(scene_);
         scene_ = nullptr;
@@ -355,7 +355,7 @@ void Viewer::AddPlayer() {
     players_.push_back(player);
     // Nothing to register: the caller follows with `LoadPackAtIndex`, and that
     // one call brings the pack, its atlases and the packs its instance parts
-    // play from (SPEC §8.1, §7.1).
+    // play from.
     LayOutPlayers();
 }
 
@@ -371,7 +371,7 @@ void Viewer::RemovePlayer() {
 /// Give each character an equal slice of the window, fit it to that slice, and
 /// stack the cast front to back.
 ///
-/// Placement is per player (SPEC §5.4); the projection belongs to the scene, and
+/// Placement is per player; the projection belongs to the scene, and
 /// it maps one unit to one target pixel, so the window's own size is the right
 /// thing to divide. Fitting rather than a fixed scale is what the demo packs
 /// need: they disagree about canvas size, so one constant either crowds two
@@ -426,7 +426,7 @@ bool Viewer::CollectPacks() {
 /// Dropped packs join the list the Left/Right keys walk rather than replacing
 /// it, so a character dropped in can still be compared against the demo set —
 /// and a folder dropped in brings its instance-referenced packs along, which is
-/// what a pack with external references needs to resolve (SPEC §7.1).
+/// what a pack with external references needs to resolve.
 bool Viewer::HandleDrop(HDROP drop) {
     std::vector<std::wstring> paths = CollectSsabPaths(drop);
     size_t first = (size_t)-1;
@@ -461,7 +461,7 @@ bool Viewer::HandleDrop(HDROP drop) {
 /// `ss_player_load` is the whole of it: the pack, its atlases in either export
 /// mode, and the sibling .ssab files its instance parts play from. A host whose
 /// assets are not files walks `ss_player_texture_at` and feeds
-/// `ss_scene_add_texture_png` instead (SPEC §8.1, §8.2).
+/// `ss_scene_add_texture_png` instead.
 void Viewer::LoadPackAtIndex(size_t index) {
     std::string path = Utf8(packs_[index]);
     for (size_t i = 0; i < players_.size(); i++) {
@@ -522,7 +522,7 @@ void Viewer::Tick() {
     }
 
     // One update and one render for the whole window, whatever the player count:
-    // they share a scene, so they share the pass (SPEC §9.2).
+    // they share a scene, so they share the pass.
     ss_scene_update(scene_, delta);
     if (ss_scene_render(scene_) != SS_OK) {
         fprintf(stderr, "render: %s\n", ss_last_error());
@@ -577,7 +577,7 @@ bool Viewer::HandleKey(WPARAM key) {
         PlayAnimationAtIndex(animIndex_);
         return true;
     // Adding a character costs a playback tree and nothing on the GPU: the pack
-    // and its atlas are already there (SPEC §1.2 / §8.2).
+    // and its atlas are already there.
     case VK_OEM_PLUS:
     case VK_ADD:
         if (players_.size() < kMaxPlayers) {
@@ -609,7 +609,7 @@ void Viewer::PrintStatus() {
     printf("  Canvas:        %.0f x %.0f\n", canvasWidth, canvasHeight);
     printf("  Players:       %u in one scene\n", ss_scene_player_count(scene_));
     printf("  Playback:      %s\n", paused_ ? "Paused" : "Playing");
-    // What the frame cost (SPEC §14.2 item 10). GPU time is 0 when the adapter
+    // What the frame cost. GPU time is 0 when the adapter
     // has no timestamp query, and lags a frame or two when it does.
     ss_scene_stats_t stats;
     if (ss_scene_stats(scene_, &stats) == SS_OK) {
@@ -680,7 +680,7 @@ static LRESULT CALLBACK WindowProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lP
         return 0;
     case WM_CLOSE:
         // Before DestroyWindow, not after: the window has to outlive the
-        // surface built from its HWND (SPEC §11, `ss_scene_create`).
+        // surface built from its HWND (`ss_scene_create`).
         if (viewer != nullptr) {
             viewer->Shutdown();
         }

@@ -1,4 +1,4 @@
-//! How a CPU frame scales with the cast (SPEC §14.2 items 5 and 6).
+//! How a CPU frame scales with the cast.
 //!
 //! `#[ignore]`d: it is a measurement, not an assertion. Wall-clock on a shared
 //! machine is not something to gate a build on, and the numbers are what decide

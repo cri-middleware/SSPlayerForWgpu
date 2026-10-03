@@ -1,4 +1,4 @@
-# DX12 verification viewer for the ssplayer-wgpu C API (SPEC §12 P5).
+# DX12 verification viewer for the ssplayer-wgpu C API.
 #
 #   cmake -B build && cmake --build build --config Release
 #   .\build\Release\ssviewer-dx12.exe

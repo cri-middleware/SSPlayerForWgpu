@@ -1,4 +1,4 @@
-# cbindgen config for the `ffi` face (SPEC §11). Driven by build.rs when the
+# cbindgen config for the `ffi` face. Driven by build.rs when the
 # `ffi` feature is on; the output is libs/ssplayer-wgpu-ffi/include/ssplayer_wgpu.h.
 
 language = "C"
@@ -27,8 +27,7 @@ parse_deps = false
 # nothing to do with the C API. Keep the header to `src/ffi.rs`'s surface.
 exclude = ["IDENTITY_TRANSFORM", "MAX_MASK_WRITERS", "COVERAGE_LAYER_BITS"]
 
-# Types keep idiomatic Rust names in the source and take their C names here, so
-# the header reads like the hand-written API sketch in SPEC §11.
+# Types keep idiomatic Rust names in the source and take their C names here.
 [export.rename]
 "SsScene" = "ss_scene_t"
 "SsPlayer" = "ss_player_t"

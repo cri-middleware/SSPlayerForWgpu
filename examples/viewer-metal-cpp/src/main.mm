@@ -1,4 +1,4 @@
-// Metal (macOS) verification viewer for the ssplayer-wgpu C API (SPEC §12 P5, §13).
+// Metal (macOS) verification viewer for the ssplayer-wgpu C API.
 //
 // This is the "③ ffi" face end to end: Cocoa owns the window and its
 // CAMetalLayer, hands the layer to `ss_scene_create`, and drives the scene with
@@ -13,12 +13,12 @@
 // it was exported. `ss_player_load(player, path)` is the whole of loading — the
 // pack, its atlases in either export mode, and the sibling .ssab files its
 // instance parts play from, all resolved against the directory the drop came
-// from (SPEC §8.1, §7.1). This viewer used to walk `ss_player_texture_at` and
+// from. This viewer used to walk `ss_player_texture_at` and
 // call `ss_scene_add_texture_png` per image; that loop is what the one call
 // replaced. Those entry points remain for a host whose assets are not files —
-// an archive, a platform asset manager (SPEC §8.2).
+// an archive, a platform asset manager.
 //
-// **It shows two characters at once by default** (SPEC §11, phase P7-7). That
+// **It shows two characters at once by default**. That
 // used to be impossible through this API: the handle fused the window and the
 // player, so a second character meant a second surface on the same window and
 // the two cleared over each other. Now the window is `ss_scene_t` and each
@@ -34,7 +34,7 @@
 //
 // The other C++ viewers (DX12/Win32, Vulkan/Linux) deliberately duplicate this
 // loop instead of sharing it: the point of the sample is that one directory is
-// self-contained (SPEC §2).
+// self-contained.
 
 #import <Cocoa/Cocoa.h>
 #import <QuartzCore/CAMetalLayer.h>
@@ -196,7 +196,7 @@ static const NSUInteger kMaxPlayers = 6;
     desc.clear_color[1] = 0.08f;
     desc.clear_color[2] = 0.12f;
     desc.clear_color[3] = 1.0f;
-    desc.enable_mask = true; // stencil buffer, so Mask.ssab renders (SPEC §6)
+    desc.enable_mask = true; // stencil buffer, so Mask.ssab renders
     desc.y_down = false;
 
     _scene = ss_scene_create(&desc);
@@ -229,7 +229,7 @@ static const NSUInteger kMaxPlayers = 6;
 
 - (void)applicationWillTerminate:(NSNotification *)note {
     // Destroying the scene takes its players with it; the handles must not be
-    // touched afterwards (SPEC §11).
+    // touched afterwards.
     ss_scene_destroy(_scene);
     _scene = NULL;
     [_players removeAllObjects];
@@ -255,7 +255,7 @@ static const NSUInteger kMaxPlayers = 6;
     [_players addObject:[NSValue valueWithPointer:player]];
     // Nothing to register: the caller follows with `loadPackAtIndex`, and that
     // one call brings the pack, its atlases and the packs its instance parts
-    // play from (SPEC §8.1, §7.1).
+    // play from.
     [self layOutPlayers];
 }
 
@@ -271,7 +271,7 @@ static const NSUInteger kMaxPlayers = 6;
 /// Give each character an equal slice of the window, fit it to that slice, and
 /// stack the cast front to back.
 ///
-/// Placement is per player (SPEC §5.4); the projection belongs to the scene, and
+/// Placement is per player; the projection belongs to the scene, and
 /// it maps one unit to one target pixel, so the drawable's own size is the right
 /// thing to divide. Fitting rather than a fixed scale is what the demo packs
 /// need: they disagree about canvas size, so one constant either crowds two
@@ -348,7 +348,7 @@ static const NSUInteger kMaxPlayers = 6;
 /// Dropped packs join the list the Left/Right keys walk rather than replacing
 /// it, so a character dropped in can still be compared against the demo set —
 /// and a folder dropped in brings its instance-referenced packs along, which is
-/// what a pack with external references needs to resolve (SPEC §7.1).
+/// what a pack with external references needs to resolve.
 - (BOOL)playDroppedPaths:(NSArray<NSString *> *)paths {
     NSUInteger first = NSNotFound;
     for (NSString *path in paths) {
@@ -376,7 +376,7 @@ static const NSUInteger kMaxPlayers = 6;
 /// `ss_player_load` is the whole of it: the pack, its atlases in either export
 /// mode, and the sibling .ssab files its instance parts play from. This viewer
 /// used to walk `ss_player_texture_at` and call `ss_scene_add_texture_png` per
-/// image, and that loop is what the call replaced (SPEC §8.1).
+/// image, and that loop is what the call replaced.
 - (void)loadPackAtIndex:(NSUInteger)index {
     NSString *path = _packs[index];
     for (NSValue *entry in _players) {
@@ -429,7 +429,7 @@ static const NSUInteger kMaxPlayers = 6;
     _lastTick = now;
 
     // One update and one render for the whole window, whatever the player count:
-    // they share a scene, so they share the pass (SPEC §9.2).
+    // they share a scene, so they share the pass.
     ss_scene_update(_scene, delta);
     if (ss_scene_render(_scene) != SS_OK) {
         fprintf(stderr, "render: %s\n", ss_last_error());
@@ -505,7 +505,7 @@ static const NSUInteger kMaxPlayers = 6;
         return YES;
     }
     // Adding a character costs a playback tree and nothing on the GPU: the pack
-    // and its atlas are already there (SPEC §1.2 / §8.2).
+    // and its atlas are already there.
     if ([chars isEqualToString:@"+"] || [chars isEqualToString:@"="]) {
         if (_players.count < kMaxPlayers) {
             [self addPlayer];
@@ -533,7 +533,7 @@ static const NSUInteger kMaxPlayers = 6;
     printf("  Canvas:        %.0f x %.0f\n", canvasWidth, canvasHeight);
     printf("  Players:       %u in one scene\n", ss_scene_player_count(_scene));
     printf("  Playback:      %s\n", _paused ? "Paused" : "Playing");
-    // What the frame cost (SPEC §14.2 item 10). GPU time is 0 when the adapter
+    // What the frame cost. GPU time is 0 when the adapter
     // has no timestamp query, and lags a frame or two when it does.
     ss_scene_stats_t stats;
     if (ss_scene_stats(_scene, &stats) == SS_OK) {

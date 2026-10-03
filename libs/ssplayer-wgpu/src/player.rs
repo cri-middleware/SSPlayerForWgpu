@@ -633,7 +633,7 @@ pub struct SSPlayer {
     /// so a culled player's skipped tick leaves it for the first one that runs.
     start_pending: bool,
     /// Where this player sits in the scene — the root transform of its tree. Composed by [`SSPlayer::set_transform`]; only the matrix is
-    /// kept because nothing yet re-composes it. A future `box` (§9.3, the
+    /// kept because nothing yet re-composes it. A future `box` (the
     /// WebGL player's viewport-tracking rect) moves after `set_transform` runs,
     /// so it will need the authored parameters retained as well.
     transform: [f32; 16],
@@ -2658,7 +2658,7 @@ fn build_rig(
             let part_type = part.part_type_type();
 
             // Static mask flags. Geometry kind picks the
-            // writer builder; Shape/Text/Nines can't write coverage yet.
+            // writer builder; Text/Nines can't write coverage yet.
             let geom = match part_type {
                 PartType::PartTypeNormal | PartType::PartTypeMask => GeomKind::Quad,
                 PartType::PartTypeMesh => GeomKind::Mesh,

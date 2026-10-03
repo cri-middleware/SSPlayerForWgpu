@@ -1,4 +1,4 @@
-# Metal verification viewer for the ssplayer-wgpu C API (SPEC §12 P5).
+# Metal verification viewer for the ssplayer-wgpu C API.
 #
 #   cmake -B build && cmake --build build && ./build/ssviewer-metal
 #

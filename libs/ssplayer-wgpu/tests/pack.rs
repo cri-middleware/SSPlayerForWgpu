@@ -1,4 +1,4 @@
-//! Shared packs and the borrowed texture channel (SPEC §8.2, phase P7-5).
+//! Shared packs and the borrowed texture channel.
 //!
 //! Two claims are worth a GPU here.
 //!
@@ -8,7 +8,7 @@
 //!   [`SSRenderer::texture_upload_count`] is what these assert on.
 //! * **A texture can be borrowed rather than owned.** `set_texture` takes a view
 //!   the supplier keeps, which is how an engine's asset system stays the single
-//!   owner (§8.2). It has to produce the same pixels as `upload_texture`, and the
+//!   owner. It has to produce the same pixels as `upload_texture`, and the
 //!   [`AlphaMode`] that comes with it has to actually change how the fragment
 //!   stage reads the texel — the mislabelled control below is what proves it does.
 //!
@@ -62,8 +62,8 @@ fn alpha_ramp(width: u32, height: u32) -> Vec<u8> {
     out
 }
 
-/// The atlases `pack` asks for, loaded the way a host is meant to load them
-/// (SPEC §8.1): the `.ssab` names each image and where it sits relative to
+/// The atlases `pack` asks for, loaded the way a host is meant to load them:
+/// the `.ssab` names each image and where it sits relative to
 /// itself, and the hash comes with it rather than being derived from a filename.
 fn atlases(pack: &SSPack) -> Vec<(u32, Vec<u8>, u32, u32)> {
     let mut out = Vec::new();
@@ -78,7 +78,7 @@ fn atlases(pack: &SSPack) -> Vec<(u32, Vec<u8>, u32, u32)> {
     out
 }
 
-/// Create a texture the *test* owns, for handing to `set_texture` (SPEC §8.2).
+/// Create a texture the *test* owns, for handing to `set_texture`.
 /// The returned view is what the renderer borrows; the texture behind it stays
 /// the caller's.
 fn supplier_texture(device: &wgpu::Device, queue: &wgpu::Queue, rgba: &[u8], width: u32, height: u32) -> wgpu::TextureView {
@@ -188,7 +188,7 @@ fn scene_for(device: &wgpu::Device, queue: &wgpu::Queue) -> SSScene {
 }
 
 /// A pack names itself, so a host does not have to reconstruct the name that
-/// instance parts reference (SPEC §7.1 / §8.2). `Instance.ssab` points at
+/// instance parts reference. `Instance.ssab` points at
 /// `Instance_SourceAnime`, and that resolves only if the two agree.
 #[test]
 fn a_pack_carries_its_own_name() {
@@ -212,7 +212,7 @@ fn a_pack_carries_its_own_name() {
     assert_eq!(SSPack::load_named("Renamed", &bytes).unwrap().name(), "Renamed");
 }
 
-/// SPEC §8.1 / §8.2: a pack names the atlases it needs **and where they are**, so
+/// A pack names the atlases it needs **and where they are**, so
 /// a host can load a reference-mode `.ssab` without knowing anything about the
 /// directory it came from.
 ///
@@ -265,7 +265,7 @@ fn a_pack_names_the_atlases_it_needs() {
     assert!(embedded.textures().iter().all(|t| t.embedded), "an embedded pack reported an atlas the host would have to load");
 }
 
-/// SPEC §8.1: an embedded pack can hand out its atlases **without decoding them**,
+/// An embedded pack can hand out its atlases **without decoding them**,
 /// which is what lets a host with its own decoder — the browser, via
 /// `createImageBitmap` — support embedded packs while the player carries no
 /// decoder at all (the `web` feature builds without `embedded` for exactly this).
@@ -285,7 +285,7 @@ fn an_embedded_pack_hands_out_its_atlases_undecoded() {
 
     // The keys must be the ones a draw batch asks for (`name_hash`), not the ones
     // the blobs are stored under (`image_path_hash`) — swapping the two is the
-    // classic way to break embedded loading (SPEC §8.1).
+    // classic way to break embedded loading.
     let undecoded: Vec<u32> = images.iter().map(|i| i.slot).collect();
     let decoded: Vec<u32> = pack.decode_embedded().iter().map(|t| t.slot).collect();
     assert_eq!(undecoded, decoded, "the encoded and decoded routes disagree about which atlas is which");
@@ -310,13 +310,13 @@ fn an_embedded_pack_hands_out_its_atlases_undecoded() {
     assert!(SSPack::load(&ref_bytes).unwrap().embedded_images().is_empty(), "a reference-mode pack claims to carry its atlases");
 }
 
-/// SPEC §8.1: a `DrawBatch.texture_hash` is a cellmap's `name_hash` for an
+/// A `DrawBatch.texture_hash` is a cellmap's `name_hash` for an
 /// ordinary part, but a texture **file name**'s hash for one the author gave a
 /// TextureChange (`TCHG`). Both `cellmaps()` and `external_textures()` have to be
 /// named, or those batches find nothing.
 ///
 /// Worth a test of its own because the failure is quiet: a missing hash falls
-/// back to the 1x1 white texture (SPEC §8), so the part still draws — as a white
+/// back to the 1x1 white texture, so the part still draws — as a white
 /// silhouette — and no count, no error and no panic marks it.
 #[test]
 fn a_pack_names_its_texture_change_targets() {
@@ -375,7 +375,7 @@ fn a_pack_names_its_texture_change_targets() {
     assert_ne!(complete, missing_one, "dropping a TextureChange target changed nothing — the parts are not sampling it");
 }
 
-/// SPEC §8.2: sharing a pack means sharing its atlas. Two players of one embedded
+/// Sharing a pack means sharing its atlas. Two players of one embedded
 /// pack must decode and upload it exactly once between them — the decode is
 /// skipped too, because the filter runs before the PNG is touched.
 #[test]
@@ -412,11 +412,11 @@ fn a_shared_pack_uploads_its_atlas_once() {
     assert!(drawn_pixels(&two) > drawn_pixels(&one), "the second player added nothing to the frame, so the sharing claim is untested");
 }
 
-/// SPEC §1.2 / §9.1: the renderer is scoped to the **device**, not to a render
+/// The renderer is scoped to the **device**, not to a render
 /// target, and it is format-independent — so several canvases share one of it,
 /// and one atlas upload covers all of them.
 ///
-/// This is the claim the web face rests on (§10). Its predecessor requested an
+/// This is the claim the web face rests on. Its predecessor requested an
 /// adapter and a device per canvas, which put every canvas on its own device;
 /// nothing is shared across a device, so N canvases of the same character meant N
 /// atlas uploads and N sets of pipelines. Two scenes here, deliberately with
@@ -459,7 +459,7 @@ fn scenes_share_one_renderer() {
     assert!(drawn_pixels(&two) > 5_000, "the second canvas drew nothing — a renderer shared across formats is broken");
 
     // The expensive thing — the atlas — is not paid for twice. Pipelines are, and
-    // must be: they are baked against a colour format (§5.2).
+    // must be: they are baked against a colour format.
     assert_eq!(renderer.texture_upload_count(), atlas_count, "the second canvas uploaded the atlas again — the renderer is not shared across targets");
     assert_eq!(renderer.texture_count(), atlas_count, "the texture map grew for the second canvas");
     assert!(renderer.pipeline_count() > after_one, "the second format compiled no pipeline of its own, so the two canvases cannot both be drawing correctly");
@@ -470,7 +470,7 @@ fn scenes_share_one_renderer() {
     assert!(drawn_pixels(&again) > 5_000, "the first canvas stopped drawing once a second one shared its renderer");
 }
 
-/// SPEC §8.2: `set_texture` borrows a view the supplier owns and builds nothing
+/// `set_texture` borrows a view the supplier owns and builds nothing
 /// but a bind group around it. Given the same pixels, it has to render exactly
 /// what `upload_texture` renders — the only difference is who owns the texture.
 #[test]
@@ -514,7 +514,7 @@ fn a_borrowed_texture_renders_like_an_owned_one() {
     assert_eq!(borrowed, owned, "a borrowed texture rendered differently from the same pixels uploaded");
 
     // Handing the hash back drops the registration; the draw falls through to the
-    // 1x1 white fallback (SPEC §8), so the frame must change.
+    // 1x1 white fallback, so the frame must change.
     for (hash, ..) in &atlases {
         renderer.forget_texture(*hash);
     }
@@ -524,7 +524,7 @@ fn a_borrowed_texture_renders_like_an_owned_one() {
     assert_ne!(forgotten, borrowed, "forgetting every texture changed nothing — they were not actually being sampled");
 }
 
-/// SPEC §8.2: engines hand over straight-alpha textures, so `AlphaMode` tells the
+/// Engines hand over straight-alpha textures, so `AlphaMode` tells the
 /// fragment stage whether to divide the alpha back out. Declaring it correctly
 /// must land within rounding of our own premultiplied path; declaring it wrongly
 /// must be far worse — that gap is the evidence the flag reaches the shader.
@@ -586,7 +586,7 @@ fn alpha_mode_decides_how_the_texel_is_read() {
     assert!(mislabelled_err > 10.0, "mislabelling straight pixels as premultiplied moved the image by only {mislabelled_err:.3} — AlphaMode is not reaching the shader");
 }
 
-/// A pack hands over pixels; it never owns a GPU texture (SPEC §8.2). The decode
+/// A pack hands over pixels; it never owns a GPU texture. The decode
 /// is the caller's to place — here into a texture the test owns and lends back —
 /// which is exactly the route a Bevy adapter takes into `Assets<Image>`.
 #[test]
@@ -638,7 +638,7 @@ fn embedded_pixels_can_be_routed_through_the_borrowed_channel() {
 }
 
 /// Re-registering a pack a live animation plays from must not pull the resource
-/// out from under it (SPEC §8.2).
+/// out from under it.
 ///
 /// `build_node` binds every `Context` to its pack's resource by **raw pointer**,
 /// and the only `Arc` keeping that resource alive is the one in the player's pack

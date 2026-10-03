@@ -259,7 +259,7 @@ fn a_player_tint_multiplies_the_finished_colour() {
     }
 }
 
-/// Device-loss recovery (SPEC §14). The player's pipelines, buffers, textures and
+/// Device-loss recovery. The player's pipelines, buffers, textures and
 /// projection all belong to the device that made them, so `restore_device` has to
 /// rebuild every one of them against the replacement. Restoring onto a *second*
 /// device (not the same one again) is what makes this a real test: a leftover
@@ -297,7 +297,7 @@ fn restore_device_rebuilds_gpu_state() {
     scene.set_viewport(&queue, W as f32, H as f32, false);
     let _ = render_to_rgba(&device, &queue, &mut renderer, &mut scene, &mut player, true, 10);
 
-    // Restore runs widest scope first (SPEC §14): the device-scoped renderer once,
+    // Restore runs widest scope first: the device-scoped renderer once,
     // then each render target, then each player's reproducible atlases.
     renderer.restore_device(&device2, &queue2);
     scene.restore_device(&device2, &queue2);
@@ -317,7 +317,7 @@ fn restore_device_rebuilds_gpu_state() {
     let without_sources = render_to_rgba(&device2, &queue2, &mut renderer, &mut scene, &mut player, true, 1);
     assert_ne!(without_sources, restored, "render unchanged after forget_texture_sources — textures are not actually coming from the retained sources");
 
-    // Embedded mode (SPEC §8.1) retains no pixels: the atlas is re-decoded from the
+    // Embedded mode retains no pixels: the atlas is re-decoded from the
     // `.ssab` the player still owns. Same fixture-optional skip as render_embedded_ssab.
     let emb_path = concat!(env!("CARGO_MANIFEST_DIR"), "/../../assets/overall_emb/Basic.ssab");
     let Ok(emb_bytes) = std::fs::read(emb_path) else {
@@ -366,7 +366,7 @@ fn render_embedded_ssab() {
     };
     let (device, queue) = pollster::block_on(adapter.request_device(&wgpu::DeviceDescriptor::default())).expect("request_device");
 
-    // Embedded-mode ssab (SPEC §8.1): the atlas PNG is baked into the .ssab, so the
+    // Embedded-mode ssab: the atlas PNG is baked into the .ssab, so the
     // player decodes + uploads it itself — the host supplies NO textures. The
     // result must match the reference-mode render (same pack, host-supplied atlas).
     // The embedded fixture is a separate conversion; skip if it wasn't produced

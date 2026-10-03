@@ -307,8 +307,8 @@ fi
 
 WASM_PROFILE="--release"
 if [ "$BUILD" = "debug" ]; then
-  # --dev skips wasm-opt, so the output is several times larger. SPEC §14.1's
-  # size figures are release figures; never quote a --dev build for them.
+  # --dev skips wasm-opt, so the output is several times larger. Size
+  # figures are release figures; never quote a --dev build for them.
   WASM_PROFILE="--dev"
 fi
 

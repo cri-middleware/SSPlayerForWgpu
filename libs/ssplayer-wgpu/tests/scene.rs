@@ -1,8 +1,7 @@
-//! Several players sharing one render target and one renderer (SPEC §13, phases
-//! P7-1 / P7-2 / P7-3).
+//! Several players sharing one render target and one renderer.
 //!
-//! The load-bearing test here is [`stencil_unwind_isolates_players`]. §6 states
-//! the invariant a player must honour: it leaves the stencil buffer exactly as
+//! The load-bearing test here is [`stencil_unwind_isolates_players`]. The
+//! invariant a player must honour is that it leaves the stencil buffer exactly as
 //! it found it. Two players stacked into one render pass must therefore render
 //! identically to the same two players drawn into two passes, each with its own
 //! stencil clear — the two-pass arrangement cannot leak coverage by
@@ -59,7 +58,7 @@ fn make_scene(device: &wgpu::Device, queue: &wgpu::Queue, stencil: bool) -> SSSc
 }
 
 /// A reference-mode player playing `pack`'s first animation. Holds no GPU
-/// resource of its own (SPEC §1.2) — the atlas goes to the caller's shared
+/// resource of its own — the atlas goes to the caller's shared
 /// `renderer`, which is why several players cost one upload between them.
 fn make_player(device: &wgpu::Device, queue: &wgpu::Queue, renderer: &mut SSRenderer, pack: &str) -> SSPlayer {
     load_textures(renderer, device, queue, Path::new(asset_dir()));
@@ -116,7 +115,7 @@ fn depth_stencil_attachment(view: &wgpu::TextureView) -> wgpu::RenderPassDepthSt
         view,
         depth_ops: Some(wgpu::Operations { load: wgpu::LoadOp::Clear(1.0), store: wgpu::StoreOp::Store }),
         // Every pass starts from zero coverage. That is exactly the state each
-        // player promises to hand back (§6).
+        // player promises to hand back.
         stencil_ops: Some(wgpu::Operations { load: wgpu::LoadOp::Clear(0), store: wgpu::StoreOp::Store }),
     }
 }
@@ -180,7 +179,7 @@ fn luminance_sum(rgba: &[u8]) -> u64 {
     rgba.as_chunks::<4>().0.iter().map(|p| p[0] as u64 + p[1] as u64 + p[2] as u64).sum()
 }
 
-/// SPEC §6: a player restores the stencil buffer before it returns, so stacking
+/// A player restores the stencil buffer before it returns, so stacking
 /// two of them into one pass is identical to giving each its own pass.
 ///
 /// Both players run `Mask.ssab` deliberately: the second one has to *test*
@@ -191,7 +190,7 @@ fn luminance_sum(rgba: &[u8]) -> u64 {
 /// Before the unwind existed this failed: `render_node` pre-wrote every pure
 /// mask but only removed the ones the scoped replay reached, so the first
 /// player's leftover coverage inverted the second one's polarity tests.
-/// SPEC §6: a player restores the stencil buffer before it returns, so putting
+/// A player restores the stencil buffer before it returns, so putting
 /// two of them in one scene is identical to giving each its own scene and pass.
 ///
 /// Both players run `Mask.ssab` deliberately: the second one has to *test*
@@ -227,7 +226,7 @@ fn stencil_unwind_isolates_players() {
     assert!(drawn > 0, "nothing was drawn — fixture or texture problem, the comparison below would be vacuous");
 
     let differing = one_scene.as_chunks::<4>().0.iter().zip(split.as_chunks::<4>().0.iter()).filter(|(x, y)| x != y).count();
-    assert_eq!(differing, 0, "{differing} px differ: sharing a scene is not equivalent to one scene each — stencil coverage leaked between players (SPEC §6)");
+    assert_eq!(differing, 0, "{differing} px differ: sharing a scene is not equivalent to one scene each — stencil coverage leaked between players");
 }
 
 /// The same invariant with a mask-free player in the mix, in both orders.
@@ -260,7 +259,7 @@ fn stencil_unwind_survives_mixed_players() {
     }
 }
 
-/// SPEC §9.2: the scene draws its players in ascending `order`, so swapping the
+/// The scene draws its players in ascending `order`, so swapping the
 /// two changes which one ends up on top. Both are opaque and overlapping here,
 /// so the composite genuinely differs.
 #[test]
@@ -296,7 +295,7 @@ fn order_decides_who_draws_on_top() {
     assert_eq!(render(&device, &queue, &renderer, &scene), basic_behind, "the scene drew in slice order rather than `order` order");
 }
 
-/// `set_transform` places a player in the scene (SPEC §5.4). The projection is
+/// `set_transform` places a player in the scene. The projection is
 /// `2/width` about a centred origin, so one world unit is one pixel and a whole-
 /// pixel translation must reproduce the original image shifted by exactly that
 /// many columns — same geometry, same rasterisation, no resampling.
@@ -401,7 +400,7 @@ fn a_hidden_player_keeps_time_and_a_culled_one_stops() {
     }
 }
 
-/// SPEC §5.2: pipelines are compiled on first use, not up front. Eager
+/// Pipelines are compiled on first use, not up front. Eager
 /// construction built the whole 12 blends x 3 stencil variants plus 3 mask
 /// writers — 39 objects — before the first frame, whatever the animation needed.
 #[test]
@@ -427,7 +426,7 @@ fn pipelines_are_built_on_demand() {
     assert_eq!(renderer.pipeline_count(), after, "rebuilding the same frame compiled more pipelines — the cache key is not stable");
 }
 
-/// SPEC §1.2: the renderer is device-scoped, so a second player on the same
+/// The renderer is device-scoped, so a second player on the same
 /// device costs no extra pipelines and no extra atlas upload.
 ///
 /// Before P7-3 each player owned its renderer outright, so two characters on one
@@ -456,7 +455,7 @@ fn players_share_one_renderer() {
     assert!(drawn_pixels(&render(&device, &queue, &renderer, &scene)) > 0, "the shared scene drew nothing");
 }
 
-/// SPEC §5.5: there is no vertex buffer. Each geometry kind is expanded by its
+/// There is no vertex buffer. Each geometry kind is expanded by its
 /// own vertex stage — `vs_quad` / `vs_mesh` / `vs_shape` / `vs_effect` — reading
 /// the runtime's SoA buffers straight out of the scene's arena, so the pipeline
 /// key gained a geometry class and each stage is a separate way to draw nothing.
@@ -486,9 +485,7 @@ fn every_geometry_class_draws() {
     }
 }
 
-/// SPEC §14.2 item 10: a frame reports what it cost. Every remaining item in
-/// that section is a claim about issuing less work, and none of them can be
-/// judged against a player that reports nothing.
+/// A frame reports what it cost.
 ///
 /// The counters are the part that is always available (GPU timing needs a device
 /// feature and lags a frame, so it cannot be asserted on here). They have to

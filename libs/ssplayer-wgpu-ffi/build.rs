@@ -1,4 +1,4 @@
-//! Generates the C header for the `ffi` face (SPEC §11).
+//! Generates the C header for the `ffi` face.
 //!
 //! With the `ffi` feature on, cbindgen reads `ssplayer-wgpu`'s `src/ffi.rs` and writes
 //! `include/ssplayer_wgpu.h` next to this crate — the path CMake consumers point

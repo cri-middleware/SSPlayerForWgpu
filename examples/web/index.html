@@ -48,7 +48,7 @@
   <ss-player-webgpu id="player" class="stage" src="assets/Basic.ssab" autoplay></ss-player-webgpu>
 
   <h2>② 1 canvas に N 体（<code>SsContextWeb</code> を直接駆動）</h2>
-  <p class="hint">1枚の canvas ＝ 1 <code>SSScene</code> に何体でも載る形（SPEC §10）。
+  <p class="hint">1枚の canvas ＝ 1 <code>SSScene</code> に何体でも載る形。
      ①と同じ device・同じ <code>SSRenderer</code> を使うので、体を増やしてもアトラスのアップロードは増えません。</p>
 
   <p>
@@ -78,10 +78,10 @@
 
     // Standalone single-pack animations from tests/overall (no external instance refs).
     // TextureChange is here on purpose: its parts bind by texture *file name*
-    // hash (`external_textures()`, SPEC §8.1), so it is the one that turns into
+    // hash (`external_textures()`), so it is the one that turns into
     // white silhouettes if only the cellmaps get loaded. Instance is here for the
     // other resolution `load` performs: its parts play an animation out of a
-    // sibling `Instance_SourceAnime.ssab`, fetched by name (SPEC §7.1).
+    // sibling `Instance_SourceAnime.ssab`, fetched by name.
     //
     // tests/Doll is a project of its own, so its packs sit in a subdirectory and
     // name it in their value -- `${mode}/Doll/Action01_Body.ssab`, which the
@@ -113,7 +113,7 @@
     // --- ② one canvas, many players -------------------------------------
     // Fetched once and reused: the same bytes make every player, and the atlas
     // they name is uploaded once by the shared renderer however many players load
-    // it (SPEC §8.2 — "registered wins", so the second one skips the decode).
+    // it, so the second one skips the decode.
     const packBytes = new Map();
     async function bytesFor(name) {
       if (!packBytes.has(name)) packBytes.set(name, new Uint8Array(await (await fetch(`assets/${name}.ssab`)).arrayBuffer()));
@@ -142,12 +142,11 @@
       async function addPlayer() {
         const name = CAST[players.length % CAST.length];
         const p = surface.createPlayer();
-        // Loading a pack loads its atlases (SPEC §8.1). They are decoded by the
+        // Loading a pack loads its atlases. They are decoded by the
         // browser into the shared, device-scoped renderer, so the second player
-        // of a pack finds them already there and loads nothing (SPEC §8.2 —
-        // "registered wins").
+        // of a pack finds them already there and loads nothing.
         await p.loadSsab(await bytesFor(name), null, new URL(`assets/${name}.ssab`, location.href).href);
-        // Select, then start — two calls (SPEC §9.3), both synchronous.
+        // Select, then start — two calls, both synchronous.
         p.setAnimation(p.animationNames()[0]);
         p.play();
         players.push(p);
@@ -176,7 +175,7 @@
       document.getElementById('remove').addEventListener('click', removePlayer);
       for (let i = 0; i < 4; i++) await addPlayer();
 
-      // SPEC §14.2 item 10: the counters the native measurements were taken from,
+      // The counters the native measurements were taken from,
       // read in the browser — where the draw-call ratios may differ, because one
       // wgpu command is one JS call here and a memcpy on native.
       let last = performance.now();

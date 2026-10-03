@@ -676,7 +676,7 @@ impl ApplicationHandler for App {
 
         let (device, queue) =
             // Take GPU timing when the adapter has it. The
-            // development viewer is where the numbers behind §14.2's proposals
+            // development viewer is where the numbers
             // get read, so it asks; a machine without the feature still runs.
             pollster::block_on(adapter.request_device(&wgpu::DeviceDescriptor {
                 label: None,
