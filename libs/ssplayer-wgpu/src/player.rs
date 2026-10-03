@@ -2658,7 +2658,7 @@ fn build_rig(
             let part_type = part.part_type_type();
 
             // Static mask flags. Geometry kind picks the
-            // writer builder; Shape/Text/Nines can't write coverage yet.
+            // writer builder; Text/Nines can't write coverage yet.
             let geom = match part_type {
                 PartType::PartTypeNormal | PartType::PartTypeMask => GeomKind::Quad,
                 PartType::PartTypeMesh => GeomKind::Mesh,

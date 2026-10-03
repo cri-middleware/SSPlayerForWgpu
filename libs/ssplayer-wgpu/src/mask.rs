@@ -70,7 +70,7 @@ pub enum GeomKind {
     /// Skinned mesh.
     Mesh,
     /// Shape part (rect/circle/…), rasterised from its runtime shape vertices as
-    /// a triangle fan. Coverage-only (no colour draw yet).
+    /// a triangle fan.
     Shape,
     /// Not renderable as a writer yet (Text/Nines/Null/etc.).
     #[default]
