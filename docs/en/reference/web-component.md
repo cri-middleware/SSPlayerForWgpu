@@ -67,7 +67,7 @@ canvas pixel with the origin at the centre.
 
 Without it the element **loads and holds its first frame**, poster-like — drawing is independent of
 the transport, so the character is on screen, not moving. That is the HTML convention (`<video
-autoplay>`), and it matches `<ss-player>`, the WebGL player's element.
+autoplay>`), and it matches `<ss-player>`, the element of SpriteStudio Player for Web's WebGL package.
 
 (The *placed* players in the family, Godot and Unity, default the other way: a scene node has no
 code to call `play()` for it, and an attribute **is** that code.)

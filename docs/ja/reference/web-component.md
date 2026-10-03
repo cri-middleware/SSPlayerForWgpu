@@ -50,7 +50,7 @@ defineSsPlayerWebGPUElement('my-ss-player');      // ... 独自の名前で
 
 ### `autoplay` は `<video>` と同じく opt-in
 
-付けない場合、要素は**ロードして 1 フレーム目で止まります**（ポスターのように）。描画は再生制御とは独立しているので、キャラクターは画面に出ていて、動いていないだけです。これは HTML の慣習（`<video autoplay>`）に従ったもので、WebGL Player の要素 `<ss-player>` とも揃っています。
+付けない場合、要素は**ロードして 1 フレーム目で止まります**（ポスターのように）。描画は再生制御とは独立しているので、キャラクターは画面に出ていて、動いていないだけです。これは HTML の慣習（`<video autoplay>`）に従ったもので、SpriteStudio Player for Web の WebGL パッケージの要素 `<ss-player>` とも揃っています。
 
 （ファミリーのうち*配置する*タイプの Player（Godot / Unity）は逆に既定でオンです。シーンノードには
 `play()` を呼ぶコードが無く、属性が**そのコードの代わり**になるためです。）

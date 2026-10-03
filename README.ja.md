@@ -149,7 +149,7 @@ C と JavaScript のフェイスは名前が違うだけで同じ形をしてお
 | [`examples/viewer-metal-cpp`](./examples/viewer-metal-cpp) | C++ / Metal, macOS | `cmake -B build && cmake --build build && ./build/ssviewer-metal` |
 | [`examples/viewer-dx12-cpp`](./examples/viewer-dx12-cpp) | C++ / DX12, Windows | `cmake -B build; cmake --build build --config Release; .\build\Release\ssviewer-dx12.exe` |
 | [`examples/viewer-vulkan-cpp`](./examples/viewer-vulkan-cpp) | C++ / Vulkan, Linux — X11 と Wayland を 1 つのバイナリに | `cmake -B build && cmake --build build && ./build/ssviewer-vulkan` |
-| [`examples/viewer-bevy`](./examples/viewer-bevy) | Bevy — アダプタの開発用ビューア。全キャラクターを並べたもの | `cargo run -p ssplayer-bevy-viewer` |
+| [`examples/viewer-bevy`](./examples/viewer-bevy) | Bevy — アダプタの開発用ビューア。複数キャラクターを並べたもの | `cargo run -p ssplayer-bevy-viewer` |
 | [`examples/overall-bevy`](./examples/overall-bevy) | Bevy — 機能を順に見せるツアー | `cargo run -p ssplayer-bevy-overall` |
 
 clone したばかりの状態からは、スクリプト 1 本で動かせます。初回はデータを変換してからサンプルを起動し、指定しなければ `hello` を動かします（Windows では `.ps1`）:

@@ -17,7 +17,7 @@ pass — ten characters cost one device, one set of pipelines and one atlas uplo
 
 A browser with WebGPU: **Chrome / Edge 113+, Safari 26+, or Firefox 141+** on a supported platform.
 `sharedContext()` rejects with a readable error where it is missing, so a fallback — a still image,
-or the [WebGL player](https://www.npmjs.com/package/@spritestudio/ssplayer-webgl) — is a `catch`
+or the [WebGL package of SpriteStudio Player for Web](https://www.npmjs.com/package/@spritestudio/ssplayer-webgl) — is a `catch`
 away.
 
 ## Install

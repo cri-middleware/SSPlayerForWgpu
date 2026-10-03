@@ -4,7 +4,7 @@ title: Bevy API リファレンス
 
 # Bevy API リファレンス
 
-公開されているのは、プラグイン 1 つ・コンポーネント 3 つ・状態コンポーネント 1 つ・メッセージ 3 つだけです。生成ドキュメント：
+公開されているのは、プラグイン 1 つ・コンポーネント 4 つ（うち 1 つは任意）・状態コンポーネント 1 つ・フィードバックのメッセージ 4 つと命令のメッセージ 3 つだけです。生成ドキュメント：
 <a href="../../api/ssplayer_bevy/index.html" target="_blank" rel="noreferrer">**`ssplayer_bevy` の rustdoc**</a>。
 
 **Bevy 0.20.x のみ** — [Bevy ではじめる](../start/bevy.md#supported-bevy)を参照。
@@ -133,7 +133,7 @@ fn on_finish(mut finished: MessageReader<SsFinished>, mut commands: Commands) {
 |---|---|
 | メインワールド | 上記コンポーネント — 公開されている全面 |
 | `ExtractSchedule` | それらとフレームのデルタをレンダーワールドへコピー |
-| `Render` / `RenderSystems::Prepare` | 再生ツリーへ適用し、`src` が変わったパックをロード |
+| `Render` / `RenderSystems::Prepare` | 再生ツリーへ適用し、`pack` か `animation` が変わったキャラクターを組み直す |
 | `Core2d` / `Core2dSystems::MainPass` | 前進・構築・描画。**`main_transparent_pass_2d` の後**に順序付け |
 
 最後の順序は、同じ set に入れた偶然ではなく明示的なエッジです。レンダーコンテキストを取る 2 つのシステムはそれぞれ自分のコマンドエンコーダを持ち、どちらのバッファが先にキューへ届くかは明示しなければ決まりません。これが無いと、キャラクターが Bevy のスプライトの上に出るか下に出るかが競合になります。

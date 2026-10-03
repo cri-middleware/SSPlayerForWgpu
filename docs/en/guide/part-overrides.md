@@ -200,7 +200,7 @@ Where is the hand *right now* — to hang a weapon, a UI marker or a particle em
 Three things to know about the numbers:
 
 * they are the **six numbers of a 2D affine**, the same shape `ssplayer-webgl`'s `getPartTransform`
-  returns, so code ported from the WebGL player reads across unchanged;
+  returns, so code ported from SpriteStudio Player for Web's WebGL package reads across unchanged;
 * they are in **animation-local, Y-down space** — neither the character's own `set_transform` nor
   the target's projection is applied. Compose those yourself, which is what lets you place the
   result in whatever space your UI lives in;

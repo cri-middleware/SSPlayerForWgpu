@@ -87,7 +87,7 @@ flowchart TD
 
 ## Face ごとにできること { #what-each-face-can-do }
 
-ライブラリは 1 つですが、Face が公開している範囲は異なります。wgpu の列以外は恒久的な境界ではありません。計画は [ROADMAP](https://github.com/cri-middleware/SSPlayerForWgpu/blob/main/ROADMAP.md) を参照してください。
+ライブラリは 1 つですが、Face が公開している範囲は異なります。最後の行以外は恒久的な境界ではありません（C と JavaScript の Face はレンダーパスを自分で持つ設計です）。計画は [ROADMAP](https://github.com/cri-middleware/SSPlayerForWgpu/blob/main/ROADMAP.md) を参照してください。
 
 | | Rust | C | JavaScript | Bevy |
 |---|:--:|:--:|:--:|:--:|
