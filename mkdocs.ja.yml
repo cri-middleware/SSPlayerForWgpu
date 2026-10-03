@@ -12,11 +12,11 @@ extra:
   site_root_prefix: "../"
   social:
     - icon: material/motion-play
-      link: https://cri-middleware.github.io/SpriteStudio-Docs/
-      name: SpriteStudio Docs
+      link: https://cri-middleware.github.io/SpriteStudio-Docs/ja/
+      name: SpriteStudio Docs（ポータル）
     - icon: fontawesome/brands/github
-      link: https://github.com/cri-middleware/SSPlayerForWgpu
-      name: GitHub の SSPlayerForWgpu
+      link: https://github.com/cri-middleware
+      name: GitHub の cri-middleware
     - icon: material/web
       link: https://www.webtech.co.jp/spritestudio/
       name: SpriteStudio

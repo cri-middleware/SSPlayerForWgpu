@@ -15,8 +15,8 @@ extra:
       link: https://cri-middleware.github.io/SpriteStudio-Docs/
       name: SpriteStudio Docs
     - icon: fontawesome/brands/github
-      link: https://github.com/cri-middleware/SSPlayerForWgpu
-      name: SSPlayerForWgpu on GitHub
+      link: https://github.com/cri-middleware
+      name: cri-middleware on GitHub
     - icon: material/web
       link: https://www.webtech.co.jp/spritestudio/
       name: SpriteStudio
