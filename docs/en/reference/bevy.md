@@ -162,7 +162,7 @@ would be a race.
 
 | | |
 |---|---|
-| **One view** | `SSScene::update` fuses the timeline advance with the geometry build, so a second view would advance every animation twice per frame. Later views are skipped, with a warning |
+| **One view** | The adapter holds one `SSScene` with every character in it, and `SSScene::update` fuses the timeline advance with the geometry build, so a second view would advance every animation twice per frame. Later views are skipped, with a warning |
 | **MSAA** | must be off. The adapter warns once and skips a multisampled target rather than crashing |
 | **Part overrides, motion blending** | not exposed as components. See [Scopes and names](../guide/concepts.md#what-each-face-can-do) |
 
