@@ -87,17 +87,12 @@ breaks are in [CONTRIBUTING.md](./CONTRIBUTING.md#technical-constraints--guiding
       freezes), and moving the feedback store off the per-view path —
       `FeedbackChannel::store` replaces the batch wholesale, so today the last view
       to run would be the only one the main world hears about.
-- [ ] **Self-contained HTML preview** — a per-animation button in a host writes one
+- [ ] **Self-contained HTML preview** — a Preview button per pack in each host writes one
       fully inlined HTML file and opens it in the browser, so every host shows the same
-      preview without an in-editor renderer. **Both halves are built**: the shell
-      (`examples/preview/shell.html` + `scripts/build-preview.sh`, 1.3 MB) opens from
-      `file://` with no server, plays a pack dropped on it, fits it into the element,
-      seeks, and shows every event it has played on a marker strip; the generator
-      (`examples/preview-gen`) fills its two holes with a pack, its atlases and the
-      sibling packs its instance parts play from. What is left is packaging — a release
-      job so a plugin fetches a pinned shell rather than builds one, and the buttons,
-      which live in the Player repositories. Design and the measurements:
-      [`PREVIEW.md`](./PREVIEW.md).
+      preview without an in-editor renderer. Missing: a release job that publishes a
+      pinned shell (`examples/preview/shell.html`, built by `scripts/build-preview.sh`),
+      so a plugin fetches it rather than builds it, and the buttons themselves, which
+      live in the Player repositories. Design and measurements: [`PREVIEW.md`](./PREVIEW.md).
 
 ## UI integration
 
