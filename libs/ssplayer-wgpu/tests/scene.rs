@@ -226,7 +226,7 @@ fn stencil_unwind_isolates_players() {
     assert!(drawn > 0, "nothing was drawn — fixture or texture problem, the comparison below would be vacuous");
 
     let differing = one_scene.as_chunks::<4>().0.iter().zip(split.as_chunks::<4>().0.iter()).filter(|(x, y)| x != y).count();
-    assert_eq!(differing, 0, "{differing} px differ: sharing a scene is not equivalent to one scene each — stencil coverage leaked between players (SPEC §6)");
+    assert_eq!(differing, 0, "{differing} px differ: sharing a scene is not equivalent to one scene each — stencil coverage leaked between players");
 }
 
 /// The same invariant with a mask-free player in the mix, in both orders.
