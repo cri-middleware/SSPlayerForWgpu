@@ -312,4 +312,4 @@ SSScene -> update(&renderer, &device, &queue, dt, &mut [a, b])
 
 * [C / C++ ではじめる](../start/cpp.md) — C++ のまま続ける場合
 * [Rust ではじめる](../start/rust.md) — 移行する場合
-* [制限事項と適用範囲](../limitations.md)
+* [制約と適用範囲](../limitations.md)

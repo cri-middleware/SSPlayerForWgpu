@@ -53,7 +53,7 @@ nav:
   - 🔩 wgpu ホスト:
       - 借用モデル: wgpu/borrow-model.md
       - エンジンへの組み込み: wgpu/engines.md
-  - ⚠️ 制限事項と適用範囲: limitations.md
+  - ⚠️ 制約と適用範囲: limitations.md
   - 🔄 マイグレーション:
       - SS6Player for CPP から: migration/from-ss6-cpp.md
   - 🛠️ 開発者向け: contributing/index.md

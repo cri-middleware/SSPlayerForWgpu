@@ -1,4 +1,4 @@
-# 制限事項と適用範囲
+# 制約と適用範囲
 
 作るものの形が変わる制約だけを並べます。詳細はそれぞれのページにあります。計画中のものは
 [ROADMAP](https://github.com/cri-middleware/SSPlayerForWgpu/blob/main/ROADMAP.md) に、各 Face が現時点で公開している範囲は[スコープと名前の対応](./guide/concepts.md#what-each-face-can-do)の表にあります。
