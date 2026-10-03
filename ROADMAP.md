@@ -1,14 +1,9 @@
 # SpriteStudio Player for wgpu — Roadmap
 
-The wgpu Player's roadmap. Runtime and converter work lives in the
-[SpriteStudio-SDK roadmap](https://github.com/cri-middleware/SpriteStudio-SDK/blob/HEAD/ROADMAP.md);
-items under *Needs SDK* wait on a capability from there.
-
-This player is first and foremost a **Rust** API, with WebGPU (`wasm-bindgen`) and
-C/C++ (`cbindgen`) as thin wrappers over it. The constraints a change most often
-breaks are in [CONTRIBUTING.md](./CONTRIBUTING.md#technical-constraints--guiding-principles).
-
-`[x]` = done · `[ ]` = planned · ⛔ = blocked
+This file lists unfinished work only. Technical constraints live in the [limitations page](./docs/en/limitations.md);
+SDK-side work lives in the [SpriteStudio-SDK ROADMAP](https://github.com/cri-middleware/SpriteStudio-SDK/blob/HEAD/ROADMAP.md).
+This player is a **Rust** API first, with WebGPU (`wasm-bindgen`) and C/C++ (`cbindgen`) as thin wrappers over it;
+the constraints a change most often breaks are in [CONTRIBUTING.md](./CONTRIBUTING.md#technical-constraints--guiding-principles).
 
 ## Playback & rendering
 
@@ -17,20 +12,37 @@ breaks are in [CONTRIBUTING.md](./CONTRIBUTING.md#technical-constraints--guiding
       `crossfade`, `fade_track`; see [Motion blending](./docs/en/guide/motion-blending.md)).
       Missing: the C and JavaScript faces and the Bevy components expose none of it, so
       from there the only route is several characters ordered with `set_order`.
-- [ ] **9-slice parts.** The runtime already emits the batches and the geometry
+- [ ] **9-slice parts** — the runtime already emits the batches and the geometry
       (`get_nines_*`), so this is one WGSL vertex entry, one `GeomClass`, one
       `GeomKind` — which also gives Nines mask coverage — and the `FrameView`
       fields to carry it. `assets/overall/NineSlice.ssab` exists and draws nothing
       today.
-- [ ] **Text parts.** Much larger than 9-slice despite sharing its label: the
+- [ ] **Text parts** — much larger than 9-slice despite sharing its label: the
       runtime hands over a batch with no geometry and a static string, so font
       loading, layout and a glyph atlas all land on this side.
 - [ ] **Integration shader gaps** — `map0` / `map1` secondary textures, shader
       parts combined with a mask, and parts other than Normal.
 
+## UI integration
+
+wgpu is a GPU API, not a UI toolkit, so this splits in two: the portable half belongs in the
+player, where every host and the C ABI reach it, and the host half belongs in an adapter crate.
+
+- [ ] **Part rect read-out and hit testing** — `part_transform` reports where a part is;
+      nothing reports how big it is, so a host cannot turn a part into a clickable region.
+      The `PartState` the runtime already delivers every frame carries `size_x` / `size_y`,
+      `anchor` and `pivot` — `part_rect` over those and the part transform, then
+      `hit_test_part(x, y)` over that, in player-local coordinates. Portable: it is C-ABI
+      shaped, needs no GPU work, and every adapter crate inherits it.
+- [ ] **Bevy UI (`Node`)** — `ssplayer-bevy` gives Bevy a player in the world; a player inside
+      Bevy's UI tree is a different thing — it has to size from `ComputedNode`, respect the UI
+      camera's stacking and clipping, and answer `Interaction` picking. The part rect above
+      and `SSPlayer::fit_into` — which `ssplayer-bevy` does not wire — are what it would be
+      built on, and it is the only Rust UI target that costs nothing new to reach.
+
 ## Expressiveness
 
-- [ ] ⛔ **One mask backend, once Bevy's 2d pass carries a stencil.** Both
+- [ ] **One mask backend, once Bevy's 2d pass carries a stencil** — both
       exist because each is the cheap answer somewhere: a host that lends a
       stencil pays nothing extra for it, while coverage (mask doc §5) is the only
       answer for a pass with none to lend — and Bevy's is one, `bevy_core_pipeline`
@@ -39,26 +51,27 @@ breaks are in [CONTRIBUTING.md](./CONTRIBUTING.md#technical-constraints--guiding
       masking player, so the fold waits for that constant to gain a stencil, and
       goes the other way: dropping coverage takes the extra pass with it, while
       `SceneConfig::stencil_format` and `TreeMask::finish` stay. Check the constant on
-      each Bevy bump. Until then every mask feature lands in both.
-- [ ] **Exact masks, past what the stencil can express.** Mixed INCR / INVERT
+      each Bevy bump. Until then every mask feature lands in both. Blocked on: Bevy's 2d
+      pass carrying a stencil.
+- [ ] **Exact masks, past what the stencil can express** — mixed INCR / INVERT
       overlaps are approximated and nesting is limited by 8 bits. The coverage
       backend already lifts the nesting limit — its accumulators are shader
       variables, not stencil bits — but both backends still stop at 96 writers
       across a player's instance tree, the limit the Godot Player shares; the
       coverage backend spends one more RGBA8 layer per 24 of them. Going past 96
       alone would fork that limit.
-- [ ] **An offscreen path, for group alpha first.** `set_alpha` composites each
+- [ ] **An offscreen path, for group alpha first** — `set_alpha` composites each
       part at that alpha in turn, so coverage accumulates where parts overlap —
       two halves of a character at 0.5 leave the overlap at 0.75. Drawing the
       player whole and compositing once fixes it, as `SSGroupAlpha.ts` does in the
       WebGL player. **Settle the API first**: the host opens the render pass, so
       inserting an offscreen changes what a host lends.
-- [ ] ⛔ **Backdrop-reading blends (`Div2` / `Overlay2`).** Same offscreen path,
+- [ ] **Backdrop-reading blends (`Div2` / `Overlay2`)** — same offscreen path,
       blocked on semantics rather than on wgpu. No reference defines the maths —
       the sibling players fall back to `Mix` and the published docs call that
-      fallback intentional — and no fixture authors the modes. Needs a formula
-      with a source, a fixture, and agreement across the other Players first.
-- [ ] **Crowd rendering (one data set : N instances).** Undesigned. The vertex
+      fallback intentional — and no fixture authors the modes. Blocked on: a formula
+      with a source, a fixture, and agreement across the other Players.
+- [ ] **Crowd rendering (one data set : N instances)** — undesigned. The vertex
       path suits it: stack N placement matrices, select with
       `@builtin(instance_index)`, and CPU cost stops scaling with body count.
       Members cannot then differ in playback position or interleave front-to-back,
@@ -73,13 +86,13 @@ breaks are in [CONTRIBUTING.md](./CONTRIBUTING.md#technical-constraints--guiding
 
 ## Hosts & platforms
 
-- [ ] **Vulkan C++ viewer** (Linux) — `examples/viewer-vulkan-cpp`. Written, and
+- [ ] **Vulkan C++ viewer (Linux)** — `examples/viewer-vulkan-cpp`. Written, and
       never built or run: it was written on macOS, where neither the X11 nor the
       Wayland code compiles. It carries both window paths in one binary because
       Xwayland means an X11 window never reaches the `SS_WINDOW_WAYLAND` arm, so
       closing this needs one run per path on a Linux desktop. Until then the Xlib
       and Wayland arms of `surface_target` stay unverified.
-- [ ] **Bevy: more than one camera.** The adapter holds one `SSScene`, binds it to
+- [ ] **Bevy: more than one camera** — the adapter holds one `SSScene`, binds it to
       the first view that renders and skips the rest with a warning
       (`ssplayer-bevy/src/render.rs`, `bound_view`), so a UI camera, a
       render-to-texture portrait, a minimap or a split screen leaves every
@@ -99,69 +112,53 @@ breaks are in [CONTRIBUTING.md](./CONTRIBUTING.md#technical-constraints--guiding
       so a plugin fetches it rather than builds it, and the buttons themselves, which
       live in the Player repositories. Design and measurements: [`PREVIEW.md`](./PREVIEW.md).
 
-## UI integration
-
-wgpu is a GPU API, not a UI toolkit, so this splits in two: the portable half belongs in the
-player, where every host and the C ABI reach it, and the host half belongs in an adapter crate.
-
-- [ ] **Part rect read-out and hit testing.** `part_transform` reports where a part is;
-      nothing reports how big it is, so a host cannot turn a part into a clickable region.
-      The `PartState` the runtime already delivers every frame carries `size_x` / `size_y`,
-      `anchor` and `pivot` — `part_rect` over those and the part transform, then
-      `hit_test_part(x, y)` over that, in player-local coordinates. Portable: it is C-ABI
-      shaped, needs no GPU work, and every adapter crate inherits it.
-- [ ] **Bevy UI (`Node`).** `ssplayer-bevy` gives Bevy a player in the world; a player inside
-      Bevy's UI tree is a different thing — it has to size from `ComputedNode`, respect the UI
-      camera's stacking and clipping, and answer `Interaction` picking. The part rect above
-      and `SSPlayer::fit_into` — not yet wired into `ssplayer-bevy` — are what it would be
-      built on, and it is the only Rust UI target that costs nothing new to reach.
-
 ## Resource management
 
-- [ ] **Pack and texture eviction.** `SSRenderer::forget_texture` drops one texture by
+- [ ] **Pack and texture eviction** — `SSRenderer::forget_texture` drops one texture by
       hash on the Rust face, but a player only accumulates packs, the renderer cannot
       list the textures it holds, and the C and JavaScript faces have no forget call —
       so a host that swaps characters grows `.ssab` bytes and VRAM with no way to
       reclaim them. Missing: a per-player pack release on every face. It must retire
       rather than drop: a `Context` points at its pack's resource by raw pointer.
-- [ ] **Generation-checked scene handles on the C face.** `ss_player_t` is safe
+- [ ] **Generation-checked scene handles on the C face** — `ss_player_t` is safe
       against a stale handle; the `*mut SsScene` it holds is not, so destroying
       the scene first cannot be detected. Closing it is an ABI change.
 
 ## Distribution & verification
 
-- [ ] **Nothing publishes the npm package yet.** `packages/ssplayer-wgpu` is
+- [ ] **Publish the npm package** — `packages/ssplayer-wgpu` is
       `@spritestudio/ssplayer-wgpu` in its shipping shape — scoped name, the
       custom element as its own `./element` entry point, its own JavaScript-facing
       README, `prepack` refusing a package whose `dist/` or `wasm/` is missing —
       and `scripts/build.sh platform=web` fills it. What is missing is the channel:
-      - A `publish_npm` input on `release.yml` and an `npm publish` step, with an
+  - [ ] A `publish_npm` input on `release.yml` and an `npm publish` step, with an
         npm automation token as a repository secret. The version is
         `7.0.0-beta.1` and `publishConfig.tag` is `beta`, so a publish cannot take
         over `latest` by accident.
-      - **npm provenance stays off** until this repository is public — npm rejects
-        the publish outright rather than degrading, which is the same reason
-        `SSPlayerForWeb` has it off.
-      - Version bumps are hand-written here (no changesets, one package), so the
-        publish step has to be the thing that refuses to re-publish a version that
-        is already on the registry.
-- [ ] **macOS signing and notarization** for the cdylib. Portable from the sibling
+  - [ ] Turn npm provenance on — npm rejects the publish outright rather than
+        degrading, which is why `SSPlayerForWeb` keeps it off. Blocked on: this
+        repository being public.
+  - [ ] Make the publish step refuse to re-publish a version that is already on the
+        registry: version bumps are hand-written here (no changesets, one package).
+- [ ] **macOS signing and notarization** — for the cdylib. Portable from the sibling
       players, using the existing organisation secrets.
-- [ ] **Version stamping.** Versions are hand-written and the SDK is a submodule rather
+- [ ] **Version stamping** — versions are hand-written and the SDK is a submodule rather
       than a release zip, so the release zips, the C library and the npm package need to
       record the SDK commit they were built from. Only the preview shell does.
-- [ ] ⛔ **crates.io.** `ssruntime` and `ssab` are path dependencies into the
+- [ ] **crates.io** — `ssruntime` and `ssab` are path dependencies into the
       submodule; cargo will not publish a crate that depends on paths only.
-- [ ] **Browser-side measurement.** `surface.stats()` is wired through to
+      Blocked on: the SDK crates `ssab` and `ssruntime` being published first.
+- [ ] **Browser-side measurement** — `surface.stats()` is wired through to
       `examples/web` but has never been read in a browser, where one command is
       one JS call and the ratios differ from native.
 
 ## Needs SDK
 
-- [ ] **GPU expansion of effect particles.** Passing particle state and expanding
+- [ ] **GPU expansion of effect particles** — passing particle state and expanding
       in the vertex stage cuts the transfer to a quarter and removes the CPU
-      trigonometry, but it changes the shape of `EffectDrawPlan` — an SDK pull
-      request plus a submodule bump.
+      trigonometry, but it changes the shape of `EffectDrawPlan`: an SDK pull
+      request plus a submodule bump. Waits for: an `EffectDrawPlan` that carries
+      particle state (the SDK ROADMAP has no entry for it).
 
 ## Deliberate non-goals
 
