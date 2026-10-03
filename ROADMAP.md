@@ -113,11 +113,12 @@ player, where every host and the C ABI reach it, and the host half belongs in an
 
 ## Resource management
 
-- [ ] **Pack and texture eviction.** A player only accumulates packs, and the
-      renderer cannot enumerate the textures it holds, so a host that swaps
-      characters grows `.ssab` bytes and VRAM with no way to reclaim them. Any
-      such API must retire rather than drop: a `Context` points at its pack's
-      resource by raw pointer.
+- [ ] **Pack and texture eviction.** `SSRenderer::forget_texture` drops one texture by
+      hash on the Rust face, but a player only accumulates packs, the renderer cannot
+      list the textures it holds, and the C and JavaScript faces have no forget call —
+      so a host that swaps characters grows `.ssab` bytes and VRAM with no way to
+      reclaim them. Missing: a per-player pack release on every face. It must retire
+      rather than drop: a `Context` points at its pack's resource by raw pointer.
 - [ ] **Generation-checked scene handles on the C face.** `ss_player_t` is safe
       against a stale handle; the `*mut SsScene` it holds is not, so destroying
       the scene first cannot be detected. Closing it is an ABI change.
