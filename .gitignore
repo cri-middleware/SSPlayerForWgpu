@@ -627,8 +627,6 @@ GEMINI.md
 .gemini/
 CLAUDE.md
 .claude/
-
-# Antigravity CLI
 .antigravitycli/
 
 # Release packaging, both ends of scripts/build-release.sh: the per-platform
