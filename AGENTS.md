@@ -19,8 +19,9 @@
     belongs to none of them goes where it will be seen to go stale.
 *   **Never commit inside the `SpriteStudio-SDK` submodule.** A change the core needs is a pull request in
     the SDK repository, followed by a submodule bump here.
-*   **Playback semantics are the SDK's** — see [its AGENTS.md](./SpriteStudio-SDK/AGENTS.md) and [the Player
-    porting guide](./SpriteStudio-SDK/libs/ssruntime/docs/); do not duplicate them here.
+*   **Playback and rendering semantics are the SDK's** — see [its AGENTS.md](./SpriteStudio-SDK/AGENTS.md)
+    and the porting guide in `SpriteStudio-SDK/libs/ssruntime/docs/`. This player is the guide's reference
+    reading: where the guide is silent, what is settled here goes into the guide in the same change.
 *   **Code comments do not cite the SDK's porting guide** — no section numbers, page paths or quotes.
     Its sections move as it is revised and nothing checks a citation inside a comment; say what breaks
     if the code changes, and leave the rule to the guide.
@@ -28,10 +29,8 @@
 ## What this repo is
 
 A wgpu renderer for SpriteStudio, and first of all a **Rust** player: a clean Rust API over
-`ssruntime`, with WebGPU (`wasm-bindgen`) and C/C++ (`cbindgen`) as thin wrappers on top. Unlike
-the other Players it links `ssruntime` and `ssab` as Rust crates rather than through the C-API,
-which is why the SDK is a submodule. The repository layout is in the README; below is only what
-an agent would otherwise break silently.
+`ssruntime`, which it links as a crate rather than through the C-API, with WebGPU (`wasm-bindgen`)
+and C/C++ (`cbindgen`) as thin wrappers on top.
 
 ## Where each answer is written
 
@@ -52,8 +51,7 @@ an agent would otherwise break silently.
     borrowed by `ssruntime`; FrameData and SoA are `ssruntime`'s, never held across frames.
 *   **There is no vertex buffer.** The SoA arrays are memcpy'd into the scene's arena and expanded in the
     vertex stage from `@builtin(vertex_index)`; the CPU writes one 80-byte `Prim` per part and nothing per
-    vertex. Put a new feature on the `Prim`. The scalar position accumulation is deliberate — `mat4 * vec4`
-    invites FMA contraction and costs the bit-exact golden comparison.
+    vertex. Put a new feature on the `Prim`.
 *   **Textures are borrowed, not owned**, and **every texture list must read both `cellmaps()` and
     `external_textures()`**. `set_texture` takes a `TextureView` the supplier owns and `SSPack` holds CPU
     data only; per-texture facts that vary (`AlphaMode`, texel size) go in the group(1) `TexInfo` uniform,
@@ -83,8 +81,6 @@ an agent would otherwise break silently.
     host's property, never the animation's, so keep the coverage path inside the mask doc's numbers —
     deviating forks a spec the Godot Player implements too. It **bakes and samples in one encoder, never
     across frames**, hence no mask lag here.
-*   **Device loss recovers in one order:** `SSRenderer::restore_device`, `SSScene::restore_device`,
-    `SSPlayer::restore_textures`. A format change does not — the pipelines are baked against it.
 *   **Loading is one call on every face**, written once — never add an API that makes a host collect
     textures by hand. The only per-platform part is `AssetLoader`, whose contract `tests/loader_contract.rs`
     pins: `reset_base()`, then `read` gets `src` verbatim, *then* `set_base(src)`, and every path after that
@@ -93,13 +89,9 @@ an agent would otherwise break silently.
     replace the loader seam, since it compiles on wasm32 and fails at runtime. A load reports `Err` only for
     an unreadable `.ssab`; everything else comes back from `missing_assets()`.
 *   **Three faces compile under no default command**: `web.rs` behind `web`, the C face behind `ffi`, and
-    the npm layer typed against wasm-pack's `.d.ts`. Build all three after touching public API. Building
-    `ssplayer-wgpu-ffi` regenerates the committed C header; read that diff, because cbindgen sweeps up every
-    module-level `pub const`.
+    the npm layer typed against wasm-pack's `.d.ts`. Build all three after touching public API.
 *   **Atlas decoding at load time is threaded; the per-frame walk is not.** It is a `std::thread::scope`
     gone before the call returns, never a pool beside the host's, and `flush_textures` settles which hash
     wins before dispatching.
-*   **Beware green rendering tests.** Every GPU test returns early and reports `ok` when no adapter is
-    present; `tests/gpu_adapter.rs` is the one that fails then, so a run without it passing verified
-    nothing. When changing rasterisation, dump the readback to a PNG and look at it — pixel counts alone
-    have hidden real regressions.
+*   **When changing rasterisation, dump the readback to a PNG and look at it** — pixel counts alone have
+    hidden real regressions.
