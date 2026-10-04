@@ -13,7 +13,7 @@
 - **モーション同士をブレンド。** Rust からは、アニメーションをトラックに重ね、トラック間でクロスフェードできます。歩きから走りへ、飛ばずになめらかにつながります。詳しくは[モーションブレンディング](./docs/ja/guide/motion-blending.md)を参照してください。
 - **GPU はホストのもの、プレイヤーは借りるだけ。** wgpu の `Device` / `Queue` / `Surface` を所有するのはホストで、フレームごとに貸し出します。そのため自前のアプリでも egui・macroquad・Bevy でも、どの wgpu アプリケーションの内側にも同居でき、多数のキャラクターを載せたシーンでもアトラスのアップロードは 1 回で共有されます。
 - **各プラットフォームのネイティブなグラフィックス API で描画。** 1 本の wgpu のコードパスが、Windows では DirectX 12、macOS では Metal、Linux では Vulkan、ブラウザでは WebGPU で描きます。
-- **Rust だけではない。** C・C++・Objective-C からは、静的ライブラリ 1 本とヘッダ 1 枚です。`HWND`・`NSView`・`CAMetalLayer`・X11 の `Window`・`wl_surface` のいずれかを渡し、毎フレーム 2 つの関数を呼ぶだけ。ブラウザでは WebAssembly ビルドとして動き、**Bevy** では `ssplayer-bevy` の 3 つのコンポーネントで Bevy 自身の 2d パスにキャラクターを spawn できます。
+- **Rust だけではない。** C・C++・Objective-C からは、静的ライブラリ 1 本とヘッダ 1 枚です。`HWND`・`NSView`・`CAMetalLayer`・X11 の `Window`・`wl_surface` のいずれかを渡し、毎フレーム 2 つの関数を呼ぶだけ。ブラウザでは WebAssembly ビルドとして動き、**Bevy** では `ssplayer-bevy` の 3 つのコンポーネントをエンティティに付けるだけで、キャラクターが Bevy 自身の 2D 描画に組み込まれます。
 - **パース不要の読み込みと SIMD。** `.ssab` は FlatBuffers のバイナリをそのまま読み、ポーズは SDK の `#![no_std]` Rust コアが SIMD で計算します。全公式プレイヤーと同じコアです。
 
 ## 📚 ドキュメント
@@ -46,8 +46,7 @@ ssplayer-wgpu = { git = "https://github.com/cri-middleware/SSPlayerForWgpu" }
 
 > 🚧 **crates.io にはまだありません。** `cargo publish` はバージョン要求を持たない依存を含むクレートを拒否するため、SDK 側のクレートが先に公開されるのを待っています。[ROADMAP](./ROADMAP.md) を参照してください。
 
-**Bevy** アプリの中で使う場合は、代わりにアダプタへ依存してください。プレイヤーを引き込んだ上で、
-Bevy 自身の 2d パスにキャラクターを spawn するための 3 つのコンポーネント
+**Bevy** アプリの中で使う場合は、代わりにアダプタへ依存してください。プレイヤーを引き込んだ上で、キャラクターを Bevy 自身の 2D 描画に組み込むための 3 つのコンポーネント
 (`SsPlayer` / `SsTransform` / `SsPlayback`) を追加します:
 
 ```toml
