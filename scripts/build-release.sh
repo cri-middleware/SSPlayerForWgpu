@@ -129,6 +129,8 @@ cd "$ROOT_DIR"
 # A release is a tag: one is pushed, and the workflow is then dispatched from
 # it. Reading the ref here is reading that decision, not making it. Absent, this
 # is a build off a branch, and no Release is created from one.
+VERSION="$(./scripts/release-version.sh)"
+
 if [ "${GITHUB_REF_TYPE:-}" = "tag" ] && [ -n "${GITHUB_REF_NAME:-}" ]; then
   TAG="$GITHUB_REF_NAME"
   TAG_SOURCE="GITHUB_REF_NAME -- the ref this release was dispatched from"
@@ -144,8 +146,20 @@ echo "  in      => $IN"
 echo "  out     => $OUT"
 echo "  verify  => $VERIFY"
 echo "  clean   => $CLEAN"
+echo "  version => $VERSION"
 echo "  tag     => ${TAG:-(none)}"
 echo "             ($TAG_SOURCE)"
+
+# A tag that disagrees with the version is not a warning: the npm package in the
+# web zip carries the version, so the Release would be called one thing and hold
+# a package that says another.
+if [ -n "$TAG" ] && [ "$TAG" != "v$VERSION" ]; then
+  echo "" >&2
+  echo "$APP: tag $TAG does not match the player's version (v$VERSION)." >&2
+  echo "$APP: bump Cargo.toml's [workspace.package] version and packages/ssplayer-wgpu/package.json" >&2
+  echo "$APP: together, or retag." >&2
+  exit 1
+fi
 
 # --- preflight ------------------------------------------------------------
 
