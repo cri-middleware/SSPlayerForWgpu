@@ -1,0 +1,177 @@
+#!/usr/bin/env node
+// Set the version of one or more packages -- the decision a release makes by hand.
+//
+//   node scripts/set-versions.mjs ssplayer-wgpu@7.0.0-beta.2
+//
+// Each argument is <package>@<version>. A package's version is written in more
+// than one file, and this changes that one field in each of them:
+//
+//   ssplayer-wgpu   Cargo.toml's [workspace.package] version, which ssplayer-wgpu
+//                   and ssplayer-wgpu-ffi inherit; their two entries in
+//                   Cargo.lock; and packages/ssplayer-wgpu/package.json.
+//
+// ssplayer-bevy is versioned on its own and has no release route yet, so it is
+// not one of them. release.yml runs this with its `versions` input in every job,
+// so each one builds the same tree; scripts/release-version.sh then prints the
+// result. Every argument is checked before any file is written, and a version
+// may not go backwards: one published by mistake can never be withdrawn.
+
+import { readFileSync, writeFileSync } from 'node:fs';
+import { join, dirname } from 'node:path';
+import { fileURLToPath } from 'node:url';
+
+const APP = 'set-versions';
+const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
+
+const escape = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+
+// Each edit takes a file's text and the version it must currently say, and
+// returns the text with that one field changed, or throws.
+const tomlSection = (section) => (text, from, to) => {
+  const lines = text.split(/(?<=\n)/);
+  let here = false;
+  let hits = 0;
+  const out = lines.map((line) => {
+    if (/^\s*\[/.test(line)) {
+      here = line.replace(/\s/g, '') === `[${section}]`;
+      return line;
+    }
+    const m = here && /^(\s*version\s*=\s*")([^"]*)(".*)$/s.exec(line);
+    if (!m) return line;
+    hits += 1;
+    if (m[2] !== from) throw new Error(`[${section}] version is '${m[2]}', not '${from}'`);
+    return `${m[1]}${to}${m[3]}`;
+  });
+  if (hits !== 1) throw new Error(`[${section}] has ${hits} version lines`);
+  return out.join('');
+};
+
+const lockEntries = (crates) => (text, from, to) => {
+  let next = text;
+  for (const crate of crates) {
+    const re = new RegExp(`(\\[\\[package\\]\\]\\r?\\nname = "${escape(crate)}"\\r?\\nversion = ")([^"]*)(")`, 'g');
+    const found = [...next.matchAll(re)];
+    if (found.length !== 1) throw new Error(`${found.length} entries for ${crate}`);
+    if (found[0][2] !== from) throw new Error(`${crate} is '${found[0][2]}', not '${from}'`);
+    next = next.replace(re, `$1${to}$3`);
+  }
+  return next;
+};
+
+const jsonVersion = (text, from, to) => {
+  const next = text.replace(new RegExp(`("version"\\s*:\\s*")${escape(from)}(")`), `$1${to}$2`);
+  if (JSON.stringify({ ...JSON.parse(text), version: to }) !== JSON.stringify(JSON.parse(next))) {
+    throw new Error(`"version" could not be changed alone`);
+  }
+  return next;
+};
+
+const PACKAGES = {
+  'ssplayer-wgpu': {
+    current: () => /^\s*version\s*=\s*"([^"]*)"/m.exec(
+      readFileSync(join(ROOT, 'Cargo.toml'), 'utf8').split(/^\s*\[workspace\.package\]\s*$/m)[1] ?? '',
+    )?.[1] ?? '',
+    files: [
+      ['Cargo.toml', tomlSection('workspace.package')],
+      ['Cargo.lock', lockEntries(['ssplayer-wgpu', 'ssplayer-wgpu-ffi'])],
+      ['packages/ssplayer-wgpu/package.json', jsonVersion],
+    ],
+  },
+};
+
+function parse(version) {
+  const m = /^(\d+)\.(\d+)\.(\d+)(?:-([0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*))?$/.exec(version);
+  if (!m) return null;
+  return { core: [Number(m[1]), Number(m[2]), Number(m[3])], pre: m[4] ? m[4].split('.') : [] };
+}
+
+// SemVer precedence: the core numerically, then a version with a prerelease part
+// below the same version without one, then the prerelease identifiers in turn.
+function compare(a, b) {
+  for (let i = 0; i < 3; i++) {
+    if (a.core[i] !== b.core[i]) return a.core[i] < b.core[i] ? -1 : 1;
+  }
+  if (a.pre.length === 0 || b.pre.length === 0) {
+    return a.pre.length === b.pre.length ? 0 : a.pre.length === 0 ? 1 : -1;
+  }
+  for (let i = 0; i < Math.max(a.pre.length, b.pre.length); i++) {
+    const x = a.pre[i];
+    const y = b.pre[i];
+    if (x === undefined) return -1;
+    if (y === undefined) return 1;
+    const xn = /^\d+$/.test(x);
+    const yn = /^\d+$/.test(y);
+    if (xn && yn) {
+      if (Number(x) !== Number(y)) return Number(x) < Number(y) ? -1 : 1;
+    } else if (xn !== yn) {
+      return xn ? -1 : 1;
+    } else if (x !== y) {
+      return x < y ? -1 : 1;
+    }
+  }
+  return 0;
+}
+
+const args = process.argv.slice(2);
+if (args.length === 0) {
+  console.error(`${APP}: name at least one <package>@<version>, e.g. ssplayer-wgpu@7.0.0-beta.2`);
+  process.exit(2);
+}
+
+const writes = [];
+const summary = [];
+const errors = [];
+const seen = new Set();
+for (const arg of args) {
+  const at = arg.lastIndexOf('@');
+  const name = at > 0 ? arg.slice(0, at) : '';
+  const version = at > 0 ? arg.slice(at + 1) : '';
+  const want = parse(version);
+  if (!name || !want) {
+    errors.push(`${arg}: expected <package>@<x.y.z[-prerelease]>`);
+    continue;
+  }
+  const pkg = PACKAGES[name];
+  if (!pkg) {
+    errors.push(`${name}: not a package this script sets (${Object.keys(PACKAGES).join(', ')})`);
+    continue;
+  }
+  if (seen.has(name)) {
+    errors.push(`${name}: named twice`);
+    continue;
+  }
+  seen.add(name);
+  const current = pkg.current();
+  const have = parse(current);
+  if (!have) {
+    errors.push(`${name}: its current version '${current}' is not one this script can compare`);
+    continue;
+  }
+  const order = compare(want, have);
+  if (order === 0) {
+    errors.push(`${name}: already ${current}`);
+    continue;
+  }
+  if (order < 0) {
+    errors.push(`${name}: ${version} is lower than its current ${current}`);
+    continue;
+  }
+  try {
+    for (const [file, edit] of pkg.files) {
+      const path = join(ROOT, file);
+      writes.push([path, edit(readFileSync(path, 'utf8'), current, version)]);
+    }
+    summary.push(`${name}: ${current} -> ${version}`);
+  } catch (e) {
+    errors.push(`${name}: ${e.message} -- set it by hand`);
+  }
+}
+
+if (errors.length > 0) {
+  for (const e of errors) console.error(`${APP}: ${e}`);
+  console.error(`${APP}: nothing was written`);
+  process.exit(1);
+}
+
+for (const [path, text] of writes) writeFileSync(path, text);
+for (const line of summary) console.log(line);

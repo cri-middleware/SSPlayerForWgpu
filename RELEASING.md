@@ -4,91 +4,50 @@ Maintainers only. Contributors do not run any of this — see [CONTRIBUTING.md](
 
 ## Cutting a release
 
-Anyone with the Write role on this repository can cut a release: every step is a branch, a pull request, a tag, a workflow run or a Release, so nothing depends on whose machine runs it. You need `git`, `gh` (run `gh auth login` once), Node.js and a Rust toolchain. The commands are bash; on Windows, run them in Git Bash.
+Anyone with the Write role on this repository can cut a release: it is one run of the **Release** workflow on `main`, so nothing depends on whose machine starts it. You need `gh` (run `gh auth login` once).
 
-This releases the player — the `ssplayer-wgpu` crate, its C face and the npm package — as zips on a GitHub Release. The Bevy adapter `ssplayer-bevy` is versioned on its own and is not part of it.
+This releases the player — the `ssplayer-wgpu` crate, its C face and the npm package — as zips on a GitHub Release. The packages here are versioned independently, and a release names the version it sets, as `<package>@<version>`; the Bevy adapter `ssplayer-bevy` has a version of its own and no release route yet. The player's version is `[workspace.package] version` in `Cargo.toml`, which `ssplayer-wgpu` and `ssplayer-wgpu-ffi` inherit, with the copy npm needs in `packages/ssplayer-wgpu/package.json`. `scripts/set-versions.mjs` writes all of them, and `scripts/release-version.sh` prints the version and refuses while they disagree. A pull request carries no version and no release note — both are decided here.
 
-A release is a tag on `main`, pushed first and built second. The version is written in one place, `[workspace.package] version` in `Cargo.toml`, which `ssplayer-wgpu` and `ssplayer-wgpu-ffi` inherit; `packages/ssplayer-wgpu/package.json` carries the copy npm needs. `scripts/release-version.sh` prints the version and refuses while the copy disagrees, the tag is `v` followed by it, and the release build refuses a tag that disagrees. `main` is the only long-lived branch: a release is a short-lived branch merged into it.
+### 1. Decide the version
+
+Look at what the player gained since its previous tag. The SDK it ships is the commit of the `SpriteStudio-SDK` submodule — `ssruntime` and `ssab` are path dependencies into it — so point the submodule at the SDK release first, in an ordinary pull request into `main`.
 
 ```bash
-VERSION=7.0.0-beta.1                 # what is being released
-BRANCH=release/$VERSION
+git log --oneline ssplayer-wgpu-v7.0.0-beta.1..origin/main
 ```
 
-### 1. Branch
+### 2. Look at it first
+
+A dry run builds every platform with the version applied and checks the result, and commits, tags and releases nothing. Its zips stay on the run (`ssplayer-wgpu-release-dist`).
 
 ```bash
-git fetch origin
-git switch -c "$BRANCH" origin/main
-```
-
-### 2. SDK, version and changelog
-
-In one commit. Point the `SpriteStudio-SDK` submodule at the SDK release this one ships: `ssruntime` and `ssab` are path dependencies into it, so its commit is the SDK version. Then set the version in `Cargo.toml` and `package.json`, and date the version's heading in `CHANGELOG.md` as `## [X.Y.Z] - YYYY-MM-DD`, adding the heading if there is none.
-
-```bash
-SDK_TAG=v7.0.0-beta.1                            # the SDK release this ships
-git -C SpriteStudio-SDK fetch --tags origin && git -C SpriteStudio-SDK checkout "$SDK_TAG"
-# set version in Cargo.toml's [workspace.package] and in packages/ssplayer-wgpu/package.json,
-# date the heading in CHANGELOG.md, then:
-cargo update --workspace                         # the workspace's own entries in Cargo.lock
-scripts/release-version.sh                       # must print $VERSION
-git add SpriteStudio-SDK Cargo.toml Cargo.lock packages/ssplayer-wgpu/package.json CHANGELOG.md
-git commit -m "chore(release): v$VERSION"
-```
-
-### 3. Pull request and QA build
-
-Open the pull request into `main`; CI builds and tests it. Then dispatch the release workflow from the branch. With `upload_release` left false it builds the library for Linux (x86_64 and aarch64), Windows and macOS (universal) and the npm package, assembles and checks the zips, keeps them on the run (`ssplayer-wgpu-release-dist`) and creates no Release. Fix anything on the branch and repeat until it is green.
-
-```bash
-git push -u origin "$BRANCH"
-gh pr create -B main --title "Release v$VERSION" --body ""
-gh workflow run release.yml --ref "$BRANCH"
+gh workflow run release.yml --ref main -f versions=ssplayer-wgpu@7.0.0-beta.2 -f dry_run=true
 gh run watch                                      # the run takes a few seconds to appear
 gh run download <run-id> -n ssplayer-wgpu-release-dist -D qa   # <run-id>: the one gh run watch shows
 ```
 
-### 4. Merge and tag
-
-Merge with a merge commit, never a squash or a rebase, so that `main` keeps the commits the QA build built rather than copies of them. Tag `main` only when its tree is the one the QA build built. It differs only when `main` gained commits after the branch was cut; merge `main` into the branch and go back to step 3.
+### 3. Run the release
 
 ```bash
-gh pr merge "$BRANCH" --merge
-git switch main && git pull --ff-only
-git diff --stat HEAD^2 HEAD                       # must print nothing
-TAG=v$(scripts/release-version.sh) && echo "$TAG"
-git tag -a "$TAG" -m "$TAG" && git push origin "$TAG"
-```
-
-### 5. Build the Release
-
-Dispatch from the tag. The run builds again and creates a **draft** Release carrying the five zips, `SHA256SUMS` and generated notes; nothing is public yet. `upload_release=true` from anything but a `v*` tag fails the run rather than skipping the Release quietly.
-
-```bash
-gh workflow run release.yml --ref "$TAG" -f upload_release=true
+gh workflow run release.yml --ref main -f versions=ssplayer-wgpu@7.0.0-beta.2
 gh run watch
 ```
 
-### 6. Publish
+The run builds the library for Linux (x86_64 and aarch64), Windows and macOS (universal) and the npm package, all with the version applied, then assembles and checks the zips, and only then commits the version to `main`, tags `ssplayer-wgpu-v<version>` and creates a **draft** Release carrying the five zips, `SHA256SUMS` and notes generated from the pull requests since the previous tag. A failure before the commit leaves `main` untouched, and so does a `main` that moved during the run, which rejects the push.
 
-Open the draft on the [Releases](https://github.com/cri-middleware/SSPlayerForWgpu/releases) page and check the attachments: `ssplayer-wgpu-linux-x86_64.zip`, `ssplayer-wgpu-linux-aarch64.zip`, `ssplayer-wgpu-windows-x86_64.zip`, `ssplayer-wgpu-macos-universal.zip`, `ssplayer-wgpu-web-wasm32.zip` and `SHA256SUMS`. Edit the notes, choose **Set as a pre-release** or **Set as the latest release** (a tag with a `-` can be either), and **Publish release**. Publishing also starts `pages.yml`, which deploys the [documentation site](https://cri-middleware.github.io/SSPlayerForWgpu/) with the rustdoc and the WebGPU demo. Watch the run through, then open the site: a failed run leaves the Release published and the site as it was. Once the cause is fixed, re-run it; a re-run builds the same tag.
+With `versions` left empty, nothing is set, and the current version is released if it has no Release yet: the first release, and the retry after a run that failed.
+
+### 4. Publish
+
+Open the draft on the [Releases](https://github.com/cri-middleware/SSPlayerForWgpu/releases) page and check the attachments: `ssplayer-wgpu-linux-x86_64.zip`, `ssplayer-wgpu-linux-aarch64.zip`, `ssplayer-wgpu-windows-x86_64.zip`, `ssplayer-wgpu-macos-universal.zip`, `ssplayer-wgpu-web-wasm32.zip` and `SHA256SUMS`. Edit the notes, choose **Set as a pre-release** or **Set as the latest release** (a version with a `-` can be either), and **Publish release**. Publishing also starts `pages.yml`, which deploys the [documentation site](https://cri-middleware.github.io/SSPlayerForWgpu/) with the rustdoc and the WebGPU demo. Watch the run through, then open the site: a failed run leaves the Release published and the site as it was. Once the cause is fixed, re-run it; a re-run builds the same tag.
 
 ```bash
 gh run watch                                      # pages.yml; the run takes a few seconds to appear
 ```
 
-### 7. Delete the branch
-
-```bash
-git push origin --delete "$BRANCH"
-```
-
-If the button on its pull request already deleted the branch, this only reports that it does not exist.
-
 ## Undoing a release
 
-Until the Release is published, it can be undone. A run that failed for a transient reason is dispatched again from the same tag once its draft is deleted. A fault that needs new commits takes the tag down too: delete the draft, run `git push origin ":refs/tags/$TAG" && git tag -d "$TAG"`, fix it on the branch — restore it from its pull request if it was deleted — and go back to step 3.
+Until the Release is published, it can be undone. A run that failed partway is run again with `versions` empty: it releases the version `main` now carries, reusing a tag it had pushed. A fault in the draft takes the tag down too: delete the draft, run `git push origin ":refs/tags/$TAG" && git tag -d "$TAG"`, merge the fix into `main`, and run the workflow again with `versions` empty, which tags the same version on the fixed `main`.
 
 **Once published, the tag and its assets are permanent** — hosts have downloaded the zips by that tag — so a fix is a new patch version.
 
@@ -111,91 +70,50 @@ scripts/build-release.sh                          # -> release-dist/
 
 ## リリースの手順
 
-このリポジトリの Write ロールを持つ人なら誰でもリリースできます。どの手順もブランチ・プルリクエスト・タグ・ワークフローの実行・Release のいずれかなので、誰の手元で実行しても結果は変わりません。必要なのは `git`、`gh`（最初に一度 `gh auth login`）、Node.js、Rust ツールチェーンです。コマンドは bash で書いています。Windows では Git Bash で実行してください。
+このリポジトリの Write ロールを持つ人なら誰でもリリースできます。リリースは `main` での **Release** ワークフローの実行 1 回なので、誰の手元から始めても結果は変わりません。必要なのは `gh`（最初に一度 `gh auth login`）です。
 
-ここでリリースするのは Player 本体 — `ssplayer-wgpu` クレート、その C フェイス、npm パッケージ — で、GitHub Release の zip として出します。Bevy アダプタ `ssplayer-bevy` は独立した版を持ち、このリリースには含まれません。
+ここでリリースするのは Player 本体 — `ssplayer-wgpu` クレート、その C フェイス、npm パッケージ — で、GitHub Release の zip として出します。このリポジトリのパッケージは独立にバージョンを持ち、リリースは設定するバージョンを `<package>@<version>` で指定します。Bevy アダプタ `ssplayer-bevy` は独自のバージョンを持ち、リリースの経路はまだありません。Player のバージョンは `Cargo.toml` の `[workspace.package] version` で、`ssplayer-wgpu` と `ssplayer-wgpu-ffi` がそれを継承し、`packages/ssplayer-wgpu/package.json` が npm に必要な写しを持ちます。`scripts/set-versions.mjs` がそのすべてを書き、`scripts/release-version.sh` がバージョンを出力します（食い違っている間は出力を拒否します）。プルリクエストはバージョンもリリースノートも持ちません。どちらもここで決めます。
 
-リリースは `main` 上のタグです。先にタグを push し、ビルドはその後です。バージョンが書かれているのは `Cargo.toml` の `[workspace.package] version` の 1 か所だけで、`ssplayer-wgpu` と `ssplayer-wgpu-ffi` がそれを継承します。`packages/ssplayer-wgpu/package.json` は npm に必要な写しを持ちます。`scripts/release-version.sh` がバージョンを出力し、写しが食い違っている間は出力を拒否します。タグはその頭に `v` を付けたもので、食い違うタグはリリースビルドが拒否します。長く残るブランチは `main` だけで、リリースは短命のブランチを `main` へマージして行います。
+### 1. バージョンを決める
+
+前回のタグから Player が何を得たかを見ます。同梱する SDK は `SpriteStudio-SDK` submodule のコミットです（`ssruntime` と `ssab` はこの submodule へのパス依存）。先に、通常のプルリクエストで `main` の submodule を SDK のリリースに合わせておきます。
 
 ```bash
-VERSION=7.0.0-beta.1                 # リリースするバージョン
-BRANCH=release/$VERSION
+git log --oneline ssplayer-wgpu-v7.0.0-beta.1..origin/main
 ```
 
-### 1. ブランチ
+### 2. 先に確かめる
+
+dry run は、バージョンを適用して全プラットフォームをビルドし、結果を検査します。コミットもタグも Release も作りません。zip は run に残ります（`ssplayer-wgpu-release-dist`）。
 
 ```bash
-git fetch origin
-git switch -c "$BRANCH" origin/main
-```
-
-### 2. SDK、バージョン、CHANGELOG
-
-1 コミットで行います。`SpriteStudio-SDK` submodule を、同梱する SDK のリリースに合わせます。`ssruntime` と `ssab` はこの submodule へのパス依存なので、submodule のコミットがそのまま SDK のバージョンです。続けて `Cargo.toml` と `package.json` のバージョンを設定し、`CHANGELOG.md` のそのバージョンの見出しに日付を入れて `## [X.Y.Z] - YYYY-MM-DD` とします。見出しが無ければ足します。
-
-```bash
-SDK_TAG=v7.0.0-beta.1                            # 同梱する SDK のリリース
-git -C SpriteStudio-SDK fetch --tags origin && git -C SpriteStudio-SDK checkout "$SDK_TAG"
-# Cargo.toml の [workspace.package] と packages/ssplayer-wgpu/package.json のバージョンを設定し、
-# CHANGELOG.md の見出しに日付を入れてから:
-cargo update --workspace                         # Cargo.lock のワークスペース自身のエントリ
-scripts/release-version.sh                       # $VERSION が出力されること
-git add SpriteStudio-SDK Cargo.toml Cargo.lock packages/ssplayer-wgpu/package.json CHANGELOG.md
-git commit -m "chore(release): v$VERSION"
-```
-
-### 3. プルリクエストと QA ビルド
-
-`main` へのプルリクエストを作ります。CI がビルドとテストを行います。続けてブランチからリリースワークフローを実行します。`upload_release` を false のままにすると、Linux（x86_64 と aarch64）・Windows・macOS（ユニバーサル）向けのライブラリと npm パッケージをビルドし、zip を組み立てて検査し、run に残します（`ssplayer-wgpu-release-dist`）。Release は作りません。問題があればブランチで直し、緑になるまで繰り返します。
-
-```bash
-git push -u origin "$BRANCH"
-gh pr create -B main --title "Release v$VERSION" --body ""
-gh workflow run release.yml --ref "$BRANCH"
+gh workflow run release.yml --ref main -f versions=ssplayer-wgpu@7.0.0-beta.2 -f dry_run=true
 gh run watch                                      # run が一覧に出るまで数秒かかる
 gh run download <run-id> -n ssplayer-wgpu-release-dist -D qa   # <run-id>: gh run watch に出るもの
 ```
 
-### 4. マージとタグ
-
-マージはマージコミットで行い、squash や rebase は使いません。QA ビルドしたコミットの写しではなく、そのものを `main` に残すためです。タグは、`main` のツリーが QA ビルドしたものと同じときにだけ打ちます。違うのは、ブランチを切った後に `main` へコミットが入った場合だけで、そのときは `main` をブランチへマージして手順 3 に戻ります。
+### 3. リリースを実行する
 
 ```bash
-gh pr merge "$BRANCH" --merge
-git switch main && git pull --ff-only
-git diff --stat HEAD^2 HEAD                       # 何も出力されないこと
-TAG=v$(scripts/release-version.sh) && echo "$TAG"
-git tag -a "$TAG" -m "$TAG" && git push origin "$TAG"
-```
-
-### 5. Release のビルド
-
-タグからワークフローを実行します。もう一度ビルドし、5 つの zip と `SHA256SUMS`、自動生成のリリースノート付きで**下書き**の Release を作ります。まだ何も公開されていません。`v*` タグ以外からの `upload_release=true` は、Release を黙って飛ばさずに実行を失敗させます。
-
-```bash
-gh workflow run release.yml --ref "$TAG" -f upload_release=true
+gh workflow run release.yml --ref main -f versions=ssplayer-wgpu@7.0.0-beta.2
 gh run watch
 ```
 
-### 6. 公開
+run は Linux（x86_64 と aarch64）・Windows・macOS（ユニバーサル）向けのライブラリと npm パッケージを、どれもバージョンを適用してビルドし、zip を組み立てて検査します。そのあとで初めてバージョンを `main` へコミットし、`ssplayer-wgpu-v<version>` のタグを打ち、5 つの zip と `SHA256SUMS`、前回のタグ以降のプルリクエストから生成したノート付きで**下書き**の Release を作ります。コミットより前に失敗すれば `main` は変わりません。run の途中で `main` が進んでいた場合も、push が拒否されるので同じです。
 
-[Releases](https://github.com/cri-middleware/SSPlayerForWgpu/releases) ページで下書きを開き、添付を確かめます。`ssplayer-wgpu-linux-x86_64.zip`、`ssplayer-wgpu-linux-aarch64.zip`、`ssplayer-wgpu-windows-x86_64.zip`、`ssplayer-wgpu-macos-universal.zip`、`ssplayer-wgpu-web-wasm32.zip`、`SHA256SUMS` の 6 つです。リリースノートを編集し、**Set as a pre-release** か **Set as the latest release** を選んで（`-` を含むタグはどちらも選べます）、**Publish release** を押します。公開すると `pages.yml` が動き、[ドキュメントサイト](https://cri-middleware.github.io/SSPlayerForWgpu/) を rustdoc と WebGPU デモ付きでデプロイします。run を最後まで見届けてから、サイトを開いて確かめます。run が失敗しても Release は公開されたままで、サイトは元のまま残ります。原因を直したら run を再実行します。再実行は同じタグをビルドします。
+`versions` を空にすると何も設定せず、現在のバージョンに Release がまだ無ければそれを出します。初回のリリースと、失敗した run のやり直しがこれです。
+
+### 4. 公開
+
+[Releases](https://github.com/cri-middleware/SSPlayerForWgpu/releases) ページで下書きを開き、添付を確かめます。`ssplayer-wgpu-linux-x86_64.zip`、`ssplayer-wgpu-linux-aarch64.zip`、`ssplayer-wgpu-windows-x86_64.zip`、`ssplayer-wgpu-macos-universal.zip`、`ssplayer-wgpu-web-wasm32.zip`、`SHA256SUMS` の 6 つです。リリースノートを編集し、**Set as a pre-release** か **Set as the latest release** を選んで（`-` を含むバージョンはどちらも選べます）、**Publish release** を押します。公開すると `pages.yml` が動き、[ドキュメントサイト](https://cri-middleware.github.io/SSPlayerForWgpu/) を rustdoc と WebGPU デモ付きでデプロイします。run を最後まで見届けてから、サイトを開いて確かめます。run が失敗しても Release は公開されたままで、サイトは元のまま残ります。原因を直したら run を再実行します。再実行は同じタグをビルドします。
 
 ```bash
 gh run watch                                      # pages.yml。run が一覧に出るまで数秒かかる
 ```
 
-### 7. ブランチを消す
-
-```bash
-git push origin --delete "$BRANCH"
-```
-
-プルリクエストのページのボタンで消してあれば、「ブランチが無い」と出るだけです。
-
 ## リリースの取り消し
 
-Release を公開するまでは取り消せます。一時的な理由で失敗した run は、下書きを消してから同じタグでもう一度実行します。新しいコミットが要る不具合ならタグも取り下げます。下書きを消し、`git push origin ":refs/tags/$TAG" && git tag -d "$TAG"` を実行し、ブランチで直して（消していたらプルリクエストのページから復元して）手順 3 に戻ります。
+Release を公開するまでは取り消せます。途中で失敗した run は `versions` を空にして実行し直します。`main` が今持っているバージョンを出し、push 済みのタグはそのまま使います。下書きに不具合があればタグも取り下げます。下書きを消し、`git push origin ":refs/tags/$TAG" && git tag -d "$TAG"` を実行し、修正を `main` へマージしてから、`versions` を空にしてワークフローを実行し直します。直した `main` に同じバージョンのタグが打たれます。
 
 **公開した後のタグとアセットは恒久的です。** ホストはそのタグで zip を取得しているので、修正は新しいパッチバージョンで出します。
 
