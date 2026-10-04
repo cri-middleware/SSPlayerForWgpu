@@ -5142,6 +5142,7 @@ version = "7.0.0-beta.1"
 dependencies = [
  "flatbuffers",
  "libm",
+ "once_cell",
  "ssab",
  "wide",
 ]
