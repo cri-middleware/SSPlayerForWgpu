@@ -124,8 +124,8 @@ crate.
 `cargo publish` refuses a crate whose dependencies have no version requirement,
 so it needs, in order:
 
-1. `ssab`, `ssinterpolate` and `ssruntime` published from the SDK repository
-   (all three names are still free on crates.io).
+1. `ssab` and `ssruntime` published from the SDK repository (both names are
+   still free on crates.io).
 2. `version = "..."` added alongside `path` in this workspace's `ssruntime` and
    `ssab` dependencies. Cargo strips the `path` and keeps the version when
    packaging, so local development is unaffected.

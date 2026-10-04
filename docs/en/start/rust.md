@@ -24,8 +24,8 @@ this for you.
 === "Released"
 
     🚧 **Not on crates.io yet.** `cargo publish` refuses a crate whose dependencies carry no
-    version requirement, so this waits on `ssab`, `ssinterpolate` and `ssruntime` publishing from
-    the SDK repository first. When they do, it becomes:
+    version requirement, so this waits on `ssab` and `ssruntime` publishing from the SDK
+    repository first. When they do, it becomes:
 
     ```toml
     [dependencies]

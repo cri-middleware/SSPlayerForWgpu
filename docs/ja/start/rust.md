@@ -21,7 +21,7 @@ title: Rust ではじめる
 
 === "リリース版"
 
-    🚧 **crates.io には未公開です。** `cargo publish` はバージョン要件を持たない依存を拒否するため、先に SDK 側の `ssab` / `ssinterpolate` / `ssruntime` の公開が必要です。公開されればこうなります：
+    🚧 **crates.io には未公開です。** `cargo publish` はバージョン要件を持たない依存を拒否するため、先に SDK 側の `ssab` / `ssruntime` の公開が必要です。公開されればこうなります：
 
     ```toml
     [dependencies]
