@@ -12,12 +12,11 @@
 # checkout, the artifact download and the Release itself.
 #
 # This is the phase AFTER it has been decided what is being released. Which
-# commit, which tag and which build's binaries are all settled before this
-# script runs -- by the tag that was pushed, the ref the workflow was dispatched
-# from, and the download that populated in=. So there is no option here that
-# re-decides any of them:
+# commit and which build's binaries are both settled before this script runs --
+# by the versions release.yml set and the download that populated in=. So there
+# is no option here that re-decides either:
 #
-#   git checkout v0.2.0                       # which release
+#   git checkout ssplayer-wgpu-v0.2.0         # which release
 #   gh run download <run-id> -D artifacts     # which build's binaries
 #   scripts/build-release.sh                  # this
 #
@@ -126,19 +125,17 @@ cd "$ROOT_DIR"
 
 # --- what this release is called ------------------------------------------
 #
-# A release is a tag: one is pushed, and the workflow is then dispatched from
-# it. Reading the ref here is reading that decision, not making it. Absent, this
-# is a build off a branch, and no Release is created from one.
+# release.yml tags a release only after this script has passed, so in CI there
+# is no tag yet and the version alone names the release. A tag is read here when
+# one is checked out -- a released version rebuilt locally -- and it has to agree
+# with the version.
 VERSION="$(./scripts/release-version.sh)"
 
-if [ "${GITHUB_REF_TYPE:-}" = "tag" ] && [ -n "${GITHUB_REF_NAME:-}" ]; then
-  TAG="$GITHUB_REF_NAME"
-  TAG_SOURCE="GITHUB_REF_NAME -- the ref this release was dispatched from"
-elif TAG="$(git -C "$ROOT_DIR" describe --exact-match --match 'v[0-9]*' --tags HEAD 2>/dev/null)"; then
+if TAG="$(git -C "$ROOT_DIR" describe --exact-match --match 'ssplayer-wgpu-v[0-9]*' --tags HEAD 2>/dev/null)"; then
   TAG_SOURCE="the release tag HEAD is checked out at"
 else
   TAG=""
-  TAG_SOURCE="HEAD is not on a release tag, so this is a build, not a release"
+  TAG_SOURCE="HEAD is not on a release tag"
 fi
 
 echo "options"
@@ -153,9 +150,9 @@ echo "             ($TAG_SOURCE)"
 # A tag that disagrees with the version is not a warning: the npm package in the
 # web zip carries the version, so the Release would be called one thing and hold
 # a package that says another.
-if [ -n "$TAG" ] && [ "$TAG" != "v$VERSION" ]; then
+if [ -n "$TAG" ] && [ "$TAG" != "ssplayer-wgpu-v$VERSION" ]; then
   echo "" >&2
-  echo "$APP: tag $TAG does not match the player's version (v$VERSION)." >&2
+  echo "$APP: tag $TAG does not match the player's version (ssplayer-wgpu-v$VERSION)." >&2
   echo "$APP: bump Cargo.toml's [workspace.package] version and packages/ssplayer-wgpu/package.json" >&2
   echo "$APP: together, or retag." >&2
   exit 1

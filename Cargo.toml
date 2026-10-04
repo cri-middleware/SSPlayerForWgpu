@@ -18,7 +18,8 @@ exclude = ["SpriteStudio-SDK"]
 # `version` is the player's: `ssplayer-wgpu` and `ssplayer-wgpu-ffi` inherit it,
 # packages/ssplayer-wgpu/package.json carries the copy npm needs, and
 # scripts/release-version.sh refuses to print it while that copy disagrees. The
-# release tag is `v` followed by it. Every other crate declares its own.
+# release tag is `ssplayer-wgpu-v` followed by it, and scripts/set-versions.mjs is
+# what changes it. Every other crate declares its own.
 #
 # The player and the Bevy adapter (`ssplayer-bevy`, `7.0.0-alpha.1`) carry the SDK
 # family line, which is what `ssab` and `ssruntime` resolve to. The prerelease word

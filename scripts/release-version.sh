@@ -2,17 +2,17 @@
 #
 # Print the player's version -- what a release is tagged as.
 #
-#   scripts/release-version.sh          # 7.0.0-beta.1
-#   v$(scripts/release-version.sh)      # v7.0.0-beta.1  -- the git tag
+#   scripts/release-version.sh                   # 7.0.0-beta.1
+#   ssplayer-wgpu-v$(scripts/release-version.sh) # the git tag
 #
-# It is `[workspace.package] version` in Cargo.toml. ssplayer-wgpu and
-# ssplayer-wgpu-ffi inherit it, and packages/ssplayer-wgpu/package.json carries
-# the copy npm needs; this prints nothing but an error while either crate
-# declares a version of its own or the copy disagrees. ssplayer-bevy is
-# versioned on its own and is not read.
+# It is `[workspace.package] version` in Cargo.toml, which
+# scripts/set-versions.mjs changes. ssplayer-wgpu and ssplayer-wgpu-ffi inherit
+# it, and packages/ssplayer-wgpu/package.json carries the copy npm needs; this
+# prints nothing but an error while either crate declares a version of its own
+# or the copy disagrees. ssplayer-bevy is versioned on its own and is not read.
 #
-# build-release.sh refuses a tag that disagrees, so a Release called v1.2.3
-# cannot hold an npm package that says 1.2.4.
+# build-release.sh refuses a tag that disagrees, so a Release called
+# ssplayer-wgpu-v1.2.3 cannot hold an npm package that says 1.2.4.
 set -euo pipefail
 
 APP="$(basename "$0")"

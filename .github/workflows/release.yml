@@ -1,26 +1,48 @@
 name: Release
-# workflow_dispatch only. The default (upload_release=false) builds every
-# platform and stops, which is the QA run off a branch. A Release is created
-# only by an explicit dispatch from a v* tag ref with upload_release=true.
+# One release of the player, dispatched by hand from main. A maintainer names the
+# version; everything after that is this workflow's, and the same ref with the
+# same inputs always produces the same result:
+#
+#   versions   `<package>@<version>` (today `ssplayer-wgpu@X.Y.Z`).
+#              scripts/set-versions.mjs writes it in every job, so each one
+#              builds the same tree. The package job commits it to main only
+#              once every platform has built and build-release.sh has checked
+#              the result. Empty sets nothing and releases the current version
+#              if it has no Release yet: the first release, and the retry after
+#              a run that died halfway.
+#
+#   dry_run    Build and check everything with the version applied, and commit,
+#              tag and release nothing. The look before a release.
+#
+# A release gets a `ssplayer-wgpu-v<version>` tag and a DRAFT GitHub Release
+# carrying the zips, SHA256SUMS and notes generated from the pull requests since
+# its previous tag. A maintainer edits and publishes it, and publishing is what
+# starts pages.yml.
 on:
   workflow_dispatch:
     inputs:
-      upload_release:
-        description: 'Upload to GitHub Release (only effective on a v* tag ref)'
-        required: false
-        default: false
+      versions:
+        description: 'Version to set, as <package>@<version> (ssplayer-wgpu@X.Y.Z). Empty releases the current version.'
+        type: string
+        default: ''
+      dry_run:
+        description: 'Build and check everything, but commit, tag and release nothing'
         type: boolean
+        default: false
 
 env:
   CARGO_TERM_COLOR: always
 
+# Never let two releases run at once.
 concurrency:
-  group: release-${{ github.ref }}
+  group: release
   cancel-in-progress: false
 
 jobs:
   build:
     name: ${{ matrix.name }}
+    # Refuse to release from anywhere but main, even if dispatched on another ref.
+    if: github.ref == 'refs/heads/main'
     runs-on: ${{ matrix.os }}
     timeout-minutes: 45
     permissions:
@@ -55,6 +77,15 @@ jobs:
           # Once the SDK is public, drop this line and the secret.
           token: ${{ secrets.SDK_SUBMODULE_TOKEN || github.token }}
           submodules: recursive
+
+      - name: Set the versions
+        if: inputs.versions != ''
+        shell: bash
+        env:
+          VERSIONS: ${{ inputs.versions }}
+        # One argument per pair, so the split is the point.
+        # shellcheck disable=SC2086
+        run: node scripts/set-versions.mjs $VERSIONS
 
       - name: Setup Rust toolchain
         uses: dtolnay/rust-toolchain@7e38f4b43b4db5c8dd498af069a4f6196df1d067 # master
@@ -153,14 +184,24 @@ jobs:
     name: 📦 Package
     needs: build
     runs-on: ubuntu-latest
-    # Needs write access to publish the GitHub Release (softprops/action-gh-release).
+    # The version commit, the tag and the draft Release.
     permissions:
       contents: write
 
     steps:
       # No submodule here: this job assembles what the matrix already built, so
-      # it never touches the SDK and needs no token for it.
+      # it never touches the SDK and needs no token for it. Full history, for the
+      # previous tag the notes start at.
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+
+      - name: Set the versions
+        if: inputs.versions != ''
+        env:
+          VERSIONS: ${{ inputs.versions }}
+        # shellcheck disable=SC2086
+        run: node scripts/set-versions.mjs $VERSIONS
 
       - name: Download all artifacts
         uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
@@ -192,26 +233,43 @@ jobs:
           # that uploaded nothing.
           retention-days: 7
 
-      # A release is a tag that was pushed first and dispatched from second, so
-      # asking to upload from anything else is an operator error, not a mode.
-      # Failing beats a silent skip: a dispatch meant to cut a release should not
-      # report success and quietly produce no Release. Leave upload_release=false
-      # to build off a branch.
-      - name: Refuse to release from a non-tag ref
-        if: inputs.upload_release && !startsWith(github.ref, 'refs/tags/v')
+      # Pushed only now, after every platform built and the release checked out.
+      # A main that moved during the run rejects the push, and nothing is tagged.
+      - name: Commit the versions
+        if: inputs.versions != '' && !inputs.dry_run
+        env:
+          VERSIONS: ${{ inputs.versions }}
         run: |
-          echo "::error::upload_release=true needs a v* tag. Push the tag first, then dispatch this workflow from it (Use workflow from → the tag)."
-          exit 1
+          git config user.name  "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add Cargo.toml Cargo.lock packages/ssplayer-wgpu/package.json
+          git commit -m "chore(release): $VERSIONS"
+          git push origin HEAD:main
 
-      - name: Create GitHub Release
-        if: inputs.upload_release
-        uses: softprops/action-gh-release@efb35369e0ad2afab669f228072c1b0d510eae64 # v3.0.3
-        with:
-          files: |
-            release-dist/*.zip
-            release-dist/SHA256SUMS
-          tag_name: ${{ github.ref_name }}
-          generate_release_notes: true
-          # Always a draft: a human checks the assets and the generated notes
-          # before publishing, and picks "pre-release" / "latest" in the UI then.
-          draft: true
+      - name: Tag and draft the Release
+        if: ${{ !inputs.dry_run }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          version="$(scripts/release-version.sh)"
+          tag="ssplayer-wgpu-v${version}"
+          if gh release view "$tag" > /dev/null 2>&1; then
+            echo "::notice::${tag} already has a Release — nothing to do."
+            exit 0
+          fi
+          # The notes start at the previous tag. A prerelease sorts below its
+          # full release, so 7.0.1 starts at 7.0.0, not at 7.0.0-beta.N.
+          previous="$(git -c versionsort.suffix=- tag --list 'ssplayer-wgpu-v*' --sort=-v:refname | grep -vx "$tag" | head -n 1 || true)"
+          # A run that tagged and then died left the tag behind; it is reused.
+          if ! git rev-parse -q --verify "refs/tags/${tag}" > /dev/null; then
+            git config user.name  "github-actions[bot]"
+            git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+            git tag -a "$tag" -m "$tag" HEAD
+            git push origin "refs/tags/${tag}"
+          fi
+          args=(--verify-tag --title "SpriteStudio Player for wgpu v${version}" --generate-notes --draft)
+          if [ -n "$previous" ]; then args+=(--notes-start-tag "$previous"); fi
+          case "$version" in *-*) args+=(--prerelease) ;; esac
+          gh release create "$tag" release-dist/*.zip release-dist/SHA256SUMS "${args[@]}"
+          echo "::notice::Drafted ${tag} — edit its notes and publish it from the Releases page."
