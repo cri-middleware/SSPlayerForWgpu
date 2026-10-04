@@ -10,6 +10,7 @@
 | **MSAA はオフ必須**。sRGB ターゲットではアトラスが二重にエンコードされます | Rust, Bevy | [レンダーパスに求められること](./wgpu/borrow-model.md#what-your-render-pass-has-to-be) |
 | **1 キャラクターにつき 1 フレーム 1 回の `update`**。1 つのキャストを 2 つのビューには描けません | Rust, Bevy | [複数ターゲット、1 デバイス](./wgpu/borrow-model.md#several-targets-one-device) |
 | **WebGPU のみ**。OpenGL / WebGL バックエンドは無く、非対応ブラウザにはフォールバックが要ります | Web | [前提](./start/web.md#requirements) |
+| **`Div2` / `Overlay2` は `Mix` で描かれます**。対応する GPU のブレンドステートがありません | 全 Face | [下記](#div2-and-overlay2-draw-as-mix) |
 | **オーディオイベントは合図**で、Player は音を鳴らしません | 全 Face | [イベントとユーザーデータ](./guide/events.md) |
 
 SS6Player for CPP から移行する場合、相当するものが無い呼び出し（ラベル指定の再生区間、パーツ単位の反転、エフェクトのシード）は
@@ -22,3 +23,9 @@ C Face は渡されたウィンドウハンドル上に**自分でグラフィ�
 wgpu の型には安定した C 表現が無く、境界を越えて渡せるものが存在しません。したがってデバイスを持つエンジンへの組み込みは **Rust 限定**の機能であり、[アダプタクレート](./wgpu/engines.md)として提供されます。
 
 C から合成したい場合の経路は、オフスクリーン描画＋テクスチャ共有です。
+
+## `Div2` と `Overlay2` は `Mix` で描かれます { #div2-and-overlay2-draw-as-mix }
+
+ブレンドモードはそれぞれ GPU の固定機能のブレンドステートとして描かれます。`Div2` と `Overlay2` には対応するステートが無いため、どちらかを設定したパーツは `Mix` として描かれます。
+
+再現できるかは wgpu ではなく計算式の定義次第です。何が要るかは [ROADMAP](https://github.com/cri-middleware/SSPlayerForWgpu/blob/main/ROADMAP.md) の項目にあります。

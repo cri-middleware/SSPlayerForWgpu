@@ -12,6 +12,7 @@ and what each face exposes today is the matrix in
 | **MSAA must be off**, and an sRGB target encodes the atlas a second time | Rust, Bevy | [What your render pass has to be](./wgpu/borrow-model.md#what-your-render-pass-has-to-be) |
 | **One `update` per character per frame** — one cast cannot be drawn into two views | Rust, Bevy | [Several targets, one device](./wgpu/borrow-model.md#several-targets-one-device) |
 | **WebGPU only**, with no OpenGL / WebGL backend — a browser without it needs a fallback | Web | [Requirements](./start/web.md#requirements) |
+| **`Div2` / `Overlay2` draw as `Mix`** — no GPU blend state reproduces them | every face | [below](#div2-and-overlay2-draw-as-mix) |
 | **Audio events are cues**; the player produces no sound | every face | [Events and user data](./guide/events.md) |
 
 Coming from SS6Player for CPP? The calls with no equivalent here — label-named sections, per-part
@@ -28,3 +29,11 @@ Embedding the player in an engine that owns a device is therefore a **Rust-only*
 delivered as [adapter crates](./wgpu/engines.md).
 
 From C, the route to compositing is offscreen rendering plus a shared texture.
+
+## `Div2` and `Overlay2` draw as `Mix`
+
+Every blend mode is drawn as a fixed-function GPU blend state. `Div2` and `Overlay2` have no such
+state to map to, so a part set to either draws as `Mix`.
+
+Matching them waits on a definition of their maths rather than on wgpu; the
+[ROADMAP](https://github.com/cri-middleware/SSPlayerForWgpu/blob/main/ROADMAP.md) item says what it needs.
