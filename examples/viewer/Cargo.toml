@@ -8,6 +8,7 @@ license.workspace = true
 repository.workspace = true
 homepage.workspace = true
 description = "Native winit + wgpu viewer for developing and verifying ssplayer-wgpu"
+publish = false
 
 [dependencies]
 ssplayer-wgpu = { workspace = true }

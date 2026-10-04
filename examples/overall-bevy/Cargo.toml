@@ -8,7 +8,6 @@ license.workspace = true
 repository.workspace = true
 homepage.workspace = true
 description = "Bevy counterpart of the sibling players' overall/webgl-example demo — a guided tour of the sample set"
-# The adapter is not published while its API moves; neither are its examples.
 publish = false
 
 [dependencies]
