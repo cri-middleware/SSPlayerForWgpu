@@ -8,7 +8,6 @@ license.workspace = true
 repository.workspace = true
 homepage.workspace = true
 description = "Bevy host for developing and verifying ssplayer-bevy"
-# The adapter is not published while its API moves; neither is its viewer.
 publish = false
 
 [dependencies]
