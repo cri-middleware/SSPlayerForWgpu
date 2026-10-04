@@ -14,8 +14,8 @@
 #      order publishes a site with no Japanese pages at all.
 #   2. --strict, always. Nothing builds the docs on a pull request, so this is
 #      the only thing standing between a broken internal link and production.
-#      mkdocs.base.yml sets strict: true as well, but the flag is spelled out
-#      here because it is what RELEASING.md tells people to run.
+#      mkdocs.base.yml sets strict: true as well; the flag is spelled out
+#      here so the build stays strict if the config ever loses it.
 #
 # `zensical serve` is deliberately not wrapped: it serves one locale at a time,
 # so it cannot show the language selector resolving. serve=yes below puts one

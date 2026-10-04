@@ -37,8 +37,8 @@ and C/C++ (`cbindgen`) as thin wrappers on top.
 | Question | File |
 |---|---|
 | What the player does, and how to use each face | [README.md](./README.md), the [docs site](./docs/en/) |
-| How to build, run and verify, and what each script takes | [CONTRIBUTING.md](./CONTRIBUTING.md), each script's `--help` |
-| How the site and the shipped artifacts are built | [RELEASING.md](./RELEASING.md), maintainers only |
+| How to build, run and verify, the docs site included, and what each script takes | [CONTRIBUTING.md](./CONTRIBUTING.md), each script's `--help` |
+| How a release is cut | [RELEASING.md](./RELEASING.md), maintainers only |
 | What to build next, and what was measured and declined | [ROADMAP.md](./ROADMAP.md), plus the entry that outgrew it: [PREVIEW.md](./PREVIEW.md) |
 
 ## Invariants

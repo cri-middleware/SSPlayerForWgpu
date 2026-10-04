@@ -149,7 +149,23 @@ it. `tests/scale.rs` interleaves `update` with the render pass, because timing t
 loops flatters anything that caches across frames. GPU time is read back a frame or two late by
 design; do not add a stall to make it current.
 
-For the documentation site, see [RELEASING.md](./RELEASING.md).
+### Documentation
+
+Pages live as both `docs/en/<path>` and `docs/ja/<path>`, and `nav` lives in both locale configs,
+so adding or renaming a page means editing both. If you edit a page, build both locales before you
+finish: nothing builds the docs on a pull request, so that local build is the only gate.
+
+```bash
+./scripts/prepare-docs.sh            # once: .venv + the pins in docs/requirements.txt
+./scripts/build-docs.sh              # English then Japanese, both --strict
+./scripts/build-pages.sh serve=yes   # docs + rustdoc at /api/ + the WebGPU demo at /demo/
+```
+
+Both locales, English first: it clears `site/`, which contains `site/ja`, so an English-only build
+leaves no Japanese site at all. `mkdocs.base.yml` sets `strict: true`; `zensical serve` validates
+nothing and serves one locale at a time, so `build-pages.sh serve=yes` is the only way to watch the
+language selector resolve. `pages.yml`'s build job **is** that script, so CI builds exactly what a
+local run with the same options builds.
 
 ## Coding Standards
 
@@ -260,7 +276,19 @@ cargo test -p ssplayer-wgpu --features ffi --lib
 
 `clippy --fix` を使うときは、先に自分の編集を `git add` してから `--allow-staged` を付けてください。`--allow-dirty` は使いません。clippy の修正が unstaged に残るので、自分の編集と分けてレビューできます。
 
-ビューア・プレビュー・npm パッケージ・ゴールデンダンプ・性能計測を含むマトリクスの残りは、英語版の [Verification](#verification) にあります。ドキュメントサイトについては [RELEASING.md](./RELEASING.md) を参照してください。
+ビューア・プレビュー・npm パッケージ・ゴールデンダンプ・性能計測を含むマトリクスの残りは、英語版の [Verification](#verification) にあります。
+
+### ドキュメント
+
+ページは `docs/en/<path>` と `docs/ja/<path>` の両方にあり、`nav` も両方のロケール設定にあります。ページの追加・改名は両方を編集してください。ページを編集したら、仕上げる前に両ロケールをビルドしてください。プルリクエストでは docs はビルドされないため、手元のビルドが唯一のゲートです。
+
+```bash
+./scripts/prepare-docs.sh            # 一度だけ: .venv と docs/requirements.txt のピン
+./scripts/build-docs.sh              # 英語 → 日本語の順に、どちらも --strict
+./scripts/build-pages.sh serve=yes   # docs + /api/ の rustdoc + /demo/ の WebGPU デモ
+```
+
+必ず両ロケールを、英語を先にビルドします。英語ビルドは `site/ja` を含む `site/` を消すため、英語だけビルドすると日本語サイトは残らず消えます。`mkdocs.base.yml` が `strict: true` を設定します。`zensical serve` は何も検証せず 1 ロケールずつしか配信しないので、言語セレクタを確認できるのは `build-pages.sh serve=yes` だけです。`pages.yml` のビルドジョブはそのスクリプトなので、CI が建てるものは、同じオプションで手元で建てたものと一致します。
 
 ## コーディング規約
 
