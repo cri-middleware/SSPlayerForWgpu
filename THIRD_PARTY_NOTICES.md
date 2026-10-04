@@ -3399,7 +3399,7 @@ Used by:
 - **flatbuffers 25.12.19** (https://github.com/google/flatbuffers)
 - **half 2.7.1** (https://github.com/VoidStarKat/half-rs)
 - **image 0.25.10** (https://github.com/image-rs/image)
-- **libc 0.2.189** (https://github.com/rust-lang/libc)
+- **libc 0.2.190** (https://github.com/rust-lang/libc)
 - **litrs 1.0.0** (https://github.com/LukasKalbertodt/litrs)
 - **miniz_oxide 0.8.9** (https://github.com/Frommi/miniz_oxide/tree/master/miniz_oxide)
 - **miniz_oxide 0.9.1** (https://github.com/Frommi/miniz_oxide/tree/master/miniz_oxide)
