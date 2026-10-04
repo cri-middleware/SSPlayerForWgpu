@@ -6,15 +6,16 @@
 
 A high-performance player for **[SpriteStudio](https://www.webtech.co.jp/spritestudio/)**
 animations (`.ssab`), built on [wgpu](https://wgpu.rs/). Animate the sprite art you already have
-(PNG / WebP) in a dedicated editor, then play it back through **one** rendering code path that covers
-WebGPU, Vulkan, DX12 and Metal — no video files, no re-authoring, no engine lock-in.
+(PNG / WebP) in a dedicated editor, then play the finished animation in your application — no video
+files, no re-authoring, no engine lock-in.
 
 ## ✨ Why use SpriteStudio with wgpu?
 
 - **Artist-made motion, not animation code.** Bone rigs, mesh deformation and particle effects are authored visually in SpriteStudio and exported as one `.ssab`. The player plays it, and timeline events and per-part overrides connect it to your game logic.
 - **Blend between motions.** From Rust, layer animations on tracks and crossfade between them, so a walk eases into a run instead of snapping — see [Motion blending](./docs/en/guide/motion-blending.md).
 - **It borrows your GPU; it never owns it.** The host owns the wgpu `Device` / `Queue` / `Surface` and lends them per frame, so the player rides inside any wgpu application — your own, egui, macroquad, Bevy — and a scene of many characters shares one upload of each atlas.
-- **Native window, browser or C++ host — one library.** A Rust crate, a C ABI with a generated header and a WebAssembly build share the same renderer, none of them a special case. In **Bevy**, `ssplayer-bevy` spawns a character into Bevy's own 2d pass with three components.
+- **Native graphics on every platform.** One wgpu code path draws through DirectX 12 on Windows, Metal on macOS, Vulkan on Linux and WebGPU in the browser.
+- **Not just Rust.** From C, C++ or Objective-C it is a static library and one header: hand it your `HWND`, `NSView`, `CAMetalLayer`, X11 `Window` or `wl_surface` and call two functions per frame. In the browser it is a WebAssembly build, and in **Bevy**, `ssplayer-bevy` adds three components that draw a character as part of Bevy's own 2D rendering.
 - **Zero-parse loading, SIMD playback.** `.ssab` is a FlatBuffers binary read in place, and poses come from the SDK's `#![no_std]` Rust core with SIMD — the same core every official SpriteStudio player uses.
 
 ## 📚 Documentation
@@ -58,7 +59,7 @@ ssplayer-wgpu = { git = "https://github.com/cri-middleware/SSPlayerForWgpu" }
 > requirement, so this waits on the SDK crates being published first — see [ROADMAP](./ROADMAP.md).
 
 Inside a **Bevy** app, depend on the adapter instead — it pulls the player in and adds the three
-components (`SsPlayer` / `SsTransform` / `SsPlayback`) that spawn a character into Bevy's own 2d pass:
+components (`SsPlayer` / `SsTransform` / `SsPlayback`) that draw a character as part of Bevy's own 2D rendering:
 
 ```toml
 [dependencies]
