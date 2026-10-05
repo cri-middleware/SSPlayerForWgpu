@@ -179,17 +179,31 @@ impl AppState {
         let delta = now.duration_since(self.last_update).as_secs_f32();
         self.last_update = now;
 
-        if !self.is_pausing {
-            // The whole cast goes into one `update`, so one `begin_frame` /
-            // `end_frame` pair spans it and the draws end up back to back in a
-            // single pass.
-            let mut players: Vec<&mut SSPlayer> = self.cast.iter_mut().map(|m| &mut m.player).collect();
-            // The CPU half of the frame. The scene deliberately does not time
-            // itself — `Instant` is not portable to wasm,
-            // and a host needs one line to do it.
-            let started = Instant::now();
-            self.scene.update(&mut self.renderer, &self.device, &self.queue, delta, &mut players);
-            self.last_update_ms = started.elapsed().as_secs_f64() * 1.0e3;
+        // Updated even while paused: the hold is the players' own `pause`, so
+        // what stops is what the runtime stops — every track and every fade —
+        // rather than the viewer skipping the tick.
+        //
+        // The whole cast goes into one `update`, so one `begin_frame` /
+        // `end_frame` pair spans it and the draws end up back to back in a
+        // single pass.
+        let mut players: Vec<&mut SSPlayer> = self.cast.iter_mut().map(|m| &mut m.player).collect();
+        // The CPU half of the frame. The scene deliberately does not time
+        // itself — `Instant` is not portable to wasm,
+        // and a host needs one line to do it.
+        let started = Instant::now();
+        self.scene.update(&mut self.renderer, &self.device, &self.queue, delta, &mut players);
+        self.last_update_ms = started.elapsed().as_secs_f64() * 1.0e3;
+    }
+
+    /// Hold or release the whole cast through the players' own transport.
+    fn toggle_pause(&mut self) {
+        self.is_pausing = !self.is_pausing;
+        for member in &mut self.cast {
+            if self.is_pausing {
+                member.player.pause();
+            } else {
+                member.player.resume();
+            }
         }
     }
 
@@ -397,6 +411,7 @@ impl AppState {
         let anim_idx = anim_idx % names.len();
         let name = names[anim_idx].clone();
 
+        let hold = self.is_pausing;
         let member = &mut self.cast[idx];
         member.anim_idx = anim_idx;
         if let Err(e) = member.player.set_animation(&name) {
@@ -407,6 +422,10 @@ impl AppState {
         member.overlay_idx = None;
         member.overlay_frame = None;
         member.player.play();
+        // `play` lifts a hold, but the viewer's pause belongs to the whole cast.
+        if hold {
+            member.player.pause();
+        }
     }
 
     // --- tracks ------------------------------------------------------------
@@ -794,8 +813,9 @@ impl ApplicationHandler for App {
                 winit::keyboard::Key::Named(winit::keyboard::NamedKey::Escape) => {
                     event_loop.exit();
                 }
-                winit::keyboard::Key::Character(ref c) if c == " " => {
-                    state.is_pausing = !state.is_pausing;
+                // winit 0.30 reports Space as a named key, not as `" "`.
+                winit::keyboard::Key::Named(winit::keyboard::NamedKey::Space) => {
+                    state.toggle_pause();
                     state.refresh_status();
                 }
                 // Focus picks who the pack/animation/appearance keys drive:
