@@ -1,0 +1,24 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>ssplayer-wgpu from a CDN — the custom element</title>
+  <style>
+    body { font-family: system-ui, sans-serif; margin: 2rem; }
+    ss-player-webgpu { display: block; width: 360px; height: 360px; border: 1px solid #ccc; }
+  </style>
+</head>
+<body>
+  <h1>&lt;ss-player-webgpu&gt;, straight from a CDN</h1>
+  <p>One module script registers the element; the markup does the rest. Needs a browser with WebGPU.</p>
+
+  <ss-player-webgpu src="Ringo.ssab" autoplay></ss-player-webgpu>
+
+  <script type="module">
+    import { defineSsPlayerWebGPUElement } from 'https://cdn.jsdelivr.net/npm/@spritestudio/ssplayer-wgpu@7.0.0-beta.1/dist/element.js';
+
+    defineSsPlayerWebGPUElement();
+  </script>
+</body>
+</html>

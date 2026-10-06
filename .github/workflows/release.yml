@@ -275,7 +275,7 @@ jobs:
         run: |
           git config user.name  "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add Cargo.toml Cargo.lock packages/ssplayer-wgpu/package.json libs/ssplayer-wgpu/CHANGELOG.md
+          git add Cargo.toml Cargo.lock packages/ssplayer-wgpu/package.json libs/ssplayer-wgpu/CHANGELOG.md examples/cdn
           git commit -m "chore(release): $VERSIONS"
           git push origin HEAD:main
 
