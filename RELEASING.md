@@ -10,6 +10,8 @@ This releases the player — the `ssplayer-wgpu` crate, its C face and the npm p
 
 Every block runs as written in a new shell: it works out what it needs from git and GitHub. One value is set by hand, written as a placeholder to fill in: `<version>`, the version from step 1, as in `7.0.0-beta.2`, in steps 4 and 5 and their retry under [Undoing a release](#undoing-a-release). The block that assembles a run's artifacts takes the run as `<run-id>` the same way. Left as it is, a placeholder stops its line with a syntax error.
 
+An agent can run every block. A person decides two steps: the merge in step 2, which puts the notes on `main`, and step 6, which publishes the Release for good.
+
 ### 1. Decide the version
 
 Look at what the player gained since its previous tag. The SDK it ships is the commit of the `SpriteStudio-SDK` submodule — `ssruntime` and `ssab` are path dependencies into it — so point the submodule at the SDK release first, in an ordinary pull request into `main`; the release stops on a submodule that is not on an SDK release tag. The first release names the version the player already has, `7.0.0-beta.1`.
@@ -35,6 +37,11 @@ git add libs/ssplayer-wgpu/CHANGELOG.md THIRD_PARTY_NOTICES.md
 git commit -m "docs: changelog for the next release"
 git push -u origin release-notes
 gh pr create -B main --fill
+```
+
+**A person runs the merge**, which puts the notes on `main`: choose **Create a merge commit** on the pull request's page, or run
+
+```bash
 gh pr merge release-notes --merge --delete-branch
 ```
 
@@ -84,7 +91,7 @@ tag=$(gh release list --json tagName,isDraft -q '[.[] | select(.isDraft) | .tagN
 gh release view "${tag:?}" --json assets -q '.assets[].name'
 ```
 
-Then publish it. Publishing also starts `pages.yml`, which deploys the [documentation site](https://cri-middleware.github.io/SSPlayerForWgpu/) with the rustdoc and the WebGPU demo.
+Then **a person publishes it**: a published Release is permanent. Publishing also starts `pages.yml`, which deploys the [documentation site](https://cri-middleware.github.io/SSPlayerForWgpu/) with the rustdoc and the WebGPU demo.
 
 ```bash
 tag=$(gh release list --json tagName,isDraft -q '[.[] | select(.isDraft) | .tagName | select(startswith("ssplayer-wgpu-v"))][0] // empty')
@@ -159,6 +166,8 @@ scripts/build-release.sh                          # -> release-dist/
 
 どのブロックも、新しいシェルで書かれたとおりに実行できます。必要なものは git と GitHub から求めます。手で設定する値は 1 つで、埋めるプレースホルダとして書いてあります。手順 4・5 と「リリースの取り消し」にあるその再実行の `<version>` で、手順 1 で決めたバージョン（`7.0.0-beta.2` など）を入れます。run の成果物を組み立てるブロックも、その run を `<run-id>` で受け取ります。埋めずに実行すると、その行は構文エラーで止まります。
 
+どのブロックもエージェントに実行させられます。2 つの手順は人が判断します。ノートを `main` に入れる手順 2 のマージと、取り消せない公開を行う手順 6 です。
+
 ### 1. バージョンを決める
 
 前回のタグから Player が何を得たかを見ます。同梱する SDK は `SpriteStudio-SDK` submodule のコミットです（`ssruntime` と `ssab` はこの submodule へのパス依存）。先に、通常のプルリクエストで `main` の submodule を SDK のリリースに合わせておきます。submodule が SDK のリリースタグの上に無いと、リリースは止まります。初回のリリースでは、Player がいま持っているバージョン `7.0.0-beta.1` をそのまま指定します。
@@ -184,6 +193,11 @@ git add libs/ssplayer-wgpu/CHANGELOG.md THIRD_PARTY_NOTICES.md
 git commit -m "docs: changelog for the next release"
 git push -u origin release-notes
 gh pr create -B main --fill
+```
+
+**マージは人が行います。** ノートが `main` に入るためです。プルリクエストのページで **Create a merge commit** を選ぶか、次を実行します。
+
+```bash
 gh pr merge release-notes --merge --delete-branch
 ```
 
@@ -233,7 +247,7 @@ tag=$(gh release list --json tagName,isDraft -q '[.[] | select(.isDraft) | .tagN
 gh release view "${tag:?}" --json assets -q '.assets[].name'
 ```
 
-確かめたら公開します。公開すると `pages.yml` が動き、[ドキュメントサイト](https://cri-middleware.github.io/SSPlayerForWgpu/) を rustdoc と WebGPU デモ付きでデプロイします。
+確かめたら公開します。**公開は人が行います。** 公開した Release は取り消せないためです。公開すると `pages.yml` が動き、[ドキュメントサイト](https://cri-middleware.github.io/SSPlayerForWgpu/) を rustdoc と WebGPU デモ付きでデプロイします。
 
 ```bash
 tag=$(gh release list --json tagName,isDraft -q '[.[] | select(.isDraft) | .tagName | select(startswith("ssplayer-wgpu-v"))][0] // empty')
