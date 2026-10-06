@@ -209,6 +209,7 @@ jobs:
             packages/ssplayer-wgpu/README.ja.md
             packages/ssplayer-wgpu/LICENSE.md
             packages/ssplayer-wgpu/LICENSE.ja.md
+            packages/ssplayer-wgpu/THIRD_PARTY_NOTICES.md
           if-no-files-found: error
           retention-days: 7
 

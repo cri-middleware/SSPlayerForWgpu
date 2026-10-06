@@ -221,6 +221,7 @@ else
   [ -f "$IN/$WEB/dist/index.js" ] || fail "$WEB/dist/index.js is missing (the js layer was not built)"
   [ -f "$IN/$WEB/package.json" ] || fail "$WEB/package.json is missing"
   [ -f "$IN/$WEB/wasm/VERSION" ] || fail "$WEB/wasm/VERSION is missing (the SDK release the wasm links)"
+  [ -f "$IN/$WEB/THIRD_PARTY_NOTICES.md" ] || fail "$WEB/THIRD_PARTY_NOTICES.md is missing (the package's files list it)"
 fi
 
 if [ -n "$FAILED" ]; then
@@ -341,7 +342,7 @@ if [ "$VERIFY" = "yes" ]; then
 
   names="$(unzip -Z1 "$OUT/ssplayer-wgpu-$WEB.zip")"
   for want in "wasm/ssplayer_wgpu_bg.wasm" "wasm/ssplayer_wgpu.js" "wasm/ssplayer_wgpu.d.ts" "wasm/VERSION" \
-              "dist/index.js" "dist/index.d.ts" "dist/element.js" "package.json"; do
+              "dist/index.js" "dist/index.d.ts" "dist/element.js" "package.json" "THIRD_PARTY_NOTICES.md"; do
     printf '%s\n' "$names" | grep -qx "$want" || fail "ssplayer-wgpu-$WEB.zip does not contain $want"
   done
 
