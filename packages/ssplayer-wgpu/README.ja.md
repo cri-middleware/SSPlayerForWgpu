@@ -101,6 +101,8 @@ await sharedContext();
 
 バージョンはパッケージと**必ず一致**させてください。JS グルーとバイナリは wasm-bindgen の ABI を共有しています。
 
+CDN からネイティブの ES モジュールとして直接 import した場合は、グルーの `import.meta.url` が CDN の URL になるので、バイナリを自分で見つけます。URL の指定は要りません。[`examples/cdn`](https://github.com/cri-middleware/SSPlayerForWgpu/tree/main/examples/cdn) が、ビルドなしでこの形で読み込むサンプルです。
+
 ## デバイスロスト
 
 ブラウザはいつでも `GPUDevice` を取り上げます（タブのバックグラウンド化、GPU プロセスのクラッシュ）。フレームループで `ctx.isDeviceLost()` を確認し、`restoreSharedDevice(ctx)` を呼べば、ページ上の全

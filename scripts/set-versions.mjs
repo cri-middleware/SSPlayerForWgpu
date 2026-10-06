@@ -8,7 +8,8 @@
 //
 //   ssplayer-wgpu   Cargo.toml's [workspace.package] version, which ssplayer-wgpu
 //                   and ssplayer-wgpu-ffi inherit; their two entries in
-//                   Cargo.lock; and packages/ssplayer-wgpu/package.json.
+//                   Cargo.lock; packages/ssplayer-wgpu/package.json; and the
+//                   version the CDN samples in examples/cdn pin.
 //
 // It also turns the `## [Unreleased]` notes in the package's CHANGELOG.md into
 // `## [<version>] - <date>` under a fresh, empty `## [Unreleased]`: the changelog
@@ -65,6 +66,13 @@ const lockEntries = (crates) => (text, from, to) => {
   return next;
 };
 
+// The CDN samples pin the package by its exact version, in every URL they load.
+const cdnPins = (text, from, to) => {
+  const pin = '@spritestudio/ssplayer-wgpu@';
+  if (!text.includes(`${pin}${from}`)) throw new Error(`no ${pin}${from} pin`);
+  return text.split(`${pin}${from}`).join(`${pin}${to}`);
+};
+
 const jsonVersion = (text, from, to) => {
   const next = text.replace(new RegExp(`("version"\\s*:\\s*")${escape(from)}(")`), `$1${to}$2`);
   if (JSON.stringify({ ...JSON.parse(text), version: to }) !== JSON.stringify(JSON.parse(next))) {
@@ -82,6 +90,9 @@ const PACKAGES = {
       ['Cargo.toml', tomlSection('workspace.package')],
       ['Cargo.lock', lockEntries(['ssplayer-wgpu', 'ssplayer-wgpu-ffi'])],
       ['packages/ssplayer-wgpu/package.json', jsonVersion],
+      ['examples/cdn/element.html', cdnPins],
+      ['examples/cdn/api.html', cdnPins],
+      ['examples/cdn/README.md', cdnPins],
     ],
     changelog: 'libs/ssplayer-wgpu/CHANGELOG.md',
   },

@@ -149,6 +149,10 @@ await sharedContext();
 
 Pin the **same version** as the package: the JS glue and the binary share a wasm-bindgen ABI.
 
+Imported as native ES modules straight from a CDN, the glue's `import.meta.url` is the CDN's, so it
+finds the binary itself and needs no URL. [`examples/cdn`](https://github.com/cri-middleware/SSPlayerForWgpu/tree/main/examples/cdn) loads the package that way, with no
+build step.
+
 ## Device loss
 
 The browser can take the `GPUDevice` at any time — a backgrounded tab, a GPU-process crash. Check

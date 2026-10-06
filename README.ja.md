@@ -151,6 +151,7 @@ C と JavaScript のフェイスは名前が違うだけで同じ形をしてお
 | [`examples/hello`](./examples/hello) | Rust, winit — 最小のホスト。キャラクター 1 体 | `cargo run -p ssplayer-wgpu-hello` |
 | [`examples/viewer`](./examples/viewer) | Rust, winit — 開発用ビューア。複数キャラクターを並べたもの | `cargo run -p ssplayer-wgpu-viewer` |
 | [`examples/web`](./examples/web) | ブラウザ上の WebGPU | `./scripts/run-web.sh` |
+| [`examples/cdn`](./examples/cdn) | ブラウザ上の WebGPU。npm パッケージを jsDelivr から直接読み込む（ビルド不要） | `cd examples/cdn && python3 -m http.server` |
 | [`examples/viewer-metal-cpp`](./examples/viewer-metal-cpp) | C++ / Metal, macOS | `cmake -B build && cmake --build build && ./build/ssviewer-metal` |
 | [`examples/viewer-dx12-cpp`](./examples/viewer-dx12-cpp) | C++ / DX12, Windows | `cmake -B build; cmake --build build --config Release; .\build\Release\ssviewer-dx12.exe` |
 | [`examples/viewer-vulkan-cpp`](./examples/viewer-vulkan-cpp) | C++ / Vulkan, Linux — X11 と Wayland を 1 つのバイナリに | `cmake -B build && cmake --build build && ./build/ssviewer-vulkan` |

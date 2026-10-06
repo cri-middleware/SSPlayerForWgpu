@@ -1,0 +1,60 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>ssplayer-wgpu from a CDN — two characters in one canvas</title>
+  <style>
+    body { font-family: system-ui, sans-serif; margin: 2rem; }
+    canvas { display: block; width: 640px; height: 360px; border: 1px solid #ccc; }
+  </style>
+</head>
+<body>
+  <h1>Two characters in one canvas, straight from a CDN</h1>
+  <p>The API the custom element wraps: one device for the page, one surface per canvas, one player per character. Needs a browser with WebGPU.</p>
+
+  <canvas id="stage"></canvas>
+  <p id="status"></p>
+
+  <script type="module">
+    import { sharedContext, restoreSharedDevice } from 'https://cdn.jsdelivr.net/npm/@spritestudio/ssplayer-wgpu@7.0.0-beta.1/dist/index.js';
+
+    const canvas = document.getElementById('stage');
+    const status = document.getElementById('status');
+    const dpr = window.devicePixelRatio || 1;
+    canvas.width = Math.round(canvas.clientWidth * dpr);
+    canvas.height = Math.round(canvas.clientHeight * dpr);
+
+    try {
+      const ctx = await sharedContext();
+      const surface = ctx.createSurface(canvas);
+
+      // Two players of one pack: the second finds the atlas already uploaded.
+      for (const side of [-1, 1]) {
+        const player = surface.createPlayer();
+        await player.load('Ringo.ssab');
+        const names = player.animationNames();
+        player.setAnimation(names[side < 0 ? 0 : names.length - 1]);
+        // Each one fills half the canvas, shifted left or right of the centre.
+        player.fitInto(canvas.width / 2, canvas.height, { offsetX: side * canvas.width / 4 });
+        player.play();
+      }
+
+      let last = performance.now();
+      const loop = async (now) => {
+        const dt = Math.min((now - last) / 1000, 0.05);
+        last = now;
+        if (ctx.isDeviceLost()) {
+          await restoreSharedDevice(ctx);
+        } else {
+          surface.frame(dt);
+        }
+        requestAnimationFrame(loop);
+      };
+      requestAnimationFrame(loop);
+    } catch (e) {
+      status.textContent = `⚠️ ${e}`;
+    }
+  </script>
+</body>
+</html>
