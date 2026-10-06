@@ -34,6 +34,7 @@ The element lives behind its own entry point, so a bundle that only wants the AP
 | `hasTexture(key)` | Whether the cache already holds one |
 | `isDeviceLost()` / `restoreDevice()` | See [Device loss](../guide/device-loss.md) |
 | `surfaceCount()` | Diagnostic |
+| `version` / `sdkVersion` | This player's version, and the SpriteStudio-SDK release it links: its tag, or `local` for an SDK that is not a release. Read-only; `element.ctx` reaches them from the custom element |
 
 ## `SsSurfaceWeb` — one canvas
 
