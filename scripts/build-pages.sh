@@ -286,6 +286,9 @@ report "site/api/ssplayer_wgpu/index.html" "api "
 report "site/demo/index.html" "demo"
 
 # --- serve ----------------------------------------------------------------
+# Bound to loopback, in the command it suggests as well. On every interface,
+# http.server announces http://[::]:PORT/, and neither [::] nor 0.0.0.0 is a
+# secure context in Chrome: opened there, the demo has no navigator.gpu at all.
 PYTHON_CMD="python3"
 command -v "$PYTHON_CMD" > /dev/null 2>&1 || PYTHON_CMD="python"
 
@@ -301,9 +304,9 @@ if [ "$SERVE" = "yes" ]; then
   echo "$APP: http://localhost:$PORT/demo/  (WebGPU demo -- needs a WebGPU browser)"
   echo "$APP: Ctrl-C to stop"
   echo ""
-  exec "$PYTHON_CMD" -m http.server "$PORT" -d site
+  exec "$PYTHON_CMD" -m http.server "$PORT" --bind 127.0.0.1 -d site
 else
   echo "$APP: serve it (one server over the whole tree, so every link resolves):"
   echo "$APP:   $APP serve=yes"
-  echo "$APP:   $PYTHON_CMD -m http.server $PORT -d site"
+  echo "$APP:   $PYTHON_CMD -m http.server $PORT --bind 127.0.0.1 -d site"
 fi
