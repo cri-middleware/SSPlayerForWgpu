@@ -8,7 +8,7 @@ Anyone with the Write role on this repository can cut a release: it is one run o
 
 This releases the player — the `ssplayer-wgpu` crate, its C face and the npm package — as zips on a GitHub Release. The packages here are versioned independently, and a release names the version it sets, as `<package>@<version>`; the Bevy adapter `ssplayer-bevy` has a version of its own and no release route yet. The player's version is `[workspace.package] version` in `Cargo.toml`, which `ssplayer-wgpu` and `ssplayer-wgpu-ffi` inherit, with the copy npm needs in `packages/ssplayer-wgpu/package.json`. `scripts/set-versions.mjs` writes all of them, and turns the `## [Unreleased]` notes in `libs/ssplayer-wgpu/CHANGELOG.md` into that version's section; `scripts/release-version.sh` prints the version and refuses while the copies disagree. What each version gained is written in that changelog and nowhere else: a Release carries the zips and a link to it. A contributor's pull request carries no version and no changelog entry — both are written here. There is no release branch: what `main` holds is what goes out, so `main` holds only what can ship.
 
-Only steps 4 and 5 and their retry under [Undoing a release](#undoing-a-release) read a value set by hand, `VERSION`, and they refuse one that is empty. Every other block works out what it needs from git and GitHub, so each can run in a new shell.
+Every block runs as written in a new shell: it works out what it needs from git and GitHub. One value is set by hand, written as a placeholder to fill in: `<version>`, the version from step 1, as in `7.0.0-beta.2`, in steps 4 and 5 and their retry under [Undoing a release](#undoing-a-release). The block that assembles a run's artifacts takes the run as `<run-id>` the same way. Left as it is, a placeholder stops its line with a syntax error.
 
 ### 1. Decide the version
 
@@ -21,11 +21,7 @@ echo "last released: ${prev:-never}"
 git log --oneline ${prev:+"$prev.."}origin/main
 ```
 
-Write the decision down for steps 4 and 5:
-
-```bash
-VERSION=7.0.0-beta.2
-```
+Steps 4 and 5 take the decision in place of their `<version>`.
 
 ### 2. Write the changelog
 
@@ -56,6 +52,7 @@ scripts/build-pages.sh                            # -> site/, the site pages.yml
 A dry run builds every platform with the version applied and checks the result, and commits, tags and releases nothing. Its zips stay on the run (`ssplayer-wgpu-release-dist`).
 
 ```bash
+VERSION=<version>                                 # the version from step 1
 RUN=$(gh workflow run release.yml --ref main -f versions="ssplayer-wgpu@${VERSION:?}" -f dry_run=true | sed 's|.*/||')
 gh run watch "${RUN:?}" --exit-status
 gh run download "${RUN:?}" -n ssplayer-wgpu-release-dist -D qa
@@ -64,6 +61,7 @@ gh run download "${RUN:?}" -n ssplayer-wgpu-release-dist -D qa
 ### 5. Run the release
 
 ```bash
+VERSION=<version>                                 # the version from step 1
 RUN=$(gh workflow run release.yml --ref main -f versions="ssplayer-wgpu@${VERSION:?}" | sed 's|.*/||')
 gh run watch "${RUN:?}" --exit-status
 ```
@@ -113,6 +111,7 @@ Until the Release is published, it can be undone:
 *   A run that failed before its commit reached `main` is run again with the same version, once the cause is fixed in `main`. The **Re-run** button would replay the old commit, and its push would be rejected.
 
     ```bash
+    VERSION=<version>                                 # the version from step 1
     RUN=$(gh workflow run release.yml --ref main -f versions="ssplayer-wgpu@${VERSION:?}" | sed 's|.*/||')
     gh run watch "${RUN:?}" --exit-status
     ```
@@ -157,7 +156,7 @@ scripts/build-release.sh                          # -> release-dist/
 
 ここでリリースするのは Player 本体 — `ssplayer-wgpu` クレート、その C フェイス、npm パッケージ — で、GitHub Release の zip として出します。このリポジトリのパッケージは独立にバージョンを持ち、リリースは設定するバージョンを `<package>@<version>` で指定します。Bevy アダプタ `ssplayer-bevy` は独自のバージョンを持ち、リリースの経路はまだありません。Player のバージョンは `Cargo.toml` の `[workspace.package] version` で、`ssplayer-wgpu` と `ssplayer-wgpu-ffi` がそれを継承し、`packages/ssplayer-wgpu/package.json` が npm に必要な写しを持ちます。`scripts/set-versions.mjs` がそのすべてを書き、`libs/ssplayer-wgpu/CHANGELOG.md` の `## [Unreleased]` のノートをそのバージョンの節に書き換えます。`scripts/release-version.sh` はバージョンを出力します（写しが食い違っている間は出力を拒否します）。各バージョンで何が変わったかは、この changelog にだけ書きます。Release が持つのは zip と、その changelog へのリンクです。コントリビューターのプルリクエストはバージョンも changelog の項目も持ちません。どちらもここで書きます。release ブランチはありません。`main` にあるものがそのまま出るので、`main` には出せるものだけを置きます。
 
-手で設定する値 `VERSION` を読むのは、手順 4・5 と「リリースの取り消し」にあるその再実行だけで、空なら実行を拒否します。ほかのブロックは必要なものを git と GitHub から求めるので、どれも新しいシェルで実行できます。
+どのブロックも、新しいシェルで書かれたとおりに実行できます。必要なものは git と GitHub から求めます。手で設定する値は 1 つで、埋めるプレースホルダとして書いてあります。手順 4・5 と「リリースの取り消し」にあるその再実行の `<version>` で、手順 1 で決めたバージョン（`7.0.0-beta.2` など）を入れます。run の成果物を組み立てるブロックも、その run を `<run-id>` で受け取ります。埋めずに実行すると、その行は構文エラーで止まります。
 
 ### 1. バージョンを決める
 
@@ -170,11 +169,7 @@ echo "last released: ${prev:-never}"
 git log --oneline ${prev:+"$prev.."}origin/main
 ```
 
-決めたものを手順 4・5 のために書き留めます。
-
-```bash
-VERSION=7.0.0-beta.2
-```
+手順 4・5 は、決めたバージョンを `<version>` の位置に受け取ります。
 
 ### 2. changelog を書く
 
@@ -205,6 +200,7 @@ scripts/build-pages.sh                            # -> site/。pages.yml がデ�
 dry run は、バージョンを適用して全プラットフォームをビルドし、結果を検査します。コミットもタグも Release も作りません。zip は run に残ります（`ssplayer-wgpu-release-dist`）。
 
 ```bash
+VERSION=<version>                                 # 手順 1 で決めたバージョン
 RUN=$(gh workflow run release.yml --ref main -f versions="ssplayer-wgpu@${VERSION:?}" -f dry_run=true | sed 's|.*/||')
 gh run watch "${RUN:?}" --exit-status
 gh run download "${RUN:?}" -n ssplayer-wgpu-release-dist -D qa
@@ -213,6 +209,7 @@ gh run download "${RUN:?}" -n ssplayer-wgpu-release-dist -D qa
 ### 5. リリースを実行する
 
 ```bash
+VERSION=<version>                                 # 手順 1 で決めたバージョン
 RUN=$(gh workflow run release.yml --ref main -f versions="ssplayer-wgpu@${VERSION:?}" | sed 's|.*/||')
 gh run watch "${RUN:?}" --exit-status
 ```
@@ -262,6 +259,7 @@ Release を公開するまでは取り消せます。
 *   コミットが `main` に届く前に失敗した run は、原因を `main` で直してから、同じバージョンで実行し直します。**Re-run** ボタンは古いコミットを再生するので、その push は拒否されます。
 
     ```bash
+    VERSION=<version>                                 # 手順 1 で決めたバージョン
     RUN=$(gh workflow run release.yml --ref main -f versions="ssplayer-wgpu@${VERSION:?}" | sed 's|.*/||')
     gh run watch "${RUN:?}" --exit-status
     ```
