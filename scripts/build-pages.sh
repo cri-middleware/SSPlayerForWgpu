@@ -58,8 +58,9 @@ usage () {
   echo "                          Needs the wasm32 target, wasm-pack and pnpm."
   echo "  assets=<auto|yes|no>    Run deploy-examples.sh before the demo, which converts"
   echo "                          the SDK's test projects into the .ssab the demo plays"
-  echo "                          (default: $ASSETS). auto = only when examples/web/assets"
-  echo "                          does not exist yet. Needs the SDK submodule."
+  echo "                          (default: $ASSETS). auto = only when that data is missing"
+  echo "                          or another SDK commit converted it (deploy-examples.sh"
+  echo "                          when=stale). Needs the SDK submodule."
   echo "  venv=<dir>              Virtualenv for the docs toolchain (default: $VENV)."
   echo "  serve=<yes|no>          Serve site/ over HTTP when the build is done (default: $SERVE)."
   echo "  port=<n>                Port for serve=yes (default: $PORT)"
@@ -234,20 +235,14 @@ fi
 # by relative path -- so the whole directory works unchanged under /demo/ on any
 # host, including a fork's Pages and a local http.server.
 build_demo () {
-  local need_assets="$ASSETS"
-  if [ "$need_assets" = "auto" ]; then
-    if [ -d "$ROOT_DIR/examples/web/assets" ]; then
-      need_assets="no"
-      echo ""
-      echo "$APP: examples/web/assets exists; skipping deploy-examples.sh (assets=yes forces it)"
-    else
-      need_assets="yes"
-    fi
-  fi
-
   # Builds ssconverter-cli from the SDK submodule and converts its test projects
-  # into .ssab, in BOTH export modes, deploying them into examples/web.
-  [ "$need_assets" = "yes" ] && step ./scripts/deploy-examples.sh
+  # into .ssab, in BOTH export modes, deploying them into examples/web. auto is
+  # its when=stale: the wasm below always comes from the SDK checked out now, and
+  # data that another SDK commit converted can make it panic.
+  case "$ASSETS" in
+    yes)  step ./scripts/deploy-examples.sh ;;
+    auto) step ./scripts/deploy-examples.sh when=stale ;;
+  esac
 
   # wasm-pack + tsdown, then deploy=yes stages the finished npm package into
   # examples/web/ssplayer-wgpu -- so the demo runs the package as published,

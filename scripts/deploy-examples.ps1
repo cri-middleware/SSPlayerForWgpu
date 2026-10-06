@@ -29,7 +29,17 @@
 # assets/overall_emb; examples/viewer and examples/viewer-metal-cpp play
 # assets/overall from the repository, so only the browser needs a copy.
 #
-# Usage: scripts/deploy-examples.ps1 [build=release|debug]   (ssconverter-cli build mode; default release)
+# Usage: scripts/deploy-examples.ps1 [build=release|debug] [when=always|stale]
+#
+#   build=release|debug   ssconverter-cli build mode (default release)
+#   when=always|stale     always (default) converts; stale converts only when the
+#                         data is missing or another SDK commit converted it
+#
+# The .ssab format follows the SDK, and a runtime reading data that another SDK
+# commit converted can panic on it. The commit that converted assets/ is kept in
+# assets/.sdk-rev for when=stale, which is how run-example.ps1 and build-pages.ps1
+# call this. An SDK that is not a git checkout has no commit to compare, so there
+# only missing data counts.
 #
 # SDK location: $env:SSSDK, else ./SpriteStudio-SDK (submodule), else ../SpriteStudio-SDK.
 $ErrorActionPreference = "Stop"
@@ -48,12 +58,15 @@ function Fail {
 }
 
 $MODE = "release"
+$WHEN = "always"
 foreach ($arg in $args) {
     switch ($arg) {
         { $_ -in "build=release", "build=debug" } { $MODE = $_ -replace '^build='; break }
         { $_ -like "build=*" } { Fail "build= takes release or debug, not '$($_ -replace '^build=')'" 2 }
+        { $_ -in "when=always", "when=stale" } { $WHEN = $_ -replace '^when='; break }
+        { $_ -like "when=*" } { Fail "when= takes always or stale, not '$($_ -replace '^when=')'" 2 }
         { $_ -in "-h", "--help" } {
-            Get-Content $PSCommandPath | Select-Object -Skip 1 -First 31 |
+            Get-Content $PSCommandPath | Select-Object -Skip 1 -First 43 |
                 ForEach-Object { $_ -replace '^# ?', '' }
             exit 0
         }
@@ -75,6 +88,23 @@ if ([string]::IsNullOrEmpty($SDK_DIR) -or !(Test-Path (Join-Path $SDK_DIR "Cargo
     Fail "SpriteStudio-SDK not found (git submodule update --init, or set SSSDK)"
 }
 
+# --- skip data that is current (when=stale) -------------------------------
+# `.git` first, so that an SDK that merely sits inside some other repository
+# does not answer with that repository's commit.
+$SDK_REV = ""
+if ((Test-Path (Join-Path $SDK_DIR ".git")) -and (Get-Command git -ErrorAction SilentlyContinue)) {
+    $SDK_REV = "$(& git -C $SDK_DIR rev-parse HEAD 2>$null)".Trim()
+    if ($LASTEXITCODE -ne 0) { $SDK_REV = "" }
+}
+$STAMP = Join-Path $ASSET_DIR ".sdk-rev"
+$haveData = (Test-Path (Join-Path $ASSET_DIR "Ringo/Ringo.ssab")) -and (Test-Path (Join-Path $WEB_DIR "assets/Ringo/Ringo.ssab"))
+$stamped = if (Test-Path $STAMP) { (Get-Content -Raw $STAMP).Trim() } else { "" }
+if ($WHEN -eq "stale" -and $haveData -and ($SDK_REV -eq "" -or $stamped -eq $SDK_REV)) {
+    $for = if ($SDK_REV) { " for SDK $($SDK_REV.Substring(0, 7))" } else { "" }
+    Write-Host "${APP}: assets/ is current$for; nothing to convert (when=always forces it)"
+    exit 0
+}
+
 # --- build the converter --------------------------------------------------
 # Built inside the SDK checkout so it uses the SDK's own workspace and target
 # dir; this repo's workspace does not depend on ssconverter.
@@ -94,6 +124,10 @@ if ($IsWindows) { $CLI += ".exe" }
 if (!(Test-Path $CLI)) { Fail "$CLI not found after build" }
 
 # --- convert --------------------------------------------------------------
+# The stamp goes first: until the last copy below, assets/ is not what any one
+# SDK commit converted, and an interrupted run must leave when=stale converting.
+if (Test-Path $STAMP) { Remove-Item -Force $STAMP }
+
 function Convert-Project {
     param(
         [string] $Sspj,           # relative to the SDK
@@ -156,6 +190,9 @@ Copy-Item -Force (Join-Path $ASSET_DIR "Ringo_emb/*.ssab") $ringo
 $doll = Join-Path $dest "Doll"
 New-Item -ItemType Directory -Force -Path $doll | Out-Null
 Copy-Item -Force (Join-Path $ASSET_DIR "Doll_emb/*.ssab") $doll
+
+# LF, as deploy-examples.sh writes it, so either twin reads the other's stamp.
+if ($SDK_REV) { [IO.File]::WriteAllText($STAMP, "$SDK_REV`n") }
 
 Write-Host "${APP}: done -> assets/{overall,overall_emb,Ringo,Ringo_emb,Doll,Doll_emb}/"
 Write-Host "${APP}:      -> examples/web/{assets,assets_emb}/{,Ringo/,Doll/}"

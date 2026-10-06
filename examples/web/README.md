@@ -21,7 +21,8 @@ are the ones an `npm i` gets, not a second copy that can drift.
 
 This directory has no build script of its own. `../../scripts/run-web.sh` takes a
 fresh checkout to the open page, running each step below only when its output is
-missing. By hand, two repository scripts fill it, split by what they produce — the
+missing, or, for the data and the package, when the SDK has moved since the data
+was converted. By hand, two repository scripts fill it, split by what they produce — the
 code and the data:
 
 ```sh
@@ -31,8 +32,8 @@ python3 -m http.server                 # serve THIS directory
 # open http://localhost:8000
 ```
 
-After changing the Rust, run `build.sh platform=web` again: `run-web.sh` does not
-notice a stale package.
+After changing the Rust, run `build.sh platform=web` again: `run-web.sh` rebuilds
+the package when the SDK moves, not when the Rust does.
 
 1. `build.sh platform=web` runs `wasm-pack build` on `libs/ssplayer-wgpu-ffi` with
    `--features web` → `packages/ssplayer-wgpu/wasm` (wasm + JS bindings), builds the

@@ -53,8 +53,9 @@ function Show-Usage {
     Write-Host "                          Needs the wasm32 target, wasm-pack and pnpm."
     Write-Host "  assets=<auto|yes|no>    Run deploy-examples.ps1 before the demo, which converts"
     Write-Host "                          the SDK's test projects into the .ssab the demo plays"
-    Write-Host "                          (default: auto). auto = only when examples/web/assets"
-    Write-Host "                          does not exist yet. Needs the SDK submodule."
+    Write-Host "                          (default: auto). auto = only when that data is missing"
+    Write-Host "                          or another SDK commit converted it (deploy-examples.ps1"
+    Write-Host "                          when=stale). Needs the SDK submodule."
     Write-Host "  venv=<dir>              Virtualenv for the docs toolchain (default: .venv)."
     Write-Host "  serve=<yes|no>          Serve site/ over HTTP when the build is done (default: no)."
     Write-Host "  port=<n>                Port for serve=yes (default: 8000)"
@@ -228,22 +229,15 @@ try {
     # all by relative path -- so the whole directory works unchanged under /demo/
     # on any host, including a fork's Pages and a local http.server.
     if ($opts.demo -eq "yes") {
-        $needAssets = $opts.assets
-        if ($needAssets -eq "auto") {
-            if (Test-Path (Join-Path $ROOT_DIR "examples/web/assets")) {
-                $needAssets = "no"
-                Write-Host ""
-                Write-Host "${APP}: examples/web/assets exists; skipping deploy-examples.ps1 (assets=yes forces it)"
-            } else {
-                $needAssets = "yes"
-            }
-        }
-
         # Builds ssconverter-cli from the SDK submodule and converts its test
         # projects into .ssab, in BOTH export modes, deploying them into
-        # examples/web.
-        if ($needAssets -eq "yes") {
+        # examples/web. auto is its when=stale: the wasm below always comes from
+        # the SDK checked out now, and data that another SDK commit converted can
+        # make it panic.
+        if ($opts.assets -eq "yes") {
             Step "deploy-examples.ps1" { & $deployScript }
+        } elseif ($opts.assets -eq "auto") {
+            Step "deploy-examples.ps1 when=stale" { & $deployScript when=stale }
         }
 
         # wasm-pack + tsdown, then deploy=yes stages the finished npm package into

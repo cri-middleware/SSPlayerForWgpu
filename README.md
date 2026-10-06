@@ -277,7 +277,7 @@ flowchart TD
 | [`examples/`](./examples) | one host per environment; see [Samples](#-samples) |
 | `scripts/build.sh` / `.ps1` | builds the library for one platform, collecting it into `bin/` |
 | `scripts/deploy-examples.sh` / `.ps1` | converts the SDK's test projects into `assets/` and deploys both export modes to `examples/web` |
-| `scripts/run-example.sh` / `.ps1`, `run-web.sh` / `.ps1` | take a fresh checkout to a running sample, converting and building only what is missing |
+| `scripts/run-example.sh` / `.ps1`, `run-web.sh` / `.ps1` | take a fresh checkout to a running sample, converting and building only what is missing or what an SDK bump left stale |
 | `bin/` | collected library artifacts. Gitignored |
 | `SpriteStudio-SDK/` | the SDK, as a git submodule — `ssruntime` and `ssab` are path dependencies into it |
 

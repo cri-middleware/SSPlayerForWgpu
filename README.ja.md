@@ -242,7 +242,7 @@ flowchart TD
 | [`examples/`](./examples) | 環境ごとに 1 ホスト。[サンプル](#-サンプル)を参照 |
 | `scripts/build.sh` / `.ps1` | ライブラリを 1 プラットフォーム分ビルドし、`bin/` に集めます |
 | `scripts/deploy-examples.sh` / `.ps1` | SDK のテストプロジェクトを `assets/` へ変換し、両方のエクスポートモードを `examples/web` に配置します |
-| `scripts/run-example.sh` / `.ps1`、`run-web.sh` / `.ps1` | clone したばかりの状態からサンプルを起動します。変換とビルドは、足りないものだけを行います |
+| `scripts/run-example.sh` / `.ps1`、`run-web.sh` / `.ps1` | clone したばかりの状態からサンプルを起動します。変換とビルドは、足りないものと、SDK の更新で古くなったものだけを行います |
 | `bin/` | 集約されたライブラリ成果物。gitignore 対象 |
 | `SpriteStudio-SDK/` | SDK。git submodule で、`ssruntime` と `ssab` はここへの path 依存 |
 

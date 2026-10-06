@@ -18,6 +18,7 @@ Player が released zip 内の安定 C API を通して SDK と話すのに対�
 
     ```bash
     git -C SpriteStudio-SDK fetch origin && git -C SpriteStudio-SDK checkout origin/develop
+    ./scripts/deploy-examples.sh
     cargo test --workspace
     git add SpriteStudio-SDK && git commit -m "chore: bump SDK submodule"
     ```
@@ -30,6 +31,8 @@ Player が released zip 内の安定 C API を通して SDK と話すのに対�
 
 サブモジュールから `ssconverter-cli` をビルドし、SDK のテストプロジェクトを `assets/` に変換して、**両方の**エクスポートモードを `examples/web` に配置します。**テストは `assets/` を読む**ので、これは
 `cargo test` の前提であって省略可能な手順ではありません。
+
+SDK を上げたら、もう一度実行してください。`.ssab` の形式は SDK に従うので、別の SDK コミットで変換したデータはランタイムを panic させることがあります。`run-example.sh` と `build-pages.sh` はこれを自分で確かめます（`deploy-examples.sh when=stale`）。
 
 ## 全 Face をビルドする
 
