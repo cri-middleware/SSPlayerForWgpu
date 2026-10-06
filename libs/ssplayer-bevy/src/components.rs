@@ -195,9 +195,11 @@ pub struct SsCellmapTextures {
 /// Playback state read back from the render world, refreshed every frame.
 ///
 /// This is the pollable half of the round-trip; the reactive half is the
-/// messages in [`crate::feedback`]. Both are **one frame behind** — what you
-/// read this frame is what playback produced last frame — because playback runs
-/// in the render world. Required by [`SsPlayer`], so it is always present.
+/// messages ([`SsStarted`](crate::SsStarted), [`SsLooped`](crate::SsLooped),
+/// [`SsFinished`](crate::SsFinished), [`SsEventMessage`](crate::SsEventMessage)).
+/// Both are **one frame behind** — what you read this frame is what playback
+/// produced last frame — because playback runs in the render world. Required by
+/// [`SsPlayer`], so it is always present.
 #[derive(Component, Clone, Copy, Debug)]
 pub struct SsPlaybackState {
     /// The frame the timeline last landed on.

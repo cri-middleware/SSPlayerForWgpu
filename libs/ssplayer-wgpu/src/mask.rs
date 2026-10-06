@@ -162,7 +162,7 @@ pub struct ScopedWriter {
 
 /// A frame's planned writers, held inline.
 ///
-/// The plan is capped at [`MAX_MASK_WRITERS`] and [`plan_writers`] runs once per
+/// The plan is capped at `MAX_MASK_WRITERS` and [`plan_writers`] runs once per
 /// node per frame, so a `Vec` here spent its life growing from empty to a bound
 /// it already knew — a string of reallocations to reach a buffer of a few
 /// kilobytes, on every masking node of every frame. A fixed array costs the same bytes and
@@ -185,7 +185,7 @@ impl Default for MaskWriters {
 impl MaskWriters {
     /// Append a writer.
     ///
-    /// Panics past [`MAX_MASK_WRITERS`]. Respecting the cap is the planner's
+    /// Panics past `MAX_MASK_WRITERS`. Respecting the cap is the planner's
     /// job — it stops walking batches at it — so arriving here full is a bug in
     /// the planner, and a writer dropped quietly instead would clip the frame
     /// wrong with nothing left to point at.

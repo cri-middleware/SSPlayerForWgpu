@@ -760,7 +760,8 @@ impl Default for SSPlayer {
 impl SSPlayer {
     /// Create a player. Takes nothing: a player holds no GPU resource at all, which is what makes putting a hundred of them in a scene
     /// cheap. The device-scoped [`SSRenderer`] and the target-scoped
-    /// [`SSScene`] are lent to it per frame by [`SSScene::update`].
+    /// [`SSScene`](crate::SSScene) are lent to it per frame by
+    /// [`SSScene::update`](crate::SSScene::update).
     pub fn new() -> Self {
         Self {
             packs: HashMap::new(),
@@ -803,7 +804,8 @@ impl SSPlayer {
     /// The player itself has nothing to rebuild — it owns no GPU resource. What it
     /// does own is the `.ssab`, which is the only place a [`Retention::Reproducible`]
     /// texture can come back from, so the host calls this once per player after
-    /// [`SSRenderer::restore_device`] and [`SSScene::restore_device`].
+    /// [`SSRenderer::restore_device`] and
+    /// [`SSScene::restore_device`](crate::SSScene::restore_device).
     ///
     /// Playback state (packs, the instance tree, the current frame) is CPU-side and
     /// was never affected: the animation resumes where it was interrupted.
@@ -1320,7 +1322,7 @@ impl SSPlayer {
     /// Scale playback by `speed`, a multiple of the frame rate. `0.0` and
     /// negatives are a **stop**, not reverse playback -- that is
     /// [`SSPlayer::set_playback_direction`] -- and read back from
-    /// [`SSPlayer::speed`] as the `0.0` they became.
+    /// [`SSPlayer::speed_scale`] as the `0.0` they became.
     ///
     /// Survives [`SSPlayer::set_animation`] and a pack change, and may be set
     /// before the first animation.
@@ -2006,7 +2008,8 @@ impl SSPlayer {
     /// ForWeb's `offsetY`). Before v7.0.0-beta.2 this axis pointed up.
     ///
     /// The per-player half of placement: the projection belongs to the render
-    /// target ([`SSScene::set_viewport`]), the placement to the player.
+    /// target ([`SSScene::set_viewport`](crate::SSScene::set_viewport)), the
+    /// placement to the player.
     /// It costs nothing extra to draw: the tree walk already composes an
     /// arbitrary parent matrix for every instance child, so a non-identity root
     /// simply rides along.
@@ -2219,8 +2222,8 @@ impl SSPlayer {
     /// The embedded-mode counterpart of [`SSPlayer::textures`]: there is nothing
     /// for the host to fetch, but there is something for it to decode. A host
     /// with its own decoder walks this and registers the results, rather than
-    /// leaving it to [`SSPlayer::flush_textures`] — which needs the `embedded`
-    /// feature and only knows how to decode PNG.
+    /// leaving it to the decode the next [`SSScene::update`](crate::SSScene::update)
+    /// runs — which needs the `embedded` feature and only knows how to decode PNG.
     pub fn embedded_images(&self, pack_name: Option<&str>) -> Option<Vec<EmbeddedImage<'_>>> {
         let name = pack_name.or(self.main_pack.as_deref())?;
         Some(self.packs.get(name)?.embedded_images())
@@ -2378,14 +2381,14 @@ impl SSPlayer {
     /// the difference is the point: it costs nothing to read, it holds still while
     /// the animation plays, and it is where the author decided the empty space
     /// belongs. A tighter box is the host's to supply through
-    /// [`Placement::frame`] — measuring one here would mean baking every frame of
-    /// the animation at load.
+    /// [`Placement::frame`](crate::fit::Placement::frame) — measuring one here
+    /// would mean baking every frame of the animation at load.
     ///
     /// It is the *current* animation's canvas, and one pack's animations may
     /// differ (Ringo's `dead` is 1300 wide, its others 800), so a host that wants
     /// one scale across a switch reads this once, after its first
-    /// [`SSPlayer::set_animation`], and passes it as [`Placement::frame`] from
-    /// then on.
+    /// [`SSPlayer::set_animation`], and passes it as
+    /// [`Placement::frame`](crate::fit::Placement::frame) from then on.
     ///
     /// The canvas is placed against the origin by the animation's **pivot**,
     /// which the runtime does not apply (it carries no pivot in its metadata) and
@@ -2422,13 +2425,13 @@ impl SSPlayer {
     /// The box the host lays out is in **pixels of the render target**, so call
     /// this again when that box changes — on a resize, and after
     /// [`SSPlayer::set_animation`] if the packs differ in canvas. It is pure
-    /// arithmetic over [`Placement::frame`] or [`SSPlayer::canvas_rect`]; nothing
-    /// is measured and no GPU state is touched.
+    /// arithmetic over [`Placement::frame`](crate::fit::Placement::frame) or
+    /// [`SSPlayer::canvas_rect`]; nothing is measured and no GPU state is touched.
     ///
-    /// The returned [`Placed`] is what was written, so a host can read back the
-    /// scale it got rather than recomputing it — and can tell the fit from the
-    /// no-fit answer, which a collapsed box or an animation that is not set up
-    /// both produce (see [`solve`](crate::fit::solve)).
+    /// The returned [`Placed`](crate::fit::Placed) is what was written, so a host
+    /// can read back the scale it got rather than recomputing it — and can tell
+    /// the fit from the no-fit answer, which a collapsed box or an animation that
+    /// is not set up both produce (see [`solve`](crate::fit::solve)).
     pub fn fit_into(&mut self, width: f32, height: f32, placement: &crate::fit::Placement) -> crate::fit::Placed {
         let content = placement.frame.or_else(|| self.canvas_rect());
         let placed = crate::fit::solve(width, height, content, placement);

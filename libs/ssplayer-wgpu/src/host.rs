@@ -9,7 +9,7 @@
 //! `Window` can use it directly instead of assembling wgpu itself.
 //!
 //! **Players live here, behind [`PlayerId`]**, because the C face cannot hold a
-//! `&mut SSPlayer` across calls. [`crate::roster`] does that bookkeeping.
+//! `&mut SSPlayer` across calls. `roster.rs` does that bookkeeping.
 
 use crate::player::SSPlayer;
 use crate::renderer::{Retention, SSRenderer};
