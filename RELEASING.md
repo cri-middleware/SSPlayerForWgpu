@@ -12,7 +12,7 @@ Only steps 4 and 5 and their retry under [Undoing a release](#undoing-a-release)
 
 ### 1. Decide the version
 
-Look at what the player gained since its previous tag. The SDK it ships is the commit of the `SpriteStudio-SDK` submodule — `ssruntime` and `ssab` are path dependencies into it — so point the submodule at the SDK release first, in an ordinary pull request into `main`. The first release names the version the player already has, `7.0.0-beta.1`.
+Look at what the player gained since its previous tag. The SDK it ships is the commit of the `SpriteStudio-SDK` submodule — `ssruntime` and `ssab` are path dependencies into it — so point the submodule at the SDK release first, in an ordinary pull request into `main`; the release stops on a submodule that is not on an SDK release tag. The first release names the version the player already has, `7.0.0-beta.1`.
 
 ```bash
 git fetch origin --tags
@@ -125,7 +125,7 @@ Until the Release is published, it can be undone:
 
 ## Building the release locally
 
-`scripts/build-release.sh` is the release package, and `release.yml`'s package job runs exactly this script. It builds nothing — the two native platforms need an operating system each — so it assembles a run's artifacts instead: one zip per platform, the npm package as its own, and `SHA256SUMS` over them. Its checks are the ones nothing else does: every platform is present, the C header is the same in all of them, and each zip holds the library it is named for. `<run-id>` is the `release.yml` run whose artifacts it assembles.
+`scripts/build-release.sh` is the release package, and `release.yml`'s package job runs exactly this script. It builds nothing — the two native platforms need an operating system each — so it assembles a run's artifacts instead: one zip per platform, the npm package as its own, and `SHA256SUMS` over them. Its checks are the ones nothing else does: every platform is present, the C header is the same in all of them, every platform links the same SDK release — a release, not `local` — and each zip holds the library it is named for. `<run-id>` is the `release.yml` run whose artifacts it assembles.
 
 ```bash
 RUN=<run-id>
@@ -151,7 +151,7 @@ scripts/build-release.sh                          # -> release-dist/
 
 ### 1. バージョンを決める
 
-前回のタグから Player が何を得たかを見ます。同梱する SDK は `SpriteStudio-SDK` submodule のコミットです（`ssruntime` と `ssab` はこの submodule へのパス依存）。先に、通常のプルリクエストで `main` の submodule を SDK のリリースに合わせておきます。初回のリリースでは、Player がいま持っているバージョン `7.0.0-beta.1` をそのまま指定します。
+前回のタグから Player が何を得たかを見ます。同梱する SDK は `SpriteStudio-SDK` submodule のコミットです（`ssruntime` と `ssab` はこの submodule へのパス依存）。先に、通常のプルリクエストで `main` の submodule を SDK のリリースに合わせておきます。submodule が SDK のリリースタグの上に無いと、リリースは止まります。初回のリリースでは、Player がいま持っているバージョン `7.0.0-beta.1` をそのまま指定します。
 
 ```bash
 git fetch origin --tags
@@ -264,7 +264,7 @@ Release を公開するまでは取り消せます。
 
 ## リリースのローカルビルド
 
-`scripts/build-release.sh` がリリースのパッケージそのもので、`release.yml` の package ジョブはこのスクリプトを実行しているだけです。何もビルドしません（ネイティブの 2 プラットフォームには、それぞれの OS が要ります）。代わりに run の成果物を組み立てます。プラットフォームごとの zip、npm パッケージの zip、それらに対する `SHA256SUMS` です。ほかのどこもしない検査を受け持ちます。全プラットフォームが揃っていること、C ヘッダがどれも同じであること、各 zip が名前どおりのライブラリを持っていることです。`<run-id>` は、成果物を組み立てる `release.yml` の run の ID です。
+`scripts/build-release.sh` がリリースのパッケージそのもので、`release.yml` の package ジョブはこのスクリプトを実行しているだけです。何もビルドしません（ネイティブの 2 プラットフォームには、それぞれの OS が要ります）。代わりに run の成果物を組み立てます。プラットフォームごとの zip、npm パッケージの zip、それらに対する `SHA256SUMS` です。ほかのどこもしない検査を受け持ちます。全プラットフォームが揃っていること、C ヘッダがどれも同じであること、全プラットフォームが同じ SDK のリリース（`local` ではなくリリース）をリンクしていること、各 zip が名前どおりのライブラリを持っていることです。`<run-id>` は、成果物を組み立てる `release.yml` の run の ID です。
 
 ```bash
 RUN=<run-id>

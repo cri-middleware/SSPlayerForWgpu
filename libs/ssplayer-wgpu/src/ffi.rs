@@ -458,6 +458,24 @@ pub unsafe extern "C" fn ss_last_error() -> *const c_char {
     LAST_ERROR.with(|slot| slot.borrow().as_ptr())
 }
 
+/// This library's version: `7.0.0-beta.1`.
+///
+/// The string is static and owned by the library. Never null.
+#[unsafe(no_mangle)]
+pub extern "C" fn ss_version() -> *const c_char {
+    concat!(env!("CARGO_PKG_VERSION"), "\0").as_ptr().cast()
+}
+
+/// The SpriteStudio-SDK release whose runtime this library links: its tag,
+/// `v7.0.0-beta.1`, or `local` for an SDK built from a commit that is not a
+/// release. The release zips carry the same string in `lib/VERSION`.
+///
+/// The string is static and owned by the library. Never null.
+#[unsafe(no_mangle)]
+pub extern "C" fn ss_sdk_version() -> *const c_char {
+    concat!(env!("SSPLAYER_SDK_VERSION"), "\0").as_ptr().cast()
+}
+
 // --- argument conversion --------------------------------------------------
 
 /// Borrow the scene behind a caller-supplied player handle.
@@ -2550,6 +2568,14 @@ pub unsafe extern "C" fn ss_scene_restore_device(scene: *mut SsScene) -> i32 {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_version_strings_are_the_crate_constants_as_c_strings() {
+        // SAFETY: both return a pointer to a static, NUL-terminated string.
+        let (version, sdk) = unsafe { (CStr::from_ptr(ss_version()), CStr::from_ptr(ss_sdk_version())) };
+        assert_eq!(version.to_str(), Ok(crate::VERSION));
+        assert_eq!(sdk.to_str(), Ok(crate::SDK_VERSION));
+    }
 
     /// The string slots hand C a pointer rather than a copy, so what is behind it
     /// has to be NUL-terminated and has to stay put until the next call on that

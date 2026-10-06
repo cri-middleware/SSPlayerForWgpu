@@ -76,8 +76,8 @@ usage () {
 echo "  -h | --help             Show this help"
   echo ""
   echo "Output, in <out>:"
-  echo "  ssplayer-wgpu-<platform>-<arch>.zip   include/, lib/, LICENSE.md, LICENSE.ja.md,"
-  echo "                                        THIRD_PARTY_NOTICES.md"
+  echo "  ssplayer-wgpu-<platform>-<arch>.zip   include/, lib/ (the library and VERSION),"
+  echo "                                        LICENSE.md, LICENSE.ja.md, THIRD_PARTY_NOTICES.md"
   echo "  ssplayer-wgpu-web-wasm32.zip          the npm package (dist/, wasm/, package.json)"
   echo "  SHA256SUMS                            covers every zip above"
   echo ""
@@ -207,6 +207,7 @@ for p in $NATIVE; do
     fail "$p/ is missing"
   else
     [ -f "$dir/libs/$os/$arch/$lib" ] || fail "$p/libs/$os/$arch/$lib is missing (the static library this platform ships)"
+    [ -f "$dir/libs/$os/$arch/VERSION" ] || fail "$p/libs/$os/$arch/VERSION is missing (the SDK release the library links)"
     [ -f "$dir/include/ssplayer_wgpu.h" ] || fail "$p/include/ssplayer_wgpu.h is missing"
     [ -f "$dir/LICENSE.md" ] || fail "$p/LICENSE.md is missing"
     [ -f "$dir/LICENSE.ja.md" ] || fail "$p/LICENSE.ja.md is missing"
@@ -219,6 +220,7 @@ else
   [ -f "$IN/$WEB/wasm/ssplayer_wgpu_bg.wasm" ] || fail "$WEB/wasm/ssplayer_wgpu_bg.wasm is missing (the wasm-pack output)"
   [ -f "$IN/$WEB/dist/index.js" ] || fail "$WEB/dist/index.js is missing (the js layer was not built)"
   [ -f "$IN/$WEB/package.json" ] || fail "$WEB/package.json is missing"
+  [ -f "$IN/$WEB/wasm/VERSION" ] || fail "$WEB/wasm/VERSION is missing (the SDK release the wasm links)"
 fi
 
 if [ -n "$FAILED" ]; then
@@ -247,6 +249,26 @@ for p in $NATIVE; do
 done
 echo "   identical in all $(echo $NATIVE | wc -w | tr -d ' ') native artifacts"
 
+# Each platform names the SpriteStudio-SDK release it links in VERSION, and a
+# release ships one: a platform that disagrees built another commit. `local` is
+# an SDK built from a commit that is not a release, which a release does not ship.
+step "checking every platform links the same SDK release"
+SDK="$(cat "$IN/$WEB/wasm/VERSION")"
+for p in $NATIVE; do
+  v="$(cat "$IN/$p/libs/${p%%-*}/${p#*-}/VERSION")"
+  if [ "$v" != "$SDK" ]; then
+    echo "$APP: $p links SDK $v, where $WEB links $SDK" >&2
+    echo "$APP: the artifacts are not all from the same commit" >&2
+    exit 1
+  fi
+done
+if [ "$SDK" = "local" ]; then
+  echo "$APP: the SDK the artifacts link is not a release (VERSION says local)" >&2
+  echo "$APP: point the SpriteStudio-SDK submodule at the SDK's release tag first" >&2
+  exit 1
+fi
+echo "   $SDK, in every artifact"
+
 # --- assemble -------------------------------------------------------------
 step "assembling in $OUT"
 
@@ -269,7 +291,7 @@ for p in $NATIVE; do
   # Flat: one platform per archive, so `lib/` needs no platform subdirectory and
   # a CMake host points at include/ and lib/ without a per-OS branch.
   cp "$IN/$p/include/ssplayer_wgpu.h" "$stage/include/"
-  cp "$IN/$p/libs/$os/$arch/$lib" "$stage/lib/"
+  cp "$IN/$p/libs/$os/$arch/$lib" "$IN/$p/libs/$os/$arch/VERSION" "$stage/lib/"
   cp "$IN/$p/LICENSE.md" "$IN/$p/LICENSE.ja.md" "$stage/"
   cp "$ROOT_DIR/THIRD_PARTY_NOTICES.md" "$stage/"
 
@@ -309,7 +331,7 @@ if [ "$VERIFY" = "yes" ]; then
     lib="$(lib_for "$p")"
     zipname="ssplayer-wgpu-$p.zip"
     names="$(unzip -Z1 "$OUT/$zipname")"
-    for want in "include/ssplayer_wgpu.h" "lib/$lib" "LICENSE.md" "LICENSE.ja.md" "THIRD_PARTY_NOTICES.md"; do
+    for want in "include/ssplayer_wgpu.h" "lib/$lib" "lib/VERSION" "LICENSE.md" "LICENSE.ja.md" "THIRD_PARTY_NOTICES.md"; do
       printf '%s\n' "$names" | grep -qx "$want" || fail "$zipname does not contain $want"
     done
     # A static library that is a few kilobytes is a link that produced nothing.
@@ -318,7 +340,7 @@ if [ "$VERIFY" = "yes" ]; then
   done
 
   names="$(unzip -Z1 "$OUT/ssplayer-wgpu-$WEB.zip")"
-  for want in "wasm/ssplayer_wgpu_bg.wasm" "wasm/ssplayer_wgpu.js" "wasm/ssplayer_wgpu.d.ts" \
+  for want in "wasm/ssplayer_wgpu_bg.wasm" "wasm/ssplayer_wgpu.js" "wasm/ssplayer_wgpu.d.ts" "wasm/VERSION" \
               "dist/index.js" "dist/index.d.ts" "dist/element.js" "package.json"; do
     printf '%s\n' "$names" | grep -qx "$want" || fail "ssplayer-wgpu-$WEB.zip does not contain $want"
   done

@@ -64,3 +64,12 @@ pub use ssruntime::TrackBlend;
 pub use ssruntime::error::SSRuntimeError;
 #[cfg(feature = "web")]
 pub use web::{SsContextWeb, SsPlayerWeb, SsSurfaceWeb};
+
+/// This player's version, `ssplayer-wgpu`'s own: `7.0.0-beta.1`.
+pub const VERSION: &str = env!("CARGO_PKG_VERSION");
+
+/// The SpriteStudio-SDK release whose runtime this build links, as its tag —
+/// `v7.0.0-beta.1` — or `local` for an SDK built from a commit that is not a
+/// release. `scripts/build.sh` names it from the submodule's tag; a plain
+/// `cargo build` says `local`.
+pub const SDK_VERSION: &str = env!("SSPLAYER_SDK_VERSION");

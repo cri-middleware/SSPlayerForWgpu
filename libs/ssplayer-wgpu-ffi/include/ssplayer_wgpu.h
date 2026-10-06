@@ -525,6 +525,22 @@ extern "C" {
 const char *ss_last_error(void);
 
 /*
+ This library's version: `7.0.0-beta.1`.
+
+ The string is static and owned by the library. Never null.
+ */
+const char *ss_version(void);
+
+/*
+ The SpriteStudio-SDK release whose runtime this library links: its tag,
+ `v7.0.0-beta.1`, or `local` for an SDK built from a commit that is not a
+ release. The release zips carry the same string in `lib/VERSION`.
+
+ The string is static and owned by the library. Never null.
+ */
+const char *ss_sdk_version(void);
+
+/*
  Create a scene that renders into the window described by `desc`.
 
  Returns null on failure; call `ss_last_error` for the reason. The window (and

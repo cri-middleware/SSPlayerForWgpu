@@ -147,7 +147,7 @@ player, where every host and the C ABI reach it, and the host half belongs in an
         this repository is public.
 - [ ] **macOS signing and notarization** — for the cdylib. Portable from the sibling
       players, using the existing organisation secrets.
-- [ ] **Version stamping** — versions are hand-written and the SDK is a submodule rather
+- [x] **Version stamping** — versions are hand-written and the SDK is a submodule rather
       than a release zip, so the release zips, the C library and the npm package need to
       record the SDK commit they were built from. Only the preview shell does.
 - [ ] **crates.io** — `ssruntime` and `ssab` are path dependencies into the

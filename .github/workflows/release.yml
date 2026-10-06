@@ -103,6 +103,13 @@ jobs:
           token: ${{ secrets.SDK_SUBMODULE_TOKEN || github.token }}
           submodules: recursive
 
+      # build.sh names the SDK release the library links by the submodule's tag
+      # -- the VERSION file and ss_sdk_version() -- and the checkout fetched the
+      # submodule's commit without its tags.
+      - name: Fetch the SDK's tags
+        shell: bash
+        run: git -C SpriteStudio-SDK fetch --quiet --depth=1 origin 'refs/tags/v*:refs/tags/v*'
+
       - name: Set the versions
         if: inputs.versions != ''
         shell: bash
