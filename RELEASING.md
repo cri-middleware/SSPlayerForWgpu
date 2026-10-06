@@ -49,13 +49,14 @@ scripts/build-pages.sh                            # -> site/, the site pages.yml
 
 ### 4. Look at it first
 
-A dry run builds every platform with the version applied and checks the result, and commits, tags and releases nothing. Its zips stay on the run (`ssplayer-wgpu-release-dist`).
+A dry run builds every platform with the version applied and checks the result, and commits, tags and releases nothing. Its zips stay on the run (`ssplayer-wgpu-release-dist`); the block downloads them into `qa/<run ID>`, and fails when the run did.
 
 ```bash
 VERSION=<version>                                 # the version from step 1
 RUN=$(gh workflow run release.yml --ref main -f versions="ssplayer-wgpu@${VERSION:?}" -f dry_run=true | sed 's|.*/||')
 gh run watch "${RUN:?}" --exit-status
-gh run download "${RUN:?}" -n ssplayer-wgpu-release-dist -D qa
+gh run download "${RUN:?}" -n ssplayer-wgpu-release-dist -D "qa/$RUN"
+gh run view "${RUN:?}" --exit-status > /dev/null  # the block fails when the run did
 ```
 
 ### 5. Run the release
@@ -197,13 +198,14 @@ scripts/build-pages.sh                            # -> site/。pages.yml がデ�
 
 ### 4. 先に確かめる
 
-dry run は、バージョンを適用して全プラットフォームをビルドし、結果を検査します。コミットもタグも Release も作りません。zip は run に残ります（`ssplayer-wgpu-release-dist`）。
+dry run は、バージョンを適用して全プラットフォームをビルドし、結果を検査します。コミットもタグも Release も作りません。zip は run に残ります（`ssplayer-wgpu-release-dist`）。ブロックはそれを `qa/<run ID>` にダウンロードし、run が失敗していればブロックも失敗します。
 
 ```bash
 VERSION=<version>                                 # 手順 1 で決めたバージョン
 RUN=$(gh workflow run release.yml --ref main -f versions="ssplayer-wgpu@${VERSION:?}" -f dry_run=true | sed 's|.*/||')
 gh run watch "${RUN:?}" --exit-status
-gh run download "${RUN:?}" -n ssplayer-wgpu-release-dist -D qa
+gh run download "${RUN:?}" -n ssplayer-wgpu-release-dist -D "qa/$RUN"
+gh run view "${RUN:?}" --exit-status > /dev/null  # run が失敗していればブロックも失敗する
 ```
 
 ### 5. リリースを実行する
