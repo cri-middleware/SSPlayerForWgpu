@@ -46,6 +46,10 @@ functions a frame; it renders through **DirectX 12 on Windows, Metal on macOS an
     dependency to ship beside it. For a shared library, build from source; `build.sh` produces one.
     On Linux, build from source as well: no release zip carries a Linux library.
 
+    The Windows library links the C runtime as a DLL (`/MD`), which is what CMake and Visual Studio
+    default to. A host built with the static runtime (`/MT`) builds the library from source, with
+    the static runtime switched on — see *From source*.
+
 === "From source"
 
     Needs a Rust toolchain (1.99+); nothing else. `cargo` also regenerates the header through
@@ -65,6 +69,13 @@ functions a frame; it renders through **DirectX 12 on Windows, Metal on macOS an
     `./scripts/build.sh` (`build.ps1` on Windows) does the same and collects the result into
     `bin/` — `bin/include/`, `bin/libs/<platform>/<arch>/` — which is the layout the release zips
     are made from. Add `arch=universal` on macOS for a two-slice library.
+
+    For a Windows host built with the static C runtime (`/MT`), build the library with it too:
+
+    ```powershell
+    $env:RUSTFLAGS = "-C target-feature=+crt-static"
+    cargo build --release -p ssplayer-wgpu-ffi
+    ```
 
 ## Linking
 

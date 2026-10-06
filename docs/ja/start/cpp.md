@@ -38,6 +38,8 @@ title: C / C++ ではじめる
 
     **静的ライブラリのみ**です。自分のバイナリにリンクする形になるので、横に置いて配布するランタイム依存はありません。共有ライブラリが必要な場合はソースからビルドしてください（`build.sh` が生成します）。Linux でもソースからビルドします。Linux 向けのライブラリはリリースの zip に含まれません。
 
+    Windows のライブラリは、C ランタイムを DLL 版（`/MD`）でリンクしています。CMake と Visual Studio の既定と同じです。静的ランタイム（`/MT`）でビルドするホストは、静的ランタイムを有効にしてソースからビルドしてください（「ソースから」を参照）。
+
 === "ソースから"
 
     必要なのは Rust ツールチェイン（1.99+）だけです。同じビルドで cbindgen がヘッダも再生成するため、ヘッダは常に今ビルドしたライブラリと一致します。
@@ -55,6 +57,13 @@ title: C / C++ ではじめる
 
     `./scripts/build.sh`（Windows では `build.ps1`）も同じことをしつつ、結果を `bin/` に収集します（`bin/include/`、`bin/libs/<platform>/<arch>/`）。これはリリース zip の元になるレイアウトです。
     macOS で 2 スライスのライブラリが欲しい場合は `arch=universal` を付けます。
+
+    静的 C ランタイム（`/MT`）でビルドする Windows のホストに向けては、ライブラリも同じランタイムでビルドします。
+
+    ```powershell
+    $env:RUSTFLAGS = "-C target-feature=+crt-static"
+    cargo build --release -p ssplayer-wgpu-ffi
+    ```
 
 ## リンク
 
