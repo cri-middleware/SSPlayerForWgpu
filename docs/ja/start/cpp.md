@@ -35,10 +35,8 @@ title: C / C++ ではじめる
     |---|---|
     | `ssplayer-wgpu-windows-x86_64.zip` | Windows / MSVC（DX12） |
     | `ssplayer-wgpu-macos-universal.zip` | macOS。arm64 + x86_64 が 1 本に（Metal） |
-    | `ssplayer-wgpu-linux-x86_64.zip` | Linux x86_64（Vulkan） |
-    | `ssplayer-wgpu-linux-aarch64.zip` | Linux aarch64（Vulkan） |
 
-    **静的ライブラリのみ**です。自分のバイナリにリンクする形になるので、横に置いて配布するランタイム依存はありません。共有ライブラリが必要な場合はソースからビルドしてください（`build.sh` が生成します）。
+    **静的ライブラリのみ**です。自分のバイナリにリンクする形になるので、横に置いて配布するランタイム依存はありません。共有ライブラリが必要な場合はソースからビルドしてください（`build.sh` が生成します）。Linux でもソースからビルドします。Linux 向けのライブラリはリリースの zip に含まれません。
 
 === "ソースから"
 
@@ -162,7 +160,7 @@ cd examples/viewer-vulkan-cpp  && cmake -B build && cmake --build build && ./bui
 `./scripts/deploy-examples.sh` を先に 1 回だけ実行してください。
 
 !!! note "Linux サンプルはまだ実行されていません"
-    ライブラリは Linux（x86_64 / aarch64）向けにビルドされ、リリースにも含まれます。ただし
+    ライブラリは Linux（x86_64 / aarch64）向けにソースからビルドできます。ただし
     **Vulkan サンプルホスト**は macOS 上で書かれたまま一度もビルド・実行されておらず、X11 / Wayland
     どちらの経路も未検証です（[ROADMAP](https://github.com/cri-middleware/SSPlayerForWgpu/blob/main/ROADMAP.md)）。
 

@@ -145,8 +145,8 @@ Three testing notes:
 ## Releasing
 
 `release.yml` builds every platform; `scripts/build-release.sh` assembles the zips and the
-checksums from what the matrix produced. There is no local equivalent of the matrix — Linux, Windows
-and macOS need three operating systems between them — so a local run starts from
+checksums from what the matrix produced. There is no local equivalent of the matrix — Windows and
+macOS need an operating system each — so a local run starts from
 `gh run download <run-id> -D artifacts`.
 
 `pages.yml` publishes this site, on a release and on demand.

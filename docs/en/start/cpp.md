@@ -41,11 +41,10 @@ functions a frame; it renders through **DirectX 12 on Windows, Metal on macOS an
     |---|---|
     | `ssplayer-wgpu-windows-x86_64.zip` | Windows, MSVC (DX12) |
     | `ssplayer-wgpu-macos-universal.zip` | macOS, arm64 + x86_64 in one library (Metal) |
-    | `ssplayer-wgpu-linux-x86_64.zip` | Linux x86_64 (Vulkan) |
-    | `ssplayer-wgpu-linux-aarch64.zip` | Linux aarch64 (Vulkan) |
 
     **Static libraries only** — you link the library into your own binary, and there is no runtime
     dependency to ship beside it. For a shared library, build from source; `build.sh` produces one.
+    On Linux, build from source as well: no release zip carries a Linux library.
 
 === "From source"
 
@@ -179,7 +178,7 @@ They run `cargo` themselves, so there is no separate build step — and
 `./scripts/deploy-examples.sh` once, first, for the animation data.
 
 !!! note "The Linux sample has not been run yet"
-    The library builds and is released for Linux (x86_64 and aarch64). The **Vulkan sample**
+    The library builds from source for Linux (x86_64 and aarch64). The **Vulkan sample**
     was written on macOS and has never been built or run, so its X11 and Wayland paths are
     unverified — see the [ROADMAP](https://github.com/cri-middleware/SSPlayerForWgpu/blob/main/ROADMAP.md).
 

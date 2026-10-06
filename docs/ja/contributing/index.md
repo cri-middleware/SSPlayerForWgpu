@@ -125,6 +125,6 @@ cargo build -p ssplayer-wgpu-ffi                          # C ヘッダも再生
 
 ## リリース
 
-`release.yml` が全プラットフォームをビルドし、`scripts/build-release.sh` がマトリクスの成果物から zip とチェックサムを組み立てます。ローカルにマトリクスの代替はありません（Linux / Windows / macOS で 3 つの OS が必要です）。ローカル実行は `gh run download <run-id> -D artifacts` から始めます。
+`release.yml` が全プラットフォームをビルドし、`scripts/build-release.sh` がマトリクスの成果物から zip とチェックサムを組み立てます。ローカルにマトリクスの代替はありません（Windows と macOS で、それぞれの OS が必要です）。ローカル実行は `gh run download <run-id> -D artifacts` から始めます。
 
 `pages.yml` がこのサイトを公開します（リリース時と、手動実行時）。
