@@ -12,7 +12,7 @@ Only steps 4 and 5 and their retry under [Undoing a release](#undoing-a-release)
 
 ### 1. Decide the version
 
-Look at what the player gained since its previous tag. The SDK it ships is the commit of the `SpriteStudio-SDK` submodule — `ssruntime` and `ssab` are path dependencies into it — so point the submodule at the SDK release first, in an ordinary pull request into `main`. The first release names the version the player already has, `7.0.0-beta.1`.
+Look at what the player gained since its previous tag. The SDK it ships is the commit of the `SpriteStudio-SDK` submodule — `ssruntime` and `ssab` are path dependencies into it — so point the submodule at the SDK release first, in an ordinary pull request into `main`; the release stops on a submodule that is not on an SDK release tag. The first release names the version the player already has, `7.0.0-beta.1`.
 
 ```bash
 git fetch origin --tags
@@ -68,7 +68,7 @@ RUN=$(gh workflow run release.yml --ref main -f versions="ssplayer-wgpu@${VERSIO
 gh run watch "${RUN:?}" --exit-status
 ```
 
-The run first checks the changelog, then builds the library for Linux (x86_64 and aarch64), Windows and macOS (universal) and the npm package, all with the version applied, then assembles and checks the zips, and only then commits the version and the dated changelog to `main`, tags `ssplayer-wgpu-v<version>` and creates a **draft** Release carrying the five zips, `SHA256SUMS` and a link to the changelog. A failure before the commit leaves `main` untouched, and so does a `main` that moved during the run, which rejects the push. Then see what it made:
+The run first checks the changelog, then builds the library for Windows and macOS (universal) and the npm package, all with the version applied, then assembles and checks the zips, and only then commits the version and the dated changelog to `main`, tags `ssplayer-wgpu-v<version>` and creates a **draft** Release carrying the three zips, `SHA256SUMS` and a link to the changelog. A failure before the commit leaves `main` untouched, and so does a `main` that moved during the run, which rejects the push. Then see what it made:
 
 ```bash
 git fetch origin --tags
@@ -78,7 +78,7 @@ gh release list --json tagName,isDraft -q '.[] | select(.isDraft) | .tagName'   
 
 ### 6. Publish
 
-Nothing on the draft needs writing, and a version with a `-` is already marked as a pre-release. Check the attachments first: `ssplayer-wgpu-linux-x86_64.zip`, `ssplayer-wgpu-linux-aarch64.zip`, `ssplayer-wgpu-windows-x86_64.zip`, `ssplayer-wgpu-macos-universal.zip`, `ssplayer-wgpu-web-wasm32.zip` and `SHA256SUMS`.
+Nothing on the draft needs writing, and a version with a `-` is already marked as a pre-release. Check the attachments first: `ssplayer-wgpu-windows-x86_64.zip`, `ssplayer-wgpu-macos-universal.zip`, `ssplayer-wgpu-web-wasm32.zip` and `SHA256SUMS`.
 
 ```bash
 tag=$(gh release list --json tagName,isDraft -q '[.[] | select(.isDraft) | .tagName | select(startswith("ssplayer-wgpu-v"))][0] // empty')
@@ -125,7 +125,7 @@ Until the Release is published, it can be undone:
 
 ## Building the release locally
 
-`scripts/build-release.sh` is the release package, and `release.yml`'s package job runs exactly this script. It builds nothing — the four native platforms need three operating systems — so it assembles a run's artifacts instead: one zip per platform, the npm package as its own, and `SHA256SUMS` over them. Its checks are the ones nothing else does: every platform is present, the C header is the same in all of them, and each zip holds the library it is named for. `<run-id>` is the `release.yml` run whose artifacts it assembles.
+`scripts/build-release.sh` is the release package, and `release.yml`'s package job runs exactly this script. It builds nothing — the two native platforms need an operating system each — so it assembles a run's artifacts instead: one zip per platform, the npm package as its own, and `SHA256SUMS` over them. Its checks are the ones nothing else does: every platform is present, the C header is the same in all of them, every platform links the same SDK release — a release, not `local` — and each zip holds the library it is named for. `<run-id>` is the `release.yml` run whose artifacts it assembles.
 
 ```bash
 RUN=<run-id>
@@ -151,7 +151,7 @@ scripts/build-release.sh                          # -> release-dist/
 
 ### 1. バージョンを決める
 
-前回のタグから Player が何を得たかを見ます。同梱する SDK は `SpriteStudio-SDK` submodule のコミットです（`ssruntime` と `ssab` はこの submodule へのパス依存）。先に、通常のプルリクエストで `main` の submodule を SDK のリリースに合わせておきます。初回のリリースでは、Player がいま持っているバージョン `7.0.0-beta.1` をそのまま指定します。
+前回のタグから Player が何を得たかを見ます。同梱する SDK は `SpriteStudio-SDK` submodule のコミットです（`ssruntime` と `ssab` はこの submodule へのパス依存）。先に、通常のプルリクエストで `main` の submodule を SDK のリリースに合わせておきます。submodule が SDK のリリースタグの上に無いと、リリースは止まります。初回のリリースでは、Player がいま持っているバージョン `7.0.0-beta.1` をそのまま指定します。
 
 ```bash
 git fetch origin --tags
@@ -207,7 +207,7 @@ RUN=$(gh workflow run release.yml --ref main -f versions="ssplayer-wgpu@${VERSIO
 gh run watch "${RUN:?}" --exit-status
 ```
 
-run はまず changelog を検査し、続けて Linux（x86_64 と aarch64）・Windows・macOS（ユニバーサル）向けのライブラリと npm パッケージを、どれもバージョンを適用してビルドし、zip を組み立てて検査します。そのあとで初めてバージョンと日付を入れた changelog を `main` へコミットし、`ssplayer-wgpu-v<version>` のタグを打ち、5 つの zip と `SHA256SUMS`、changelog へのリンク付きで**下書き**の Release を作ります。コミットより前に失敗すれば `main` は変わりません。run の途中で `main` が進んでいた場合も、push が拒否されるので同じです。終わったら、できたものを確かめます。
+run はまず changelog を検査し、続けて Windows・macOS（ユニバーサル）向けのライブラリと npm パッケージを、どれもバージョンを適用してビルドし、zip を組み立てて検査します。そのあとで初めてバージョンと日付を入れた changelog を `main` へコミットし、`ssplayer-wgpu-v<version>` のタグを打ち、3 つの zip と `SHA256SUMS`、changelog へのリンク付きで**下書き**の Release を作ります。コミットより前に失敗すれば `main` は変わりません。run の途中で `main` が進んでいた場合も、push が拒否されるので同じです。終わったら、できたものを確かめます。
 
 ```bash
 git fetch origin --tags
@@ -217,7 +217,7 @@ gh release list --json tagName,isDraft -q '.[] | select(.isDraft) | .tagName'   
 
 ### 6. 公開
 
-下書きに書き足すものはありません。`-` を含むバージョンは、すでに pre-release になっています。先に添付を確かめます。`ssplayer-wgpu-linux-x86_64.zip`、`ssplayer-wgpu-linux-aarch64.zip`、`ssplayer-wgpu-windows-x86_64.zip`、`ssplayer-wgpu-macos-universal.zip`、`ssplayer-wgpu-web-wasm32.zip`、`SHA256SUMS` の 6 つです。
+下書きに書き足すものはありません。`-` を含むバージョンは、すでに pre-release になっています。先に添付を確かめます。`ssplayer-wgpu-windows-x86_64.zip`、`ssplayer-wgpu-macos-universal.zip`、`ssplayer-wgpu-web-wasm32.zip`、`SHA256SUMS` の 4 つです。
 
 ```bash
 tag=$(gh release list --json tagName,isDraft -q '[.[] | select(.isDraft) | .tagName | select(startswith("ssplayer-wgpu-v"))][0] // empty')
@@ -264,7 +264,7 @@ Release を公開するまでは取り消せます。
 
 ## リリースのローカルビルド
 
-`scripts/build-release.sh` がリリースのパッケージそのもので、`release.yml` の package ジョブはこのスクリプトを実行しているだけです。何もビルドしません（ネイティブの 4 プラットフォームには 3 つの OS が要ります）。代わりに run の成果物を組み立てます。プラットフォームごとの zip、npm パッケージの zip、それらに対する `SHA256SUMS` です。ほかのどこもしない検査を受け持ちます。全プラットフォームが揃っていること、C ヘッダがどれも同じであること、各 zip が名前どおりのライブラリを持っていることです。`<run-id>` は、成果物を組み立てる `release.yml` の run の ID です。
+`scripts/build-release.sh` がリリースのパッケージそのもので、`release.yml` の package ジョブはこのスクリプトを実行しているだけです。何もビルドしません（ネイティブの 2 プラットフォームには、それぞれの OS が要ります）。代わりに run の成果物を組み立てます。プラットフォームごとの zip、npm パッケージの zip、それらに対する `SHA256SUMS` です。ほかのどこもしない検査を受け持ちます。全プラットフォームが揃っていること、C ヘッダがどれも同じであること、全プラットフォームが同じ SDK のリリース（`local` ではなくリリース）をリンクしていること、各 zip が名前どおりのライブラリを持っていることです。`<run-id>` は、成果物を組み立てる `release.yml` の run の ID です。
 
 ```bash
 RUN=<run-id>

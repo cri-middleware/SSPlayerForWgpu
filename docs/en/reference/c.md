@@ -16,6 +16,7 @@ no dependencies.
 |---|---|
 | Return values | Functions that can fail return `int32_t`: `SS_OK` (0), `SS_ERROR_INVALID_ARGUMENT` (-1), `SS_ERROR_GPU` (-2) |
 | Error text | `ss_last_error()` — the last failure on the calling thread. For logging, not for branching |
+| Versions | `ss_version()` — this library's version. `ss_sdk_version()` — the SpriteStudio-SDK release it links, as its tag, or `local` for an SDK that is not a release. Both static; never free them |
 | Null handles | Every function tolerates a null handle and answers `SS_ERROR_INVALID_ARGUMENT` (or a zero value) rather than crashing |
 | Strings | `const char *` in, UTF-8. Strings *out* are owned by the scene and valid until the next call of the same kind — copy what you keep |
 | Sizes | Always **drawable pixels**, never points. Scale by the display factor yourself |

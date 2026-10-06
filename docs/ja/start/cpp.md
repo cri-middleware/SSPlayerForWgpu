@@ -19,6 +19,7 @@ title: C / C++ ではじめる
 |---|---|
 | `include/ssplayer_wgpu.h` | ヘッダ 1 枚。C99、依存なし。cbindgen が生成 |
 | `lib/libssplayer_wgpu.a`（MSVC では `ssplayer_wgpu.lib`） | 静的ライブラリ |
+| `lib/VERSION` | ライブラリがリンクしている SpriteStudio-SDK のリリースのタグ。`ss_sdk_version()` が返すものと同じ |
 | `LICENSE.md` | BSD-3-Clause |
 | `LICENSE.ja.md` | その参考訳 |
 | `THIRD_PARTY_NOTICES.md` | ライブラリに組み込まれた Rust クレートのライセンス。謝辞に載せるべきもの |
@@ -35,10 +36,10 @@ title: C / C++ ではじめる
     |---|---|
     | `ssplayer-wgpu-windows-x86_64.zip` | Windows / MSVC（DX12） |
     | `ssplayer-wgpu-macos-universal.zip` | macOS。arm64 + x86_64 が 1 本に（Metal） |
-    | `ssplayer-wgpu-linux-x86_64.zip` | Linux x86_64（Vulkan） |
-    | `ssplayer-wgpu-linux-aarch64.zip` | Linux aarch64（Vulkan） |
 
-    **静的ライブラリのみ**です。自分のバイナリにリンクする形になるので、横に置いて配布するランタイム依存はありません。共有ライブラリが必要な場合はソースからビルドしてください（`build.sh` が生成します）。
+    **静的ライブラリのみ**です。自分のバイナリにリンクする形になるので、横に置いて配布するランタイム依存はありません。共有ライブラリが必要な場合はソースからビルドしてください（`build.sh` が生成します）。Linux でもソースからビルドします。Linux 向けのライブラリはリリースの zip に含まれません。
+
+    Windows のライブラリは、C ランタイムを DLL 版（`/MD`）でリンクしています。CMake と Visual Studio の既定と同じです。静的ランタイム（`/MT`）でビルドするホストは、静的ランタイムを有効にしてソースからビルドしてください（「ソースから」を参照）。
 
 === "ソースから"
 
@@ -57,6 +58,13 @@ title: C / C++ ではじめる
 
     `./scripts/build.sh`（Windows では `build.ps1`）も同じことをしつつ、結果を `bin/` に収集します（`bin/include/`、`bin/libs/<platform>/<arch>/`）。これはリリース zip の元になるレイアウトです。
     macOS で 2 スライスのライブラリが欲しい場合は `arch=universal` を付けます。
+
+    静的 C ランタイム（`/MT`）でビルドする Windows のホストに向けては、ライブラリも同じランタイムでビルドします。
+
+    ```powershell
+    $env:RUSTFLAGS = "-C target-feature=+crt-static"
+    cargo build --release -p ssplayer-wgpu-ffi
+    ```
 
 ## リンク
 
@@ -162,7 +170,7 @@ cd examples/viewer-vulkan-cpp  && cmake -B build && cmake --build build && ./bui
 `./scripts/deploy-examples.sh` を先に 1 回だけ実行してください。
 
 !!! note "Linux サンプルはまだ実行されていません"
-    ライブラリは Linux（x86_64 / aarch64）向けにビルドされ、リリースにも含まれます。ただし
+    ライブラリは Linux（x86_64 / aarch64）向けにソースからビルドできます。ただし
     **Vulkan サンプルホスト**は macOS 上で書かれたまま一度もビルド・実行されておらず、X11 / Wayland
     どちらの経路も未検証です（[ROADMAP](https://github.com/cri-middleware/SSPlayerForWgpu/blob/main/ROADMAP.md)）。
 

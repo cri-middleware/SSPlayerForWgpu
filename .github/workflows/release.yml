@@ -82,12 +82,6 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - name: 🐧 Linux (x86_64)
-            artifact: linux-x86_64
-            os: ubuntu-latest
-          - name: 🐧 Linux (aarch64)
-            artifact: linux-aarch64
-            os: ubuntu-24.04-arm
           - name: 🪟 Windows (x86_64)
             artifact: windows-x86_64
             os: windows-latest
@@ -108,6 +102,13 @@ jobs:
           # Once the SDK is public, drop this line and the secret.
           token: ${{ secrets.SDK_SUBMODULE_TOKEN || github.token }}
           submodules: recursive
+
+      # build.sh names the SDK release the library links by the submodule's tag
+      # -- the VERSION file and ss_sdk_version() -- and the checkout fetched the
+      # submodule's commit without its tags.
+      - name: Fetch the SDK's tags
+        shell: bash
+        run: git -C SpriteStudio-SDK fetch --quiet --depth=1 origin 'refs/tags/v*:refs/tags/v*'
 
       - name: Set the versions
         if: inputs.versions != ''
@@ -208,6 +209,7 @@ jobs:
             packages/ssplayer-wgpu/README.ja.md
             packages/ssplayer-wgpu/LICENSE.md
             packages/ssplayer-wgpu/LICENSE.ja.md
+            packages/ssplayer-wgpu/THIRD_PARTY_NOTICES.md
           if-no-files-found: error
           retention-days: 7
 

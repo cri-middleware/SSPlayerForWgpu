@@ -31,6 +31,8 @@ pub use ssruntime::TrackBlend;
 pub use ssruntime::error::SSRuntimeError;
 #[cfg(feature = "web")]
 pub use web::{SsContextWeb, SsPlayerWeb, SsSurfaceWeb};
+pub const VERSION: &str;      // この Player のバージョン
+pub const SDK_VERSION: &str;  // リンクしている SpriteStudio-SDK のリリース。リリースでなければ "local"
 ```
 
 ほとんどのアプリが触るのはこのうち 6 つです：`SSRenderer` / `SSScene` / `SceneConfig` / `SSPlayer` /
