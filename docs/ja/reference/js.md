@@ -33,6 +33,7 @@ import { defineSsPlayerWebGPUElement } from '@spritestudio/ssplayer-wgpu/element
 | `hasTexture(key)` | キャッシュに既にあるか |
 | `isDeviceLost()` / `restoreDevice()` | [デバイスロスト](../guide/device-loss.md)を参照 |
 | `surfaceCount()` | 診断用 |
+| `version` / `sdkVersion` | この Player のバージョンと、リンクしている SpriteStudio-SDK のリリースのタグ（リリースでない SDK なら `local`）。読み取り専用。カスタム要素からは `element.ctx` で届く |
 
 ## `SsSurfaceWeb` — キャンバス 1 枚
 
