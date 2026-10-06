@@ -56,10 +56,9 @@ Windows のゲームも、macOS のアプリも、4 本の移植版ではなく�
 
 どれを選んでも `.ssab` が必要です — [アセットの準備](./start/assets.md)を参照してください。試すだけなら自前のデータは不要です。すべてのサンプルは SDK 付属のテストアニメーションで動きます。
 
-▶️ **まず動いているところを見たい場合**：<a href="../demo/" target="_blank" rel="noreferrer">WebGPU デモ</a>
-がこのドキュメントと一緒に公開されています。インストール不要（WebGPU 対応ブラウザが必要）。ページは 3 つ：API の 2 つの形、<a href="../demo/element.html" target="_blank" rel="noreferrer">カスタム要素</a>
-単体、そして<a href="../demo/multi.html" target="_blank" rel="noreferrer">それを 1 ページに並べたもの</a>
-（他の要素と重ねても `GPUDevice` は 1 つ）。
+▶️ **まず動いているところを見たい場合**：<a href="../demo/" target="_blank" rel="noreferrer">WebGPU デモ</a>がこのドキュメントと一緒に公開されています。インストール不要（WebGPU
+対応ブラウザが必要）。ページは 4 つ：API の 2 つの形、<a href="../demo/element.html" target="_blank" rel="noreferrer">カスタム要素</a>単体、<a href="../demo/multi.html" target="_blank" rel="noreferrer">それを 1 ページに並べたもの</a>（他の要素と重ねても `GPUDevice`
+は 1 つ）、そして<a href="../demo/part-follow.html" target="_blank" rel="noreferrer">選んだパーツにマーカーを追従させるもの</a>（姿勢はホストが毎フレーム読み出す）。
 
 ## 🧭 このドキュメントの構成
 

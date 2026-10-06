@@ -50,16 +50,17 @@ notice a stale package.
 
 `ssplayer-wgpu/`, `assets/` and `assets_emb/` are all generated (git-ignored).
 
-## The three pages
+## The four pages
 
 Each is self-contained static HTML — no build step, no bundler, one inline module
-script — and all three share the same staged package and the same data.
+script — and all four share the same staged package and the same data.
 
 | Page | What it is for |
 |---|---|
 | [`index.html`](./index.html) | The two shapes of the API side by side: one `<ss-player-webgpu>` element, and one canvas driven directly with several players on it, printing `SceneStats`. Both export modes are selectable, which is what exercises the fetch path as well as the embedded one. |
 | [`element.html`](./element.html) | The Web Component on its own: the declarative markup, a panel that sets its attributes live (`src`, `animation`, `speed-scale`, `fit`, `align`), the six events as they arrive, `element.player` for transport and loop count, and a copy-pasteable snippet that tracks the panel. |
 | [`multi.html`](./multi.html) | Many elements on one page, in article flow — block, inline, overlapped with HTML above and below, and styled with `border-radius` / `filter`. The HUD counts elements, canvases and **distinct `SsContextWeb` objects**, so "one device however many elements" is measured rather than claimed; per-animation frame counters make `pause-when-hidden` visible. |
+| [`part-follow.html`](./part-follow.html) | Following a part from the host, since the player has no follow object of its own: `partTransform(name)` read back every frame, and a DOM marker over the canvas placed at it. Skinned (bone-bound) mesh parts are marked ⚠, because their own transform stays at the setup pose while the bones draw the vertices. Its prose switches between Japanese and English. |
 
 The element fits the animation's authored canvas into its box by itself, placed by
 the pivot the artist set, so Ringo, who stands on his origin, lands inside the box
