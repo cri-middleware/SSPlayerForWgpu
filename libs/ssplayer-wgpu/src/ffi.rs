@@ -9,7 +9,7 @@
 //!
 //! Raw window handles cannot cross the ABI as Rust traits, so the
 //! caller fills in a flat [`SsWindowHandle`] (HWND / NSView / CAMetalLayer /
-//! Xlib / Wayland) which [`surface_target`] turns into what wgpu wants.
+//! Xlib / Wayland) which `surface_target` turns into what wgpu wants.
 //!
 //! **Two handles, not one.** `ss_scene_t` is the window — surface, device,
 //! renderer, scene — and `ss_player_t` is one character drawn into it. Fusing
@@ -18,11 +18,11 @@
 //!
 //! Conventions:
 //! * Status is `int32_t`: `SS_OK` (0), positive = an `ssruntime` error code
-//! (same numbering as the SDK's C-API), negative = a player/host error.
-//! [`ss_last_error`] carries the human-readable detail.
+//!   (same numbering as the SDK's C-API), negative = a player/host error.
+//!   [`ss_last_error`] carries the human-readable detail.
 //! * No entry point unwinds: the workspace builds with `panic = "abort"`.
 //! * Nothing here retains the window; the caller must keep it (and its layer)
-//! alive until [`ss_scene_destroy`].
+//!   alive until [`ss_scene_destroy`].
 
 use crate::events::{SignalValue, SsEvent};
 use crate::fit::{Align, Fit, Placement, Rect};

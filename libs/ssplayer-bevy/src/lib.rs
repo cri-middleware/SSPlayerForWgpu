@@ -12,8 +12,9 @@
 //!   one target-scoped `SSScene`. Nothing here is reachable from gameplay code.
 //!
 //! Authoring state crosses to the render world through `ExtractSchedule`;
-//! playback state crosses back through a shared buffer (see [`feedback`]) — the
-//! timeline events, the loop and completion edges, and the frame landed on. The
+//! playback state crosses back through a shared buffer — the timeline events
+//! ([`SsEventMessage`]), the start, loop and completion edges ([`SsStarted`],
+//! [`SsLooped`], [`SsFinished`]), and the frame landed on ([`SsPlaybackState`]). The
 //! return trip is one frame late, because playback runs in the render world.
 //!
 //! The player never owns Bevy's `Device` / `Queue` / render target; the draw

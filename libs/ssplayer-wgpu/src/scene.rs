@@ -127,8 +127,9 @@ pub struct BatchInfo {
     /// Player-level tint, multiplied into the fragment *after* the PartsColor
     /// mix — the place `uColor` lands in the WebGL player, and the reason it
     /// cannot fold into the vertex colour the formula blends towards. Packed in
-    /// [`pack_rgb`]'s byte order; [`NO_TINT`] leaves the colour alone. Mask
-    /// writers are untinted for the same reason they are unfaded.
+    /// the `unpack4x8unorm` byte order (red in byte 0); white, `0x00FF_FFFF`,
+    /// leaves the colour alone. Mask writers are untinted for the same reason
+    /// they are unfaded.
     pub tint: u32,
 }
 
@@ -251,7 +252,7 @@ fn target_mask_info(seq: u32, inside: bool) -> u32 {
 
 /// Where one node's slice of the frame arena starts.
 ///
-/// [`SSScene::begin_node`] copies the runtime's SoA buffers in — once per node
+/// [`FrameChunk::begin_node`] copies the runtime's SoA buffers in — once per node
 /// per frame, as a handful of memcpys — and hands back the offsets. Every
 /// primitive that node contributes then refers to the arena rather than carrying
 /// its own expanded geometry.

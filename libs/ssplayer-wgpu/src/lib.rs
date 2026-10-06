@@ -21,17 +21,21 @@ mod assets;
 #[cfg(feature = "embedded")]
 mod decode;
 mod events;
-/// The C-ABI face (`ffi` feature): a thin translation layer whose `ss_player_*`
-/// entry points are exported from the cdylib/staticlib and described by the
-/// generated `ssplayer_wgpu.h`. The work it delegates to lives in [`host`].
+// The three public modules carry their docs inside (`//!`), so the notes here are
+// plain comments: an outer `///` would print above them on the module's page, and
+// would make rustdoc resolve every link in the module's own docs from this file.
+//
+// The C-ABI face (`ffi` feature): a thin translation layer whose `ss_player_*`
+// entry points are exported from the cdylib/staticlib and described by the
+// generated `ssplayer_wgpu.h`. The work it delegates to lives in `host`.
 #[cfg(feature = "ffi")]
 pub mod ffi;
-/// `fit` / `align` — placing an animation inside a box the host laid out. Pure
-/// arithmetic, so every face inherits it.
+// `fit` / `align` — placing an animation inside a box the host laid out. Pure
+// arithmetic, so every face inherits it.
 pub mod fit;
 mod frame;
-/// A window-owning wgpu host (`ffi` feature), used by [`ffi`] and available to
-/// Rust callers that have a raw window handle rather than a winit `Window`.
+// A window-owning wgpu host (`ffi` feature), used by `ffi` and available to
+// Rust callers that have a raw window handle rather than a winit `Window`.
 #[cfg(feature = "ffi")]
 pub mod host;
 mod mask;

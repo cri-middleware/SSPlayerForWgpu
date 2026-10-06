@@ -4,7 +4,7 @@
 //! resolves to `None` rather than to whichever value later reuses the slot.
 //! Slots are reused, so churn does not grow the roster.
 
-/// Names one value in a [`Roster`]. Safe to hold past its removal.
+/// Names one value in a `Roster`. Safe to hold past its removal.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct SlotId {
     index: u32,
