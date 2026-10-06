@@ -5,19 +5,20 @@ name: Release
 #
 #   versions   `<package>@<version>` (today `ssplayer-wgpu@X.Y.Z`).
 #              scripts/set-versions.mjs writes it in every job, so each one
-#              builds the same tree. The package job commits it to main only
-#              once every platform has built and build-release.sh has checked
-#              the result. Empty sets nothing and releases the current version
-#              if it has no Release yet: the first release, and the retry after
-#              a run that died halfway.
+#              builds the same tree, and turns the package's `## [Unreleased]`
+#              notes into that version's CHANGELOG.md section. The package job
+#              commits it to main only once every platform has built and
+#              build-release.sh has checked the result. Empty sets nothing and
+#              releases the current version if it has no Release yet: the retry
+#              after a run that died halfway.
 #
 #   dry_run    Build and check everything with the version applied, and commit,
 #              tag and release nothing. The look before a release.
 #
 # A release gets a `ssplayer-wgpu-v<version>` tag and a DRAFT GitHub Release
-# carrying the zips, SHA256SUMS and notes generated from the pull requests since
-# its previous tag. A maintainer edits and publishes it, and publishing is what
-# starts pages.yml.
+# carrying the zips, SHA256SUMS and a link to the package's CHANGELOG.md, which
+# is where the notes are. A maintainer checks and publishes it, and publishing is
+# what starts pages.yml.
 on:
   workflow_dispatch:
     inputs:
@@ -39,10 +40,40 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
-  build:
-    name: ${{ matrix.name }}
+  # A Release carries a link to the package's CHANGELOG.md and no notes of its
+  # own, so a version without a section there would go out with nothing to say.
+  # set-versions.mjs writes the section for the version it sets; a run with
+  # `versions` empty releases what main already carries, and this is where a
+  # version nobody wrote notes for stops -- first, before any platform builds.
+  changelog:
+    name: 📝 Changelog
     # Refuse to release from anywhere but main, even if dispatched on another ref.
     if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Set the versions
+        if: inputs.versions != ''
+        env:
+          VERSIONS: ${{ inputs.versions }}
+        # shellcheck disable=SC2086
+        run: node scripts/set-versions.mjs $VERSIONS
+
+      - name: Check the changelog
+        run: |
+          set -euo pipefail
+          version="$(scripts/release-version.sh)"
+          if ! awk -v h="## [${version}] - " 'index($0, h) == 1 { found = 1 } END { exit !found }' libs/ssplayer-wgpu/CHANGELOG.md; then
+            echo "::error::libs/ssplayer-wgpu/CHANGELOG.md has no '## [${version}]' section."
+            exit 1
+          fi
+
+  build:
+    name: ${{ matrix.name }}
+    needs: changelog
     runs-on: ${{ matrix.os }}
     timeout-minutes: 45
     permissions:
@@ -190,8 +221,8 @@ jobs:
 
     steps:
       # No submodule here: this job assembles what the matrix already built, so
-      # it never touches the SDK and needs no token for it. Full history, for the
-      # previous tag the notes start at.
+      # it never touches the SDK and needs no token for it. Full history and
+      # tags, so that a tag a run left behind is reused.
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 0
@@ -242,7 +273,7 @@ jobs:
         run: |
           git config user.name  "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add Cargo.toml Cargo.lock packages/ssplayer-wgpu/package.json
+          git add Cargo.toml Cargo.lock packages/ssplayer-wgpu/package.json libs/ssplayer-wgpu/CHANGELOG.md
           git commit -m "chore(release): $VERSIONS"
           git push origin HEAD:main
 
@@ -258,9 +289,6 @@ jobs:
             echo "::notice::${tag} already has a Release — nothing to do."
             exit 0
           fi
-          # The notes start at the previous tag. A prerelease sorts below its
-          # full release, so 7.0.1 starts at 7.0.0, not at 7.0.0-beta.N.
-          previous="$(git -c versionsort.suffix=- tag --list 'ssplayer-wgpu-v*' --sort=-v:refname | grep -vx "$tag" | head -n 1 || true)"
           # A run that tagged and then died left the tag behind; it is reused.
           if ! git rev-parse -q --verify "refs/tags/${tag}" > /dev/null; then
             git config user.name  "github-actions[bot]"
@@ -268,8 +296,8 @@ jobs:
             git tag -a "$tag" -m "$tag" HEAD
             git push origin "refs/tags/${tag}"
           fi
-          args=(--verify-tag --title "SpriteStudio Player for wgpu v${version}" --generate-notes --draft)
-          if [ -n "$previous" ]; then args+=(--notes-start-tag "$previous"); fi
+          notes="See [CHANGELOG.md](${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/blob/${tag}/libs/ssplayer-wgpu/CHANGELOG.md) for what changed."
+          args=(--verify-tag --title "SpriteStudio Player for wgpu v${version}" --notes "$notes" --draft)
           case "$version" in *-*) args+=(--prerelease) ;; esac
           gh release create "$tag" release-dist/*.zip release-dist/SHA256SUMS "${args[@]}"
-          echo "::notice::Drafted ${tag} — edit its notes and publish it from the Releases page."
+          echo "::notice::Drafted ${tag} — check it and publish it from the Releases page."

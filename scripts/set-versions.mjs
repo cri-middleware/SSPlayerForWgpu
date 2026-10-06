@@ -10,11 +10,18 @@
 //                   and ssplayer-wgpu-ffi inherit; their two entries in
 //                   Cargo.lock; and packages/ssplayer-wgpu/package.json.
 //
+// It also turns the `## [Unreleased]` notes in the package's CHANGELOG.md into
+// `## [<version>] - <date>` under a fresh, empty `## [Unreleased]`: the changelog
+// is where the notes are, and a Release only links it.
+//
 // ssplayer-bevy is versioned on its own and has no release route yet, so it is
 // not one of them. release.yml runs this with its `versions` input in every job,
 // so each one builds the same tree; scripts/release-version.sh then prints the
 // result. Every argument is checked before any file is written, and a version
-// may not go backwards: one published by mistake can never be withdrawn.
+// may not go backwards: one published by mistake can never be withdrawn. A
+// version the changelog already has a heading for is released, and nothing under
+// `## [Unreleased]` leaves a release with no notes. Naming the version a package
+// already has cuts its first release.
 
 import { readFileSync, writeFileSync } from 'node:fs';
 import { join, dirname } from 'node:path';
@@ -76,6 +83,7 @@ const PACKAGES = {
       ['Cargo.lock', lockEntries(['ssplayer-wgpu', 'ssplayer-wgpu-ffi'])],
       ['packages/ssplayer-wgpu/package.json', jsonVersion],
     ],
+    changelog: 'libs/ssplayer-wgpu/CHANGELOG.md',
   },
 };
 
@@ -118,6 +126,24 @@ if (args.length === 0) {
   process.exit(2);
 }
 
+// Dates the `## [Unreleased]` notes as `version`'s section, or throws.
+const datedChangelog = (text, version, today) => {
+  const lines = text.split('\n');
+  if (lines.some((l) => l.startsWith(`## [${version}]`))) {
+    throw new Error(`${version} is already released -- its CHANGELOG.md has a heading for it`);
+  }
+  const top = lines.findIndex((l) => l.trimEnd() === '## [Unreleased]');
+  if (top < 0) throw new Error(`its CHANGELOG.md has no '## [Unreleased]' heading`);
+  const end = lines.findIndex((l, i) => i > top && l.startsWith('## '));
+  const notes = lines.slice(top + 1, end < 0 ? lines.length : end);
+  if (!notes.some((l) => l.trim() !== '' && !l.startsWith('#'))) {
+    throw new Error(`nothing under '## [Unreleased]' in its CHANGELOG.md -- write what ${version} gains first`);
+  }
+  lines.splice(top, 1, '## [Unreleased]', '', `## [${version}] - ${today}`);
+  return lines.join('\n');
+};
+
+const today = new Date().toISOString().slice(0, 10);
 const writes = [];
 const summary = [];
 const errors = [];
@@ -148,20 +174,27 @@ for (const arg of args) {
     continue;
   }
   const order = compare(want, have);
-  if (order === 0) {
-    errors.push(`${name}: already ${current}`);
-    continue;
-  }
   if (order < 0) {
     errors.push(`${name}: ${version} is lower than its current ${current}`);
     continue;
   }
+  const logPath = join(ROOT, pkg.changelog);
+  let log;
   try {
-    for (const [file, edit] of pkg.files) {
-      const path = join(ROOT, file);
-      writes.push([path, edit(readFileSync(path, 'utf8'), current, version)]);
+    log = datedChangelog(readFileSync(logPath, 'utf8'), version, today);
+  } catch (e) {
+    errors.push(`${name}: ${e.message}`);
+    continue;
+  }
+  try {
+    if (order > 0) {
+      for (const [file, edit] of pkg.files) {
+        const path = join(ROOT, file);
+        writes.push([path, edit(readFileSync(path, 'utf8'), current, version)]);
+      }
     }
-    summary.push(`${name}: ${current} -> ${version}`);
+    writes.push([logPath, log]);
+    summary.push(order > 0 ? `${name}: ${current} -> ${version}` : `${name}: ${version}`);
   } catch (e) {
     errors.push(`${name}: ${e.message} -- set it by hand`);
   }
