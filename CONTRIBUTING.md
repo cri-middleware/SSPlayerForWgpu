@@ -125,9 +125,9 @@ The rest of the matrix:
 | Check | Command |
 |---|---|
 | Fetch the SDK | `git submodule update --init` |
-| Generate the fixtures (required once) | `./scripts/deploy-examples.sh` — the tests read `assets/` |
+| Generate the fixtures (once, and after an SDK bump) | `./scripts/deploy-examples.sh` — the tests read `assets/`, whose `.ssab` format follows the SDK |
 | Build the library for this host | `./scripts/build.sh` |
-| A sample from a fresh checkout | `./scripts/run-example.sh` (`example=viewer` / `viewer-bevy` / `overall-bevy` / `web`) — converts and builds only what is missing |
+| A sample from a fresh checkout | `./scripts/run-example.sh` (`example=viewer` / `viewer-bevy` / `overall-bevy` / `web`) — converts and builds only what is missing or what an SDK bump left stale |
 | Smallest Rust host | `cargo run -p ssplayer-wgpu-hello` |
 | Native viewer | `cargo run -p ssplayer-wgpu-viewer` |
 | Metal C++ viewer (macOS) | `cd examples/viewer-metal-cpp && cmake -B build && cmake --build build && ./build/ssviewer-metal` |

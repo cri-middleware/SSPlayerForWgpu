@@ -29,7 +29,17 @@
 # assets/overall_emb; examples/viewer and examples/viewer-metal-cpp play
 # assets/overall from the repository, so only the browser needs a copy.
 #
-# Usage: scripts/deploy-examples.sh [build=release|debug]   (ssconverter-cli build mode; default release)
+# Usage: scripts/deploy-examples.sh [build=release|debug] [when=always|stale]
+#
+#   build=release|debug   ssconverter-cli build mode (default release)
+#   when=always|stale     always (default) converts; stale converts only when the
+#                         data is missing or another SDK commit converted it
+#
+# The .ssab format follows the SDK, and a runtime reading data that another SDK
+# commit converted can panic on it. The commit that converted assets/ is kept in
+# assets/.sdk-rev for when=stale, which is how run-example.sh and build-pages.sh
+# call this. An SDK that is not a git checkout has no commit to compare, so there
+# only missing data counts.
 #
 # SDK location: $SSSDK, else ./SpriteStudio-SDK (submodule), else ../SpriteStudio-SDK.
 set -euo pipefail
@@ -39,11 +49,14 @@ ASSET_DIR="$ROOT_DIR/assets"
 WEB_DIR="$ROOT_DIR/examples/web"
 
 MODE="release"
+WHEN="always"
 for arg in "$@"; do
   case "$arg" in
     build=release|build=debug) MODE="${arg#*=}" ;;
     build=*) echo "deploy-examples.sh: build= takes release or debug, not '${arg#*=}'" >&2; exit 2 ;;
-    -h|--help) sed -n '2,32p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
+    when=always|when=stale) WHEN="${arg#*=}" ;;
+    when=*) echo "deploy-examples.sh: when= takes always or stale, not '${arg#*=}'" >&2; exit 2 ;;
+    -h|--help) sed -n '2,44p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
     *) echo "deploy-examples.sh: unknown arg '$arg'" >&2; exit 2 ;;
   esac
 done
@@ -60,6 +73,18 @@ if [ -z "$SDK_DIR" ] || [ ! -f "$SDK_DIR/Cargo.toml" ]; then
   exit 1
 fi
 
+# --- skip data that is current (when=stale) -------------------------------
+# `-e .git` first, so that an SDK that merely sits inside some other repository
+# does not answer with that repository's commit.
+SDK_REV=""
+[ -e "$SDK_DIR/.git" ] && SDK_REV="$(git -C "$SDK_DIR" rev-parse HEAD 2> /dev/null || true)"
+STAMP="$ASSET_DIR/.sdk-rev"
+if [ "$WHEN" = "stale" ] && [ -f "$ASSET_DIR/Ringo/Ringo.ssab" ] && [ -f "$WEB_DIR/assets/Ringo/Ringo.ssab" ] \
+  && { [ -z "$SDK_REV" ] || [ "$(cat "$STAMP" 2> /dev/null || true)" = "$SDK_REV" ]; }; then
+  echo "deploy-examples.sh: assets/ is current${SDK_REV:+ for SDK ${SDK_REV:0:7}}; nothing to convert (when=always forces it)"
+  exit 0
+fi
+
 # --- build the converter --------------------------------------------------
 # Built inside the SDK checkout so it uses the SDK's own workspace and target
 # dir; this repo's workspace does not depend on ssconverter.
@@ -73,6 +98,10 @@ CLI="$SDK_DIR/target/$MODE/ssconverter-cli"
 [ -x "$CLI" ] || { echo "deploy-examples.sh: $CLI not found after build" >&2; exit 1; }
 
 # --- convert --------------------------------------------------------------
+# The stamp goes first: until the last copy below, assets/ is not what any one
+# SDK commit converted, and an interrupted run must leave when=stale converting.
+rm -f "$STAMP"
+
 convert () { # <sspj-relative-to-sdk> <dest-name> [--embedded]
   local sspj="$1" name="$2"; shift 2
   local dest="$ASSET_DIR/$name"
@@ -117,6 +146,10 @@ mkdir -p "$WEB_DIR/assets_emb/Ringo"
 cp "$ASSET_DIR/Ringo_emb/"*.ssab "$WEB_DIR/assets_emb/Ringo/"
 mkdir -p "$WEB_DIR/assets_emb/Doll"
 cp "$ASSET_DIR/Doll_emb/"*.ssab "$WEB_DIR/assets_emb/Doll/"
+
+if [ -n "$SDK_REV" ]; then
+  echo "$SDK_REV" > "$STAMP"
+fi
 
 echo "deploy-examples.sh: done -> assets/{overall,overall_emb,Ringo,Ringo_emb,Doll,Doll_emb}/"
 echo "deploy-examples.sh:      -> examples/web/{assets,assets_emb}/{,Ringo/,Doll/}"

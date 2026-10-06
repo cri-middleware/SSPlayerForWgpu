@@ -8,16 +8,16 @@
 #
 # example=<hello|viewer|viewer-bevy|overall-bevy|web>, hello by default. In order:
 #
-#   1. converts the SDK's test projects if assets/ has not been generated
-#      (scripts/deploy-examples.sh)
-#   2. web only: builds the npm package into examples/web if it is not there
-#      (scripts/build.sh platform=web)
+#   1. converts the SDK's test projects if assets/ is missing or another SDK
+#      commit converted it (scripts/deploy-examples.sh when=stale)
+#   2. web only: builds the npm package into examples/web if it is not there, or
+#      if step 1 converted (scripts/build.sh platform=web)
 #   3. runs the example: cargo run for the native ones; for web, serves
 #      examples/web on http://localhost:8000 and opens it (Ctrl-C stops the server)
 #
-# Each step runs only when its output is missing, and nothing checks whether an
-# existing one is stale: after changing the Rust, run build.sh platform=web yourself.
-# The SDK submodule has to be checked out (git submodule update --init).
+# The data follows the SDK commit because its format does. Nothing checks the
+# package against the Rust: after changing the Rust, run build.sh platform=web
+# yourself. The SDK submodule has to be checked out (git submodule update --init).
 set -euo pipefail
 
 APP="$(basename "$0")"
@@ -44,11 +44,15 @@ case "$EXAMPLE" in
 esac
 
 # --- 1. the playback data -------------------------------------------------
-# examples/web/assets is deploy-examples.sh's output too, so one marker per side.
-if [ ! -f "$ROOT_DIR/assets/Ringo/Ringo.ssab" ] || { [ "$EXAMPLE" = "web" ] && [ ! -f "$WEB_DIR/assets/Ringo/Ringo.ssab" ]; }; then
-  echo ">> $APP: converting the SDK's test projects (scripts/deploy-examples.sh)"
-  "$ROOT_DIR/scripts/deploy-examples.sh"
-fi
+# The examples are built from the SDK checked out now, and the .ssab format moves
+# with it. When this converts, the stamp changes, and an existing web package --
+# built from the old SDK -- can no longer read the data either.
+STAMP="$ROOT_DIR/assets/.sdk-rev"
+BEFORE="$(cat "$STAMP" 2> /dev/null || true)"
+echo ">> $APP: the playback data (scripts/deploy-examples.sh when=stale)"
+"$ROOT_DIR/scripts/deploy-examples.sh" when=stale
+CONVERTED=""
+[ "$(cat "$STAMP" 2> /dev/null || true)" = "$BEFORE" ] || CONVERTED="yes"
 
 # --- 2 and 3 --------------------------------------------------------------
 if [ -n "$CRATE" ]; then
@@ -57,7 +61,7 @@ if [ -n "$CRATE" ]; then
   exec cargo run -p "$CRATE"
 fi
 
-if [ ! -f "$WEB_DIR/ssplayer-wgpu/wasm/ssplayer_wgpu_bg.wasm" ]; then
+if [ -n "$CONVERTED" ] || [ ! -f "$WEB_DIR/ssplayer-wgpu/wasm/ssplayer_wgpu_bg.wasm" ]; then
   echo ">> $APP: building the npm package into examples/web (scripts/build.sh platform=web)"
   "$ROOT_DIR/scripts/build.sh" platform=web
 fi

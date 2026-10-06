@@ -22,6 +22,7 @@ one links those crates directly and reads their FlatBuffers types, so it has to 
 
     ```bash
     git -C SpriteStudio-SDK fetch origin && git -C SpriteStudio-SDK checkout origin/develop
+    ./scripts/deploy-examples.sh
     cargo test --workspace
     git add SpriteStudio-SDK && git commit -m "chore: bump SDK submodule"
     ```
@@ -35,6 +36,10 @@ one links those crates directly and reads their FlatBuffers types, so it has to 
 It builds `ssconverter-cli` from the submodule, converts the SDK's test projects into `assets/`, and
 deploys **both** export modes into `examples/web`. **The tests read `assets/`**, so this is a
 prerequisite for `cargo test`, not an optional step.
+
+Run it again after the SDK moves: the `.ssab` format follows the SDK, and data that another SDK
+commit converted can make the runtime panic. `run-example.sh` and `build-pages.sh` check for that
+themselves (`deploy-examples.sh when=stale`).
 
 ## Build every face
 
