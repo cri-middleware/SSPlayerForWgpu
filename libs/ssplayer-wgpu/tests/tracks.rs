@@ -84,6 +84,49 @@ fn track_sync_needs_an_animation() {
     assert!(player.track_sync(0).is_none());
 }
 
+/// A second animation on track 0, mixed by weight: the handle it comes back
+/// with reaches its weight, playhead and event threshold, and the track's main
+/// source stays the one `set_animation` put there.
+#[test]
+fn a_source_can_be_added_to_a_track_and_tuned() {
+    let Some((mut player, names)) = ringo() else { return };
+    let main = player.track_main_source(0).expect("set_animation leaves a main source on track 0");
+
+    let added = player.add_track_source(0, &names[1], 0.3).unwrap();
+    assert_ne!(added, main);
+    assert_eq!(player.track_main_source(0), Some(main), "adding does not take the track over");
+    assert_eq!(player.track_count(), 1, "it shares track 0 rather than opening one");
+
+    assert_eq!(player.source_weight(added), Some(0.3));
+    player.set_source_weight(added, 0.7).unwrap();
+    assert_eq!(player.source_weight(added), Some(0.7));
+
+    player.set_source_frame(added, 2.0).unwrap();
+    assert_eq!(player.source_frame(added), Some(2.0));
+
+    assert_eq!(player.source_event_threshold(added), Some(f32::INFINITY), "only track 0's main source fires by default");
+    player.set_source_event_threshold(added, 0.5).unwrap();
+    assert_eq!(player.source_event_threshold(added), Some(0.5));
+}
+
+#[test]
+fn source_calls_reject_a_handle_that_names_nothing() {
+    let Some((mut player, _)) = ringo() else { return };
+    assert!(player.source_weight(999).is_none());
+    assert!(player.source_frame(999).is_none());
+    assert!(player.set_source_weight(999, 1.0).is_err());
+    assert!(player.set_source_frame(999, 0.0).is_err());
+    assert!(player.set_source_event_threshold(999, 0.5).is_err());
+}
+
+#[test]
+fn source_calls_need_an_animation() {
+    let mut player = SSPlayer::new();
+    assert!(player.track_main_source(0).is_none());
+    assert!(player.add_track_source(0, "anything", 1.0).is_err());
+    assert!(player.source_weight(0).is_none());
+}
+
 /// Track 0 carries the structure, so it is refused rather than silently
 /// emptying the instance.
 #[test]

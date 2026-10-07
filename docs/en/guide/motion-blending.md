@@ -76,6 +76,31 @@ player.cancel_track_fade(1)?;
     built it. So crossfading to an animation whose **instance parts differ** is out of scope — use
     `set_animation` for that, and accept the cut.
 
+## Mixing two animations on one track
+
+A track can carry more than one animation, mixed by **weight** — the way a walk and a run blend by
+how fast the character moves. Each one is a *source*, named by a handle:
+
+```rust
+player.set_animation("walk")?;
+player.play();
+let walk = player.track_main_source(0).unwrap();
+let run = player.add_track_source(0, "run", 0.0)?;   // beside the walk, silent for now
+
+// every frame, from the character's speed
+player.set_source_weight(walk, 1.0 - t)?;
+player.set_source_weight(run, t)?;
+```
+
+* Weights are **ratios within the track**: `(0.7, 0.3)` and `(7, 3)` mix alike. The track's
+  strength is still its alpha.
+* A walk and a run of different lengths drift apart. Lay the run with the track's sync at
+  `TrackSync::Start` (below) to start it in step, or seek it with `set_source_frame`.
+* Only track 0's main source fires events. To have another source fire, lower its threshold to its
+  weight or below with `set_source_event_threshold`.
+* A handle stays valid until its source is released: a crossfade completing, `clear_track`, or
+  `set_animation`.
+
 ## Starting in step with track 0
 
 An animation laid on a track starts from the head of its section. Lay a run over a walk that is
@@ -96,8 +121,9 @@ player.crossfade(0, "run", 400.0)?;            // run starts at the walk's phase
 | `TrackSync::Free` (default) | The head of its section | One-off motions: a blink, a mouth shape, a hit reaction |
 | `TrackSync::Start` | The same fraction of its section as track 0's animation | Cyclic motions over one another: walk and run |
 
-* It applies to everything laid on the track afterwards — `set_track_animation` and `crossfade`,
-  track 0 included, where the incoming animation starts at the outgoing one's phase.
+* It applies to everything laid on the track afterwards — `set_track_animation`, `crossfade` and
+  `add_track_source`, track 0 included, where the incoming animation starts at the outgoing one's
+  phase.
 * It aligns **once**, when the animation is laid. Both then run on one clock, so animations of
   the same length and speed stay in step; different lengths or speeds drift apart again.
 * It belongs to the track, like its alpha and blend: `set_animation` resets every track to

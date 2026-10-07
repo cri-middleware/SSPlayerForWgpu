@@ -1589,6 +1589,61 @@ impl SSPlayer {
         root.context.set_track_speed(track, speed)
     }
 
+    // --- Sources: several animations on one track ------------------------------
+    //
+    // A track can carry more than one animation, mixed by `weight` — a walk and a
+    // run on track 0 blended by the character's speed. Each one is a *source*,
+    // named by the handle these return; handles stay valid until the source is
+    // released (a crossfade completing, `clear_track`, `set_animation`).
+
+    /// The source carrying `track`'s animation — the one `set_track_animation`,
+    /// `crossfade` or `set_animation` put there.
+    pub fn track_main_source(&self, track: u32) -> Option<u32> {
+        self.root.as_ref()?.context.get_track_main_source(track)
+    }
+
+    /// Lay `anim_name` on `track` beside what it already carries, at `weight`,
+    /// and return its handle. On an empty track it becomes the main source.
+    /// It starts per the track's [`TrackSync`].
+    pub fn add_track_source(&mut self, track: u32, anim_name: &str, weight: f32) -> Result<u32, SSRuntimeError> {
+        let root = self.root.as_mut().ok_or(SSRuntimeError::NotLoaded)?;
+        root.context.add_track_source(track, anim_name, weight)
+    }
+
+    /// A source's share **within its track**: weights are ratios, so `(0.7, 0.3)`
+    /// and `(7, 3)` mix alike. The track's strength is [`SSPlayer::set_track_alpha`].
+    pub fn set_source_weight(&mut self, source: u32, weight: f32) -> Result<(), SSRuntimeError> {
+        let root = self.root.as_mut().ok_or(SSRuntimeError::NotLoaded)?;
+        root.context.set_source_weight(source, weight)
+    }
+
+    pub fn source_weight(&self, source: u32) -> Option<f32> {
+        self.root.as_ref()?.context.get_source_weight(source)
+    }
+
+    /// Seek one source. Sources of different lengths drift apart; this is how a
+    /// host keeps them in step.
+    pub fn set_source_frame(&mut self, source: u32, frame: f32) -> Result<(), SSRuntimeError> {
+        let root = self.root.as_mut().ok_or(SSRuntimeError::NotLoaded)?;
+        root.context.set_source_frame(source, frame)
+    }
+
+    pub fn source_frame(&self, source: u32) -> Option<f32> {
+        self.root.as_ref()?.context.get_source_frame(source)
+    }
+
+    /// The weight at or above which `source` fires its events. Only track 0's
+    /// main source fires by default (the default threshold is `+∞`); lower this
+    /// to the source's weight or below to have it fire too.
+    pub fn set_source_event_threshold(&mut self, source: u32, threshold: f32) -> Result<(), SSRuntimeError> {
+        let root = self.root.as_mut().ok_or(SSRuntimeError::NotLoaded)?;
+        root.context.set_source_event_threshold(source, threshold)
+    }
+
+    pub fn source_event_threshold(&self, source: u32) -> Option<f32> {
+        self.root.as_ref()?.context.get_source_event_threshold(source)
+    }
+
     /// Which way the playhead walks, and what it does at the far end. Taken
     /// together because the runtime sets them as a pair — pass the current value
     /// for whichever you are not changing.
