@@ -472,22 +472,34 @@ impl OverridePriority {
 /// accumulates. Bails before touching the `.ssab` when the runtime reports
 /// nothing, which is the overwhelmingly common case — a frame with no events
 /// costs one integer read.
-fn collect_events(node: &PlaybackNode, animation: Option<&str>, out: &mut Vec<SsEvent>) {
+///
+/// Each index addresses the event table of **the animation of the source that
+/// fired it**, so the table is looked up per event. Keeping the one
+/// `set_animation` chose read every event wrongly once a crossfade on track 0
+/// had handed the track to another animation: a different event, or none.
+fn collect_events(node: &PlaybackNode, out: &mut Vec<SsEvent>) {
     out.clear();
     let indices = node.context.get_passed_event_indices();
     if indices.is_empty() {
         return;
     }
-    let (Some(animation), Some(ssab_bytes)) = (animation, node.context.get_ssab_data()) else {
+    let Some(ssab_bytes) = node.context.get_ssab_data() else {
         return;
     };
     // SAFETY: the buffer the node was built from, which the host guaranteed is a valid
     // `.ssab` (`SSPack::build`).
     let ab = unsafe { root_as_ss_anime_binary_unchecked(ssab_bytes) };
-    let Some(anim) = ab.animations().iter().find(|a| a.name() == animation) else {
-        return;
-    };
-    decode_events(&ab, &anim, indices, out);
+    let animations = ab.animations();
+    let sources = node.context.get_passed_event_source_handles();
+    for (&index, &source) in indices.iter().zip(sources) {
+        let Some(anim_index) = node.context.get_source_animation_index(source) else {
+            continue;
+        };
+        if anim_index as usize >= animations.len() {
+            continue;
+        }
+        decode_events(&ab, &animations.get(anim_index as usize), source, &[index], out);
+    }
 }
 
 /// One node in the playback tree: a runtime context plus its instance children
@@ -2625,7 +2637,7 @@ impl SSPlayer {
         // integer draw frame changing and lost frame-0 events on the first tick
         // after `play()` as a result.
         let finished = root.context.is_finished();
-        collect_events(root, self.current_animation.as_deref(), &mut self.events);
+        collect_events(root, &mut self.events);
         self.looped = looped;
         self.finished_edge = finished && !self.prev_finished;
         self.prev_finished = finished;
