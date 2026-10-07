@@ -1688,6 +1688,179 @@ impl SsPlayerWeb {
         with_player!(self, |p| p.part_count())
     }
 
+    // --- Motion blending: tracks and sources ---
+    //
+    // The track stack: tracks fold onto the setup pose in ascending order,
+    // track 0 being what `setAnimation` establishes. A track's alpha is its
+    // strength; a source's weight only sets proportions among the animations
+    // sharing one track. A read of a track or source that does not exist answers
+    // `undefined`; a command on one throws.
+
+    /// Put `name` on `track`, replacing what it was playing. Track 0 is better set
+    /// with `setAnimation`, which rebuilds the instance tree.
+    #[wasm_bindgen(js_name = setTrackAnimation)]
+    pub fn set_track_animation(&self, track: u32, name: &str) -> Result<(), JsValue> {
+        with_player!(self, |p| p.set_track_animation(track, name).map_err(js_err)?)
+    }
+
+    /// Number of tracks, empty ones included; 0 before an animation is set up.
+    #[wasm_bindgen(js_name = trackCount)]
+    pub fn track_count(&self) -> Result<u32, JsValue> {
+        with_player!(self, |p| p.track_count())
+    }
+
+    /// Silence a track. Track 0 is refused — fade it to alpha 0 instead.
+    #[wasm_bindgen(js_name = clearTrack)]
+    pub fn clear_track(&self, track: u32) -> Result<(), JsValue> {
+        with_player!(self, |p| p.clear_track(track).map_err(js_err)?)
+    }
+
+    /// How much of `track` survives onto the pose below. Not clamped: above 1
+    /// extrapolates, 0 or below contributes nothing.
+    #[wasm_bindgen(js_name = setTrackAlpha)]
+    pub fn set_track_alpha(&self, track: u32, alpha: f32) -> Result<(), JsValue> {
+        with_player!(self, |p| p.set_track_alpha(track, alpha).map_err(js_err)?)
+    }
+
+    #[wasm_bindgen(js_name = trackAlpha)]
+    pub fn track_alpha(&self, track: u32) -> Result<Option<f32>, JsValue> {
+        with_player!(self, |p| p.track_alpha(track))
+    }
+
+    /// `blend`: 0 = mix (lerp onto what is below), 1 = additive (offset from the setup pose).
+    #[wasm_bindgen(js_name = setTrackBlend)]
+    pub fn set_track_blend(&self, track: u32, blend: u32) -> Result<(), JsValue> {
+        let blend = match blend {
+            0 => crate::TrackBlend::Mix,
+            1 => crate::TrackBlend::Additive,
+            _ => return Err(JsValue::from_str("blend must be 0 (mix) or 1 (additive)")),
+        };
+        with_player!(self, |p| p.set_track_blend(track, blend).map_err(js_err)?)
+    }
+
+    /// 0 = mix, 1 = additive.
+    #[wasm_bindgen(js_name = trackBlend)]
+    pub fn track_blend(&self, track: u32) -> Result<Option<u32>, JsValue> {
+        with_player!(self, |p| p.track_blend(track).map(|b| match b {
+            crate::TrackBlend::Mix => 0,
+            crate::TrackBlend::Additive => 1,
+        }))
+    }
+
+    /// `sync`: 0 = free (an animation laid on the track starts from its head),
+    /// 1 = start (it starts at the phase track 0 stands at). Set it before
+    /// laying; `setAnimation` resets every track to free.
+    #[wasm_bindgen(js_name = setTrackSync)]
+    pub fn set_track_sync(&self, track: u32, sync: u32) -> Result<(), JsValue> {
+        let sync = match sync {
+            0 => crate::TrackSync::Free,
+            1 => crate::TrackSync::Start,
+            _ => return Err(JsValue::from_str("sync must be 0 (free) or 1 (start)")),
+        };
+        with_player!(self, |p| p.set_track_sync(track, sync).map_err(js_err)?)
+    }
+
+    /// 0 = free, 1 = start.
+    #[wasm_bindgen(js_name = trackSync)]
+    pub fn track_sync(&self, track: u32) -> Result<Option<u32>, JsValue> {
+        with_player!(self, |p| p.track_sync(track).map(|s| match s {
+            crate::TrackSync::Free => 0,
+            crate::TrackSync::Start => 1,
+        }))
+    }
+
+    /// Fade `track` to `name` over `durationMs`, starting from whatever it is
+    /// playing. Advanced by `frame()`. On track 0 it does not rebuild the
+    /// instance tree, so animations whose instance parts differ are out of scope.
+    pub fn crossfade(&self, track: u32, name: &str, duration_ms: f32) -> Result<(), JsValue> {
+        with_player!(self, |p| p.crossfade(track, name, duration_ms).map_err(js_err)?)
+    }
+
+    /// Drive `track`'s alpha to `target` over `durationMs`. Fading track 0 to 0
+    /// settles the character onto the setup pose.
+    #[wasm_bindgen(js_name = fadeTrack)]
+    pub fn fade_track(&self, track: u32, target: f32, duration_ms: f32) -> Result<(), JsValue> {
+        with_player!(self, |p| p.fade_track(track, target, duration_ms).map_err(js_err)?)
+    }
+
+    /// How far the fade on `track` has got, 0 to 1; `undefined` when it is not fading.
+    #[wasm_bindgen(js_name = trackFadeProgress)]
+    pub fn track_fade_progress(&self, track: u32) -> Result<Option<f32>, JsValue> {
+        with_player!(self, |p| p.track_fade_progress(track))
+    }
+
+    /// Stop the fade on `track`, leaving alpha and weights where they stand.
+    #[wasm_bindgen(js_name = cancelTrackFade)]
+    pub fn cancel_track_fade(&self, track: u32) -> Result<(), JsValue> {
+        with_player!(self, |p| p.cancel_track_fade(track).map_err(js_err)?)
+    }
+
+    /// Seek `track`'s animation — how a continuous-control axis is driven.
+    #[wasm_bindgen(js_name = setTrackFrame)]
+    pub fn set_track_frame(&self, track: u32, frame: f32) -> Result<(), JsValue> {
+        with_player!(self, |p| p.set_track_frame(track, frame).map_err(js_err)?)
+    }
+
+    #[wasm_bindgen(js_name = trackFrame)]
+    pub fn track_frame(&self, track: u32) -> Result<Option<f32>, JsValue> {
+        with_player!(self, |p| p.track_frame(track))
+    }
+
+    /// `track`'s own playback speed; 0 parks it, which is how a scrubbed axis
+    /// stays where `setTrackFrame` puts it.
+    #[wasm_bindgen(js_name = setTrackSpeed)]
+    pub fn set_track_speed(&self, track: u32, speed: f32) -> Result<(), JsValue> {
+        with_player!(self, |p| p.set_track_speed(track, speed).map_err(js_err)?)
+    }
+
+    /// The source carrying `track`'s animation; `undefined` when it has none.
+    #[wasm_bindgen(js_name = trackMainSource)]
+    pub fn track_main_source(&self, track: u32) -> Result<Option<u32>, JsValue> {
+        with_player!(self, |p| p.track_main_source(track))
+    }
+
+    /// Lay `name` on `track` beside what it already carries, at `weight`, and
+    /// return its handle. On an empty track it becomes the main source.
+    #[wasm_bindgen(js_name = addTrackSource)]
+    pub fn add_track_source(&self, track: u32, name: &str, weight: f32) -> Result<u32, JsValue> {
+        with_player!(self, |p| p.add_track_source(track, name, weight).map_err(js_err)?)
+    }
+
+    /// A source's share **within its track**; weights are ratios.
+    #[wasm_bindgen(js_name = setSourceWeight)]
+    pub fn set_source_weight(&self, source: u32, weight: f32) -> Result<(), JsValue> {
+        with_player!(self, |p| p.set_source_weight(source, weight).map_err(js_err)?)
+    }
+
+    #[wasm_bindgen(js_name = sourceWeight)]
+    pub fn source_weight(&self, source: u32) -> Result<Option<f32>, JsValue> {
+        with_player!(self, |p| p.source_weight(source))
+    }
+
+    /// Seek one source — how a page keeps sources of different lengths in step.
+    #[wasm_bindgen(js_name = setSourceFrame)]
+    pub fn set_source_frame(&self, source: u32, frame: f32) -> Result<(), JsValue> {
+        with_player!(self, |p| p.set_source_frame(source, frame).map_err(js_err)?)
+    }
+
+    #[wasm_bindgen(js_name = sourceFrame)]
+    pub fn source_frame(&self, source: u32) -> Result<Option<f32>, JsValue> {
+        with_player!(self, |p| p.source_frame(source))
+    }
+
+    /// The weight at or above which `source` fires its events. Only track 0's
+    /// main source fires by default (the default threshold is `Infinity`); lower
+    /// this to the source's weight or below to have it fire too.
+    #[wasm_bindgen(js_name = setSourceEventThreshold)]
+    pub fn set_source_event_threshold(&self, source: u32, threshold: f32) -> Result<(), JsValue> {
+        with_player!(self, |p| p.set_source_event_threshold(source, threshold).map_err(js_err)?)
+    }
+
+    #[wasm_bindgen(js_name = sourceEventThreshold)]
+    pub fn source_event_threshold(&self, source: u32) -> Result<Option<f32>, JsValue> {
+        with_player!(self, |p| p.source_event_threshold(source))
+    }
+
     // --- Events ---
     //
     // Polled after `frame()`, which is what advanced the clock. All four
@@ -1725,9 +1898,15 @@ impl SsPlayerWeb {
     /// { kind: 'audio', partIndex, soundName, soundListNameHash, soundNameHash, loopNum }
     /// ```
     ///
+    /// Every kind also carries `frameNo` (the frame the key is authored on),
+    /// `partName`, and `source`: the handle of the source on the track stack
+    /// that fired it, which tells events apart once another source has opted in
+    /// with `setSourceEventThreshold`.
+    ///
     /// **Frames skipped over are still represented**: a long tick reports every
     /// frame it stepped through, not just the one it landed on. Empty on a tick
-    /// that crossed nothing, and on a hidden player, which does not advance.
+    /// that crossed nothing, and on a culled player, which does not advance; a
+    /// hidden one reports as usual.
     pub fn events(&self) -> Result<js_sys::Array, JsValue> {
         with_player!(self, |p| {
             let out = js_sys::Array::new();
@@ -1922,6 +2101,9 @@ fn event_to_js(event: &SsEvent) -> JsValue {
     // landed on when several were crossed at once.
     set("frameNo", event.frame_no().into());
     set("partName", JsValue::from_str(event.part_name()));
+    // The source on the track stack that fired it, as `trackMainSource` and
+    // `addTrackSource` name it.
+    set("source", event.source().into());
     match event {
         SsEvent::UserData(u) => {
             set("kind", JsValue::from_str("userData"));

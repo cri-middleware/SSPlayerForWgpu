@@ -102,7 +102,7 @@ import { defineSsPlayerWebGPUElement } from '@spritestudio/ssplayer-wgpu/element
 | `clearAllPartOverrides()` | |
 | `partTransform(part)` / `partTransformByIndex(i)` | `[m00, m01, m10, m11, tx, ty]` |
 | `isPartHidden(part)` / `isPartSkinnedMesh(part)` / `partCount()` | `isPartSkinnedMesh` は `true`/`false`、不明なパーツなら `null` |
-| `events()` | `kind` で分類されたプレーンオブジェクト：`'userData'` / `'signal'` / `'audio'` |
+| `events()` | `kind` で分類されたプレーンオブジェクト：`'userData'` / `'signal'` / `'audio'`。どれも `frameNo`・`partName` と、発火したソースのハンドル `source` を持つ |
 
 **テクスチャ差し替え** — セルマップがバインドするテクスチャ丸ごとを差し替えます（衣装・パレット変更）。`pack` に null でメインパック。[テクスチャ差し替え](../guide/texture-replacement.md)を参照。
 
@@ -113,6 +113,27 @@ import { defineSsPlayerWebGPUElement } from '@spritestudio/ssplayer-wgpu/element
 | `setCellmapTextureFromBytes(pack, name, bytes): Promise` | …またはエンコード済みバイト列から（ブラウザがデコード） |
 | `restoreCellmapTexture(pack, name)` | 元のアトラスに戻す |
 | `isCellmapOverridden(pack, name)` | 現在オーバーライドされているか |
+
+### モーションブレンディング
+
+トラックスタックです。トラックはセットアップポーズの上に昇順に重なり、トラック 0 は `setAnimation` が確立するものです。[モーションブレンディング](../guide/motion-blending.md)を参照。
+
+| | |
+|---|---|
+| `setTrackAnimation(track, name)` | トラックにアニメーションを載せる（それまでの再生内容を置き換える） |
+| `crossfade(track, name, ms)` | トラックを別のアニメーションへフェードで切り替える |
+| `fadeTrack(track, target, ms)` / `cancelTrackFade(track)` | トラックの alpha を目標値へ動かす／フェードをその場で止める |
+| `trackFadeProgress(track)` | 0〜1。フェードしていないときは `undefined` |
+| `setTrackAlpha(track, a)` / `trackAlpha(track)` | トラックの強さ |
+| `setTrackBlend(track, b)` / `trackBlend(track)` | `0` が mix、`1` が additive |
+| `setTrackSync(track, s)` / `trackSync(track)` | `0` が free、`1` が start。載せる前に設定する |
+| `setTrackFrame` / `trackFrame` / `setTrackSpeed` | トラックのスクラブ。速度 0 で止まる |
+| `trackCount()` / `clearTrack(track)` | トラックの数／トラックを空にする（トラック 0 は不可） |
+| `trackMainSource(track)` | トラックのアニメーションを担うソース |
+| `addTrackSource(track, name, weight)` | 別のアニメーションを横に載せ、weight で混ぜる。ハンドルを返す |
+| `setSourceWeight` / `setSourceFrame` / `setSourceEventThreshold` と、`set` の無い取得 | ソース 1 つの weight・再生位置・イベントのしきい値 |
+
+存在しないトラックやソースを読むと `undefined` が返り、操作すると例外を投げます。
 
 ## `<ss-player-webgpu>` { #ss-player-webgpu }
 
@@ -128,8 +149,4 @@ import { defineSsPlayerWebGPUElement } from '@spritestudio/ssplayer-wgpu/element
 | `speed-scale` | 既定 fps の倍率 |
 | `fit`、`align`、`flip-x`、`flip-y` | オーサリング時のキャンバスを要素にどう合わせるか。既定は `contain` と `center`、`fit="none"` で 1:1 |
 
-`element.loadSrc(src, pack?, animation?)` でスクリプトからパックを差し替えられ、アニメーション名が返ります。`animationstarted`・`animationfinished`・`animationlooped`・`userdata`・`signal`・`audio` を DOM イベントとして送り、パックを読み込むと `load` を送ります。上の属性は置いた後に書き換えても反映されます。
-
-## この Face に無いもの
-
-**モーションブレンディング**（トラックスタック）は Rust だけです。全体像は[スコープと名前の対応](../guide/concepts.md#what-each-face-can-do)を参照。
+`element.loadSrc(src, pack?, animation?)` でスクリプトからパックを差し替えられ、アニメーション名が返ります。`animationstarted`・`animationfinished`・`animationlooped`・`userdata`・`signal`・`audio` を DOM イベントとして送り、パックを読み込むと `load` を送ります。上の属性は置いた後に書き換えても反映されます。モーションブレンディングを含め、`SsPlayerWeb` の機能はすべて `element.player` から使えます。

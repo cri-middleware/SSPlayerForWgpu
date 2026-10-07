@@ -105,7 +105,7 @@ the calls.
 | `clearAllPartOverrides()` | |
 | `partTransform(part)` / `partTransformByIndex(i)` | `[m00, m01, m10, m11, tx, ty]` |
 | `isPartHidden(part)` / `isPartSkinnedMesh(part)` / `partCount()` | `isPartSkinnedMesh` → `true`/`false`, or `null` for an unknown part |
-| `events()` | Plain objects tagged by `kind`: `'userData'` / `'signal'` / `'audio'` |
+| `events()` | Plain objects tagged by `kind`: `'userData'` / `'signal'` / `'audio'`. Each carries `frameNo`, `partName` and `source`, the handle of the source that fired it |
 
 **Texture replacement** — swap the whole texture a cell map binds (a costume or palette change).
 `pack` null selects the main pack. See [Texture replacement](../guide/texture-replacement.md).
@@ -117,6 +117,28 @@ the calls.
 | `setCellmapTextureFromBytes(pack, name, bytes): Promise` | …or from encoded bytes, decoded by the browser |
 | `restoreCellmapTexture(pack, name)` | Put the original atlas back |
 | `isCellmapOverridden(pack, name)` | Whether one is currently overridden |
+
+### Motion blending
+
+The track stack: tracks fold onto the setup pose in ascending order, track 0 being what
+`setAnimation` establishes. See [Motion blending](../guide/motion-blending.md).
+
+| | |
+|---|---|
+| `setTrackAnimation(track, name)` | Lay an animation on a track, replacing what it played |
+| `crossfade(track, name, ms)` | Fade a track over to another animation |
+| `fadeTrack(track, target, ms)` / `cancelTrackFade(track)` | Drive a track's alpha somewhere / stop the fade where it stands |
+| `trackFadeProgress(track)` | 0 to 1; `undefined` when the track is not fading |
+| `setTrackAlpha(track, a)` / `trackAlpha(track)` | A track's strength |
+| `setTrackBlend(track, b)` / `trackBlend(track)` | `0` mix or `1` additive |
+| `setTrackSync(track, s)` / `trackSync(track)` | `0` free or `1` start — set it before laying |
+| `setTrackFrame` / `trackFrame` / `setTrackSpeed` | Scrub a track; speed 0 parks it |
+| `trackCount()` / `clearTrack(track)` | How many tracks; silence one (not track 0) |
+| `trackMainSource(track)` | The source carrying a track's animation |
+| `addTrackSource(track, name, weight)` | Lay another animation beside it, mixed by weight; returns its handle |
+| `setSourceWeight` / `setSourceFrame` / `setSourceEventThreshold`, and the reads without `set` | One source's weight, playhead and event threshold |
+
+A read of a track or source that does not exist answers `undefined`; a command on one throws.
 
 ## `<ss-player-webgpu>` { #ss-player-webgpu }
 
@@ -132,9 +154,4 @@ Documented in full on [its own page](./web-component.md); the attributes, in sho
 | `speed-scale` | A multiple of the authored rate |
 | `fit`, `align`, `flip-x`, `flip-y` | How the authored canvas fits the element: `contain` and `center` by default, `fit="none"` for 1:1 |
 
-`element.loadSrc(src, pack?, animation?)` switches packs from script and resolves to the animation names. It dispatches `animationstarted`, `animationfinished`, `animationlooped`, `userdata`, `signal` and `audio` as DOM events, and `load` once a pack has loaded; the attributes above can be changed on a live element.
-
-## Not on this face
-
-**Motion blending** (the track stack) is Rust-only. See
-[Scopes and names](../guide/concepts.md#what-each-face-can-do) for the full matrix.
+`element.loadSrc(src, pack?, animation?)` switches packs from script and resolves to the animation names. It dispatches `animationstarted`, `animationfinished`, `animationlooped`, `userdata`, `signal` and `audio` as DOM events, and `load` once a pack has loaded; the attributes above can be changed on a live element. Everything `SsPlayerWeb` offers, motion blending included, is on `element.player`.
