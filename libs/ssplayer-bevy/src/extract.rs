@@ -11,7 +11,7 @@ use bevy::render::Extract;
 use bevy::render::sync_world::MainEntity;
 
 use crate::asset::SsPack;
-use crate::components::{SsCellmapTextures, SsPlay, SsPlayback, SsPlayer, SsSeek, SsStop, SsTransform};
+use crate::components::{SsCellmapTextures, SsPlay, SsPlayback, SsPlayer, SsSeek, SsStop, SsTrackCommand, SsTransform, TrackCommand};
 
 /// One character's worth of main-world state, as of this frame.
 pub(crate) struct ExtractedPlayer {
@@ -45,17 +45,22 @@ pub(crate) struct ExtractedPlayers {
     pub seeks: Vec<(MainEntity, f32)>,
     pub plays: Vec<(MainEntity, Option<f32>)>,
     pub stops: Vec<MainEntity>,
+    /// The track-stack commands written this frame, in the order they were written.
+    pub track_commands: Vec<(MainEntity, TrackCommand)>,
     /// How far each kind has been read, as a `MessageReader` keeps it. When the
     /// main world swaps its message buffers is not tied to when extract runs, so
     /// reading only the newer buffer misses a message written just before a swap.
     seek_cursor: MessageCursor<SsSeek>,
     play_cursor: MessageCursor<SsPlay>,
     stop_cursor: MessageCursor<SsStop>,
+    track_cursor: MessageCursor<SsTrackCommand>,
 }
 
 // A five-part query with an optional is exactly the shape `type_complexity`
 // fires on, and the shape Bevy queries take; naming it would obscure, not clarify.
-#[allow(clippy::type_complexity)]
+// A system takes what it reads as parameters, one message buffer per kind, so
+// the count grows with the kinds; a `SystemParam` bundle would only move the list.
+#[allow(clippy::type_complexity, clippy::too_many_arguments)]
 pub(crate) fn extract_players(
     mut extracted: ResMut<ExtractedPlayers>,
     time: Extract<Res<Time>>,
@@ -63,16 +68,19 @@ pub(crate) fn extract_players(
     seeks: Extract<Res<Messages<SsSeek>>>,
     plays: Extract<Res<Messages<SsPlay>>>,
     stops: Extract<Res<Messages<SsStop>>>,
+    track_commands: Extract<Res<Messages<SsTrackCommand>>>,
     query: Extract<Query<(Entity, &SsPlayer, &SsTransform, &SsPlayback, Option<&SsCellmapTextures>)>>,
 ) {
     extracted.delta_secs = time.delta_secs();
-    let ExtractedPlayers { seeks: seek_list, plays: play_list, stops: stop_list, seek_cursor, play_cursor, stop_cursor, .. } = &mut *extracted;
+    let ExtractedPlayers { seeks: seek_list, plays: play_list, stops: stop_list, track_commands: track_list, seek_cursor, play_cursor, stop_cursor, track_cursor, .. } = &mut *extracted;
     seek_list.clear();
     seek_list.extend(seek_cursor.read(&seeks).map(|seek| (MainEntity::from(seek.entity), seek.frame)));
     play_list.clear();
     play_list.extend(play_cursor.read(&plays).map(|play| (MainEntity::from(play.entity), play.start_frame)));
     stop_list.clear();
     stop_list.extend(stop_cursor.read(&stops).map(|stop| MainEntity::from(stop.entity)));
+    track_list.clear();
+    track_list.extend(track_cursor.read(&track_commands).map(|command| (MainEntity::from(command.entity), command.command.clone())));
     extracted.players.clear();
     extracted.players.extend(query.iter().map(|(entity, player, transform, playback, textures)| ExtractedPlayer {
         entity: MainEntity::from(entity),

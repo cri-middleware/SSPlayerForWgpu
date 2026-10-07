@@ -15,7 +15,7 @@ use std::sync::{Arc, Mutex};
 use bevy::prelude::*;
 use ssplayer_wgpu::SsEvent;
 
-use crate::components::SsPlaybackState;
+use crate::components::{SsPlaybackState, SsSourceInfo, SsTrackInfo, SsTrackState};
 
 /// One player's playback state as of the render frame that produced it.
 pub(crate) struct PlaybackFeedback {
@@ -31,6 +31,9 @@ pub(crate) struct PlaybackFeedback {
     /// The loop pulse — set only on the tick the timeline wrapped.
     pub looped: bool,
     pub events: Vec<SsEvent>,
+    /// The track stack after the advance, for [`SsTrackState`].
+    pub tracks: Vec<SsTrackInfo>,
+    pub sources: Vec<SsSourceInfo>,
 }
 
 /// The shared buffer, held by a clone in each world.
@@ -91,24 +94,26 @@ pub struct SsLooped {
 }
 
 /// Drain the render world's feedback into the main world: update the pollable
-/// [`SsPlaybackState`] and raise the reactive messages.
+/// [`SsPlaybackState`] and [`SsTrackState`], and raise the reactive messages.
 ///
 /// Runs in `PreUpdate` so a gameplay system reading the messages in `Update`
 /// sees this frame's batch. A message for an entity that has since despawned is
 /// harmless: nothing reads it against a live component.
 pub(crate) fn dispatch_feedback(
     channel: Res<FeedbackChannel>,
-    mut states: Query<&mut SsPlaybackState>,
+    mut states: Query<(&mut SsPlaybackState, &mut SsTrackState)>,
     mut events: MessageWriter<SsEventMessage>,
     mut started: MessageWriter<SsStarted>,
     mut finished: MessageWriter<SsFinished>,
     mut looped: MessageWriter<SsLooped>,
 ) {
     for feedback in channel.take() {
-        if let Ok(mut state) = states.get_mut(feedback.entity) {
+        if let Ok((mut state, mut stack)) = states.get_mut(feedback.entity) {
             state.frame_no = feedback.frame_no;
             state.finished = feedback.is_finished;
             state.playing_forward = feedback.playing_forward;
+            stack.tracks = feedback.tracks;
+            stack.sources = feedback.sources;
         }
         if feedback.started_edge {
             started.write(SsStarted { entity: feedback.entity });

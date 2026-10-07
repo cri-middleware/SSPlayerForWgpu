@@ -25,7 +25,7 @@ use bevy::render::render_resource::{Extent3d, TextureDimension, TextureFormat, T
 use bevy::render::view::Msaa;
 use bevy::sprite::Sprite;
 use bevy::window::WindowPlugin;
-use ssplayer_bevy::{PlaybackDirection, SsPlay, SsPlayback, SsPlaybackState, SsPlayer, SsPlayerPlugin, SsSeek, SsStop, SsTransform};
+use ssplayer_bevy::{PlaybackDirection, SsPlay, SsPlayback, SsPlaybackState, SsPlayer, SsPlayerPlugin, SsSeek, SsStop, SsTrackCommand, SsTrackState, SsTransform, TrackCommand, TrackSync};
 use std::path::Path;
 use std::sync::{Arc, Mutex};
 
@@ -423,6 +423,48 @@ fn a_seek_sent_before_the_pack_loads_lands_once_it_has() {
 
     let state = app.world().entity(player).get::<SsPlaybackState>().expect("SsPlaybackState is a required component of SsPlayer and must be present");
     assert_eq!(state.frame_no, 5.0, "the seek did not land");
+}
+
+/// Track commands written before the pack has loaded are kept and applied, in
+/// order, once the animation is set up, and the stack comes back through
+/// `SsTrackState` — including the handle of a source laid with `AddSource`,
+/// which is what the `Source*` commands that follow need.
+#[test]
+fn track_commands_reach_the_stack_and_it_crosses_back() {
+    if !fixtures_present() {
+        eprintln!("assets not generated, skipping");
+        return;
+    }
+    let Some((mut app, handle, _captured)) = headless_app() else {
+        eprintln!("no GPU adapter available, skipping");
+        return;
+    };
+
+    app.world_mut().spawn((Camera2d, Camera { clear_color: ClearColorConfig::Custom(Color::BLACK), ..default() }, RenderTarget::Image(handle.into()), Msaa::Off));
+    let character = masked_character(app.world());
+    let player = app.world_mut().spawn(character).id();
+    for command in [TrackCommand::SetSync { track: 1, sync: TrackSync::Start }, TrackCommand::AddSource { track: 0, animation: MASK_ANIM.into(), weight: 0.5 }] {
+        app.world_mut().write_message(SsTrackCommand { entity: player, command });
+    }
+
+    app.finish();
+    app.cleanup();
+    pump(&mut app);
+
+    let stack = app.world().entity(player).get::<SsTrackState>().expect("SsTrackState is a required component of SsPlayer and must be present").clone();
+    assert!(stack.tracks.len() >= 2, "SetSync did not open track 1: {stack:?}");
+    assert_eq!(stack.tracks[1].sync, TrackSync::Start);
+    assert!(stack.tracks[0].main_source.is_some(), "track 0 reports no main source");
+    let [added] = stack.sources.as_slice() else { panic!("expected the one added source back, got {:?}", stack.sources) };
+    assert_eq!((added.track, added.animation.as_str(), added.weight), (0, MASK_ANIM, 0.5));
+    assert_ne!(Some(added.source), stack.tracks[0].main_source, "the added source is not the main one");
+
+    app.world_mut().write_message(SsTrackCommand { entity: player, command: TrackCommand::SetSourceWeight { source: added.source, weight: 0.25 } });
+    for _ in 0..3 {
+        app.update();
+    }
+    let stack = app.world().entity(player).get::<SsTrackState>().unwrap();
+    assert_eq!(stack.sources[0].weight, 0.25, "the weight sent by handle did not land");
 }
 
 /// `SsPlay` with a start frame lands there, like `play_from`, even when sent
