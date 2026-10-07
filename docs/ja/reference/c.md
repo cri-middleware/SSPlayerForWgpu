@@ -150,6 +150,27 @@ title: C API リファレンス
 差し替えテクスチャは元アトラスとサイズ・セルレイアウトを合わせてください。次のシーン更新で
 GPU に届きます。[テクスチャ差し替え](../guide/texture-replacement.md)を参照。
 
+## モーションブレンディング { #motion-blending }
+
+トラックスタックです。トラックはセットアップポーズの上に昇順に重なり、トラック 0 は `ss_player_set_animation` が確立するものです。[モーションブレンディング](../guide/motion-blending.md)を参照。
+
+| | |
+|---|---|
+| `ss_player_set_track_animation(player, track, name)` | トラックにアニメーションを載せる（それまでの再生内容を置き換える） |
+| `ss_player_crossfade(player, track, name, ms)` | トラックを別のアニメーションへフェードで切り替える |
+| `ss_player_fade_track(player, track, target, ms)` / `ss_player_cancel_track_fade(player, track)` | トラックの alpha を目標値へ動かす／フェードをその場で止める |
+| `ss_player_track_fade_progress(player, track)` | 0〜1。フェードしていないときは **-1** |
+| `ss_player_set_track_alpha` / `ss_player_track_alpha` | トラックの強さ |
+| `ss_player_set_track_blend` / `ss_player_track_blend` | `SS_TRACK_BLEND_MIX`（0）か `SS_TRACK_BLEND_ADDITIVE`（1） |
+| `ss_player_set_track_sync` / `ss_player_track_sync` | `SS_TRACK_SYNC_FREE`（0）か `SS_TRACK_SYNC_START`（1）。載せる前に設定する |
+| `ss_player_set_track_frame` / `ss_player_track_frame` / `ss_player_set_track_speed` | トラックのスクラブ。速度 0 で止まる |
+| `ss_player_track_count(player)` / `ss_player_clear_track(player, track)` | トラックの数／トラックを空にする（トラック 0 は不可） |
+| `ss_player_track_main_source(player, track)` | トラックのアニメーションを担うソース。無いときは **`SS_INVALID_SOURCE`** |
+| `ss_player_add_track_source(player, track, name, weight, &source)` | 別のアニメーションを横に載せ、weight で混ぜる |
+| `ss_player_set_source_weight` / `_frame` / `_event_threshold` と、`set_` の無い取得 | ソース 1 つの weight・再生位置・イベントのしきい値 |
+
+操作は状態コードを返します。存在しないトラックやソースを読むと **0** が返るので、先に `ss_player_track_count` で確かめてください。例外は上で印を付けた 2 つで、0 が意味を持つ値だからです。`SsEventData.source` は、イベントを発火したソースを表します。
+
 ## この Face に無いもの
 
-**モーションブレンディング**（トラックスタック）は Rust だけです。自分が持つレンダーパスへの描画も同様で、この Face はデバイスを自分で構築し所有します。全体像は[スコープと名前の対応](../guide/concepts.md#what-each-face-can-do)、デバイス共有を提供しない理由は[制限事項](../limitations.md#no-device-sharing-across-the-c-abi)を参照してください。
+自分が持つレンダーパスへの描画は Rust だけです。この Face はデバイスを自分で構築し所有します。全体像は[スコープと名前の対応](../guide/concepts.md#what-each-face-can-do)、デバイス共有を提供しない理由は[制限事項](../limitations.md#no-device-sharing-across-the-c-abi)を参照してください。

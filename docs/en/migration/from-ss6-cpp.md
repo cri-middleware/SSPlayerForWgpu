@@ -114,8 +114,8 @@ first `update` — and a missing atlas is **not** an error, it is an entry in
 !!! note "'Track' means something else here now"
     SS6's tracks were parallel animation slots on one entity. This player has a
     [track stack](../guide/motion-blending.md) too — but it is a *blending* stack (layer, weight,
-    crossfade), reached through `set_track_animation` and friends on the Rust API, not through the
-    transport calls.
+    crossfade), reached through `ss_player_set_track_animation` and friends on the C face
+    (`set_track_animation` on the Rust API), not through the transport calls.
 
 ### The mapping
 
@@ -317,7 +317,7 @@ Cell maps and cells are named by **string** here, not by index — and every ove
 
 | | |
 |---|---|
-| **Multiple tracks per entity** | Replaced by the [track stack](../guide/motion-blending.md), which blends rather than merely plays in parallel — Rust API only. From C or JavaScript, stack several characters and order them with `set_order` |
+| **Multiple tracks per entity** | Replaced by the [track stack](../guide/motion-blending.md), which blends rather than merely plays in parallel: `ss_player_set_track_animation`, `ss_player_crossfade` and the rest on the C face |
 | **Sequencer (`.ssqb`)** | No equivalent. Detect `just_finished()` and `set_animation` the next one |
 | **Per-part flip (`FlipSetParts`)** | Not available. Flipping follows the authored keyframes |
 | **Effect seed (`SeedOffsetSet`)** | Not available. Seeds are decided per playback slot |
@@ -328,7 +328,7 @@ Cell maps and cells are named by **string** here, not by index — and every ove
 * one code path across **WebGPU, Vulkan, DX12 and Metal**;
 * a much smaller host: no global system, no texture loop, one call to load;
 * several characters per render pass, sharing one atlas upload;
-* [motion blending](../guide/motion-blending.md), if you move to the Rust API.
+* [motion blending](../guide/motion-blending.md): layering and crossfading animations on one character.
 
 ## Next
 

@@ -29,8 +29,8 @@ extract / prepare / draw のシステムを追加し、レンダーワールド�
 | `pack: Handle<SsPack>` | `asset_server.load(...)` で得た `.ssab` | **変更すると、新しいパックが読み終わった時点で再生ツリーを再構築します** |
 | `animation: String` | 選択するアニメーション。空文字は「まだ選ばない」 | 同上 |
 
-`SsTransform` / `SsPlayback` / `SsPlaybackState` は **required component** なので、`SsPlayer` だけを
-spawn すれば 4 つとも既定値で付きます。
+`SsTransform` / `SsPlayback` / `SsPlaybackState` / `SsTrackState` は **required component** なので、`SsPlayer` だけを
+spawn すれば 5 つとも既定値で付きます。
 
 ### `SsPack` — アセットとしての `.ssab`
 
@@ -81,8 +81,16 @@ spawn すれば 4 つとも既定値で付きます。
 | `finished: bool` | アニメーションが終端に達したか |
 | `playing_forward: bool` | 再生ヘッドが実際に進んでいる向き。ピンポンの戻りの脚でも false。音声はこれでゲートする |
 
-### `SsCellmapTextures` — ランタイムテクスチャ差し替え（任意）
+### `SsTrackState` — トラックスタック（ポーリング） { #sstrackstate }
 
+[`SsTrackCommand`](#motion-blending) が組み立てたスタックです。毎フレーム更新され、**1 フレーム遅れ**です。
+
+| フィールド | |
+|---|---|
+| `tracks: Vec<SsTrackInfo>` | トラックごとに 1 つ（トラック 0 が先頭）。`main_source`・`alpha`・`blend`・`sync`・`frame`・`fade_progress`（フェードしていないときは `None`） |
+| `sources: Vec<SsSourceInfo>` | `TrackCommand::AddSource` で載せ、まだ再生中のソース。`source`（ハンドル）・`track`・`animation`・`weight`・`frame` |
+
+### `SsCellmapTextures` — ランタイムテクスチャ差し替え（任意）
 セルマップがバインドするテクスチャ丸ごとを、Bevy の画像に差し替えます（衣装・パレット変更）。
 
 | フィールド | |
@@ -110,6 +118,19 @@ spawn すれば 4 つとも既定値で付きます。
 
 同じフレームに一緒に送ると、play・stop・seek の順に反映されます。
 
+### モーションブレンディング { #motion-blending }
+
+`SsTrackCommand { entity, command }` は、キャラクターのトラックスタックに対する操作を 1 つ行います。`command` は `TrackCommand` で、各値は `SSPlayer` の同名の呼び出しに対応します（`SetAnimation`・`Crossfade`・`FadeTrack`・`CancelFade`・`Clear`・`SetAlpha`・`SetBlend`・`SetSync`・`SetFrame`・`SetSpeed`・`AddSource`・`SetSourceWeight`・`SetSourceFrame`・`SetSourceEventThreshold`）。上の 3 つと違い、**送ったものはすべて、送った順に反映されます**。パックの読み込み前に送ったものは、アニメーションの準備ができてから反映されます。拒否された操作はログに出ます。結果は [`SsTrackState`](#sstrackstate) に戻り、`AddSource` で載せたソースのハンドルもそこで分かります。
+
+```rust
+fn run(mut tracks: MessageWriter<SsTrackCommand>, character: Single<Entity, With<SsPlayer>>) {
+    let entity = *character;
+    tracks.write(SsTrackCommand { entity, command: TrackCommand::SetSync { track: 0, sync: TrackSync::Start } });
+    tracks.write(SsTrackCommand { entity, command: TrackCommand::Crossfade { track: 0, animation: "run".into(), duration_ms: 300.0 } });
+}
+```
+
+**`SsPlayer::animation` を変えると、スタックはトラック 0 だけに戻ります**（`set_animation` と同じ）。オーバーレイやトラックの設定は、そのあと送り直してください。[モーションブレンディング](../guide/motion-blending.md)を参照。
 ```rust
 fn jump(mut seeks: MessageWriter<SsSeek>, character: Single<Entity, With<SsPlayer>>) {
     seeks.write(SsSeek { entity: *character, frame: 18.0 });
@@ -144,7 +165,7 @@ fn on_finish(mut finished: MessageReader<SsFinished>, mut commands: Commands) {
 |---|---|
 | **ビューは 1 つ** | アダプタは全キャラクターを 1 つの `SSScene` に入れており、`SSScene::update` はタイムラインの前進とジオメトリ構築を一体で行うため、2 つ目のビューは全アニメーションを 1 フレームに 2 回進めてしまいます。2 つ目以降のビューは警告付きでスキップされます |
 | **MSAA** | オフ必須。マルチサンプルのターゲットに対しては、クラッシュせず 1 度警告してスキップします |
-| **パーツオーバーライド、モーションブレンディング** | コンポーネントとして公開されていません。[スコープと名前の対応](../guide/concepts.md#what-each-face-can-do)を参照 |
+| **パーツオーバーライド** | コンポーネントとして公開されていません。[スコープと名前の対応](../guide/concepts.md#what-each-face-can-do)を参照 |
 
 ## マスクとデバイスロスト
 

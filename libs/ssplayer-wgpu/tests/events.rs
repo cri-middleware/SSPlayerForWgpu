@@ -448,3 +448,38 @@ fn a_hidden_player_keeps_reporting_events() {
     }
     assert!(reported > 0, "no tick of {} raised an event — nothing was compared", EVENT_PACKS[0]);
 }
+
+/// Events keep coming across a crossfade on track 0, read per firing source,
+/// and each one names the source that fired it. The fixtures have no pack with
+/// two animations of which one carries events, so the defect this guards — the
+/// incoming animation's indices read against the table `set_animation` chose —
+/// is pinned in the runtime instead, by the source reporting its animation.
+#[test]
+fn events_keep_coming_across_a_crossfade_and_name_their_source() {
+    let Some((device, queue)) = gpu() else {
+        eprintln!("no adapter — skipping");
+        return;
+    };
+    let mut renderer = SSRenderer::new(&device);
+    let mut scene = scene(&device, &queue);
+    let Some(mut player) = player_for(EVENT_PACKS[0]) else {
+        eprintln!("{} missing — skipping", EVENT_PACKS[0]);
+        return;
+    };
+    let name = player.current_animation().unwrap().to_owned();
+    player.set_loop_count(-1);
+    player.play();
+    player.crossfade(0, &name, 50.0).unwrap();
+
+    // Only what the incoming animation fires once it holds track 0.
+    let mut after = Vec::new();
+    for _ in 0..240 {
+        scene.update(&mut renderer, &device, &queue, 1.0 / 60.0, &mut [&mut player]);
+        if player.track_fade_progress(0).is_none() {
+            after.extend(player.events().iter().cloned());
+        }
+    }
+    assert!(!after.is_empty(), "no event came through after the crossfade");
+    let main = player.track_main_source(0).unwrap();
+    assert!(after.iter().all(|e| e.source() == main), "an event after the crossfade names a source other than track 0's");
+}

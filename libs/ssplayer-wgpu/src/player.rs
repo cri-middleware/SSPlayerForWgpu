@@ -17,7 +17,7 @@ use crate::scene::{BatchInfo, FrameChunk, NodeSlot, pack_tint};
 use ssab::ssab::ss::format::{PartType, root_as_ss_anime_binary_unchecked};
 use ssruntime::error::SSRuntimeError;
 use ssruntime::runtime::framedata::ss::runtime::{DrawBatchKind, root_as_frame_data_unchecked};
-use ssruntime::{Context, EffectSlot, InstanceSlot, TrackBlend};
+use ssruntime::{Context, EffectSlot, InstanceSlot, TrackBlend, TrackSync};
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU32, Ordering};
@@ -472,22 +472,34 @@ impl OverridePriority {
 /// accumulates. Bails before touching the `.ssab` when the runtime reports
 /// nothing, which is the overwhelmingly common case — a frame with no events
 /// costs one integer read.
-fn collect_events(node: &PlaybackNode, animation: Option<&str>, out: &mut Vec<SsEvent>) {
+///
+/// Each index addresses the event table of **the animation of the source that
+/// fired it**, so the table is looked up per event. Keeping the one
+/// `set_animation` chose read every event wrongly once a crossfade on track 0
+/// had handed the track to another animation: a different event, or none.
+fn collect_events(node: &PlaybackNode, out: &mut Vec<SsEvent>) {
     out.clear();
     let indices = node.context.get_passed_event_indices();
     if indices.is_empty() {
         return;
     }
-    let (Some(animation), Some(ssab_bytes)) = (animation, node.context.get_ssab_data()) else {
+    let Some(ssab_bytes) = node.context.get_ssab_data() else {
         return;
     };
     // SAFETY: the buffer the node was built from, which the host guaranteed is a valid
     // `.ssab` (`SSPack::build`).
     let ab = unsafe { root_as_ss_anime_binary_unchecked(ssab_bytes) };
-    let Some(anim) = ab.animations().iter().find(|a| a.name() == animation) else {
-        return;
-    };
-    decode_events(&ab, &anim, indices, out);
+    let animations = ab.animations();
+    let sources = node.context.get_passed_event_source_handles();
+    for (&index, &source) in indices.iter().zip(sources) {
+        let Some(anim_index) = node.context.get_source_animation_index(source) else {
+            continue;
+        };
+        if anim_index as usize >= animations.len() {
+            continue;
+        }
+        decode_events(&ab, &animations.get(anim_index as usize), source, &[index], out);
+    }
 }
 
 /// One node in the playback tree: a runtime context plus its instance children
@@ -1520,6 +1532,19 @@ impl SSPlayer {
         self.root.as_ref()?.context.get_track_blend(track)
     }
 
+    /// Where the animations laid on `track` start: [`TrackSync::Free`] from the
+    /// head of their section, [`TrackSync::Start`] at the phase track 0 stands
+    /// at, so a run laid over a walk keeps its stride. Set it before laying;
+    /// [`SSPlayer::set_animation`] resets every track to `Free`.
+    pub fn set_track_sync(&mut self, track: u32, sync: TrackSync) -> Result<(), SSRuntimeError> {
+        let root = self.root.as_mut().ok_or(SSRuntimeError::NotLoaded)?;
+        root.context.set_track_sync(track, sync)
+    }
+
+    pub fn track_sync(&self, track: u32) -> Option<TrackSync> {
+        self.root.as_ref()?.context.get_track_sync(track)
+    }
+
     pub fn track_count(&self) -> u32 {
         self.root.as_ref().map(|r| r.context.get_track_count()).unwrap_or(0)
     }
@@ -1574,6 +1599,61 @@ impl SSPlayer {
     pub fn set_track_speed(&mut self, track: u32, speed: f32) -> Result<(), SSRuntimeError> {
         let root = self.root.as_mut().ok_or(SSRuntimeError::NotLoaded)?;
         root.context.set_track_speed(track, speed)
+    }
+
+    // --- Sources: several animations on one track ------------------------------
+    //
+    // A track can carry more than one animation, mixed by `weight` — a walk and a
+    // run on track 0 blended by the character's speed. Each one is a *source*,
+    // named by the handle these return; handles stay valid until the source is
+    // released (a crossfade completing, `clear_track`, `set_animation`).
+
+    /// The source carrying `track`'s animation — the one `set_track_animation`,
+    /// `crossfade` or `set_animation` put there.
+    pub fn track_main_source(&self, track: u32) -> Option<u32> {
+        self.root.as_ref()?.context.get_track_main_source(track)
+    }
+
+    /// Lay `anim_name` on `track` beside what it already carries, at `weight`,
+    /// and return its handle. On an empty track it becomes the main source.
+    /// It starts per the track's [`TrackSync`].
+    pub fn add_track_source(&mut self, track: u32, anim_name: &str, weight: f32) -> Result<u32, SSRuntimeError> {
+        let root = self.root.as_mut().ok_or(SSRuntimeError::NotLoaded)?;
+        root.context.add_track_source(track, anim_name, weight)
+    }
+
+    /// A source's share **within its track**: weights are ratios, so `(0.7, 0.3)`
+    /// and `(7, 3)` mix alike. The track's strength is [`SSPlayer::set_track_alpha`].
+    pub fn set_source_weight(&mut self, source: u32, weight: f32) -> Result<(), SSRuntimeError> {
+        let root = self.root.as_mut().ok_or(SSRuntimeError::NotLoaded)?;
+        root.context.set_source_weight(source, weight)
+    }
+
+    pub fn source_weight(&self, source: u32) -> Option<f32> {
+        self.root.as_ref()?.context.get_source_weight(source)
+    }
+
+    /// Seek one source. Sources of different lengths drift apart; this is how a
+    /// host keeps them in step.
+    pub fn set_source_frame(&mut self, source: u32, frame: f32) -> Result<(), SSRuntimeError> {
+        let root = self.root.as_mut().ok_or(SSRuntimeError::NotLoaded)?;
+        root.context.set_source_frame(source, frame)
+    }
+
+    pub fn source_frame(&self, source: u32) -> Option<f32> {
+        self.root.as_ref()?.context.get_source_frame(source)
+    }
+
+    /// The weight at or above which `source` fires its events. Only track 0's
+    /// main source fires by default (the default threshold is `+∞`); lower this
+    /// to the source's weight or below to have it fire too.
+    pub fn set_source_event_threshold(&mut self, source: u32, threshold: f32) -> Result<(), SSRuntimeError> {
+        let root = self.root.as_mut().ok_or(SSRuntimeError::NotLoaded)?;
+        root.context.set_source_event_threshold(source, threshold)
+    }
+
+    pub fn source_event_threshold(&self, source: u32) -> Option<f32> {
+        self.root.as_ref()?.context.get_source_event_threshold(source)
     }
 
     /// Which way the playhead walks, and what it does at the far end. Taken
@@ -2557,7 +2637,7 @@ impl SSPlayer {
         // integer draw frame changing and lost frame-0 events on the first tick
         // after `play()` as a result.
         let finished = root.context.is_finished();
-        collect_events(root, self.current_animation.as_deref(), &mut self.events);
+        collect_events(root, &mut self.events);
         self.looped = looped;
         self.finished_edge = finished && !self.prev_finished;
         self.prev_finished = finished;

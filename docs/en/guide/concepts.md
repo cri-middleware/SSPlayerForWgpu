@@ -108,7 +108,7 @@ for what is planned.
 | [Part overrides: visibility, cell, colour](./part-overrides.md) | ✅ | ✅ | ✅ | — |
 | [Texture replacement: a whole cell map](./texture-replacement.md) | ✅ | ✅ | ✅ | ✅ |
 | [Part transform lookup](./part-overrides.md#reading-a-parts-transform) | ✅ | ✅ | ✅ | — |
-| [Motion blending: tracks, crossfade](./motion-blending.md) | ✅ | — | — | — |
+| [Motion blending: tracks, crossfade, sources](./motion-blending.md) | ✅ | ✅ | ✅ | ✅ |
 | [Masks — stencil](./masks.md) | ✅ | ✅ | ✅ | — |
 | [Masks — coverage bitmap](./masks.md) | ✅ | — | — | ✅ |
 | [Supplying your own textures](./loading.md#supplying-textures-yourself) | ✅ | ✅ | ✅ | — |
@@ -116,8 +116,8 @@ for what is planned.
 | [Frame statistics](./performance.md) | ✅ | ✅ | ✅ | — |
 | Drawing into a render pass you own | ✅ | — | — | ✅ |
 
-**[Motion blending](./motion-blending.md) is Rust-only today.** From the other faces, layer several
-characters and order them with `set_order` instead.
+On Bevy, [motion blending](./motion-blending.md) is driven by the `SsTrackCommand` message and read
+back from the `SsTrackState` component, since the playback trees live in the render world.
 
 ## Two calls, not one: selecting and starting
 

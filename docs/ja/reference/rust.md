@@ -28,6 +28,7 @@ pub use player::{AssetLoader, AtlasKeys, BlendOp, MissingAsset, MissingKind, Ove
 pub use renderer::{AlphaMode, Retention, SSRenderer};
 pub use scene::{BatchInfo, FrameChunk, IDENTITY_TRANSFORM, MaskBackend, NodeSlot, SSScene, SceneConfig};
 pub use ssruntime::TrackBlend;
+pub use ssruntime::TrackSync;
 pub use ssruntime::error::SSRuntimeError;
 #[cfg(feature = "web")]
 pub use web::{SsContextWeb, SsPlayerWeb, SsSurfaceWeb};

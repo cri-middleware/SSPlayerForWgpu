@@ -4,9 +4,12 @@ Play several animations on one character at once, and move between them without 
 underneath, an aim overlay on top, a one-shot reaction crossfading in — from files an animator
 authored separately.
 
-!!! info "Rust only, today"
-    The track stack is on the Rust API. It is not exposed on the C or JavaScript faces, and the
-    Bevy adapter's three components do not reach it. Everything on this page is `SSPlayer`.
+!!! info "On every face"
+    The examples here are `SSPlayer`'s Rust API. The C face has the same calls as `ss_player_*`,
+    the JavaScript face as camelCase methods on `SsPlayerWeb`, and the Bevy adapter as the
+    `SsTrackCommand` message, with the stack read back from `SsTrackState`. See the
+    [C](../reference/c.md#motion-blending), [JavaScript](../reference/js.md#motion-blending) and
+    [Bevy](../reference/bevy.md#motion-blending) references.
 
 ## The model: a stack of tracks
 
@@ -76,6 +79,59 @@ player.cancel_track_fade(1)?;
     built it. So crossfading to an animation whose **instance parts differ** is out of scope — use
     `set_animation` for that, and accept the cut.
 
+## Mixing two animations on one track
+
+A track can carry more than one animation, mixed by **weight** — the way a walk and a run blend by
+how fast the character moves. Each one is a *source*, named by a handle:
+
+```rust
+player.set_animation("walk")?;
+player.play();
+let walk = player.track_main_source(0).unwrap();
+let run = player.add_track_source(0, "run", 0.0)?;   // beside the walk, silent for now
+
+// every frame, from the character's speed
+player.set_source_weight(walk, 1.0 - t)?;
+player.set_source_weight(run, t)?;
+```
+
+* Weights are **ratios within the track**: `(0.7, 0.3)` and `(7, 3)` mix alike. The track's
+  strength is still its alpha.
+* A walk and a run of different lengths drift apart. Lay the run with the track's sync at
+  `TrackSync::Start` (below) to start it in step, or seek it with `set_source_frame`.
+* Only track 0's main source fires events. To have another source fire, lower its threshold to its
+  weight or below with `set_source_event_threshold`.
+* A handle stays valid until its source is released: a crossfade completing, `clear_track`, or
+  `set_animation`.
+
+## Starting in step with track 0
+
+An animation laid on a track starts from the head of its section. Lay a run over a walk that is
+half-way through its stride and the feet disagree. Set the track's **sync** to `TrackSync::Start`
+and what is laid on it next starts at the **phase** track 0 stands at — how far through its
+section it is, from 0.0 at the start towards 1.0 at the end — so animations of different lengths
+line up by proportion:
+
+```rust
+use ssplayer_wgpu::TrackSync;
+
+player.set_track_sync(0, TrackSync::Start)?;   // set it before laying
+player.crossfade(0, "run", 400.0)?;            // run starts at the walk's phase
+```
+
+| Sync | Where a laid animation starts | Suited to |
+|---|---|---|
+| `TrackSync::Free` (default) | The head of its section | One-off motions: a blink, a mouth shape, a hit reaction |
+| `TrackSync::Start` | The same fraction of its section as track 0's animation | Cyclic motions over one another: walk and run |
+
+* It applies to everything laid on the track afterwards — `set_track_animation`, `crossfade` and
+  `add_track_source`, track 0 included, where the incoming animation starts at the outgoing one's
+  phase.
+* It aligns **once**, when the animation is laid. Both then run on one clock, so animations of
+  the same length and speed stay in step; different lengths or speeds drift apart again.
+* It belongs to the track, like its alpha and blend: `set_animation` resets every track to
+  `Free`, so set it again after switching the base animation.
+
 ## Scrubbing a track: continuous control
 
 Author a control axis as an animation — a head turning from full left to full right, an eyelid
@@ -101,8 +157,8 @@ A common three-track arrangement for a character in a game:
 | 1 | `aim_lr` | Additive, speed 0 | `set_track_frame` from the aim angle |
 | 2 | `hit_react` | Mix | `set_track_animation` + `fade_track(2, 1.0, 80.0)`, faded back out on completion |
 
-Query what is up there with `track_count()`, `track_alpha(track)`, `track_blend(track)` and
-`track_frame(track)`.
+Query what is up there with `track_count()`, `track_alpha(track)`, `track_blend(track)`,
+`track_sync(track)` and `track_frame(track)`.
 
 ## Two limits
 
@@ -126,6 +182,7 @@ overlay leaves the performance underneath showing:
 | `A` | track 1 mix / additive |
 | `0` | fade track 0 to the setup pose and back |
 | `,` / `.` | scrub track 1's frame — the tracking-driven axis above |
+| `Y` | track sync free / start, for the whole cast — compare `C` and `S` both ways |
 
 ## Next
 

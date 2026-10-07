@@ -31,8 +31,8 @@ The camera, however, needs two things: `Msaa::Off` (the player's pipelines are s
 | `pack: Handle<SsPack>` | the `.ssab`, from `asset_server.load(...)` | **Changing it rebuilds the playback tree**, once the new pack has loaded |
 | `animation: String` | animation to select. Empty means "not yet" | The same |
 
-`SsTransform`, `SsPlayback` and `SsPlaybackState` are **required components**, so spawning
-`SsPlayer` alone gives you all four at their defaults.
+`SsTransform`, `SsPlayback`, `SsPlaybackState` and `SsTrackState` are **required components**, so
+spawning `SsPlayer` alone gives you all five at their defaults.
 
 ### `SsPack` — the `.ssab` as an asset
 
@@ -88,6 +88,15 @@ with nothing to clear afterwards, and so two restarts in a row are two restarts.
 | `finished: bool` | whether the animation has reached its end |
 | `playing_forward: bool` | which way the playhead is actually travelling — false on a ping-pong's return leg too. Gate audio on it |
 
+### `SsTrackState` — the track stack (polled) { #sstrackstate }
+
+What [`SsTrackCommand`](#motion-blending) built, refreshed every frame and **one frame behind**.
+
+| Field | |
+|---|---|
+| `tracks: Vec<SsTrackInfo>` | one per track, track 0 first: `main_source`, `alpha`, `blend`, `sync`, `frame` and `fade_progress` (`None` when not fading) |
+| `sources: Vec<SsSourceInfo>` | the sources laid with `TrackCommand::AddSource` that are still playing: `source` (the handle), `track`, `animation`, `weight`, `frame` |
+
 ### `SsCellmapTextures` — runtime texture replacement (optional)
 
 Swap the whole texture a cell map binds — a costume or palette change — for a Bevy image.
@@ -123,6 +132,28 @@ last wins:
 | `SsSeek` | `entity`, `frame: f32` — move the playhead there. Fractional frames are honoured, and it stays inside the section |
 
 Sent together in one frame they apply as play, stop, seek.
+
+### Motion blending { #motion-blending }
+
+`SsTrackCommand { entity, command }` performs one operation on the character's track stack;
+`command` is a `TrackCommand`, each variant the `SSPlayer` call of the same name — `SetAnimation`,
+`Crossfade`, `FadeTrack`, `CancelFade`, `Clear`, `SetAlpha`, `SetBlend`, `SetSync`, `SetFrame`,
+`SetSpeed`, `AddSource`, `SetSourceWeight`, `SetSourceFrame`, `SetSourceEventThreshold`. Unlike the
+three above, **every one applies, in the order written**, and ones sent before the pack has loaded
+wait for the animation. A refused one is logged. The result comes back in
+[`SsTrackState`](#sstrackstate), where an `AddSource` finds its handle.
+
+```rust
+fn run(mut tracks: MessageWriter<SsTrackCommand>, character: Single<Entity, With<SsPlayer>>) {
+    let entity = *character;
+    tracks.write(SsTrackCommand { entity, command: TrackCommand::SetSync { track: 0, sync: TrackSync::Start } });
+    tracks.write(SsTrackCommand { entity, command: TrackCommand::Crossfade { track: 0, animation: "run".into(), duration_ms: 300.0 } });
+}
+```
+
+**Changing `SsPlayer::animation` resets the stack** to track 0 alone, as `set_animation` does;
+send the overlays and track settings again after it. See
+[Motion blending](../guide/motion-blending.md).
 
 ```rust
 fn jump(mut seeks: MessageWriter<SsSeek>, character: Single<Entity, With<SsPlayer>>) {
@@ -164,7 +195,7 @@ would be a race.
 |---|---|
 | **One view** | The adapter holds one `SSScene` with every character in it, and `SSScene::update` fuses the timeline advance with the geometry build, so a second view would advance every animation twice per frame. Later views are skipped, with a warning |
 | **MSAA** | must be off. The adapter warns once and skips a multisampled target rather than crashing |
-| **Part overrides, motion blending** | not exposed as components. See [Scopes and names](../guide/concepts.md#what-each-face-can-do) |
+| **Part overrides** | not exposed as components. See [Scopes and names](../guide/concepts.md#what-each-face-can-do) |
 
 ## Masks and device loss
 

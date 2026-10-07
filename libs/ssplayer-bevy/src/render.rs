@@ -20,6 +20,7 @@ use ssplayer_wgpu::{AlphaMode as SsAlphaMode, MaskBackend, PlaybackDirection, Pl
 use std::collections::{HashMap, HashSet};
 
 use crate::asset::{Keys, RenderSsPack, SsPack};
+use crate::components::{SsSourceInfo, SsTrackInfo, TrackCommand};
 use crate::extract::ExtractedPlayers;
 use crate::feedback::{FeedbackChannel, PlaybackFeedback};
 
@@ -62,6 +63,13 @@ struct PlayerSlot {
     pending_seek: Option<f32>,
     pending_play: Option<Option<f32>>,
     pending_stop: bool,
+    /// Track-stack commands not yet applied, in the order they were written; kept,
+    /// like the transport ones, until the character has an animation set up.
+    pending_tracks: Vec<TrackCommand>,
+    /// The sources `TrackCommand::AddSource` laid: handle, track, animation.
+    /// Pruned once the runtime no longer knows a handle, and dropped with the tree,
+    /// since a new animation releases every source.
+    added_sources: Vec<(u32, u32, String)>,
     /// Runtime texture overrides currently bound, cellmap name -> (the image
     /// applied, the GPU texture it had then, the private renderer key it went in
     /// under). Diffed against the character's `SsCellmapTextures` each frame: a
@@ -174,6 +182,8 @@ pub(crate) fn sync_players(mut state: Option<ResMut<SsRenderState>>, extracted: 
                     pending_seek: None,
                     pending_play: None,
                     pending_stop: false,
+                    pending_tracks: Vec::new(),
+                    added_sources: Vec::new(),
                     applied_overrides: HashMap::new(),
                 });
                 slots.len() - 1
@@ -213,6 +223,7 @@ pub(crate) fn sync_players(mut state: Option<ResMut<SsRenderState>>, extracted: 
             slot.heading = None;
             slot.loop_count = None;
             slot.section = None;
+            slot.added_sources.clear();
             pack_changed = true;
             packs_changed = true;
         }
@@ -229,12 +240,14 @@ pub(crate) fn sync_players(mut state: Option<ResMut<SsRenderState>>, extracted: 
                 error!("ssplayer-bevy: no animation {:?} in {path:?} ({err:?}); it has {:?}", extracted_player.animation, slot.player.animation_names().unwrap_or_default());
                 continue;
             }
-            // A fresh tree, stopped at its head; transport starts over.
+            // A fresh tree, stopped at its head; transport starts over, and the
+            // track stack is back to track 0 alone.
             slot.started = false;
             slot.playing = false;
             slot.heading = None;
             slot.loop_count = None;
             slot.section = None;
+            slot.added_sources.clear();
         }
 
         // Allocation-free from here down.
@@ -332,10 +345,82 @@ pub(crate) fn sync_players(mut state: Option<ResMut<SsRenderState>>, extracted: 
             slot.player.seek(frame);
         }
 
+        // The track stack, after the transport: `play` heads track 0 out, and a
+        // crossfade or a seek of a track sent with it means the animation it starts.
+        slot.pending_tracks.extend(extracted.track_commands.iter().filter(|(entity, _)| *entity == slot.entity).map(|(_, command)| command.clone()));
+        if ready {
+            for command in std::mem::take(&mut slot.pending_tracks) {
+                apply_track_command(slot, command);
+            }
+        }
+
         reconcile_overrides(slot, renderer, device, &images, &extracted_player.overrides, pack_changed, warned_srgb_override);
     }
 
     lend_atlases(renderer, device, lent_atlases, slots, &packs, &images, packs_changed);
+}
+
+/// Perform one track-stack command on a character whose animation is set up.
+///
+/// A refused command is logged rather than dropped silently — a typo in an
+/// animation name, or a handle the runtime has already released — since the
+/// host wrote a message and has nothing to read a failure back from.
+fn apply_track_command(slot: &mut PlayerSlot, command: TrackCommand) {
+    let player = &mut slot.player;
+    let result = match &command {
+        TrackCommand::SetAnimation { track, animation } => player.set_track_animation(*track, animation),
+        TrackCommand::Crossfade { track, animation, duration_ms } => player.crossfade(*track, animation, *duration_ms),
+        TrackCommand::FadeTrack { track, target, duration_ms } => player.fade_track(*track, *target, *duration_ms),
+        TrackCommand::CancelFade { track } => player.cancel_track_fade(*track),
+        TrackCommand::Clear { track } => {
+            let result = player.clear_track(*track);
+            if result.is_ok() {
+                slot.added_sources.retain(|(_, on, _)| on != track);
+            }
+            result
+        }
+        TrackCommand::SetAlpha { track, alpha } => player.set_track_alpha(*track, *alpha),
+        TrackCommand::SetBlend { track, blend } => player.set_track_blend(*track, *blend),
+        TrackCommand::SetSync { track, sync } => player.set_track_sync(*track, *sync),
+        TrackCommand::SetFrame { track, frame } => player.set_track_frame(*track, *frame),
+        TrackCommand::SetSpeed { track, speed } => player.set_track_speed(*track, *speed),
+        TrackCommand::AddSource { track, animation, weight } => player.add_track_source(*track, animation, *weight).map(|source| {
+            // A handle the runtime hands out again names the new source, not the
+            // one it was released from.
+            slot.added_sources.retain(|(handle, _, _)| *handle != source);
+            slot.added_sources.push((source, *track, animation.clone()));
+        }),
+        TrackCommand::SetSourceWeight { source, weight } => player.set_source_weight(*source, *weight),
+        TrackCommand::SetSourceFrame { source, frame } => player.set_source_frame(*source, *frame),
+        TrackCommand::SetSourceEventThreshold { source, threshold } => player.set_source_event_threshold(*source, *threshold),
+    };
+    if let Err(err) = result {
+        warn!("ssplayer-bevy: {command:?} refused ({err:?})");
+    }
+}
+
+/// The track stack as it stands after the advance, for [`crate::SsTrackState`].
+/// Drops the added sources the runtime has released since, which is what keeps a
+/// handle the runtime later reuses from being reported under the old animation.
+fn track_feedback(slot: &mut PlayerSlot) -> (Vec<SsTrackInfo>, Vec<SsSourceInfo>) {
+    let player = &slot.player;
+    let tracks = (0..player.track_count())
+        .map(|track| SsTrackInfo {
+            main_source: player.track_main_source(track),
+            alpha: player.track_alpha(track).unwrap_or(0.0),
+            blend: player.track_blend(track).unwrap_or(ssplayer_wgpu::TrackBlend::Mix),
+            sync: player.track_sync(track).unwrap_or(ssplayer_wgpu::TrackSync::Free),
+            frame: player.track_frame(track),
+            fade_progress: player.track_fade_progress(track),
+        })
+        .collect();
+    slot.added_sources.retain(|(source, _, _)| player.source_weight(*source).is_some());
+    let sources = slot
+        .added_sources
+        .iter()
+        .map(|(source, track, animation)| SsSourceInfo { source: *source, track: *track, animation: animation.clone(), weight: player.source_weight(*source).unwrap_or(0.0), frame: player.source_frame(*source).unwrap_or(0.0) })
+        .collect();
+    (tracks, sources)
 }
 
 /// Lend the renderer every atlas the characters' packs draw with, as the texture
@@ -531,8 +616,9 @@ pub(crate) fn draw_players(
     drop(players);
     channel.store(
         slots
-            .iter()
+            .iter_mut()
             .map(|slot| {
+                let (tracks, sources) = track_feedback(slot);
                 let player = &slot.player;
                 PlaybackFeedback {
                     entity: slot.entity.id(),
@@ -543,6 +629,8 @@ pub(crate) fn draw_players(
                     finished_edge: player.just_finished(),
                     looped: player.just_looped(),
                     events: player.events().to_vec(),
+                    tracks,
+                    sources,
                 }
             })
             .collect(),

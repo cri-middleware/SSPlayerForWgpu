@@ -46,6 +46,8 @@ pub struct UserDataEvent {
     /// it was noticed on: one update can step across several and reports every
     /// key in between.
     pub frame_no: u32,
+    /// The source that fired it — see [`SsEvent::source`].
+    pub source: u32,
     pub integer: Option<i32>,
     /// `[left, top, right, bottom]` as authored — four edges, not origin+size.
     pub rect: Option<[f32; 4]>,
@@ -63,6 +65,8 @@ pub struct SignalEvent {
     /// it was noticed on: one update can step across several and reports every
     /// key in between.
     pub frame_no: u32,
+    /// The source that fired it — see [`SsEvent::source`].
+    pub source: u32,
     pub command_id: String,
     pub params: Vec<SignalParam>,
 }
@@ -78,6 +82,8 @@ pub struct AudioEvent {
     /// it was noticed on: one update can step across several and reports every
     /// key in between.
     pub frame_no: u32,
+    /// The source that fired it — see [`SsEvent::source`].
+    pub source: u32,
     /// The alias as authored, kept for diagnostics and for hosts that key their
     /// own audio by name.
     pub sound_name: String,
@@ -127,19 +133,38 @@ impl SsEvent {
             Self::Audio(e) => &e.part_name,
         }
     }
+
+    /// The source on the character's track stack that fired it, as the handle
+    /// [`SSPlayer::track_main_source`] and [`SSPlayer::add_track_source`] use.
+    /// By default only track 0's main source fires, so this is that one; it
+    /// tells events apart once another source has opted in with
+    /// [`SSPlayer::set_source_event_threshold`].
+    ///
+    /// [`SSPlayer::track_main_source`]: crate::SSPlayer::track_main_source
+    /// [`SSPlayer::add_track_source`]: crate::SSPlayer::add_track_source
+    /// [`SSPlayer::set_source_event_threshold`]: crate::SSPlayer::set_source_event_threshold
+    pub fn source(&self) -> u32 {
+        match self {
+            Self::UserData(e) => e.source,
+            Self::Signal(e) => e.source,
+            Self::Audio(e) => e.source,
+        }
+    }
 }
 
-/// Append every event on the frames `indices` names to `out`.
+/// Append every event on the frames `indices` names to `out`, stamped with the
+/// `source` that fired them.
 ///
-/// `events` is the current animation's `EventsPerFrame` vector and `indices`
-/// the runtime's passed-event indices. **Indices are bounds-checked**: they are
-/// only meaningful against the animation currently bound to the context, and a
+/// `anim` is **the firing source's** animation, whose `EventsPerFrame` vector
+/// `indices` addresses — not necessarily the one `set_animation` chose, since a
+/// crossfade on track 0 hands the track to another. **Indices are
+/// bounds-checked**: they are only meaningful against that animation, and a
 /// stale one — or the runtime's not-found `-1` — would otherwise read past the
 /// FlatBuffer. The Godot Player hit exactly that.
 ///
 /// Signals that are switched off are skipped, matching the sibling Players:
 /// an inactive signal is authoring state, not something that happened.
-pub(crate) fn decode_events(ab: &SsAnimeBinary<'_>, anim: &AnimationData<'_>, indices: &[i32], out: &mut Vec<SsEvent>) {
+pub(crate) fn decode_events(ab: &SsAnimeBinary<'_>, anim: &AnimationData<'_>, source: u32, indices: &[i32], out: &mut Vec<SsEvent>) {
     let Some(events) = anim.events() else { return };
     let len = events.len();
     // The pack's part list is shared across its animations, so one lookup per
@@ -160,6 +185,7 @@ pub(crate) fn decode_events(ab: &SsAnimeBinary<'_>, anim: &AnimationData<'_>, in
                     part_index: user.part_index() as u32,
                     part_name: part_name(user.part_index() as u32),
                     frame_no,
+                    source,
                     integer: value.integer().map(|v| v.value()),
                     rect: value.rect().map(|r| [r.left(), r.top(), r.right(), r.bottom()]),
                     point: value.point().map(|p| [p.v1(), p.v2()]),
@@ -175,7 +201,7 @@ pub(crate) fn decode_events(ab: &SsAnimeBinary<'_>, anim: &AnimationData<'_>, in
                     continue;
                 }
                 let params = value.params().iter().map(|param| SignalParam { id: param.param_id().to_owned(), value: decode_signal_value(&param) }).collect();
-                out.push(SsEvent::Signal(SignalEvent { part_index: signal.part_index() as u32, part_name: part_name(signal.part_index() as u32), frame_no, command_id: value.command_id().to_owned(), params }));
+                out.push(SsEvent::Signal(SignalEvent { part_index: signal.part_index() as u32, part_name: part_name(signal.part_index() as u32), frame_no, source, command_id: value.command_id().to_owned(), params }));
             }
         }
 
@@ -186,6 +212,7 @@ pub(crate) fn decode_events(ab: &SsAnimeBinary<'_>, anim: &AnimationData<'_>, in
                     part_index: audio.part_index() as u32,
                     part_name: part_name(audio.part_index() as u32),
                     frame_no,
+                    source,
                     sound_name: value.sound_name().to_owned(),
                     sound_list_name_hash: value.sound_list_name_hash(),
                     sound_name_hash: value.sound_name_hash(),

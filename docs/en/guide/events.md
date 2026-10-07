@@ -100,6 +100,15 @@ landed on — so a footstep on frame 7 is not lost because the tick went from 5 
 That is also why each event carries the frame it was **authored** on, which is not necessarily the
 frame it was noticed on.
 
+## With motion blending
+
+Only track 0's animation fires events, and after a `crossfade` on track 0 that is the incoming
+animation: its events come through as soon as it holds the track. Each event also says which
+**source** fired it — `source()`, the handle `track_main_source` and `add_track_source` use — which
+tells events apart once another source has opted in with `set_source_event_threshold`
+([Motion blending](./motion-blending.md)). The C face carries it as `SsEventData.source`, and each
+JavaScript event object as `source`.
+
 ## Empty is meaningful
 
 | Situation | What `events()` gives you |

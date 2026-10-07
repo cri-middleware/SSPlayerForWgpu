@@ -32,11 +32,13 @@
 // 1 / 2       track 1 alpha down / up        A  track 1 mix / additive
 // 0           fade track 0 to the rest pose and back
 // , / .       scrub track 1's frame — how a tracking-driven axis is driven
+// Y           track sync free / start — whether what C and S lay on starts at
+//             track 0's phase, so a run laid over a walk keeps its stride
 //
 // The pack, animation, visibility, culling and alpha keys act on the **focused** member;
 // focus starts at "all", so they drive the whole cast until you press Tab.
 
-use ssplayer_wgpu::{MaskBackend, Placement, SSPack, SSPlayer, SSRenderer, SSScene, SceneConfig, TrackBlend};
+use ssplayer_wgpu::{MaskBackend, Placement, SSPack, SSPlayer, SSRenderer, SSScene, SceneConfig, TrackBlend, TrackSync};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
@@ -152,6 +154,9 @@ struct AppState {
 
     last_update: Instant,
     is_pausing: bool,
+    /// Applied to tracks 0 and 1 of the whole cast, and again after every
+    /// `set_animation`, which resets a track's sync with the rest of the stack.
+    track_sync: TrackSync,
     y_down: bool,
     logged_first_draw: bool,
     /// Wall time of the last `SSScene::update`, in milliseconds.
@@ -179,17 +184,43 @@ impl AppState {
         let delta = now.duration_since(self.last_update).as_secs_f32();
         self.last_update = now;
 
-        if !self.is_pausing {
-            // The whole cast goes into one `update`, so one `begin_frame` /
-            // `end_frame` pair spans it and the draws end up back to back in a
-            // single pass.
-            let mut players: Vec<&mut SSPlayer> = self.cast.iter_mut().map(|m| &mut m.player).collect();
-            // The CPU half of the frame. The scene deliberately does not time
-            // itself — `Instant` is not portable to wasm,
-            // and a host needs one line to do it.
-            let started = Instant::now();
-            self.scene.update(&mut self.renderer, &self.device, &self.queue, delta, &mut players);
-            self.last_update_ms = started.elapsed().as_secs_f64() * 1.0e3;
+        // Updated even while paused: the hold is the players' own `pause`, so
+        // what stops is what the runtime stops — every track and every fade —
+        // rather than the viewer skipping the tick.
+        //
+        // The whole cast goes into one `update`, so one `begin_frame` /
+        // `end_frame` pair spans it and the draws end up back to back in a
+        // single pass.
+        let mut players: Vec<&mut SSPlayer> = self.cast.iter_mut().map(|m| &mut m.player).collect();
+        // The CPU half of the frame. The scene deliberately does not time
+        // itself — `Instant` is not portable to wasm,
+        // and a host needs one line to do it.
+        let started = Instant::now();
+        self.scene.update(&mut self.renderer, &self.device, &self.queue, delta, &mut players);
+        self.last_update_ms = started.elapsed().as_secs_f64() * 1.0e3;
+    }
+
+    /// Switch the cast between laying animations on from their head and laying
+    /// them on at track 0's phase.
+    fn toggle_track_sync(&mut self) {
+        self.track_sync = match self.track_sync {
+            TrackSync::Free => TrackSync::Start,
+            _ => TrackSync::Free,
+        };
+        for member in &mut self.cast {
+            apply_track_sync(&mut member.player, self.track_sync);
+        }
+    }
+
+    /// Hold or release the whole cast through the players' own transport.
+    fn toggle_pause(&mut self) {
+        self.is_pausing = !self.is_pausing;
+        for member in &mut self.cast {
+            if self.is_pausing {
+                member.player.pause();
+            } else {
+                member.player.resume();
+            }
         }
     }
 
@@ -397,16 +428,24 @@ impl AppState {
         let anim_idx = anim_idx % names.len();
         let name = names[anim_idx].clone();
 
+        let hold = self.is_pausing;
+        let sync = self.track_sync;
         let member = &mut self.cast[idx];
         member.anim_idx = anim_idx;
         if let Err(e) = member.player.set_animation(&name) {
             eprintln!("Failed to select animation {name:?}: {e:?}");
             return;
         }
-        // Setting track 0 rebuilds the stack, so any overlay went with it.
+        // Setting track 0 rebuilds the stack, so any overlay went with it, and
+        // the track sync with it.
         member.overlay_idx = None;
         member.overlay_frame = None;
+        apply_track_sync(&mut member.player, sync);
         member.player.play();
+        // `play` lifts a hold, but the viewer's pause belongs to the whole cast.
+        if hold {
+            member.player.pause();
+        }
     }
 
     // --- tracks ------------------------------------------------------------
@@ -622,6 +661,7 @@ impl AppState {
         println!(" Draw list: {} mergeable / {} redundant texture binds", stats.mergeable_draws, stats.redundant_texture_binds);
         println!(" GPU pass: {gpu} (cpu update {:.3} ms)", self.last_update_ms);
         println!(" Playback: {}", if self.is_pausing { "Paused" } else { "Playing" });
+        println!(" Track sync: {}", if self.track_sync == TrackSync::Start { "Start (at track 0's phase)" } else { "Free (from the head)" });
         println!(" Y-Axis Mode: {}", if self.y_down { "Y-Down (flipped)" } else { "Y-Up (standard)" });
         println!(" Mask backend: {:?} ({} coverage bitmaps last frame)", self.scene.config().mask, stats.coverage_layers);
         println!("----------------------------------------------------");
@@ -638,6 +678,7 @@ impl AppState {
         println!(" C  - Crossfade to next anim S     - Cycle track 1 overlay");
         println!(" 1/2 - Track 1 alpha down / up A     - Track 1 mix / additive");
         println!(" 0  - Fade track 0 to rest pose , /. - Scrub track 1 frame");
+        println!(" Y  - Track sync free / start");
         println!(" Drop a .ssab or a folder on the window to play it");
         println!("====================================================");
     }
@@ -734,6 +775,7 @@ impl ApplicationHandler for App {
             reverse_order: false,
             last_update: Instant::now(),
             is_pausing: false,
+            track_sync: TrackSync::Free,
             y_down: false,
             logged_first_draw: false,
             last_update_ms: 0.0,
@@ -794,8 +836,9 @@ impl ApplicationHandler for App {
                 winit::keyboard::Key::Named(winit::keyboard::NamedKey::Escape) => {
                     event_loop.exit();
                 }
-                winit::keyboard::Key::Character(ref c) if c == " " => {
-                    state.is_pausing = !state.is_pausing;
+                // winit 0.30 reports Space as a named key, not as `" "`.
+                winit::keyboard::Key::Named(winit::keyboard::NamedKey::Space) => {
+                    state.toggle_pause();
                     state.refresh_status();
                 }
                 // Focus picks who the pack/animation/appearance keys drive:
@@ -913,6 +956,11 @@ impl ApplicationHandler for App {
                     }
                     state.refresh_status();
                 }
+                // The whole cast, like Space: a comparison wants both sides the same.
+                winit::keyboard::Key::Character(ref c) if c.eq_ignore_ascii_case("y") => {
+                    state.toggle_track_sync();
+                    state.refresh_status();
+                }
                 winit::keyboard::Key::Character(ref c) if c == "1" || c == "2" => {
                     let delta = if c == "2" { 0.1 } else { -0.1 };
                     for idx in state.targets() {
@@ -998,6 +1046,13 @@ fn load_packs(dir: &Path) -> (Vec<SSPack>, Vec<Vec<String>>, Vec<PathBuf>) {
 
     let pack_anims = packs.iter().map(SSPack::animation_names).collect();
     (packs, pack_anims, kept)
+}
+
+/// Set the sync of the two tracks the keys lay animations on: track 0 for `C`,
+/// track 1 for `S`.
+fn apply_track_sync(player: &mut SSPlayer, sync: TrackSync) {
+    let _ = player.set_track_sync(0, sync);
+    let _ = player.set_track_sync(1, sync);
 }
 
 /// Locate the converted demo assets, which `scripts/deploy-examples.sh` writes to

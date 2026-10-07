@@ -7,7 +7,7 @@
 use bevy::platform::collections::HashMap;
 use bevy::prelude::*;
 
-use ssplayer_wgpu::{PlaybackDirection, PlaybackStyle};
+use ssplayer_wgpu::{PlaybackDirection, PlaybackStyle, TrackBlend, TrackSync};
 
 use crate::asset::SsPack;
 
@@ -18,7 +18,7 @@ use crate::asset::SsPack;
 /// else is allocation-free transport, which is why placement and playback sit in
 /// their own components.
 #[derive(Component, Clone, Debug, Default)]
-#[require(SsTransform, SsPlayback, SsPlaybackState)]
+#[require(SsTransform, SsPlayback, SsPlaybackState, SsTrackState)]
 pub struct SsPlayer {
     /// The `.ssab` this character plays from: `asset_server.load("Ringo/Ringo.ssab")`.
     /// The character appears once the pack and its atlases have loaded.
@@ -166,6 +166,104 @@ pub struct SsPlay {
 #[derive(Message, Clone, Copy, Debug)]
 pub struct SsStop {
     pub entity: Entity,
+}
+
+/// One operation on a character's track stack — motion blending, as
+/// [`ssplayer_wgpu::SSPlayer`]'s track API performs it.
+///
+/// Tracks fold onto the setup pose in ascending order; track 0 is what
+/// [`SsPlayer::animation`] sets up. A message rather than a component because
+/// these are operations, a crossfade above all, rather than a state: write
+/// them with a `MessageWriter<SsTrackCommand>`. Several in one frame apply in
+/// the order they were written. Ones sent before the character's pack has
+/// loaded are kept and applied once its animation is set up.
+///
+/// **A new `animation` resets the stack** to track 0 alone, as
+/// [`ssplayer_wgpu::SSPlayer::set_animation`] does: send the overlays and the
+/// track settings again after changing it. What the stack holds comes back in
+/// [`SsTrackState`], a frame late.
+#[derive(Message, Clone, Debug)]
+pub struct SsTrackCommand {
+    pub entity: Entity,
+    pub command: TrackCommand,
+}
+
+/// What an [`SsTrackCommand`] does. Each variant is the
+/// [`ssplayer_wgpu::SSPlayer`] call of the same name.
+#[derive(Clone, Debug, PartialEq)]
+pub enum TrackCommand {
+    /// Lay `animation` on `track`, replacing what it played.
+    SetAnimation { track: u32, animation: String },
+    /// Fade `track` over to `animation` in `duration_ms`.
+    Crossfade { track: u32, animation: String, duration_ms: f32 },
+    /// Drive `track`'s alpha to `target` in `duration_ms`.
+    FadeTrack { track: u32, target: f32, duration_ms: f32 },
+    /// Stop the fade on `track` where it stands.
+    CancelFade { track: u32 },
+    /// Silence `track`. Track 0 is refused.
+    Clear { track: u32 },
+    /// `track`'s strength.
+    SetAlpha { track: u32, alpha: f32 },
+    /// How `track` layers onto what is below.
+    SetBlend { track: u32, blend: TrackBlend },
+    /// Where the animations laid on `track` from now on start. Send it before
+    /// the animation it is for.
+    SetSync { track: u32, sync: TrackSync },
+    /// Seek `track` — how a continuous-control axis is driven.
+    SetFrame { track: u32, frame: f32 },
+    /// `track`'s own speed; `0` parks it.
+    SetSpeed { track: u32, speed: f32 },
+    /// Lay `animation` on `track` beside what it carries, mixed by `weight`. Its
+    /// handle comes back in [`SsTrackState::sources`].
+    AddSource { track: u32, animation: String, weight: f32 },
+    /// A source's share within its track.
+    SetSourceWeight { source: u32, weight: f32 },
+    /// Seek one source.
+    SetSourceFrame { source: u32, frame: f32 },
+    /// The weight at or above which a source fires its events; only track 0's
+    /// main source fires by default.
+    SetSourceEventThreshold { source: u32, threshold: f32 },
+}
+
+/// A character's track stack as the render world last left it — the readable
+/// half of [`SsTrackCommand`]. **One frame behind**, like [`SsPlaybackState`].
+/// Required by [`SsPlayer`], so it is always present; empty until the
+/// character's animation is set up.
+#[derive(Component, Clone, Debug, Default)]
+pub struct SsTrackState {
+    /// One entry per track, track 0 first.
+    pub tracks: Vec<SsTrackInfo>,
+    /// The sources laid with [`TrackCommand::AddSource`] that are still
+    /// playing, with their handles. A source leaves the list when it is
+    /// released: a crossfade on its track completing, `Clear`, or a new
+    /// animation.
+    pub sources: Vec<SsSourceInfo>,
+}
+
+/// One track of [`SsTrackState`].
+#[derive(Clone, Debug, PartialEq)]
+pub struct SsTrackInfo {
+    /// The source carrying the track's animation; `None` on an empty track.
+    pub main_source: Option<u32>,
+    pub alpha: f32,
+    pub blend: TrackBlend,
+    pub sync: TrackSync,
+    /// The track's playhead; `None` on an empty track.
+    pub frame: Option<f32>,
+    /// How far a fade on the track has got, `0..=1`; `None` when not fading.
+    pub fade_progress: Option<f32>,
+}
+
+/// A source added with [`TrackCommand::AddSource`], as it stands.
+#[derive(Clone, Debug, PartialEq)]
+pub struct SsSourceInfo {
+    /// The handle the `Source*` commands take.
+    pub source: u32,
+    pub track: u32,
+    /// The animation it was laid with.
+    pub animation: String,
+    pub weight: f32,
+    pub frame: f32,
 }
 
 /// Runtime texture replacement: swap the texture a cellmap binds for a Bevy
