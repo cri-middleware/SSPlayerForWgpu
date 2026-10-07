@@ -157,10 +157,33 @@ null selects the main pack.
 The replacement should match the original atlas's size and cell layout, and reaches the GPU on the
 next scene update. See [Texture replacement](../guide/texture-replacement.md).
 
+## Motion blending
+
+The track stack: tracks fold onto the setup pose in ascending order, track 0 being what
+`ss_player_set_animation` establishes. See [Motion blending](../guide/motion-blending.md).
+
+| | |
+|---|---|
+| `ss_player_set_track_animation(player, track, name)` | Lay an animation on a track, replacing what it played |
+| `ss_player_crossfade(player, track, name, ms)` | Fade a track over to another animation |
+| `ss_player_fade_track(player, track, target, ms)` / `ss_player_cancel_track_fade(player, track)` | Drive a track's alpha somewhere / stop the fade where it stands |
+| `ss_player_track_fade_progress(player, track)` | 0 to 1; **-1** when the track is not fading |
+| `ss_player_set_track_alpha` / `ss_player_track_alpha` | A track's strength |
+| `ss_player_set_track_blend` / `ss_player_track_blend` | `SS_TRACK_BLEND_MIX` (0) or `SS_TRACK_BLEND_ADDITIVE` (1) |
+| `ss_player_set_track_sync` / `ss_player_track_sync` | `SS_TRACK_SYNC_FREE` (0) or `SS_TRACK_SYNC_START` (1) — set it before laying |
+| `ss_player_set_track_frame` / `ss_player_track_frame` / `ss_player_set_track_speed` | Scrub a track; speed 0 parks it |
+| `ss_player_track_count(player)` / `ss_player_clear_track(player, track)` | How many tracks; silence one (not track 0) |
+| `ss_player_track_main_source(player, track)` | The source carrying a track's animation; **`SS_INVALID_SOURCE`** when it has none |
+| `ss_player_add_track_source(player, track, name, weight, &source)` | Lay another animation beside it, mixed by weight |
+| `ss_player_set_source_weight` / `_frame` / `_event_threshold`, and the reads without `set_` | One source's weight, playhead and event threshold |
+
+Commands return a status. A read of a track or source that does not exist answers **0**, so check
+`ss_player_track_count` first; the two exceptions are marked above, where 0 is a real answer.
+`SsEventData.source` says which source fired an event.
+
 ## Not on this face
 
-**Motion blending** (the track stack) is Rust-only, and so is drawing into a render pass you own —
-this face builds and owns its device. See [Scopes and names](../guide/concepts.md#what-each-face-can-do)
+Drawing into a render pass you own is Rust-only — this face builds and owns its device. See [Scopes and names](../guide/concepts.md#what-each-face-can-do)
 for the full matrix, and
 [Limitations](../limitations.md#no-device-sharing-across-the-c-abi) for why device sharing is not
 offered here.

@@ -168,6 +168,31 @@
 #define SS_ALIGN_BOTTOM_RIGHT 8
 
 /*
+ `ss_player_set_track_blend`: lerp toward the track's pose.
+ */
+#define SS_TRACK_BLEND_MIX 0
+
+/*
+ `ss_player_set_track_blend`: add the track's offset from the setup pose.
+ */
+#define SS_TRACK_BLEND_ADDITIVE 1
+
+/*
+ `ss_player_set_track_sync`: an animation laid on the track starts from its head.
+ */
+#define SS_TRACK_SYNC_FREE 0
+
+/*
+ `ss_player_set_track_sync`: it starts at the phase track 0 stands at.
+ */
+#define SS_TRACK_SYNC_START 1
+
+/*
+ `ss_player_track_main_source` on a track with no animation.
+ */
+#define SS_INVALID_SOURCE UINT32_MAX
+
+/*
  Opaque player handle: which scene, and which player within it.
 
  Not a pointer into the scene's player list. That list moves as it grows, and
@@ -331,6 +356,13 @@ typedef struct {
      every key in between, so this is the only way to tell them apart.
      */
     uint32_t frame_no;
+    /*
+     The source on the track stack that fired it, as `ss_player_track_main_source`
+     and `ss_player_add_track_source` name it. By default only track 0's main
+     source fires; this tells events apart once another source has opted in
+     with `ss_player_set_source_event_threshold`.
+     */
+    uint32_t source;
     /*
      UserData: whether the animator filled each optional field in. Unset is
      not the same as zero, which is what these distinguish.
@@ -1348,6 +1380,219 @@ int32_t ss_player_is_part_hidden(ss_player_t *handle, const char *part);
  `handle` must be a live handle or null.
  */
 int32_t ss_player_is_part_hidden_by_index(ss_player_t *handle, uint32_t part);
+
+/*
+ Put `anim_name` on `track`, replacing what it was playing. Track 0 is better
+ set with `ss_player_set_animation`, which rebuilds the instance tree; this is
+ for the overlay tracks above it.
+
+ # Safety
+ `handle` must be a live handle or null; `anim_name` a NUL-terminated UTF-8 string.
+ */
+int32_t ss_player_set_track_animation(ss_player_t *handle, uint32_t track, const char *anim_name);
+
+/*
+ Number of tracks, empty ones included; 0 before an animation is set up.
+
+ # Safety
+ `handle` must be a live handle or null.
+ */
+uint32_t ss_player_track_count(ss_player_t *handle);
+
+/*
+ Silence a track. Track 0 is refused — fade it to alpha 0 instead.
+
+ # Safety
+ `handle` must be a live handle or null.
+ */
+int32_t ss_player_clear_track(ss_player_t *handle, uint32_t track);
+
+/*
+ How much of `track` survives onto the pose the tracks below produced. Not
+ clamped: above 1 extrapolates, 0 or below contributes nothing.
+
+ # Safety
+ `handle` must be a live handle or null.
+ */
+int32_t ss_player_set_track_alpha(ss_player_t *handle, uint32_t track, float alpha);
+
+/*
+ `track`'s alpha; 0 for a track that does not exist.
+
+ # Safety
+ `handle` must be a live handle or null.
+ */
+float ss_player_track_alpha(ss_player_t *handle, uint32_t track);
+
+/*
+ `blend` is one of `SS_TRACK_BLEND_*`.
+
+ # Safety
+ `handle` must be a live handle or null.
+ */
+int32_t ss_player_set_track_blend(ss_player_t *handle, uint32_t track, uint32_t blend);
+
+/*
+ One of `SS_TRACK_BLEND_*`; `SS_TRACK_BLEND_MIX` for a track that does not exist.
+
+ # Safety
+ `handle` must be a live handle or null.
+ */
+uint32_t ss_player_track_blend(ss_player_t *handle, uint32_t track);
+
+/*
+ `sync` is one of `SS_TRACK_SYNC_*`: where the animations laid on `track` from
+ now on start. Set it before laying; a track with nothing on it yet is created
+ for it, and `ss_player_set_animation` resets every track to `FREE`.
+
+ # Safety
+ `handle` must be a live handle or null.
+ */
+int32_t ss_player_set_track_sync(ss_player_t *handle, uint32_t track, uint32_t sync);
+
+/*
+ One of `SS_TRACK_SYNC_*`; `SS_TRACK_SYNC_FREE` for a track that does not exist.
+
+ # Safety
+ `handle` must be a live handle or null.
+ */
+uint32_t ss_player_track_sync(ss_player_t *handle, uint32_t track);
+
+/*
+ Fade `track` to `anim_name` over `duration_ms`, starting from whatever it is
+ playing. Advanced by `ss_scene_update`. On track 0 it does not rebuild the
+ instance tree, so animations whose instance parts differ are out of scope.
+
+ # Safety
+ `handle` must be a live handle or null; `anim_name` a NUL-terminated UTF-8 string.
+ */
+int32_t ss_player_crossfade(ss_player_t *handle, uint32_t track, const char *anim_name, float duration_ms);
+
+/*
+ Drive `track`'s alpha to `target` over `duration_ms`. Fading track 0 to 0
+ settles the character onto the setup pose.
+
+ # Safety
+ `handle` must be a live handle or null.
+ */
+int32_t ss_player_fade_track(ss_player_t *handle, uint32_t track, float target, float duration_ms);
+
+/*
+ How far the fade on `track` has got, 0 to 1; **-1** when it is not fading,
+ since 0 is a fade that has just started.
+
+ # Safety
+ `handle` must be a live handle or null.
+ */
+float ss_player_track_fade_progress(ss_player_t *handle, uint32_t track);
+
+/*
+ Stop the fade on `track`, leaving alpha and weights where they stand.
+
+ # Safety
+ `handle` must be a live handle or null.
+ */
+int32_t ss_player_cancel_track_fade(ss_player_t *handle, uint32_t track);
+
+/*
+ Seek `track`'s animation — how a continuous-control axis is driven.
+
+ # Safety
+ `handle` must be a live handle or null.
+ */
+int32_t ss_player_set_track_frame(ss_player_t *handle, uint32_t track, float frame);
+
+/*
+ `track`'s playhead; 0 for a track with no animation.
+
+ # Safety
+ `handle` must be a live handle or null.
+ */
+float ss_player_track_frame(ss_player_t *handle, uint32_t track);
+
+/*
+ `track`'s own playback speed; 0 parks it, which is how a scrubbed axis stays
+ where `ss_player_set_track_frame` puts it.
+
+ # Safety
+ `handle` must be a live handle or null.
+ */
+int32_t ss_player_set_track_speed(ss_player_t *handle, uint32_t track, float speed);
+
+/*
+ The source carrying `track`'s animation; `SS_INVALID_SOURCE` when the track
+ has none, since 0 is a handle.
+
+ # Safety
+ `handle` must be a live handle or null.
+ */
+uint32_t ss_player_track_main_source(ss_player_t *handle, uint32_t track);
+
+/*
+ Lay `anim_name` on `track` beside what it already carries, at `weight`, and
+ write its handle to `out_source`. On an empty track it becomes the main
+ source. `out_source` is untouched on failure.
+
+ # Safety
+ `handle` must be a live handle or null; `anim_name` a NUL-terminated UTF-8
+ string; `out_source` a writable `uint32_t`.
+ */
+int32_t ss_player_add_track_source(ss_player_t *handle,
+                                   uint32_t track,
+                                   const char *anim_name,
+                                   float weight,
+                                   uint32_t *out_source);
+
+/*
+ A source's share **within its track**; weights are ratios.
+
+ # Safety
+ `handle` must be a live handle or null.
+ */
+int32_t ss_player_set_source_weight(ss_player_t *handle, uint32_t source, float weight);
+
+/*
+ A source's weight; 0 for a handle that names nothing.
+
+ # Safety
+ `handle` must be a live handle or null.
+ */
+float ss_player_source_weight(ss_player_t *handle, uint32_t source);
+
+/*
+ Seek one source — how a host keeps sources of different lengths in step.
+
+ # Safety
+ `handle` must be a live handle or null.
+ */
+int32_t ss_player_set_source_frame(ss_player_t *handle, uint32_t source, float frame);
+
+/*
+ A source's playhead; 0 for a handle that names nothing.
+
+ # Safety
+ `handle` must be a live handle or null.
+ */
+float ss_player_source_frame(ss_player_t *handle, uint32_t source);
+
+/*
+ The weight at or above which `source` fires its events. Only track 0's main
+ source fires by default (the default threshold is infinity); lower this to
+ the source's weight or below to have it fire too.
+
+ # Safety
+ `handle` must be a live handle or null.
+ */
+int32_t ss_player_set_source_event_threshold(ss_player_t *handle, uint32_t source, float threshold);
+
+/*
+ A source's event threshold (infinity by default); 0 for a handle that names
+ nothing.
+
+ # Safety
+ `handle` must be a live handle or null.
+ */
+float ss_player_source_event_threshold(ss_player_t *handle, uint32_t source);
 
 /*
  Whether the last `ss_scene_update` was the first to run after an

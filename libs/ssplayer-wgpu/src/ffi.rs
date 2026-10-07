@@ -209,6 +209,11 @@ pub struct SsEventData {
     /// the tick landed on: one update can step across several frames and reports
     /// every key in between, so this is the only way to tell them apart.
     pub frame_no: u32,
+    /// The source on the track stack that fired it, as `ss_player_track_main_source`
+    /// and `ss_player_add_track_source` name it. By default only track 0's main
+    /// source fires; this tells events apart once another source has opted in
+    /// with `ss_player_set_source_event_threshold`.
+    pub source: u32,
 
     /// UserData: whether the animator filled each optional field in. Unset is
     /// not the same as zero, which is what these distinguish.
@@ -1821,6 +1826,314 @@ pub unsafe extern "C" fn ss_player_is_part_hidden_by_index(handle: *mut SsPlayer
     }
 }
 
+// --- Motion blending: tracks and sources ---
+//
+// The track stack over `SSPlayer`'s track API: tracks fold onto the setup pose
+// in ascending order, track 0 being what `ss_player_set_animation` establishes.
+// A track's alpha is its strength; a source's weight only sets proportions
+// among the animations sharing one track.
+//
+// Reads follow this face's convention rather than the SDK C-API's NaN: a read
+// of a track or source that does not exist answers 0, so check
+// `ss_player_track_count` first. Two reads cannot use 0 and say so:
+// `ss_player_track_fade_progress` (-1 when not fading, since 0 is a fade just
+// started) and `ss_player_track_main_source` (`SS_INVALID_SOURCE`, since 0 is a
+// handle).
+
+/// `ss_player_set_track_blend`: lerp toward the track's pose.
+pub const SS_TRACK_BLEND_MIX: u32 = 0;
+/// `ss_player_set_track_blend`: add the track's offset from the setup pose.
+pub const SS_TRACK_BLEND_ADDITIVE: u32 = 1;
+/// `ss_player_set_track_sync`: an animation laid on the track starts from its head.
+pub const SS_TRACK_SYNC_FREE: u32 = 0;
+/// `ss_player_set_track_sync`: it starts at the phase track 0 stands at.
+pub const SS_TRACK_SYNC_START: u32 = 1;
+/// `ss_player_track_main_source` on a track with no animation.
+pub const SS_INVALID_SOURCE: u32 = u32::MAX;
+
+/// Map a track or source call onto the status convention.
+fn track_status(result: Result<(), crate::SSRuntimeError>, what: std::fmt::Arguments<'_>) -> i32 {
+    match result {
+        Ok(()) => SS_OK,
+        Err(e) => fail(e.as_code(), format!("{what}: {e}")),
+    }
+}
+
+/// Put `anim_name` on `track`, replacing what it was playing. Track 0 is better
+/// set with `ss_player_set_animation`, which rebuilds the instance tree; this is
+/// for the overlay tracks above it.
+///
+/// # Safety
+/// `handle` must be a live handle or null; `anim_name` a NUL-terminated UTF-8 string.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn ss_player_set_track_animation(handle: *mut SsPlayer, track: u32, anim_name: *const c_char) -> i32 {
+    let Some(player) = (unsafe { player(handle) }) else { return fail(SS_ERROR_INVALID_ARGUMENT, "player handle is null or destroyed") };
+    let Some(name) = (unsafe { c_str(anim_name) }) else { return fail(SS_ERROR_INVALID_ARGUMENT, "anim_name is null or not UTF-8") };
+    track_status(player.set_track_animation(track, name), format_args!("track {track}, {name}"))
+}
+
+/// Number of tracks, empty ones included; 0 before an animation is set up.
+///
+/// # Safety
+/// `handle` must be a live handle or null.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn ss_player_track_count(handle: *mut SsPlayer) -> u32 {
+    unsafe { player(handle) }.map(|p| p.track_count()).unwrap_or(0)
+}
+
+/// Silence a track. Track 0 is refused — fade it to alpha 0 instead.
+///
+/// # Safety
+/// `handle` must be a live handle or null.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn ss_player_clear_track(handle: *mut SsPlayer, track: u32) -> i32 {
+    let Some(player) = (unsafe { player(handle) }) else { return fail(SS_ERROR_INVALID_ARGUMENT, "player handle is null or destroyed") };
+    track_status(player.clear_track(track), format_args!("track {track}"))
+}
+
+/// How much of `track` survives onto the pose the tracks below produced. Not
+/// clamped: above 1 extrapolates, 0 or below contributes nothing.
+///
+/// # Safety
+/// `handle` must be a live handle or null.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn ss_player_set_track_alpha(handle: *mut SsPlayer, track: u32, alpha: f32) -> i32 {
+    let Some(player) = (unsafe { player(handle) }) else { return fail(SS_ERROR_INVALID_ARGUMENT, "player handle is null or destroyed") };
+    track_status(player.set_track_alpha(track, alpha), format_args!("track {track}"))
+}
+
+/// `track`'s alpha; 0 for a track that does not exist.
+///
+/// # Safety
+/// `handle` must be a live handle or null.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn ss_player_track_alpha(handle: *mut SsPlayer, track: u32) -> f32 {
+    unsafe { player(handle) }.and_then(|p| p.track_alpha(track)).unwrap_or(0.0)
+}
+
+/// `blend` is one of `SS_TRACK_BLEND_*`.
+///
+/// # Safety
+/// `handle` must be a live handle or null.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn ss_player_set_track_blend(handle: *mut SsPlayer, track: u32, blend: u32) -> i32 {
+    let Some(player) = (unsafe { player(handle) }) else { return fail(SS_ERROR_INVALID_ARGUMENT, "player handle is null or destroyed") };
+    let blend = match blend {
+        SS_TRACK_BLEND_MIX => crate::TrackBlend::Mix,
+        SS_TRACK_BLEND_ADDITIVE => crate::TrackBlend::Additive,
+        _ => return fail(SS_ERROR_INVALID_ARGUMENT, format!("blend {blend} is not one of SS_TRACK_BLEND_*")),
+    };
+    track_status(player.set_track_blend(track, blend), format_args!("track {track}"))
+}
+
+/// One of `SS_TRACK_BLEND_*`; `SS_TRACK_BLEND_MIX` for a track that does not exist.
+///
+/// # Safety
+/// `handle` must be a live handle or null.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn ss_player_track_blend(handle: *mut SsPlayer, track: u32) -> u32 {
+    match unsafe { player(handle) }.and_then(|p| p.track_blend(track)) {
+        Some(crate::TrackBlend::Additive) => SS_TRACK_BLEND_ADDITIVE,
+        _ => SS_TRACK_BLEND_MIX,
+    }
+}
+
+/// `sync` is one of `SS_TRACK_SYNC_*`: where the animations laid on `track` from
+/// now on start. Set it before laying; a track with nothing on it yet is created
+/// for it, and `ss_player_set_animation` resets every track to `FREE`.
+///
+/// # Safety
+/// `handle` must be a live handle or null.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn ss_player_set_track_sync(handle: *mut SsPlayer, track: u32, sync: u32) -> i32 {
+    let Some(player) = (unsafe { player(handle) }) else { return fail(SS_ERROR_INVALID_ARGUMENT, "player handle is null or destroyed") };
+    let sync = match sync {
+        SS_TRACK_SYNC_FREE => crate::TrackSync::Free,
+        SS_TRACK_SYNC_START => crate::TrackSync::Start,
+        _ => return fail(SS_ERROR_INVALID_ARGUMENT, format!("sync {sync} is not one of SS_TRACK_SYNC_*")),
+    };
+    track_status(player.set_track_sync(track, sync), format_args!("track {track}"))
+}
+
+/// One of `SS_TRACK_SYNC_*`; `SS_TRACK_SYNC_FREE` for a track that does not exist.
+///
+/// # Safety
+/// `handle` must be a live handle or null.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn ss_player_track_sync(handle: *mut SsPlayer, track: u32) -> u32 {
+    match unsafe { player(handle) }.and_then(|p| p.track_sync(track)) {
+        Some(crate::TrackSync::Start) => SS_TRACK_SYNC_START,
+        _ => SS_TRACK_SYNC_FREE,
+    }
+}
+
+/// Fade `track` to `anim_name` over `duration_ms`, starting from whatever it is
+/// playing. Advanced by `ss_scene_update`. On track 0 it does not rebuild the
+/// instance tree, so animations whose instance parts differ are out of scope.
+///
+/// # Safety
+/// `handle` must be a live handle or null; `anim_name` a NUL-terminated UTF-8 string.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn ss_player_crossfade(handle: *mut SsPlayer, track: u32, anim_name: *const c_char, duration_ms: f32) -> i32 {
+    let Some(player) = (unsafe { player(handle) }) else { return fail(SS_ERROR_INVALID_ARGUMENT, "player handle is null or destroyed") };
+    let Some(name) = (unsafe { c_str(anim_name) }) else { return fail(SS_ERROR_INVALID_ARGUMENT, "anim_name is null or not UTF-8") };
+    track_status(player.crossfade(track, name, duration_ms), format_args!("track {track}, {name}"))
+}
+
+/// Drive `track`'s alpha to `target` over `duration_ms`. Fading track 0 to 0
+/// settles the character onto the setup pose.
+///
+/// # Safety
+/// `handle` must be a live handle or null.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn ss_player_fade_track(handle: *mut SsPlayer, track: u32, target: f32, duration_ms: f32) -> i32 {
+    let Some(player) = (unsafe { player(handle) }) else { return fail(SS_ERROR_INVALID_ARGUMENT, "player handle is null or destroyed") };
+    track_status(player.fade_track(track, target, duration_ms), format_args!("track {track}"))
+}
+
+/// How far the fade on `track` has got, 0 to 1; **-1** when it is not fading,
+/// since 0 is a fade that has just started.
+///
+/// # Safety
+/// `handle` must be a live handle or null.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn ss_player_track_fade_progress(handle: *mut SsPlayer, track: u32) -> f32 {
+    unsafe { player(handle) }.and_then(|p| p.track_fade_progress(track)).unwrap_or(-1.0)
+}
+
+/// Stop the fade on `track`, leaving alpha and weights where they stand.
+///
+/// # Safety
+/// `handle` must be a live handle or null.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn ss_player_cancel_track_fade(handle: *mut SsPlayer, track: u32) -> i32 {
+    let Some(player) = (unsafe { player(handle) }) else { return fail(SS_ERROR_INVALID_ARGUMENT, "player handle is null or destroyed") };
+    track_status(player.cancel_track_fade(track), format_args!("track {track}"))
+}
+
+/// Seek `track`'s animation — how a continuous-control axis is driven.
+///
+/// # Safety
+/// `handle` must be a live handle or null.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn ss_player_set_track_frame(handle: *mut SsPlayer, track: u32, frame: f32) -> i32 {
+    let Some(player) = (unsafe { player(handle) }) else { return fail(SS_ERROR_INVALID_ARGUMENT, "player handle is null or destroyed") };
+    track_status(player.set_track_frame(track, frame), format_args!("track {track}"))
+}
+
+/// `track`'s playhead; 0 for a track with no animation.
+///
+/// # Safety
+/// `handle` must be a live handle or null.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn ss_player_track_frame(handle: *mut SsPlayer, track: u32) -> f32 {
+    unsafe { player(handle) }.and_then(|p| p.track_frame(track)).unwrap_or(0.0)
+}
+
+/// `track`'s own playback speed; 0 parks it, which is how a scrubbed axis stays
+/// where `ss_player_set_track_frame` puts it.
+///
+/// # Safety
+/// `handle` must be a live handle or null.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn ss_player_set_track_speed(handle: *mut SsPlayer, track: u32, speed: f32) -> i32 {
+    let Some(player) = (unsafe { player(handle) }) else { return fail(SS_ERROR_INVALID_ARGUMENT, "player handle is null or destroyed") };
+    track_status(player.set_track_speed(track, speed), format_args!("track {track}"))
+}
+
+/// The source carrying `track`'s animation; `SS_INVALID_SOURCE` when the track
+/// has none, since 0 is a handle.
+///
+/// # Safety
+/// `handle` must be a live handle or null.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn ss_player_track_main_source(handle: *mut SsPlayer, track: u32) -> u32 {
+    unsafe { player(handle) }.and_then(|p| p.track_main_source(track)).unwrap_or(SS_INVALID_SOURCE)
+}
+
+/// Lay `anim_name` on `track` beside what it already carries, at `weight`, and
+/// write its handle to `out_source`. On an empty track it becomes the main
+/// source. `out_source` is untouched on failure.
+///
+/// # Safety
+/// `handle` must be a live handle or null; `anim_name` a NUL-terminated UTF-8
+/// string; `out_source` a writable `uint32_t`.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn ss_player_add_track_source(handle: *mut SsPlayer, track: u32, anim_name: *const c_char, weight: f32, out_source: *mut u32) -> i32 {
+    if out_source.is_null() {
+        return fail(SS_ERROR_INVALID_ARGUMENT, "out_source is null");
+    }
+    let Some(player) = (unsafe { player(handle) }) else { return fail(SS_ERROR_INVALID_ARGUMENT, "player handle is null or destroyed") };
+    let Some(name) = (unsafe { c_str(anim_name) }) else { return fail(SS_ERROR_INVALID_ARGUMENT, "anim_name is null or not UTF-8") };
+    match player.add_track_source(track, name, weight) {
+        Ok(source) => {
+            unsafe { *out_source = source };
+            SS_OK
+        }
+        Err(e) => fail(e.as_code(), format!("track {track}, {name}: {e}")),
+    }
+}
+
+/// A source's share **within its track**; weights are ratios.
+///
+/// # Safety
+/// `handle` must be a live handle or null.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn ss_player_set_source_weight(handle: *mut SsPlayer, source: u32, weight: f32) -> i32 {
+    let Some(player) = (unsafe { player(handle) }) else { return fail(SS_ERROR_INVALID_ARGUMENT, "player handle is null or destroyed") };
+    track_status(player.set_source_weight(source, weight), format_args!("source {source}"))
+}
+
+/// A source's weight; 0 for a handle that names nothing.
+///
+/// # Safety
+/// `handle` must be a live handle or null.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn ss_player_source_weight(handle: *mut SsPlayer, source: u32) -> f32 {
+    unsafe { player(handle) }.and_then(|p| p.source_weight(source)).unwrap_or(0.0)
+}
+
+/// Seek one source — how a host keeps sources of different lengths in step.
+///
+/// # Safety
+/// `handle` must be a live handle or null.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn ss_player_set_source_frame(handle: *mut SsPlayer, source: u32, frame: f32) -> i32 {
+    let Some(player) = (unsafe { player(handle) }) else { return fail(SS_ERROR_INVALID_ARGUMENT, "player handle is null or destroyed") };
+    track_status(player.set_source_frame(source, frame), format_args!("source {source}"))
+}
+
+/// A source's playhead; 0 for a handle that names nothing.
+///
+/// # Safety
+/// `handle` must be a live handle or null.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn ss_player_source_frame(handle: *mut SsPlayer, source: u32) -> f32 {
+    unsafe { player(handle) }.and_then(|p| p.source_frame(source)).unwrap_or(0.0)
+}
+
+/// The weight at or above which `source` fires its events. Only track 0's main
+/// source fires by default (the default threshold is infinity); lower this to
+/// the source's weight or below to have it fire too.
+///
+/// # Safety
+/// `handle` must be a live handle or null.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn ss_player_set_source_event_threshold(handle: *mut SsPlayer, source: u32, threshold: f32) -> i32 {
+    let Some(player) = (unsafe { player(handle) }) else { return fail(SS_ERROR_INVALID_ARGUMENT, "player handle is null or destroyed") };
+    track_status(player.set_source_event_threshold(source, threshold), format_args!("source {source}"))
+}
+
+/// A source's event threshold (infinity by default); 0 for a handle that names
+/// nothing.
+///
+/// # Safety
+/// `handle` must be a live handle or null.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn ss_player_source_event_threshold(handle: *mut SsPlayer, source: u32) -> f32 {
+    unsafe { player(handle) }.and_then(|p| p.source_event_threshold(source)).unwrap_or(0.0)
+}
+
 // --- Events ---
 //
 // Polled after `ss_scene_update`, which is what advanced the clock. Everything
@@ -1894,6 +2207,7 @@ pub unsafe extern "C" fn ss_player_event_at(handle: *mut SsPlayer, index: u32, o
         kind: 0,
         part_index: event.part_index(),
         frame_no: event.frame_no(),
+        source: event.source(),
         has_integer: false,
         has_rect: false,
         has_point: false,
@@ -2619,6 +2933,35 @@ mod tests {
             assert_eq!(ss_player_alpha(null), fresh.alpha());
             assert_eq!(ss_player_order(null), fresh.order());
             assert_eq!(ss_player_tint(null), fresh.tint());
+        }
+    }
+
+    /// A track or source read that has nothing to read answers what the section
+    /// comment promises: 0, except the two reads where 0 is a real answer. A
+    /// command fails rather than doing nothing.
+    #[test]
+    fn track_reads_with_nothing_to_read_answer_the_documented_values() {
+        let null = std::ptr::null_mut();
+        let name = c"walk";
+        unsafe {
+            assert_eq!(ss_player_track_count(null), 0);
+            assert_eq!(ss_player_track_alpha(null, 0), 0.0);
+            assert_eq!(ss_player_track_frame(null, 0), 0.0);
+            assert_eq!(ss_player_track_blend(null, 0), SS_TRACK_BLEND_MIX);
+            assert_eq!(ss_player_track_sync(null, 0), SS_TRACK_SYNC_FREE);
+            assert_eq!(ss_player_track_fade_progress(null, 0), -1.0, "0 would read as a fade just started");
+            assert_eq!(ss_player_track_main_source(null, 0), SS_INVALID_SOURCE, "0 would read as a handle");
+            assert_eq!(ss_player_source_weight(null, 0), 0.0);
+            assert_eq!(ss_player_source_frame(null, 0), 0.0);
+            assert_eq!(ss_player_source_event_threshold(null, 0), 0.0);
+
+            assert_eq!(ss_player_set_track_animation(null, 1, name.as_ptr()), SS_ERROR_INVALID_ARGUMENT);
+            assert_eq!(ss_player_crossfade(null, 0, name.as_ptr(), 100.0), SS_ERROR_INVALID_ARGUMENT);
+            assert_eq!(ss_player_set_track_sync(null, 0, SS_TRACK_SYNC_START), SS_ERROR_INVALID_ARGUMENT);
+            let mut source = 7;
+            assert_eq!(ss_player_add_track_source(null, 0, name.as_ptr(), 1.0, &mut source), SS_ERROR_INVALID_ARGUMENT);
+            assert_eq!(source, 7, "out_source is untouched on failure");
+            assert_eq!(ss_player_add_track_source(null, 0, name.as_ptr(), 1.0, std::ptr::null_mut()), SS_ERROR_INVALID_ARGUMENT);
         }
     }
 }
