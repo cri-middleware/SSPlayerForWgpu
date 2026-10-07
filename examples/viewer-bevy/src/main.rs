@@ -23,17 +23,22 @@
 //! F       flip Y (vertical mirror) Esc     quit
 //! drop    play a dropped .ssab, or every .ssab in a dropped folder
 //!
-//! The pack / animation / V / `[` `]` keys act on the **focused** member; focus
-//! starts at "all", so they drive the whole cast until you press Tab.
+//! Tracks — the same keys as the native viewer, sent as `SsTrackCommand` and read
+//! back from `SsTrackState`, so what the HUD shows is a frame behind:
 //!
-//! Two native-viewer keys are deliberately absent, because the Bevy adapter's
-//! surface does not reach what they drive:
-//! - **K (mask backend)** — Bevy's 2d depth is `Depth32Float`, which carries no
-//!   stencil, so the adapter always uses the coverage backend; there is nothing to
-//!   toggle to.
-//! - **the track keys (C / S / A / 1 / 2 / 0 / , / .)** — track mixing is a method
-//!   on the render-world player, and the adapter exposes only `SsPlayer` /
-//!   `SsTransform` / `SsPlayback`, none of which carries a track stack yet.
+//! C       crossfade track 0 to the next animation (400ms)
+//! S       cycle which animation sits on track 1, or take it off
+//! 1 / 2   track 1 alpha down / up      A   track 1 mix / additive
+//! 0       fade track 0 to the rest pose and back
+//! , / .   scrub track 1's frame
+//! Y       track sync free / start, for the whole cast
+//!
+//! The pack / animation / V / `[` `]` and track keys act on the **focused** member;
+//! focus starts at "all", so they drive the whole cast until you press Tab.
+//!
+//! One native-viewer key is deliberately absent: **K (mask backend)**. Bevy's 2d
+//! depth is `Depth32Float`, which carries no stencil, so the adapter always uses
+//! the coverage backend; there is nothing to toggle to.
 
 use bevy::asset::{AssetPlugin, UnapprovedPathMode};
 use bevy::audio::{AudioPlayer, PlaybackSettings};
@@ -42,7 +47,7 @@ use bevy::input::ButtonInput;
 use bevy::prelude::*;
 use bevy::render::view::Msaa;
 use bevy::window::FileDragAndDrop;
-use ssplayer_bevy::{SsEvent, SsEventMessage, SsFinished, SsLooped, SsPlayback, SsPlaybackState, SsPlayer, SsPlayerPlugin, SsStarted, SsTransform};
+use ssplayer_bevy::{SsEvent, SsEventMessage, SsFinished, SsLooped, SsPlayback, SsPlaybackState, SsPlayer, SsPlayerPlugin, SsStarted, SsTrackCommand, SsTrackState, SsTransform, TrackBlend, TrackCommand, TrackSync};
 use ssplayer_wgpu::SSPack;
 use std::path::{Path, PathBuf};
 
@@ -111,6 +116,29 @@ struct Catalogue {
 struct Slot {
     pack_idx: usize,
     anim_idx: usize,
+    /// What the track keys last laid on track 1, as an index into the pack's
+    /// animations; `None` with nothing there. Kept here because the stack read
+    /// back from the render world is a frame late, and a key pressed twice in a
+    /// row must not act on the state from before the first press.
+    overlay_idx: Option<usize>,
+    /// Track 1's frame while it is being scrubbed; `None` while it plays.
+    overlay_frame: Option<f32>,
+    /// Track 1's alpha and blend as the keys last set them.
+    overlay_alpha: f32,
+    overlay_additive: bool,
+    /// Whether `0` has faded track 0 out to the rest pose.
+    at_rest: bool,
+}
+
+impl Slot {
+    fn new(pack_idx: usize, anim_idx: usize) -> Self {
+        Self { pack_idx, anim_idx, overlay_idx: None, overlay_frame: None, overlay_alpha: 0.5, overlay_additive: false, at_rest: false }
+    }
+
+    /// A new animation or pack collapses the stack to track 0 alone.
+    fn clear_tracks(&mut self) {
+        *self = Self::new(self.pack_idx, self.anim_idx);
+    }
 }
 
 /// Viewer-wide state the render output does not carry: who is focused, how the
@@ -127,6 +155,9 @@ struct ViewerState {
     cast: Vec<Entity>,
     /// The last timeline event, for the HUD.
     last_event: String,
+    /// What `Y` set for tracks 0 and 1 of the whole cast. Sent again whenever a
+    /// member's stack reads back otherwise — a new animation or pack resets it.
+    track_sync: TrackSync,
 }
 
 /// Marks the HUD text so a system can find it.
@@ -142,7 +173,7 @@ fn main() {
         .add_systems(Startup, setup)
         // Chained: input mutates the cast, drop grows the catalogue, layout reads
         // both and places every member, then the HUD reads the settled state.
-        .add_systems(Update, (handle_input, handle_drop, playback_events, apply_layout, refresh_hud).chain())
+        .add_systems(Update, (handle_input, handle_track_input, keep_track_sync, handle_drop, playback_events, apply_layout, refresh_hud).chain())
         .run();
 }
 
@@ -170,13 +201,13 @@ fn setup(mut commands: Commands, asset_server: Res<AssetServer>) {
     let start = catalogue.initial;
     if let Some(info) = catalogue.packs.get(start) {
         for i in 0..INITIAL_CAST {
-            let entity = commands.spawn((SsPlayer { pack: asset_server.load(&info.path), animation: info.anims.first().cloned().unwrap_or_default() }, Slot { pack_idx: start, anim_idx: 0 }, SsPlayback { order: i as i32, ..default() })).id();
+            let entity = commands.spawn((SsPlayer { pack: asset_server.load(&info.path), animation: info.anims.first().cloned().unwrap_or_default() }, Slot::new(start, 0), SsPlayback { order: i as i32, ..default() })).id();
             cast.push(entity);
         }
     }
 
     commands.insert_resource(catalogue);
-    commands.insert_resource(ViewerState { focus: None, layout: Layout::Row, reverse_order: false, y_flip: false, cast, last_event: "-".into() });
+    commands.insert_resource(ViewerState { focus: None, layout: Layout::Row, reverse_order: false, y_flip: false, cast, last_event: "-".into(), track_sync: TrackSync::Free });
 }
 
 /// The members the pack / animation / appearance keys act on: the focused one, or
@@ -246,6 +277,7 @@ fn handle_input(
                 slot.anim_idx = slot.anim_idx.min(info.anims.len().saturating_sub(1));
                 player.pack = asset_server.load(&info.path);
                 player.animation = info.anims.get(slot.anim_idx).cloned().unwrap_or_default();
+                slot.clear_tracks();
             }
         }
     }
@@ -260,6 +292,7 @@ fn handle_input(
                     let m = info.anims.len() as i32;
                     slot.anim_idx = ((slot.anim_idx as i32 + anim_step) % m + m) as usize % info.anims.len();
                     player.animation = info.anims[slot.anim_idx].clone();
+                    slot.clear_tracks();
                 }
             }
         }
@@ -280,7 +313,7 @@ fn handle_input(
         // Start the newcomer on whatever the last one plays.
         let (pack_idx, anim_idx) = state.cast.last().and_then(|&e| players.get(e).ok().map(|(_, _, slot)| (slot.pack_idx, slot.anim_idx))).unwrap_or((catalogue.initial, 0));
         if let Some(info) = catalogue.packs.get(pack_idx) {
-            let entity = commands.spawn((SsPlayer { pack: asset_server.load(&info.path), animation: info.anims.get(anim_idx).cloned().unwrap_or_default() }, Slot { pack_idx, anim_idx }, SsPlayback { order: state.cast.len() as i32, ..default() })).id();
+            let entity = commands.spawn((SsPlayer { pack: asset_server.load(&info.path), animation: info.anims.get(anim_idx).cloned().unwrap_or_default() }, Slot::new(pack_idx, anim_idx), SsPlayback { order: state.cast.len() as i32, ..default() })).id();
             state.cast.push(entity);
         }
     }
@@ -317,6 +350,111 @@ fn handle_input(
         // vertically via a negative scale instead. Enough to sanity-check that
         // negative scale draws.
         state.y_flip = !state.y_flip;
+    }
+}
+
+/// The track keys, the native viewer's. Each sends an `SsTrackCommand`; what the
+/// stack then holds comes back in `SsTrackState` a frame later, so the keys act on
+/// what `Slot` remembers they last did rather than on that.
+fn handle_track_input(keys: Res<ButtonInput<KeyCode>>, mut state: ResMut<ViewerState>, catalogue: Res<Catalogue>, mut slots: Query<&mut Slot>, mut tracks: MessageWriter<SsTrackCommand>) {
+    if catalogue.packs.is_empty() {
+        return;
+    }
+    if keys.just_pressed(KeyCode::KeyY) {
+        // `keep_track_sync` sends it, to the whole cast and again after a reset.
+        state.track_sync = match state.track_sync {
+            TrackSync::Free => TrackSync::Start,
+            _ => TrackSync::Free,
+        };
+    }
+
+    for entity in targets(&state) {
+        let Ok(mut slot) = slots.get_mut(entity) else { continue };
+        let anims = &catalogue.packs[slot.pack_idx].anims;
+        if anims.is_empty() {
+            continue;
+        }
+        let mut send = |command| {
+            tracks.write(SsTrackCommand { entity, command });
+        };
+
+        // C: crossfade track 0 to the next animation, without rebuilding the
+        // tree. `Slot` follows so the HUD names it and Up/Down carry on from it.
+        if keys.just_pressed(KeyCode::KeyC) {
+            slot.anim_idx = (slot.anim_idx + 1) % anims.len();
+            send(TrackCommand::Crossfade { track: 0, animation: anims[slot.anim_idx].clone(), duration_ms: 400.0 });
+        }
+        // S: walk track 1 through the pack's animations, then back to empty.
+        if keys.just_pressed(KeyCode::KeyS) {
+            let next = match slot.overlay_idx {
+                Some(i) if (i + 1) % anims.len() == slot.anim_idx => None,
+                Some(i) => Some((i + 1) % anims.len()),
+                None => Some((slot.anim_idx + 1) % anims.len()),
+            };
+            match next {
+                Some(i) => {
+                    send(TrackCommand::SetAnimation { track: 1, animation: anims[i].clone() });
+                    // Half strength: the point is to see partial blending.
+                    send(TrackCommand::SetAlpha { track: 1, alpha: slot.overlay_alpha });
+                    let blend = if slot.overlay_additive { TrackBlend::Additive } else { TrackBlend::Mix };
+                    send(TrackCommand::SetBlend { track: 1, blend });
+                    slot.overlay_frame = None;
+                }
+                None => send(TrackCommand::Clear { track: 1 }),
+            }
+            slot.overlay_idx = next;
+        }
+        if slot.overlay_idx.is_none() {
+            continue;
+        }
+        // 1 / 2: track 1's alpha. Not clamped at the top: above 1 extrapolates.
+        let alpha_step = keys.just_pressed(KeyCode::Digit2) as i32 - keys.just_pressed(KeyCode::Digit1) as i32;
+        if alpha_step != 0 {
+            slot.overlay_alpha = (slot.overlay_alpha + alpha_step as f32 * 0.1).max(0.0);
+            send(TrackCommand::SetAlpha { track: 1, alpha: slot.overlay_alpha });
+        }
+        // A: track 1 mix / additive.
+        if keys.just_pressed(KeyCode::KeyA) {
+            slot.overlay_additive = !slot.overlay_additive;
+            let blend = if slot.overlay_additive { TrackBlend::Additive } else { TrackBlend::Mix };
+            send(TrackCommand::SetBlend { track: 1, blend });
+        }
+        // , / .: scrub track 1 instead of playing it — how a continuous axis is driven.
+        let scrub = keys.just_pressed(KeyCode::Period) as i32 - keys.just_pressed(KeyCode::Comma) as i32;
+        if scrub != 0 {
+            let frame = (slot.overlay_frame.unwrap_or(0.0) + scrub as f32).max(0.0);
+            slot.overlay_frame = Some(frame);
+            send(TrackCommand::SetSpeed { track: 1, speed: 0.0 });
+            send(TrackCommand::SetFrame { track: 1, frame });
+        }
+    }
+
+    // 0: fade track 0 to the rest pose, and back. Outside the overlay guard: it
+    // needs no overlay.
+    if keys.just_pressed(KeyCode::Digit0) {
+        for entity in targets(&state) {
+            let Ok(mut slot) = slots.get_mut(entity) else { continue };
+            slot.at_rest = !slot.at_rest;
+            let target = if slot.at_rest { 0.0 } else { 1.0 };
+            tracks.write(SsTrackCommand { entity, command: TrackCommand::FadeTrack { track: 0, target, duration_ms: 500.0 } });
+        }
+    }
+}
+
+/// Keep tracks 0 and 1 of every member on the sync `Y` chose. Compared against
+/// what the stack reads back rather than sent once, because a new animation or
+/// pack resets the stack — and a pack switch does so only once the new pack has
+/// loaded, frames after the key that asked for it.
+fn keep_track_sync(state: Res<ViewerState>, stacks: Query<&SsTrackState>, mut tracks: MessageWriter<SsTrackCommand>) {
+    for &entity in &state.cast {
+        let Ok(stack) = stacks.get(entity) else { continue };
+        let Some(track0) = stack.tracks.first() else { continue };
+        let track1 = stack.tracks.get(1).map(|t| t.sync);
+        if track0.sync != state.track_sync || track1 != Some(state.track_sync) {
+            for track in [0, 1] {
+                tracks.write(SsTrackCommand { entity, command: TrackCommand::SetSync { track, sync: state.track_sync } });
+            }
+        }
     }
 }
 
@@ -362,6 +500,7 @@ fn handle_drop(mut drops: MessageReader<FileDragAndDrop>, asset_server: Res<Asse
                 if let Ok((mut player, _, mut slot)) = players.get_mut(e) {
                     slot.pack_idx = idx;
                     slot.anim_idx = 0;
+                    slot.clear_tracks();
                     let info = &catalogue.packs[idx];
                     player.pack = asset_server.load(&info.path);
                     player.animation = info.anims.first().cloned().unwrap_or_default();
@@ -450,7 +589,7 @@ fn apply_layout(state: Res<ViewerState>, windows: Query<&Window>, mut players: Q
 /// Draw the HUD from what the main world knows: the cast, the layout, and each
 /// member's component state plus its read-back frame. GPU / primitive counters are
 /// not shown — the adapter does not surface `SSScene::stats()` to the main world.
-fn refresh_hud(state: Res<ViewerState>, catalogue: Res<Catalogue>, members: Query<(&Slot, &SsPlayback, &SsPlaybackState)>, mut hud: Query<&mut Text, With<Hud>>) {
+fn refresh_hud(state: Res<ViewerState>, catalogue: Res<Catalogue>, members: Query<(&Slot, &SsPlayback, &SsPlaybackState, &SsTrackState)>, mut hud: Query<&mut Text, With<Hud>>) {
     let Ok(mut text) = hud.single_mut() else { return };
 
     let focus = match state.focus {
@@ -459,20 +598,38 @@ fn refresh_hud(state: Res<ViewerState>, catalogue: Res<Catalogue>, members: Quer
     };
     let order = if state.reverse_order { ", order reversed" } else { "" };
     let flip = if state.y_flip { ", Y-flipped" } else { "" };
-    let mut out = format!("Cast: {} in 1 pass   focus {focus}   layout {}{order}{flip}\n", state.cast.len(), state.layout.name());
+    let sync = if state.track_sync == TrackSync::Start { "start (at track 0's phase)" } else { "free (from the head)" };
+    let mut out = format!("Cast: {} in 1 pass   focus {focus}   layout {}{order}{flip}   track sync {sync}\n", state.cast.len(), state.layout.name());
 
     for (i, &entity) in state.cast.iter().enumerate() {
-        let Ok((slot, playback, playstate)) = members.get(entity) else { continue };
+        let Ok((slot, playback, playstate, stack)) = members.get(entity) else { continue };
         let marker = if state.focus == Some(i) { '>' } else { ' ' };
         let pack = catalogue.packs.get(slot.pack_idx).map(|p| p.name.as_str()).unwrap_or("none");
         let anim = catalogue.packs.get(slot.pack_idx).and_then(|p| p.anims.get(slot.anim_idx)).map(String::as_str).unwrap_or("none");
         let hidden = if playback.visible { "" } else { " [hidden]" };
         let paused = if playback.playing { "" } else { " [paused]" };
         out.push_str(&format!("{marker} #{} {pack} / {anim}   order {} alpha {:.2} frame {:.0}{hidden}{paused}\n", i + 1, playback.order, playback.alpha, playstate.frame_no));
+
+        // The stack as the render world last left it, a frame behind.
+        if let Some(track0) = stack.tracks.first() {
+            let fading = track0.fade_progress.map(|p| format!(", fading {:.0}%", p * 100.0)).unwrap_or_default();
+            if track0.alpha < 0.999 || !fading.is_empty() {
+                out.push_str(&format!("      track 0 alpha {:.2}{fading}\n", track0.alpha));
+            }
+        }
+        if let (Some(oi), Some(track1)) = (slot.overlay_idx, stack.tracks.get(1)) {
+            let name = catalogue.packs.get(slot.pack_idx).and_then(|p| p.anims.get(oi)).map(String::as_str).unwrap_or("?");
+            let blend = if track1.blend == TrackBlend::Additive { "additive" } else { "mix" };
+            let at = match slot.overlay_frame {
+                Some(f) => format!(", scrubbed to frame {f:.0}"),
+                None => track1.frame.map(|f| format!(", frame {f:.0}")).unwrap_or_default(),
+            };
+            out.push_str(&format!("      track 1 {name} alpha {:.2} {blend}{at}\n", track1.alpha));
+        }
     }
 
     out.push_str(&format!("last event: {}\n", state.last_event));
-    out.push_str("Space pause  Left/Right pack  Up/Down anim  R restart  +/- cast  Tab focus\nL layout  O order  V hide  [ ] alpha  F flip-Y  Esc quit  (drop a .ssab to play it)");
+    out.push_str("Space pause  Left/Right pack  Up/Down anim  R restart  +/- cast  Tab focus\nL layout  O order  V hide  [ ] alpha  F flip-Y  Esc quit  (drop a .ssab to play it)\nC crossfade  S track 1  1/2 track 1 alpha  A mix/additive  0 rest pose  , . scrub  Y sync");
     **text = out;
 }
 
