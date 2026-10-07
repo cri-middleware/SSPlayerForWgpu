@@ -8,7 +8,7 @@
 //! What the runtime *computes* is the SDK's own business and is tested there;
 //! what this file protects is the seam.
 
-use ssplayer_wgpu::{SSPlayer, TrackBlend};
+use ssplayer_wgpu::{SSPlayer, TrackBlend, TrackSync};
 
 fn asset_root() -> &'static str {
     concat!(env!("CARGO_MANIFEST_DIR"), "/../../assets")
@@ -59,6 +59,29 @@ fn an_overlay_track_can_be_laid_on_and_taken_off() {
     // The track survives as a silent slot; only its animation is gone.
     assert_eq!(player.track_count(), 2);
     assert!(player.track_frame(1).is_none());
+}
+
+/// The sync reaches the track it names and, like the rest of the stack, goes
+/// with the next `set_animation`.
+#[test]
+fn track_sync_is_set_per_track_and_reset_by_set_animation() {
+    let Some((mut player, names)) = ringo() else { return };
+    assert_eq!(player.track_sync(0), Some(TrackSync::Free));
+
+    player.set_track_sync(1, TrackSync::Start).unwrap();
+    assert_eq!(player.track_sync(1), Some(TrackSync::Start));
+    assert_eq!(player.track_sync(0), Some(TrackSync::Free));
+
+    player.set_animation(&names[1]).unwrap();
+    assert!(player.track_sync(1).is_none());
+    assert_eq!(player.track_sync(0), Some(TrackSync::Free));
+}
+
+#[test]
+fn track_sync_needs_an_animation() {
+    let mut player = SSPlayer::new();
+    assert!(player.set_track_sync(0, TrackSync::Start).is_err());
+    assert!(player.track_sync(0).is_none());
 }
 
 /// Track 0 carries the structure, so it is refused rather than silently

@@ -61,6 +61,8 @@ pub use renderer::{AlphaMode, Retention, SSRenderer};
 pub use scene::{BatchInfo, FrameChunk, IDENTITY_TRANSFORM, MaskBackend, NodeSlot, SSScene, SceneConfig};
 /// Re-exported from the runtime: how a track folds onto the tracks below it.
 pub use ssruntime::TrackBlend;
+/// Re-exported from the runtime: where the animations laid on a track start.
+pub use ssruntime::TrackSync;
 pub use ssruntime::error::SSRuntimeError;
 #[cfg(feature = "web")]
 pub use web::{SsContextWeb, SsPlayerWeb, SsSurfaceWeb};

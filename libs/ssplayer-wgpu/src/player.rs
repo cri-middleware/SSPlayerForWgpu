@@ -17,7 +17,7 @@ use crate::scene::{BatchInfo, FrameChunk, NodeSlot, pack_tint};
 use ssab::ssab::ss::format::{PartType, root_as_ss_anime_binary_unchecked};
 use ssruntime::error::SSRuntimeError;
 use ssruntime::runtime::framedata::ss::runtime::{DrawBatchKind, root_as_frame_data_unchecked};
-use ssruntime::{Context, EffectSlot, InstanceSlot, TrackBlend};
+use ssruntime::{Context, EffectSlot, InstanceSlot, TrackBlend, TrackSync};
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU32, Ordering};
@@ -1518,6 +1518,19 @@ impl SSPlayer {
 
     pub fn track_blend(&self, track: u32) -> Option<TrackBlend> {
         self.root.as_ref()?.context.get_track_blend(track)
+    }
+
+    /// Where the animations laid on `track` start: [`TrackSync::Free`] from the
+    /// head of their section, [`TrackSync::Start`] at the phase track 0 stands
+    /// at, so a run laid over a walk keeps its stride. Set it before laying;
+    /// [`SSPlayer::set_animation`] resets every track to `Free`.
+    pub fn set_track_sync(&mut self, track: u32, sync: TrackSync) -> Result<(), SSRuntimeError> {
+        let root = self.root.as_mut().ok_or(SSRuntimeError::NotLoaded)?;
+        root.context.set_track_sync(track, sync)
+    }
+
+    pub fn track_sync(&self, track: u32) -> Option<TrackSync> {
+        self.root.as_ref()?.context.get_track_sync(track)
     }
 
     pub fn track_count(&self) -> u32 {
