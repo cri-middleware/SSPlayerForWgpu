@@ -4,9 +4,12 @@ Play several animations on one character at once, and move between them without 
 underneath, an aim overlay on top, a one-shot reaction crossfading in — from files an animator
 authored separately.
 
-!!! info "Rust only, today"
-    The track stack is on the Rust API. It is not exposed on the C or JavaScript faces, and the
-    Bevy adapter's three components do not reach it. Everything on this page is `SSPlayer`.
+!!! info "On every face"
+    The examples here are `SSPlayer`'s Rust API. The C face has the same calls as `ss_player_*`,
+    the JavaScript face as camelCase methods on `SsPlayerWeb`, and the Bevy adapter as the
+    `SsTrackCommand` message, with the stack read back from `SsTrackState`. See the
+    [C](../reference/c.md#motion-blending), [JavaScript](../reference/js.md#motion-blending) and
+    [Bevy](../reference/bevy.md#motion-blending) references.
 
 ## The model: a stack of tracks
 

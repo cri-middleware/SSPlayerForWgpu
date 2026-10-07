@@ -157,7 +157,7 @@ null selects the main pack.
 The replacement should match the original atlas's size and cell layout, and reaches the GPU on the
 next scene update. See [Texture replacement](../guide/texture-replacement.md).
 
-## Motion blending
+## Motion blending { #motion-blending }
 
 The track stack: tracks fold onto the setup pose in ascending order, track 0 being what
 `ss_player_set_animation` establishes. See [Motion blending](../guide/motion-blending.md).

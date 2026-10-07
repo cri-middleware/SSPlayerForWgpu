@@ -12,7 +12,7 @@ files, no re-authoring, no engine lock-in.
 ## ✨ Why use SpriteStudio with wgpu?
 
 - **Artist-made motion, not animation code.** Bone rigs, mesh deformation and particle effects are authored visually in SpriteStudio and exported as one `.ssab`. The player plays it, and timeline events and per-part overrides connect it to your game logic.
-- **Blend between motions.** From Rust, layer animations on tracks and crossfade between them, so a walk eases into a run instead of snapping — see [Motion blending](./docs/en/guide/motion-blending.md).
+- **Blend between motions.** Layer animations on tracks and crossfade between them, so a walk eases into a run instead of snapping — see [Motion blending](./docs/en/guide/motion-blending.md).
 - **It borrows your GPU; it never owns it.** The host owns the wgpu `Device` / `Queue` / `Surface` and lends them per frame, so the player rides inside any wgpu application — your own, egui, macroquad, Bevy — and a scene of many characters shares one upload of each atlas.
 - **Native graphics on every platform.** One wgpu code path draws through DirectX 12 on Windows, Metal on macOS, Vulkan on Linux and WebGPU in the browser.
 - **Not just Rust.** From C, C++ or Objective-C it is a static library and one header: hand it your `HWND`, `NSView`, `CAMetalLayer`, X11 `Window` or `wl_surface` and call two functions per frame. In the browser it is a WebAssembly build, and in **Bevy**, `ssplayer-bevy` adds three components that draw a character as part of Bevy's own 2D rendering.
@@ -155,8 +155,8 @@ the same shape under different names, and each sample below documents its own.
 **Several animations on one character.** A stack of tracks folds onto the setup pose: `set_animation`
 establishes track 0 and carries the structure, and `set_track_animation` / `set_track_alpha` /
 `set_track_blend` lay overlays above it — a walk underneath, an aim on top — with `crossfade` moving
-between two without a cut. This is on the **Rust API only** today: not the C or JavaScript faces, and
-not the Bevy adapter's components. The model and the calls are in
+between two without a cut. Every face has it: the C and JavaScript faces under their own names, and
+the Bevy adapter through the `SsTrackCommand` message. The model and the calls are in
 [Motion blending](./docs/en/guide/motion-blending.md).
 
 ### Where that `.ssab` comes from

@@ -114,7 +114,7 @@ import { defineSsPlayerWebGPUElement } from '@spritestudio/ssplayer-wgpu/element
 | `restoreCellmapTexture(pack, name)` | 元のアトラスに戻す |
 | `isCellmapOverridden(pack, name)` | 現在オーバーライドされているか |
 
-### モーションブレンディング
+### モーションブレンディング { #motion-blending }
 
 トラックスタックです。トラックはセットアップポーズの上に昇順に重なり、トラック 0 は `setAnimation` が確立するものです。[モーションブレンディング](../guide/motion-blending.md)を参照。
 

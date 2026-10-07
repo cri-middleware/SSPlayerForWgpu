@@ -2,9 +2,8 @@
 
 1 体のキャラクターで複数のアニメーションを同時に再生し、カットせずに移り変わります。下地に歩行、その上に照準のオーバーレイ、さらにワンショットのリアクションをクロスフェードで — すべてアーティストが別々にオーサリングしたファイルからです。
 
-!!! info "現時点では Rust のみ"
-    トラックスタックは Rust API にあります。C / JavaScript Face には公開されておらず、Bevy アダプタの
-    3 コンポーネントからも届きません。このページの内容はすべて `SSPlayer` のものです。
+!!! info "どの Face からも使えます"
+    このページの例は `SSPlayer` の Rust API です。C の Face では `ss_player_*`、JavaScript の Face では `SsPlayerWeb` の camelCase のメソッド、Bevy アダプタでは `SsTrackCommand` メッセージとして同じ操作があり、スタックの状態は `SsTrackState` から読めます。[C](../reference/c.md#motion-blending)・[JavaScript](../reference/js.md#motion-blending)・[Bevy](../reference/bevy.md#motion-blending) のリファレンスを参照してください。
 
 ## モデル：トラックのスタック
 

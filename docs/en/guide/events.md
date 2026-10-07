@@ -106,7 +106,8 @@ Only track 0's animation fires events, and after a `crossfade` on track 0 that i
 animation: its events come through as soon as it holds the track. Each event also says which
 **source** fired it — `source()`, the handle `track_main_source` and `add_track_source` use — which
 tells events apart once another source has opted in with `set_source_event_threshold`
-([Motion blending](./motion-blending.md)). Rust only, today.
+([Motion blending](./motion-blending.md)). The C face carries it as `SsEventData.source`, and each
+JavaScript event object as `source`.
 
 ## Empty is meaningful
 

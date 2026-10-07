@@ -150,7 +150,7 @@ title: C API リファレンス
 差し替えテクスチャは元アトラスとサイズ・セルレイアウトを合わせてください。次のシーン更新で
 GPU に届きます。[テクスチャ差し替え](../guide/texture-replacement.md)を参照。
 
-## モーションブレンディング
+## モーションブレンディング { #motion-blending }
 
 トラックスタックです。トラックはセットアップポーズの上に昇順に重なり、トラック 0 は `ss_player_set_animation` が確立するものです。[モーションブレンディング](../guide/motion-blending.md)を参照。
 

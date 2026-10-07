@@ -118,7 +118,7 @@ the calls.
 | `restoreCellmapTexture(pack, name)` | Put the original atlas back |
 | `isCellmapOverridden(pack, name)` | Whether one is currently overridden |
 
-### Motion blending
+### Motion blending { #motion-blending }
 
 The track stack: tracks fold onto the setup pose in ascending order, track 0 being what
 `setAnimation` establishes. See [Motion blending](../guide/motion-blending.md).

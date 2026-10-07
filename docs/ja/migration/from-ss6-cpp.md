@@ -101,7 +101,7 @@ SSScene -> update(&renderer, &device, &queue, dt, &mut [a, b])
     ```
 
 !!! note "「トラック」の意味が変わりました"
-    SS6 のトラックは 1 エンティティ上の並列再生スロットでした。本 Player にも[トラックスタック](../guide/motion-blending.md)がありますが、こちらは*ブレンド*のスタック（レイヤー・重み・クロスフェード）で、再生制御ではなく Rust API の `set_track_animation` などから触ります。
+    SS6 のトラックは 1 エンティティ上の並列再生スロットでした。本 Player にも[トラックスタック](../guide/motion-blending.md)がありますが、こちらは*ブレンド*のスタック（レイヤー・重み・クロスフェード）で、再生制御ではなく C の Face の `ss_player_set_track_animation` など（Rust API では `set_track_animation` など）から触ります。
 
 ### 対応表
 
@@ -295,7 +295,7 @@ SSScene -> update(&renderer, &device, &queue, dt, &mut [a, b])
 
 | | |
 |---|---|
-| **エンティティごとの複数トラック** | [トラックスタック](../guide/motion-blending.md)に置き換わりました。単に並列再生するのではなくブレンドします（Rust API のみ）。C / JavaScript からは複数キャラクターを重ね、`set_order` で前後を決めてください |
+| **エンティティごとの複数トラック** | [トラックスタック](../guide/motion-blending.md)に置き換わりました。単に並列再生するのではなくブレンドします。C の Face では `ss_player_set_track_animation`・`ss_player_crossfade` などで操作します |
 | **シーケンサー（`.ssqb`）** | 相当機能はありません。`just_finished()` を検知して次を `set_animation` してください |
 | **パーツ単位の反転（`FlipSetParts`）** | ありません。反転はオーサリングされたキーフレームに従います |
 | **エフェクトのシード（`SeedOffsetSet`）** | ありません。シードは再生スロットごとに決まります |
@@ -306,7 +306,7 @@ SSScene -> update(&renderer, &device, &queue, dt, &mut [a, b])
 * **WebGPU / Vulkan / DX12 / Metal** を 1 つのコードパスで；
 * 大幅に小さいホストコード（グローバルシステム無し、テクスチャループ無し、ロードは 1 呼び出し）；
 * 1 レンダーパスに複数キャラクター、アトラスアップロードは共有；
-* Rust API へ移るなら[モーションブレンディング](../guide/motion-blending.md)。
+* [モーションブレンディング](../guide/motion-blending.md)（1 体のキャラクターでアニメーションを重ね、クロスフェードする）。
 
 ## 次に読む
 

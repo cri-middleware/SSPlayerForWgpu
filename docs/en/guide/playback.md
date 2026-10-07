@@ -254,5 +254,5 @@ exactly one frame advanced per update, whatever the elapsed time.
 ## Next
 
 * [Events and user data](./events.md) — reacting to the timeline
-* [Motion blending](./motion-blending.md) — playing two animations at once and crossfading (Rust)
+* [Motion blending](./motion-blending.md) — playing two animations at once and crossfading
 * [Part overrides](./part-overrides.md) — changing what a part draws
