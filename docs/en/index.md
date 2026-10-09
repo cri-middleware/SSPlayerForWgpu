@@ -9,6 +9,16 @@ wgpu puts **WebGPU, Vulkan, DirectX 12 and Metal** behind a single API, which is
 canvas, a Windows game and a macOS app can all be served by the same library instead of by four
 ports of it.
 
+!!! tip "Try it in your browser"
+    <a href="./demo/" target="_blank" rel="noreferrer">▶️ Open the WebGPU demo</a>, published beside
+    these pages. Nothing to install; it needs a WebGPU-capable browser. Four pages: the API in both its
+    shapes, the <a href="./demo/element.html" target="_blank" rel="noreferrer">custom element</a> on
+    its own, <a href="./demo/multi.html" target="_blank" rel="noreferrer">a page full of them</a> —
+    overlapping other content, on one `GPUDevice` — and
+    <a href="./demo/part-follow.html" target="_blank" rel="noreferrer">a marker following a part</a>,
+    its pose read back by the host every frame. Drop a folder of your own `.ssab` on the first one and
+    it plays them, atlases and sibling packs included.
+
 !!! tip "No SpriteStudio data of your own yet?"
     The [official sample data](https://www.webtech.co.jp/help/ja/spritestudio7/download/sample/) works as-is — that page is
     Japanese only, but the downloads themselves are language-neutral.
@@ -64,15 +74,6 @@ own, and you never need the other three.
 Whichever you pick, you also need a `.ssab` — see [Preparing assets](./start/assets.md). Nothing of
 your own is required to try the player first: every sample runs on the SDK's own test animations.
 
-▶️ **Prefer to see it first?** The <a href="./demo/" target="_blank" rel="noreferrer">WebGPU demo</a>
-runs in the browser, with nothing installed — it needs a WebGPU-capable browser and is published
-beside these pages. Four of them: the API in both its shapes, the
-<a href="./demo/element.html" target="_blank" rel="noreferrer">custom element</a> on its own,
-<a href="./demo/multi.html" target="_blank" rel="noreferrer">a page full of them</a> — overlapping
-other content, on one `GPUDevice` — and
-<a href="./demo/part-follow.html" target="_blank" rel="noreferrer">a marker following a part</a>,
-its pose read back by the host every frame.
-
 ## 🧭 How these docs are laid out
 
 | Section | Who reads it |
@@ -86,8 +87,8 @@ its pose read back by the host every frame.
 Two more things are published beside this text rather than inside it: the
 <a href="./api/" target="_blank" rel="noreferrer">Rust API reference</a> (rustdoc for
 `ssplayer_wgpu` and `ssplayer_bevy`) and the
-<a href="./demo/" target="_blank" rel="noreferrer">WebGPU demo</a>. Both are in the navigation bar
-as well.
+<a href="./demo/" target="_blank" rel="noreferrer">WebGPU demo</a>. Both are in the navigation as
+well: the rustdoc under API reference, the demo under Get started.
 
 ## 📦 What ships
 

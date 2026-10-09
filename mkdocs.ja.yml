@@ -32,6 +32,7 @@ nav:
       - C / C++: start/cpp.md
       - Web（WebGPU）: start/web.md
       - アセットの準備: start/assets.md
+      - ▶️ ライブデモ: ../demo/index.html
   - 🎬 ガイド:
       - スコープと名前の対応: guide/concepts.md
       - 再生と再生制御: guide/playback.md
@@ -46,6 +47,7 @@ nav:
       - パフォーマンス: guide/performance.md
   - 📖 API リファレンス:
       - Rust: reference/rust.md
+      - 📦 Rust API（rustdoc）: ../api/ssplayer_wgpu/index.html
       - C: reference/c.md
       - JavaScript: reference/js.md
       - Web Component: reference/web-component.md
@@ -58,5 +60,3 @@ nav:
       - SS6Player for CPP から: migration/from-ss6-cpp.md
   - 🛠️ 開発者向け: contributing/index.md
   - ⚖️ ライセンス: license.md
-  - ▶️ ライブデモ: ../demo/index.html
-  - 📦 Rust API（rustdoc）: ../api/ssplayer_wgpu/index.html

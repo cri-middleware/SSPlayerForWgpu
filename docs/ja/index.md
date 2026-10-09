@@ -6,6 +6,9 @@
 wgpu は **WebGPU / Vulkan / DirectX 12 / Metal** を 1 つの API の裏に置きます。ブラウザのキャンバスも、
 Windows のゲームも、macOS のアプリも、4 本の移植版ではなく同じライブラリ 1 本で賄えるのはそのためです。
 
+!!! tip "ブラウザで試す"
+    <a href="../demo/" target="_blank" rel="noreferrer">▶️ WebGPU デモを開く</a> — このドキュメントと一緒に公開しています。インストール不要で、WebGPU 対応ブラウザがあれば動きます。ページは 4 つ：API の 2 つの形、<a href="../demo/element.html" target="_blank" rel="noreferrer">カスタム要素</a>単体、<a href="../demo/multi.html" target="_blank" rel="noreferrer">それを 1 ページに並べたもの</a>（他の要素と重ねても `GPUDevice` は 1 つ）、そして<a href="../demo/part-follow.html" target="_blank" rel="noreferrer">選んだパーツにマーカーを追従させるもの</a>（姿勢はホストが毎フレーム読み出す）。最初のページには手元の `.ssab` を含むフォルダをドロップでき、アトラスや兄弟パックも含めて再生します。
+
 !!! tip "SpriteStudio のデータが手元に無くても始められます"
     [公式のサンプルデータ](https://www.webtech.co.jp/help/ja/spritestudio7/download/sample/)がそのまま使えます。キャラクターなら
     [Ringo](https://www.webtech.co.jp/help/ja/spritestudio7/download/sample/#ringo)、エフェクトを含むものなら
@@ -56,10 +59,6 @@ Windows のゲームも、macOS のアプリも、4 本の移植版ではなく�
 
 どれを選んでも `.ssab` が必要です — [アセットの準備](./start/assets.md)を参照してください。試すだけなら自前のデータは不要です。すべてのサンプルは SDK 付属のテストアニメーションで動きます。
 
-▶️ **まず動いているところを見たい場合**：<a href="../demo/" target="_blank" rel="noreferrer">WebGPU デモ</a>がこのドキュメントと一緒に公開されています。インストール不要（WebGPU
-対応ブラウザが必要）。ページは 4 つ：API の 2 つの形、<a href="../demo/element.html" target="_blank" rel="noreferrer">カスタム要素</a>単体、<a href="../demo/multi.html" target="_blank" rel="noreferrer">それを 1 ページに並べたもの</a>（他の要素と重ねても `GPUDevice`
-は 1 つ）、そして<a href="../demo/part-follow.html" target="_blank" rel="noreferrer">選んだパーツにマーカーを追従させるもの</a>（姿勢はホストが毎フレーム読み出す）。
-
 ## 🧭 このドキュメントの構成
 
 | セクション | 誰が読むか |
@@ -70,9 +69,7 @@ Windows のゲームも、macOS のアプリも、4 本の移植版ではなく�
 | **[wgpu ホスト](./wgpu/borrow-model.md)** | **デバイスを自分で持っている人だけ** — Rust アプリかエンジンアダプタ。C++ / ブラウザの読者はこのセクションに入る必要がありません |
 | **[開発者向け](./contributing/index.md)** | ライブラリの全 Face を手元でビルドする手順と、変更が守るべきルール |
 
-本文とは別に、<a href="../api/" target="_blank" rel="noreferrer">Rust API リファレンス</a>（`ssplayer_wgpu` と
-`ssplayer_bevy` の rustdoc）と <a href="../demo/" target="_blank" rel="noreferrer">WebGPU デモ</a>
-が同じサイト上に公開されています。ナビゲーションバーからも辿れます。
+本文とは別に、<a href="../api/" target="_blank" rel="noreferrer">Rust API リファレンス</a>（`ssplayer_wgpu` と `ssplayer_bevy` の rustdoc）と <a href="../demo/" target="_blank" rel="noreferrer">WebGPU デモ</a>が同じサイト上に公開されています。ナビゲーションからも辿れます（rustdoc は API リファレンス、デモははじめるの下）。
 
 ## 📦 成果物
 
