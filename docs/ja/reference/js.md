@@ -52,9 +52,9 @@ import { defineSsPlayerWebGPUElement } from '@spritestudio/ssplayer-wgpu/element
 
 | | |
 |---|---|
-| `load(src): Promise` | URL からパック・アトラス・兄弟パックを |
-| `loadSsab(bytes, pack?, baseUrl?): Promise` | バイト列を登録し、選択対象にする |
-| `addSsab(bytes, pack?, baseUrl?): Promise` | 登録のみ |
+| `load(src, read?): Promise` | URL からパック・アトラス・兄弟パックを。`read(url)` を渡すと `fetch` の代わりにそれが答えます（[ブラウザでは](../guide/loading.md#in-a-browser)） |
+| `loadSsab(bytes, pack?, baseUrl?, read?): Promise` | バイト列を登録し、選択対象にする |
+| `addSsab(bytes, pack?, baseUrl?, read?): Promise` | 登録のみ |
 | `missingAssets()` | 届かなかったもの。**reject ではありません** |
 | `textureRefs(pack?)` / `embeddedTextures(pack?)` | パックが要求するアトラス |
 | `animationNames()` / `partNames()` / `cellmapNames()` / `cellNames(cellmap)` | パックが持つもの |
@@ -149,4 +149,4 @@ import { defineSsPlayerWebGPUElement } from '@spritestudio/ssplayer-wgpu/element
 | `speed-scale` | 既定 fps の倍率 |
 | `fit`、`align`、`flip-x`、`flip-y` | オーサリング時のキャンバスを要素にどう合わせるか。既定は `contain` と `center`、`fit="none"` で 1:1 |
 
-`element.loadSrc(src, pack?, animation?)` でスクリプトからパックを差し替えられ、アニメーション名が返ります。`animationstarted`・`animationfinished`・`animationlooped`・`userdata`・`signal`・`audio` を DOM イベントとして送り、パックを読み込むと `load` を送ります。上の属性は置いた後に書き換えても反映されます。モーションブレンディングを含め、`SsPlayerWeb` の機能はすべて `element.player` から使えます。
+`element.loadSrc(src, pack?, animation?, read?)` でスクリプトからパックを差し替えられ、アニメーション名が返ります。`animationstarted`・`animationfinished`・`animationlooped`・`userdata`・`signal`・`audio` を DOM イベントとして送り、パックを読み込むと `load` を送ります。上の属性は置いた後に書き換えても反映されます。モーションブレンディングを含め、`SsPlayerWeb` の機能はすべて `element.player` から使えます。

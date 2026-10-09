@@ -111,7 +111,7 @@
   <pre>el.setAttribute('src', 'assets/Mesh.ssab');
 el.addEventListener('load', () => console.log(el.player.animationNames()));
 el.setAttribute('animation', 'walk');   // autoplay があれば頭から再生</pre>
-  <p class="hint">スクリプトから切り替えるなら <code>element.loadSrc(src, pack?, animation?)</code> もあります。戻り値はアニメーション名の配列で、連続で呼んでも要素側で直列化され、最後に呼んだものが画面に残ります。</p>
+  <p class="hint">スクリプトから切り替えるなら <code>element.loadSrc(src, pack?, animation?, read?)</code> もあります。戻り値はアニメーション名の配列で、連続で呼んでも要素側で直列化され、最後に呼んだものが画面に残ります。</p>
 
   <h2>イベント</h2>
   <p>再生が起こしたことは DOM イベントとして届きます。<code>animationstarted</code>・<code>animationfinished</code>・<code>animationlooped</code> と、タイムラインの <code>userdata</code>・<code>signal</code>・<code>audio</code>（中身は <code>event.detail</code>）です。上の「イベント」の行は、この 6 つを表示しています。</p>

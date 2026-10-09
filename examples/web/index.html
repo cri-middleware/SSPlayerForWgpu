@@ -20,6 +20,9 @@
     nav { float: right; font-size: 0.9em; }
     nav a { margin-left: 1em; }
     #stats { font-family: ui-monospace, monospace; font-size: 0.85em; white-space: pre-wrap; opacity: 0.85; }
+    body.dragging::after { content: 'ここにドロップ'; position: fixed; inset: 0.75rem; display: grid; place-items: center;
+      border: 3px dashed currentColor; border-radius: 12px; font-size: 1.4rem; font-weight: 600; pointer-events: none;
+      background: color-mix(in srgb, Canvas 80%, transparent); }
   </style>
 </head>
 <body>
@@ -34,8 +37,10 @@
   <p class="hint">単体用途向けの便利ラッパ。下の②と <strong>device・パイプライン・アトラスを共有</strong>します。</p>
 
   <p>
-    <label for="pick">アニメーション:</label>
+    <label for="pick">パック:</label>
     <select id="pick"></select>
+    <label for="anim">アニメーション:</label>
+    <select id="anim"></select>
     <label for="mode">形態:</label>
     <select id="mode">
       <option value="assets">reference（外部 PNG）</option>
@@ -43,6 +48,8 @@
     </select>
     <span class="hint">— <code>load()</code> 1コールでアトラスも兄弟 ssab（<code>Instance</code>）も揃います</span>
   </p>
+  <p class="hint">手元の <code>.ssab</code> は、それを含むフォルダをこのページにドロップすると「パック」に加わり、選ぶと再生できます。アトラスも参照先の <code>.ssab</code> も、ドロップしたフォルダから同じ <code>load()</code> 1コールで読みます。</p>
+  <p id="missing" class="hint" hidden></p>
 
   <!-- The custom element creates its own <canvas> and drives requestAnimationFrame. -->
   <ss-player-webgpu id="player" class="stage" src="assets/Basic.ssab" autoplay></ss-player-webgpu>
@@ -91,24 +98,102 @@
     const PACKS = ['Basic', 'PartsColor', 'BlendMode', 'Mask', 'Shape', 'Mesh', 'Effect', 'Shader', 'TextureChange', 'Instance',
       'Doll/Action01_Body', 'Doll/Action02_Body', 'Doll/Eye'];
     const pick = document.getElementById('pick');
+    const anim = document.getElementById('anim');
     const mode = document.getElementById('mode');
+    const missing = document.getElementById('missing');
     const player = document.getElementById('player');
-    for (const p of PACKS) {
-      const o = document.createElement('option');
-      o.value = p; o.textContent = p;
-      pick.appendChild(o);
+    const samples = document.createElement('optgroup');
+    samples.label = 'サンプル';
+    samples.append(...PACKS.map((p) => new Option(p, p)));
+    pick.append(samples);
+
+    // --- dropping a folder ------------------------------------------------
+    // The files of a drop are filed under URLs the page makes up, one base per
+    // drop, and `read` answers from them in place of fetch. So a dropped pack
+    // goes through the same one `loadSrc` call: the atlases and the sibling
+    // packs beside it are asked for by URL, and come out of the drop.
+    //
+    // A base per drop, because atlases are keyed by URL: a second folder under
+    // the first one's base would find its `common.png` already loaded and draw
+    // the first folder's.
+    let drops = 0;
+    let dropped = new Map();   // URL -> File
+    const read = (url) => dropped.get(url);
+    const dropGroup = document.createElement('optgroup');
+    dropGroup.label = 'ドロップ';
+
+    /** Every file under a dropped entry, with its path from the drop. */
+    async function walk(entry) {
+      if (entry.isFile) return [{ path: entry.fullPath.slice(1), file: await new Promise((ok, ng) => entry.file(ok, ng)) }];
+      const reader = entry.createReader();
+      const files = [];
+      // A directory comes in batches; an empty one is the end.
+      for (let batch; (batch = await new Promise((ok, ng) => reader.readEntries(ok, ng))).length;) {
+        for (const child of batch) files.push(...await walk(child));
+      }
+      return files;
     }
+
+    addEventListener('dragover', (e) => {
+      e.preventDefault();
+      document.body.classList.add('dragging');
+    });
+    addEventListener('dragleave', (e) => {
+      if (!e.relatedTarget) document.body.classList.remove('dragging');
+    });
+    addEventListener('drop', async (e) => {
+      e.preventDefault();
+      document.body.classList.remove('dragging');
+      // Taken before the first await: the items are gone once the event returns.
+      const entries = [...e.dataTransfer.items].map((item) => item.webkitGetAsEntry()).filter(Boolean);
+      const files = (await Promise.all(entries.map(walk))).flat();
+      const depth = (path) => path.split('/').length;
+      const ssabs = files.map((f) => f.path).filter((path) => /\.ssab$/i.test(path))
+        .sort((a, b) => depth(a) - depth(b) || a.localeCompare(b));
+      if (!ssabs.length) {
+        missing.hidden = false;
+        missing.textContent = 'ドロップしたものに .ssab がありません';
+        return;
+      }
+      const base = new URL(`dropped/${++drops}/`, location.href);
+      dropped = new Map(files.map((f) => [new URL(f.path, base).href, f.file]));
+      dropGroup.replaceChildren(...ssabs.map((path) => new Option(path, new URL(path, base).href)));
+      pick.prepend(dropGroup);
+      pick.value = dropGroup.firstChild.value;
+      reload();
+    });
+
     // The same call for both export modes: an embedded pack decodes what it
     // carries, a reference pack fetches its sibling PNGs relative to the .ssab.
+    // A dropped pack is the same call again, with `read` in place of fetch.
     // An event handler cannot await, so the rejection needs a home: an unhandled
     // one is a console warning with no context, and the element only routes its
     // *own* startup failure to the on-page error box. Overlapping switches are
     // the element's problem, not the page's — `loadSrc` serialises them.
     const reload = () => {
-      player.loadSrc(`${mode.value}/${pick.value}.ssab`).catch((e) => console.error('[demo] could not load the pack:', e));
+      const isDropped = dropped.has(pick.value);
+      mode.disabled = isDropped;   // the export mode picks between the samples' two sets
+      // A new pack starts on its first animation; a stale attribute would make
+      // picking that animation's namesake later a no-op.
+      player.removeAttribute('animation');
+      const src = isDropped ? pick.value : `${mode.value}/${pick.value}.ssab`;
+      player.loadSrc(src, null, null, isDropped ? read : null).catch((e) => console.error('[demo] could not load the pack:', e));
     };
     pick.addEventListener('change', reload);
     mode.addEventListener('change', reload);
+
+    // `load` arrives once a pack is set up, the first one included. A load
+    // rejects only for an unreadable .ssab, so what else did not arrive is
+    // read here — a folder dropped without its PNGs draws white silhouettes.
+    player.addEventListener('load', () => {
+      anim.replaceChildren(...player.player.animationNames().map((name) => new Option(name, name)));
+      anim.value = player.player.currentAnimation() ?? '';
+      const gaps = player.player.missingAssets().map((m) => `${m.kind === 'pack' ? 'パック' : 'アトラス'} ${m.name}`);
+      missing.hidden = !gaps.length;
+      missing.textContent = `見つからなかったもの: ${gaps.join('、')}`;
+    });
+    // With `autoplay` on the element, a new animation plays from its head.
+    anim.addEventListener('change', () => player.setAttribute('animation', anim.value));
 
     // --- ② one canvas, many players -------------------------------------
     // Fetched once and reused: the same bytes make every player, and the atlas

@@ -83,7 +83,7 @@ defineSsPlayerWebGPUElement(); // registers <ss-player-webgpu>
 | `speed-scale` | A multiple of the authored rate |
 | `fit`, `align`, `flip-x`, `flip-y` | How the authored canvas fits the element: `contain` and `center` by default, `fit="none"` for 1:1 |
 
-`element.loadSrc(src, pack?, animation?)` switches packs from script and resolves to the animation names.
+`element.loadSrc(src, pack?, animation?, read?)` switches packs from script and resolves to the animation names.
 It dispatches `animationstarted`, `animationfinished`, `animationlooped`, `userdata`, `signal` and `audio` as DOM events, and `load` once a pack has loaded; the attributes above can be changed on a live element.
 Registration is **opt-in** rather than a side effect of the import, so a bundle that only wants the
 API below never carries the element.

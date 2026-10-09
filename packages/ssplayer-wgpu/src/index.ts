@@ -17,7 +17,7 @@ import type { InitInput } from '../wasm/ssplayer_wgpu.js';
 // here: it lives behind the `./element` entry point so a page that drives the
 // context itself never pulls it in.
 export { SsContextWeb, SsSurfaceWeb, SsPlayerWeb } from '../wasm/ssplayer_wgpu.js';
-export type { InitInput, InitOutput } from '../wasm/ssplayer_wgpu.js';
+export type { InitInput, InitOutput, SsAssetBytes, SsAssetReader } from '../wasm/ssplayer_wgpu.js';
 
 let wasmSource: InitInput | Promise<InitInput> | undefined;
 

@@ -45,7 +45,7 @@ defineSsPlayerWebGPUElement(); // <ss-player-webgpu> を登録
 | `speed-scale` | 既定 fps の倍率。 |
 | `fit`、`align`、`flip-x`、`flip-y` | オーサリング時のキャンバスを要素にどう合わせるか。既定は `contain` と `center`、`fit="none"` で 1:1。 |
 
-`element.loadSrc(src, pack?, animation?)` でスクリプトからパックを差し替えられ、アニメーション名一覧が返ります。`animationstarted`・`animationfinished`・`animationlooped`・`userdata`・`signal`・`audio` を DOM イベントとして送り、パックを読み込むと `load` を送ります。上の属性は置いた後に書き換えても反映されます。
+`element.loadSrc(src, pack?, animation?, read?)` でスクリプトからパックを差し替えられ、アニメーション名一覧が返ります。`animationstarted`・`animationfinished`・`animationlooped`・`userdata`・`signal`・`audio` を DOM イベントとして送り、パックを読み込むと `load` を送ります。上の属性は置いた後に書き換えても反映されます。
 
 登録は import の副作用ではなく **明示呼び出し** です。下の API だけを使うバンドルが、使わない要素を抱え込まないようにするためです。
 

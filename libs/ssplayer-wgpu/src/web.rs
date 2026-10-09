@@ -238,6 +238,110 @@ async fn fetch_files(paths: &[String], base_url: Option<&str>) -> HashMap<String
     out
 }
 
+#[wasm_bindgen(typescript_custom_section)]
+const ASSET_READER_TS: &str = r#"
+/** One file, as a host reader hands it over: `null` / `undefined` is "not here". */
+export type SsAssetBytes = ArrayBuffer | Uint8Array | Blob | null | undefined;
+/**
+ * Stands in for `fetch` in a load. `url` is absolute, resolved exactly as the
+ * fetch would have been, so a host keys its files by the URL it gave `load`.
+ */
+export type SsAssetReader = (url: string) => SsAssetBytes | Promise<SsAssetBytes>;
+"#;
+
+/// [`fetch_files`] with the host's `read` in place of `fetch`.
+///
+/// For files a page holds but cannot fetch: a dropped folder, an archive it
+/// unpacked. Each path is resolved against `base_url` exactly as a fetch would
+/// be, and `read` is handed that absolute URL. The texture keys are hashed from
+/// the same URLs, so they are as distinct as fetched ones: two folders dropped
+/// under two bases are two sets of images, even when both name `spritemap1.png`.
+///
+/// `read` answers an `ArrayBuffer`, a `Uint8Array` or a `Blob` (a dropped `File`
+/// is one), or a promise of one. `null` / `undefined` means the reader does not
+/// have the file, and the walk reports it the same way as a 404.
+async fn read_files(read: &js_sys::Function, paths: &[String], base_url: Option<&str>) -> HashMap<String, Rc<[u8]>> {
+    let mut out = HashMap::new();
+    let base = resolved_base(base_url);
+
+    let answers = js_sys::Array::new();
+    let mut ordered: Vec<&String> = Vec::new();
+    for path in paths {
+        let url = match base.as_deref().and_then(|base| web_sys::Url::new_with_base(path, base).ok()) {
+            Some(url) => url.href(),
+            None => {
+                warn(&format!("[ssplayer-wgpu] {path}: cannot resolve against a base URL; pass `baseUrl` to loadSsab"));
+                continue;
+            }
+        };
+        // A reader that throws costs that one file, as a rejection does.
+        let answer = match read.call1(&JsValue::NULL, &JsValue::from_str(&url)) {
+            Ok(value) => js_sys::Promise::resolve(&value),
+            Err(e) => js_sys::Promise::reject(&e),
+        };
+        answers.push(&answer);
+        ordered.push(path);
+    }
+    if ordered.is_empty() {
+        return out;
+    }
+
+    let settled = match wasm_bindgen_futures::JsFuture::from(js_sys::Promise::all_settled(&answers)).await {
+        Ok(value) => js_sys::Array::from(&value),
+        Err(e) => {
+            warn(&format!("[ssplayer-wgpu] read failed: {e:?}"));
+            return out;
+        }
+    };
+
+    // Second round, for the Blobs: their bytes are a promise of their own.
+    let bodies = js_sys::Array::new();
+    let mut with_body: Vec<&String> = Vec::new();
+    for (i, path) in ordered.iter().enumerate() {
+        let entry = settled.get(i as u32);
+        let field = |name: &str| js_sys::Reflect::get(&entry, &JsValue::from_str(name)).unwrap_or(JsValue::UNDEFINED);
+        if field("status").as_string().as_deref() == Some("rejected") {
+            warn(&format!("[ssplayer-wgpu] {path}: read rejected: {:?}", field("reason")));
+            continue;
+        }
+        let value = field("value");
+        if value.is_null() || value.is_undefined() {
+            continue;
+        }
+        match value.dyn_ref::<web_sys::Blob>() {
+            Some(blob) => bodies.push(&blob.array_buffer()),
+            None => bodies.push(&js_sys::Promise::resolve(&value)),
+        };
+        with_body.push(path);
+    }
+    if with_body.is_empty() {
+        return out;
+    }
+
+    let settled = match wasm_bindgen_futures::JsFuture::from(js_sys::Promise::all_settled(&bodies)).await {
+        Ok(value) => js_sys::Array::from(&value),
+        Err(e) => {
+            warn(&format!("[ssplayer-wgpu] body read failed: {e:?}"));
+            return out;
+        }
+    };
+    for (i, path) in with_body.iter().enumerate() {
+        let entry = settled.get(i as u32);
+        let value = js_sys::Reflect::get(&entry, &JsValue::from_str("value")).unwrap_or(JsValue::UNDEFINED);
+        let bytes = match value.dyn_ref::<js_sys::ArrayBuffer>() {
+            Some(buffer) => Some(js_sys::Uint8Array::new(buffer).to_vec()),
+            None => value.dyn_ref::<js_sys::Uint8Array>().map(js_sys::Uint8Array::to_vec),
+        };
+        match bytes {
+            Some(bytes) => {
+                out.insert((*path).clone(), Rc::from(bytes));
+            }
+            None => warn(&format!("[ssplayer-wgpu] {path}: the reader answered neither an ArrayBuffer, a Uint8Array nor a Blob")),
+        }
+    }
+    out
+}
+
 /// Request a device and subscribe to its `GPUDevice.lost`. The returned
 /// flag flips when the browser drops the device — which it does on its own schedule
 /// (backgrounded tab, GPU process crash, driver reset), so a long-lived ad creative
@@ -829,8 +933,8 @@ macro_rules! with_player {
     }};
 }
 
-/// The web half of [`AssetLoader`]: `fetch` for files,
-/// `createImageBitmap` for images.
+/// The web half of [`AssetLoader`]: `fetch` for files, or the host's own reader
+/// in its place, and `createImageBitmap` for images.
 ///
 /// The counterpart of the filesystem loader behind [`SSPlayer::load`], and the
 /// reason the walk itself —
@@ -850,12 +954,14 @@ struct WebAssetLoader {
     /// What the pack's relative paths resolve against — the `.ssab`'s own URL.
     /// `None` falls back to the document's.
     base_url: Option<String>,
+    /// The host's `SsAssetReader`, asked instead of `fetch` (see [`read_files`]).
+    read: Option<js_sys::Function>,
 }
 
 impl WebAssetLoader {
     /// Rooted wherever the host said, or at the document when it said nothing.
-    fn new(ctx: Rc<RefCell<WebContext>>, base_url: Option<String>) -> Self {
-        Self { ctx, origin_url: base_url.clone(), base_url }
+    fn new(ctx: Rc<RefCell<WebContext>>, base_url: Option<String>, read: Option<js_sys::Function>) -> Self {
+        Self { ctx, origin_url: base_url.clone(), base_url, read }
     }
 }
 
@@ -885,7 +991,10 @@ impl AssetLoader for WebAssetLoader {
     /// One `fetch` per path, settled together: this is the face where overlapping
     /// the waiting is the difference between one round trip and N.
     async fn read(&mut self, paths: &[String]) -> Vec<Option<Vec<u8>>> {
-        let fetched = fetch_files(paths, self.base_url.as_deref()).await;
+        let fetched = match &self.read {
+            Some(read) => read_files(read, paths, self.base_url.as_deref()).await,
+            None => fetch_files(paths, self.base_url.as_deref()).await,
+        };
         paths.iter().map(|path| fetched.get(path).map(|bytes| bytes.to_vec())).collect()
     }
 
@@ -1024,6 +1133,7 @@ impl SsPlayerWeb {
     /// external instance reference to this pack stops resolving.
     /// * `baseUrl` is where the `.ssab` came from; reference-mode atlas paths are
     /// relative to it. Defaults to the document's URL. Embedded packs ignore it.
+    /// * `read` answers in place of `fetch`, as it does for [`SsPlayerWeb::load`].
     ///
     /// An atlas the renderer already has is left alone ("registered wins",
     ///), so N players of one pack load it once between them. An atlas
@@ -1031,10 +1141,18 @@ impl SsPlayerWeb {
     /// as in `_load_external_ssabs`' `ERR_PRINT` and `PackResolver`'s
     /// `console.warn`: one missing image should not cost you the character.
     #[wasm_bindgen(js_name = loadSsab)]
-    pub async fn load_ssab(&self, bytes: Vec<u8>, pack: Option<String>, base_url: Option<String>) -> Result<(), JsValue> {
+    pub async fn load_ssab(
+        &self,
+        bytes: Vec<u8>,
+        // Spelled out because a typed trailing parameter costs the ones before it
+        // their `?` in the generated `.d.ts`.
+        #[wasm_bindgen(unchecked_optional_param_type = "string | null")] pack: Option<String>,
+        #[wasm_bindgen(unchecked_optional_param_type = "string | null")] base_url: Option<String>,
+        #[wasm_bindgen(unchecked_optional_param_type = "SsAssetReader | null")] read: Option<js_sys::Function>,
+    ) -> Result<(), JsValue> {
         self.ensure_idle()?;
         let registered = self.register(&bytes, pack, true)?;
-        let mut loader = WebAssetLoader::new(Rc::clone(&self.ctx), base_url);
+        let mut loader = WebAssetLoader::new(Rc::clone(&self.ctx), base_url, read);
         let name = registered.name().to_string();
         self.with_player_detached(|mut player| async move {
             // The pack is registered; only the assets around it are left, so the
@@ -1057,23 +1175,40 @@ impl SsPlayerWeb {
     ///
     /// This is [`SSPlayer::load`] with the browser's loader plugged in — the same
     /// call, the same walk, as a native host makes with
-    /// [`SSPlayer::load`]. Use [`SsPlayerWeb::load_ssab`] when the bytes
-    /// come from somewhere that is not URL-addressable — a drop, a bundler, an
-    /// archive — and pass `baseUrl` if that pack still has siblings to find.
+    /// [`SSPlayer::load`]. Use [`SsPlayerWeb::load_ssab`] when the bytes have
+    /// no URL at all — a bundler's import — and pass `baseUrl` if that pack
+    /// still has siblings to find.
+    ///
+    /// `read` stands in for `fetch` when the files are not on a server: a
+    /// dropped folder, an archive the page unpacked. It is handed each file's
+    /// absolute URL — `src` resolved against the document, everything after it
+    /// resolved against `src` — and answers an `ArrayBuffer`, a `Uint8Array` or a
+    /// `Blob`, or `null` for a file it does not have. So a page that files a
+    /// dropped folder under URLs of its own choosing gets the whole walk:
+    ///
+    /// ```js
+    /// const base = new URL('dropped/1/', location.href);
+    /// const files = new Map(dropped.map((f) => [new URL(f.path, base).href, f.file]));
+    /// await player.load(new URL('Ringo/Ringo.ssab', base).href, (url) => files.get(url));
+    /// ```
+    ///
+    /// The atlases are keyed by those URLs, as fetched ones are, so a second
+    /// folder needs a base of its own: under the same one, an atlas that shares
+    /// a name with the first folder's is taken as already loaded.
     ///
     /// **One load at a time per player.** Starting a second before the first has
     /// settled is rejected, because the two would otherwise race for the slot the
     /// player was lifted out of and one of them would be lost — `await` the
     /// promise, or chain the calls. Two *different* players load concurrently as
     /// usual, and share whatever atlases they have in common.
-    pub async fn load(&self, src: &str) -> Result<(), JsValue> {
+    pub async fn load(&self, src: &str, #[wasm_bindgen(unchecked_optional_param_type = "SsAssetReader | null")] read: Option<js_sys::Function>) -> Result<(), JsValue> {
         // No base of our own: `src` is page-relative like any other URL here, so
         // the document resolves it. The walk then hands `src` to `set_base` — after
         // it has been read, never before — and the `.ssab`'s own URL becomes what
         // its siblings resolve against. Setting it here instead is what once made
         // `src` resolve against itself and fetch `assets/assets/Basic.ssab`; the
         // ordering is now what rules that out.
-        let mut loader = WebAssetLoader::new(Rc::clone(&self.ctx), None);
+        let mut loader = WebAssetLoader::new(Rc::clone(&self.ctx), None, read);
         let src = src.to_owned();
         self.with_player_detached(|mut player| async move {
             let out = player.load_with(&mut loader, &src).await;
@@ -1091,10 +1226,18 @@ impl SsPlayerWeb {
     /// itself; it remains for packs that are not URL-addressable, the case
     /// `ssplayer-core` covers with its `InstancePackProvider` hook.
     #[wasm_bindgen(js_name = addSsab)]
-    pub async fn add_ssab(&self, bytes: Vec<u8>, pack: Option<String>, base_url: Option<String>) -> Result<(), JsValue> {
+    pub async fn add_ssab(
+        &self,
+        bytes: Vec<u8>,
+        // Spelled out because a typed trailing parameter costs the ones before it
+        // their `?` in the generated `.d.ts`.
+        #[wasm_bindgen(unchecked_optional_param_type = "string | null")] pack: Option<String>,
+        #[wasm_bindgen(unchecked_optional_param_type = "string | null")] base_url: Option<String>,
+        #[wasm_bindgen(unchecked_optional_param_type = "SsAssetReader | null")] read: Option<js_sys::Function>,
+    ) -> Result<(), JsValue> {
         self.ensure_idle()?;
         let registered = self.register(&bytes, pack, false)?;
-        let mut loader = WebAssetLoader::new(Rc::clone(&self.ctx), base_url);
+        let mut loader = WebAssetLoader::new(Rc::clone(&self.ctx), base_url, read);
         let name = registered.name().to_string();
         self.with_player_detached(|mut player| async move {
             player.load_assets(&mut loader, &name).await;

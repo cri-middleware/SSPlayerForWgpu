@@ -55,9 +55,9 @@ the calls.
 
 | | |
 |---|---|
-| `load(src): Promise` | Pack, atlases, sibling packs — from a URL |
-| `loadSsab(bytes, pack?, baseUrl?): Promise` | Register bytes and select that pack |
-| `addSsab(bytes, pack?, baseUrl?): Promise` | Register bytes only |
+| `load(src, read?): Promise` | Pack, atlases, sibling packs — from a URL. `read(url)` answers in place of `fetch`; see [In a browser](../guide/loading.md#in-a-browser) |
+| `loadSsab(bytes, pack?, baseUrl?, read?): Promise` | Register bytes and select that pack |
+| `addSsab(bytes, pack?, baseUrl?, read?): Promise` | Register bytes only |
 | `missingAssets()` | What did not arrive. **Not a rejection** |
 | `textureRefs(pack?)` / `embeddedTextures(pack?)` | What atlases a pack asks for |
 | `animationNames()` / `partNames()` / `cellmapNames()` / `cellNames(cellmap)` | What the pack offers |
@@ -154,4 +154,4 @@ Documented in full on [its own page](./web-component.md); the attributes, in sho
 | `speed-scale` | A multiple of the authored rate |
 | `fit`, `align`, `flip-x`, `flip-y` | How the authored canvas fits the element: `contain` and `center` by default, `fit="none"` for 1:1 |
 
-`element.loadSrc(src, pack?, animation?)` switches packs from script and resolves to the animation names. It dispatches `animationstarted`, `animationfinished`, `animationlooped`, `userdata`, `signal` and `audio` as DOM events, and `load` once a pack has loaded; the attributes above can be changed on a live element. Everything `SsPlayerWeb` offers, motion blending included, is on `element.player`.
+`element.loadSrc(src, pack?, animation?, read?)` switches packs from script and resolves to the animation names. It dispatches `animationstarted`, `animationfinished`, `animationlooped`, `userdata`, `signal` and `audio` as DOM events, and `load` once a pack has loaded; the attributes above can be changed on a live element. Everything `SsPlayerWeb` offers, motion blending included, is on `element.player`.

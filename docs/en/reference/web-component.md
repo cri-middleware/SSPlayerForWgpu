@@ -91,7 +91,7 @@ el.player.setLoopCount(1);
 el.player.setPartVisibilityOverride('hat', true, false);
 ```
 
-### `loadSrc(src, pack?, animation?)`
+### `loadSrc(src, pack?, animation?, read?)`
 
 Fetches and plays a `.ssab`, and is how you switch packs at runtime. It resolves to the array of
 animation names, so a UI can offer them.
@@ -103,6 +103,9 @@ again) loads what its `src` says; a page that moves elements sets the attribute 
 
 Passing `pack` makes the element fetch the bytes itself and register them under that name, since
 `load` takes no name override.
+
+`read` stands in for `fetch`, as it does for `SsPlayerWeb.load`: it is how an element plays a
+dropped folder. See [In a browser](../guide/loading.md#in-a-browser).
 
 Calls are **serialised**: a player is lifted out of the shared context while it loads, so the
 context rejects a second load started before the first settles. Switching packs is usually a user

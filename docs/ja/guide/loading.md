@@ -102,7 +102,7 @@
 
 ## すでにバイト列を持っている場合
 
-自分でファイルを取得したホスト（ドラッグ＆ドロップ、バンドラ、アーカイブ、エンジンのアセットシステム）は、バイト列を直接登録します。
+自分でファイルを取得したホスト（ドラッグ＆ドロップ、バンドラ、アーカイブ、エンジンのアセットシステム）は、バイト列を直接登録します。アトラスや兄弟パックを `.ssab` の隣に置いたフォルダごとドロップされた場合は、リーダーを渡して `load` 1 回で読むほうが向いています。[ブラウザでは](#in-a-browser)を参照してください。
 
 === "Rust"
 
@@ -199,6 +199,22 @@ player.load_with(&mut my_loader, "res://characters/Ringo.ssab").await?;
 
 !!! note "代わりに `std::fs` を使わないでください"
     wasm32 でもコンパイルは通り、実行時に失敗します。アーカイブ内のファイルも開けません。この継ぎ目はまさにその 2 つのために存在します。
+
+### ブラウザでは { #in-a-browser }
+
+Web フェイスは URL の解決を自分で行うので、差し替えるのは `fetch` だけです。`load` に `read(url)` を渡すと、走査が求めるファイル（`.ssab`、そのアトラス、兄弟パック）はすべてそちらから取られます。渡されるのは、fetch なら使ったはずの絶対 URL です。`ArrayBuffer`・`Uint8Array`・`Blob` のどれかを返し、持っていないファイルには `null` を返します。
+
+ドロップされたフォルダはこの形で再生します。中身を自分で決めた URL の下に並べ、そこから読み込みます。
+
+```js
+// ドロップごとに base を分ける。アトラスは URL で識別されるので、
+// 同じ base に 2 つ目のフォルダを置くと、同名のアトラスが読み込み済みと見なされ、1 つ目の絵で描かれる。
+const base = new URL(`dropped/${++drops}/`, location.href);
+const files = new Map(dropped.map(({ path, file }) => [new URL(path, base).href, file]));
+await player.load(new URL('Ringo/Ringo.ssab', base).href, (url) => files.get(url));
+```
+
+`loadSsab`・`addSsab`・要素の `loadSrc` も、最後の引数に同じ `read` を取ります。<a href="../../demo/" target="_blank" rel="noreferrer">WebGPU デモ</a>は、ドロップされたフォルダをこの方法で再生しています。
 
 ## 次に読む
 
