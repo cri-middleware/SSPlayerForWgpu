@@ -58,7 +58,7 @@ script — and all four share the same staged package and the same data.
 
 | Page | What it is for |
 |---|---|
-| [`index.html`](./index.html) | The two shapes of the API side by side: one `<ss-player-webgpu>` element, and one canvas driven directly with several players on it, printing `SceneStats`. Both export modes are selectable, which is what exercises the fetch path as well as the embedded one. |
+| [`index.html`](./index.html) | The two shapes of the API side by side: one `<ss-player-webgpu>` element, and one canvas driven directly with several players on it, printing `SceneStats`. Both export modes are selectable, which is what exercises the fetch path as well as the embedded one. A folder dropped on the page joins the element's pack list, played through a `read` in place of `fetch`, and what it lacked is listed from `missingAssets()`. |
 | [`element.html`](./element.html) | The Web Component on its own: the declarative markup, a panel that sets its attributes live (`src`, `animation`, `speed-scale`, `fit`, `align`), the six events as they arrive, `element.player` for transport and loop count, and a copy-pasteable snippet that tracks the panel. |
 | [`multi.html`](./multi.html) | Many elements on one page, in article flow — block, inline, overlapped with HTML above and below, and styled with `border-radius` / `filter`. The HUD counts elements, canvases and **distinct `SsContextWeb` objects**, so "one device however many elements" is measured rather than claimed; per-animation frame counters make `pause-when-hidden` visible. |
 | [`part-follow.html`](./part-follow.html) | Following a part from the host, since the player has no follow object of its own: `partTransform(name)` read back every frame, and a DOM marker over the canvas placed at it. Skinned (bone-bound) mesh parts are marked ⚠, because their own transform stays at the setup pose while the bones draw the vertices. Its prose switches between Japanese and English. |
@@ -151,12 +151,14 @@ switching motions must not carry a promise.
 | instance pack | `<dir>/<packName>.ssab` | fetches it by the name the exporter wrote, then its atlases, then whatever *it* references |
 
 A URL is what makes this one call: it answers both "what are the bytes" and
-"what do the siblings resolve against". `loadSsab(bytes, pack?, baseUrl?)` is the
-same thing for bytes that are not URL-addressable — a drop, a bundler, an archive
-— where `baseUrl` supplies the second answer and `pack` can override the pack's
-name. Omit `pack`: the name the exporter wrote is the one external instance parts
-are resolved against (`ref_anime_pack`), and a name of your own **silently breaks
-those references**.
+"what do the siblings resolve against". Files the page holds rather than serves —
+a dropped folder, an unpacked archive — keep that one call: give them URLs of
+your own, and pass `load(src, read)` a `read(url)` that answers from them in place
+of `fetch`. `loadSsab(bytes, pack?, baseUrl?, read?)` is the same thing for bytes
+with no URL at all — a bundler's import — where `baseUrl` supplies the second
+answer and `pack` can override the pack's name. Omit `pack`: the name the
+exporter wrote is the one external instance parts are resolved against
+(`ref_anime_pack`), and a name of your own **silently breaks those references**.
 
 These are `async` only because a browser leaves no choice — `fetch` and
 `createImageBitmap` are asynchronous where Godot's `ResourceLoader::load` is not.

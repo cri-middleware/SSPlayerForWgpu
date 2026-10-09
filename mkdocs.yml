@@ -32,6 +32,7 @@ nav:
       - C / C++: start/cpp.md
       - Web (WebGPU): start/web.md
       - Preparing assets: start/assets.md
+      - ▶️ Live demo: demo/index.html
   - 🎬 Guide:
       - Scopes and names: guide/concepts.md
       - Playback and transport: guide/playback.md
@@ -46,6 +47,7 @@ nav:
       - Performance: guide/performance.md
   - 📖 API reference:
       - Rust: reference/rust.md
+      - 📦 Rust API (rustdoc): api/ssplayer_wgpu/index.html
       - C: reference/c.md
       - JavaScript: reference/js.md
       - Web Component: reference/web-component.md
@@ -58,5 +60,3 @@ nav:
       - From SS6Player for CPP: migration/from-ss6-cpp.md
   - 🛠️ For contributors: contributing/index.md
   - ⚖️ License: license.md
-  - ▶️ Live demo: demo/index.html
-  - 📦 Rust API (rustdoc): api/ssplayer_wgpu/index.html

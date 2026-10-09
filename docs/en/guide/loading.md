@@ -118,7 +118,8 @@ always a missing entry here.
 ## Bytes you already have
 
 A host that fetched the file itself — a drag-and-drop, a bundler, an archive, an engine's asset
-system — registers the bytes directly instead.
+system — registers the bytes directly instead. A whole dropped folder, atlases and sibling packs
+beside the `.ssab`, is better served by one `load` with a reader: see [In a browser](#in-a-browser).
 
 === "Rust"
 
@@ -228,6 +229,28 @@ you know whether you are holding a filesystem path, a URL or an archive key.
 !!! note "Do not reach for `std::fs` instead"
     It compiles on wasm32 and fails at runtime, and it cannot open a file that is inside an archive.
     The seam exists for exactly those two cases.
+
+### In a browser { #in-a-browser }
+
+The web face resolves URLs itself, so what you replace there is only the `fetch`. Pass `load` a
+`read(url)`, and every file the walk asks for — the `.ssab`, its atlases, its sibling packs — comes
+from you instead, by the absolute URL a fetch would have used. Answer an `ArrayBuffer`, a
+`Uint8Array` or a `Blob`, or `null` for a file you do not have.
+
+That is how a page plays a dropped folder: file its contents under URLs of your own choosing, and
+load from there.
+
+```js
+// One base per drop. Atlases are keyed by URL, so a second folder under the first
+// one's base would find a same-named atlas already loaded and draw the first one's.
+const base = new URL(`dropped/${++drops}/`, location.href);
+const files = new Map(dropped.map(({ path, file }) => [new URL(path, base).href, file]));
+await player.load(new URL('Ringo/Ringo.ssab', base).href, (url) => files.get(url));
+```
+
+`loadSsab`, `addSsab` and the element's `loadSrc` take the same `read` as their last argument. The
+<a href="../demo/" target="_blank" rel="noreferrer">WebGPU demo</a> plays a folder dropped on it
+this way.
 
 ## Next
 

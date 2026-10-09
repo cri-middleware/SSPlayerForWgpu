@@ -21,7 +21,7 @@
 // the import: a bundle that only wants the context API must not be made to carry
 // an element it never puts on a page.
 import { sharedContext, restoreSharedDevice } from './index.js';
-import type { SsContextWeb, SsSurfaceWeb, SsPlayerWeb } from '../wasm/ssplayer_wgpu.js';
+import type { SsAssetReader, SsContextWeb, SsSurfaceWeb, SsPlayerWeb } from '../wasm/ssplayer_wgpu.js';
 
 /** The attributes that only move the character, so a change re-fits and nothing else. */
 const FIT_ATTRIBUTES = ['fit', 'align', 'flip-x', 'flip-y'];
@@ -340,16 +340,19 @@ export class SsPlayerWebGPUElement extends HTMLElement {
    * usually a user gesture — a dropdown, a scroll — and two of those in quick
    * succession must switch twice, not fail, so each waits for the one before it
    * and the last one called is the one left on screen.
+   *
+   * `read` stands in for `fetch`, as it does for `SsPlayerWeb.load`: it is how a
+   * page plays a dropped folder.
    */
-  loadSrc(src: string, pack?: string | null, animation?: string | null): Promise<string[] | undefined> {
-    const run = this._loads.then(() => this._loadSrc(src, pack, animation));
+  loadSrc(src: string, pack?: string | null, animation?: string | null, read?: SsAssetReader | null): Promise<string[] | undefined> {
+    const run = this._loads.then(() => this._loadSrc(src, pack, animation, read));
     // What the next call waits on must settle, so the chain survives a load that
     // rejected. The caller still sees `run` itself, rejection and all.
     this._loads = run.catch(() => {});
     return run;
   }
 
-  private async _loadSrc(src: string, pack?: string | null, animation?: string | null): Promise<string[] | undefined> {
+  private async _loadSrc(src: string, pack?: string | null, animation?: string | null, read?: SsAssetReader | null): Promise<string[] | undefined> {
     if (!this.player) return;
     // One call fetches the pack, its atlases and any sibling `.ssab` its instance
     // parts play from — a URL answers both "what bytes" and
@@ -358,10 +361,13 @@ export class SsPlayerWebGPUElement extends HTMLElement {
     // through `loadSsab` with its own bytes.
     if (pack) {
       const url = new URL(src, location.href);
-      const bytes = new Uint8Array(await (await fetch(url)).arrayBuffer());
-      await this.player.loadSsab(bytes, pack, url.href);
+      const answer = read ? await read(url.href) : await (await fetch(url)).arrayBuffer();
+      if (answer == null) throw new Error(`could not read ${url.href}`);
+      // A dropped `File` is a Blob, whose bytes are one await further.
+      const bytes = new Uint8Array(answer instanceof Blob ? await answer.arrayBuffer() : answer);
+      await this.player.loadSsab(bytes, pack, url.href, read);
     } else {
-      await this.player.load(src);
+      await this.player.load(src, read);
     }
     // Disconnected while the bytes were in flight: `disconnectedCallback` has
     // destroyed the player, and calling a destroyed handle is not a diagnostic
