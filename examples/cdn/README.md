@@ -30,9 +30,6 @@ these pages on every release.
 
 ## Run it
 
-🚧 The package is not on npm yet. Until its first version is published, jsDelivr has nothing to
-serve and both pages fail to load it.
-
 Both pages `fetch()` an `.ssab`, so serve them over http(s): opening the file directly (`file://`)
 fails on CORS. They need a browser with WebGPU.
 

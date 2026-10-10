@@ -17,43 +17,27 @@ this for you.
 |---|---|
 | Rust | 1.99 or newer, edition 2024 |
 | wgpu | the **30** line — your app and the player must resolve to one `wgpu`, so a different major is a compile error |
-| SDK access | while [SpriteStudio-SDK](https://github.com/cri-middleware/SpriteStudio-SDK) is private, whoever builds needs access to it |
 
 ## Install
 
-=== "Released"
+Add the crate as a git dependency; cargo checks out the `SpriteStudio-SDK` submodule for you:
 
-    🚧 **Not on crates.io yet.** `cargo publish` refuses a crate whose dependencies carry no
-    version requirement, so this waits on `ssab` and `ssruntime` publishing from the SDK
-    repository first. When they do, it becomes:
+```toml
+[dependencies]
+ssplayer-wgpu = { git = "https://github.com/cri-middleware/SSPlayerForWgpu" }
+```
 
-    ```toml
-    [dependencies]
-    ssplayer-wgpu = "7.0.0-beta.1"
-    ```
+To **vendor the source into your own tree** instead — a submodule of your repository, or a
+checkout you patch — point at the crate directory rather than the repository root:
 
-    Nothing else about your code changes — the git dependency below builds the same crate.
+```toml
+[dependencies]
+ssplayer-wgpu = { path = "third_party/SSPlayerForWgpu/libs/ssplayer-wgpu" }
+```
 
-=== "From source"
-
-    A git dependency works today, and cargo checks out the `SpriteStudio-SDK` submodule for you:
-
-    ```toml
-    [dependencies]
-    ssplayer-wgpu = { git = "https://github.com/cri-middleware/SSPlayerForWgpu" }
-    ```
-
-    To **vendor the source into your own tree** instead — a submodule of your repository, or a
-    checkout you patch — point at the crate directory rather than the repository root:
-
-    ```toml
-    [dependencies]
-    ssplayer-wgpu = { path = "third_party/SSPlayerForWgpu/libs/ssplayer-wgpu" }
-    ```
-
-    That path is a crate, not a workspace, so it slots into yours. Run
-    `git submodule update --init --recursive` in the checkout: the player's own `SpriteStudio-SDK`
-    submodule is a path dependency, and without it cargo cannot resolve `ssruntime` / `ssab`.
+That path is a crate, not a workspace, so it slots into yours. Run
+`git submodule update --init --recursive` in the checkout: the player's own `SpriteStudio-SDK`
+submodule is a path dependency, and without it cargo cannot resolve `ssruntime` / `ssab`.
 
 ## The three objects
 

@@ -18,21 +18,18 @@
 
 ## 📚 ドキュメント
 
-- [**ドキュメントサイト**](https://cri-middleware.github.io/SSPlayerForWgpu/ja/) — まずはここから。ホストごとの導入経路 (Rust / Bevy / C・C++ / WebGPU)、共通ガイド、各フェイスの API リファレンス、
-  WebGPU のライブデモがあります。🚧 このリポジトリの Pages ワークフローが公開されてから有効になります。それまでは `./scripts/build-pages.sh serve=yes` でローカルにビルドするか、
-  [`docs/ja/`](./docs/ja/index.md) を直接お読みください
+- [**ドキュメントサイト**](https://cri-middleware.github.io/SSPlayerForWgpu/ja/) — まずはここから。ホストごとの導入経路 (Rust / Bevy / C・C++ / WebGPU)、共通ガイド、各フェイスの API リファレンス、WebGPU のライブデモがあります。ページの原稿はリポジトリ内の [`docs/ja/`](./docs/ja/index.md) です
 - [**English documentation**](https://cri-middleware.github.io/SSPlayerForWgpu/) — 同じサイトの英語版（リポジトリ内では [`docs/en/`](./docs/en/index.md)）
 - [**制約と適用範囲**](./docs/ja/limitations.md) — 現在描けるもの、ホスト側に委ねているもの
 - [**SS6Player for CPP からの移行**](./docs/ja/migration/from-ss6-cpp.md)
 - [**ROADMAP**](./ROADMAP.md) — 実装済みのもの、予定しているもの、意図的に見送ったもの
-- [**AI アシスタント向け**](https://cri-middleware.github.io/SSPlayerForWgpu/ja/llms.txt) — このドキュメントを Markdown で提供します。`llms.txt` はページの目次、`llms-full.txt` は全ページを 1 ファイルにまとめたものです — 🚧 初回リリース後に公開
-- [**SpriteStudio Docs（ポータル）**](https://cri-middleware.github.io/SpriteStudio-Docs/ja/) — SDK と全公式 Player の入口 — 🚧 初回リリース後に公開
+- [**AI アシスタント向け**](https://cri-middleware.github.io/SSPlayerForWgpu/ja/llms.txt) — このドキュメントを Markdown で提供します。`llms.txt` はページの目次、`llms-full.txt` は全ページを 1 ファイルにまとめたものです
+- [**SpriteStudio Docs（ポータル）**](https://cri-middleware.github.io/SpriteStudio-Docs/ja/) — SDK と全公式 Player の入口
 
 ## 📦 インストール
 
 **アプリケーションで使う場合**はこのまま下へ。ホストを選んで、[使い方](#-使い方)へ。最初の 1 体から先（イベント、パーツ単位の上書き、モーションブレンディング、デバイスロストからの復帰）も同じ道の続きで、[クレートの README](./libs/ssplayer-wgpu) と[ドキュメント](./docs/ja/index.md)にあります。**プレイヤー自体を開発する場合**は[コントリビュート](#-コントリビュート)へ。
 
-> **`SpriteStudio-SDK` リポジトリが private である間は、以下のどの経路でもそのアクセス権が必要です。**
 > このプレイヤーは公開済みの C-API 経由ではなく `ssruntime` と `ssab` を Rust クレートとして直接リンクするため、SDK は git submodule として入ります。
 
 ### Rust
@@ -43,8 +40,6 @@
 [dependencies]
 ssplayer-wgpu = { git = "https://github.com/cri-middleware/SSPlayerForWgpu" }
 ```
-
-> 🚧 **crates.io にはまだありません。** `cargo publish` はバージョン要求を持たない依存を含むクレートを拒否するため、SDK 側のクレートが先に公開されるのを待っています。[ROADMAP](./ROADMAP.md) を参照してください。
 
 **Bevy** アプリの中で使う場合は、代わりにアダプタへ依存してください。プレイヤーを引き込んだ上で、キャラクターを Bevy 自身の 2D 描画に組み込むための 3 つのコンポーネント
 (`SsPlayer` / `SsTransform` / `SsPlayback`) を追加します:
@@ -59,7 +54,9 @@ ssplayer-bevy = { git = "https://github.com/cri-middleware/SSPlayerForWgpu" }
 
 ### C と C++
 
-C フェイスは cdylib / staticlib と、生成されたヘッダです。🚧 **ビルド済みの配布が用意されるまでは**（このブロックの下の注記を参照）、チェックアウトからのビルドがこのホストでの導入経路になります:
+C フェイスは cdylib / staticlib と、生成されたヘッダです。各 [`ssplayer-wgpu` の Release](https://github.com/cri-middleware/SSPlayerForWgpu/releases?q=ssplayer-wgpu&expanded=true) の **Assets** に、静的ライブラリがプラットフォームごとの zip で付いています。`ssplayer-wgpu-windows-x86_64.zip`（MSVC、`/MD` ランタイム）と `ssplayer-wgpu-macos-universal.zip`（arm64 + x86_64）で、どちらも `include/`・`lib/`・`LICENSE.md`・`LICENSE.ja.md`・`THIRD_PARTY_NOTICES.md` を含み、`SHA256SUMS` が添えてあります。リンクの方法と、静的ランタイム（`/MT`）向けのビルドは [C / C++ ではじめる](./docs/ja/start/cpp.md) にあります。
+
+Linux の場合や共有ライブラリが必要な場合は、チェックアウトからビルドします:
 
 ```bash
 git clone --recursive https://github.com/cri-middleware/SSPlayerForWgpu.git
@@ -80,11 +77,6 @@ bin/libs/<platform>/<arch>/libssplayer_wgpu.{a,dylib}    # Windows では .lib/.
 ビルド設定をこの 2 つのディレクトリに向けてください。[`examples/`](#-サンプル) 以下の C++ ビューアがまさにそれを CMake で行っており、動く実例としては最短です。macOS では Metal、Windows では DX12、
 Linux では Vulkan を駆動し、それぞれ丸ごとコピーして持ち出せる程度に自己完結しています。
 
-> 🚧 **ビルド済みバイナリの配布はまだありません。** 想定している経路は、プラットフォームごとのアーカイブ `ssplayer-wgpu-<platform>-<arch>.zip` を
-> [GitHub Releases](https://github.com/cri-middleware/SSPlayerForWgpu/releases) へ置く形で、SDK や他の
-> Player の配布方法に揃えます。中身は同じヘッダとライセンスで、ライブラリは `lib/` 直下に入ります。リリースワークフローと `SHA256SUMS` はすでにあります。足りていないのは macOS の署名と notarization、そして最初のリリースです。
-> [ROADMAP](./ROADMAP.md) を参照してください。
-
 ### ブラウザ (WebGPU)
 
 ブラウザ向けフェイスは npm パッケージ
@@ -100,6 +92,12 @@ import { defineSsPlayerWebGPUElement } from '@spritestudio/ssplayer-wgpu/element
 1 サーフェス、1 パスに任意個数のキャラクター）。カスタム要素はその上に載る 1 キャラクター用の簡便なラッパーで、使わないバンドルが抱え込まずに済むよう独立したエントリポイントに分けてあります。
 JavaScript 側から読むべき README は[パッケージ自身のもの](./packages/ssplayer-wgpu/README.ja.md)です。
 
+npm からインストールします:
+
+```bash
+npm i @spritestudio/ssplayer-wgpu@beta
+```
+
 このリポジトリからビルドする場合:
 
 ```bash
@@ -108,8 +106,6 @@ JavaScript 側から読むべき README は[パッケージ自身のもの](./pa
 
 `wasm-pack` に加えて `pnpm` (`corepack enable`) が必要で、そのディレクトリからそのまま publish できる状態になります。同じビルドが [`examples/web`](./examples/web) にも配置されるため、デモは `npm i` で得られるものとまったく同じものを動かしています。wasm 側の実体は `web` フィーチャの下の
 `libs/ssplayer-wgpu/src/web.rs` です。
-
-> 🚧 **npm にはまだありません。** パッケージは出荷時の形（スコープ付きの名前、独立したエントリポイントのカスタム要素、専用の README）になっていますが、publish する経路がまだありません。バージョン更新と `npm publish` のステップがこれからです。[ROADMAP](./ROADMAP.md) を参照してください。
 
 ## ⚡ 使い方
 

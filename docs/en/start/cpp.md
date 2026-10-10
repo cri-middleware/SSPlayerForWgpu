@@ -32,11 +32,9 @@ functions a frame; it renders through **DirectX 12 on Windows, Metal on macOS an
 
 === "Released"
 
-    🚧 **No release cut yet.** The workflow that builds these exists
-    (`.github/workflows/release.yml`); the first tag is what publishes them. They will appear on
-    the [Releases page](https://github.com/cri-middleware/SSPlayerForWgpu/releases) as one zip per
-    platform, each holding `include/`, `lib/`, `LICENSE.md`, `LICENSE.ja.md` and
-    `THIRD_PARTY_NOTICES.md`:
+    Each [`ssplayer-wgpu` Release](https://github.com/cri-middleware/SSPlayerForWgpu/releases?q=ssplayer-wgpu&expanded=true)
+    carries one zip per platform under **Assets**, each holding `include/`, `lib/`, `LICENSE.md`,
+    `LICENSE.ja.md` and `THIRD_PARTY_NOTICES.md`:
 
     | Zip | For |
     |---|---|
