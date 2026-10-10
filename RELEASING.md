@@ -10,7 +10,7 @@ This releases the player — the `ssplayer-wgpu` crate, its C face and the npm p
 
 Every block runs as written in a new shell: it works out what it needs from git and GitHub. One value is set by hand, written as a placeholder to fill in: `<version>`, the version from step 1, as in `7.0.0-beta.2`, in steps 4 and 5 and their retry under [Undoing a release](#undoing-a-release). The block that assembles a run's artifacts takes the run as `<run-id>` the same way. Left as it is, a placeholder stops its line with a syntax error.
 
-An agent can run every block. A person decides two steps: the merge in step 2, which puts the notes on `main`, and step 6, which publishes the Release for good.
+An agent can run every block. A person sorts the scan's matches in step 4 and decides two steps: the merge in step 2, which puts the notes on `main`, and step 6, which publishes the Release for good.
 
 ### 1. Decide the version
 
@@ -64,6 +64,17 @@ RUN=$(gh workflow run release.yml --ref main -f versions="ssplayer-wgpu@${VERSIO
 gh run watch "${RUN:?}" --exit-status
 gh run download "${RUN:?}" -n ssplayer-wgpu-release-dist -D "qa/$RUN"
 gh run view "${RUN:?}" --exit-status > /dev/null  # the block fails when the run did
+```
+
+Scan `main` too, for code copied from others. `scripts/scan-snippets.sh` matches the files tracked at `HEAD` against public open-source code with SCANOSS, sending their fingerprints rather than the code; it writes its report to `qa/scanoss-<commit>.json` and prints the matches. It runs on this machine, and needs Python 3: SCANOSS's free service limits calls per address, and GitHub's runners share addresses it has often limited already. `provenance.yml` runs ScanCode, which finds copyright and license notices, and keeps its report and a summary on the run (`provenance`); the block downloads them into `qa/<run ID>` and prints the summary. **A person sorts the matches.** A match with the earlier SpriteStudio Players and SDK is our own code. A match with a library this repository bundles must be listed in `THIRD_PARTY_NOTICES.md`. Anything else is rewritten, unless its license, read at its source, is compatible with BSD-3-Clause and the code keeps the notice that license asks for. Fix a match by a pull request into `main` before step 5, and run the block again.
+
+```bash
+git switch main && git pull --ff-only &&
+  RUN=$(gh workflow run provenance.yml --ref main | sed 's|.*/||') &&
+  scripts/scan-snippets.sh &&
+  gh run watch "${RUN:?}" --exit-status &&
+  gh run download "${RUN:?}" -n provenance -D "qa/$RUN" &&
+  cat "qa/$RUN/summary.md"
 ```
 
 ### 5. Run the release
@@ -166,7 +177,7 @@ scripts/build-release.sh                          # -> release-dist/
 
 どのブロックも、新しいシェルで書かれたとおりに実行できます。必要なものは git と GitHub から求めます。手で設定する値は 1 つで、埋めるプレースホルダとして書いてあります。手順 4・5 と「リリースの取り消し」にあるその再実行の `<version>` で、手順 1 で決めたバージョン（`7.0.0-beta.2` など）を入れます。run の成果物を組み立てるブロックも、その run を `<run-id>` で受け取ります。埋めずに実行すると、その行は構文エラーで止まります。
 
-どのブロックもエージェントに実行させられます。2 つの手順は人が判断します。ノートを `main` に入れる手順 2 のマージと、取り消せない公開を行う手順 6 です。
+どのブロックもエージェントに実行させられます。手順 4 の照合の一致は人が仕分けます。2 つの手順は人が判断します。ノートを `main` に入れる手順 2 のマージと、取り消せない公開を行う手順 6 です。
 
 ### 1. バージョンを決める
 
@@ -220,6 +231,17 @@ RUN=$(gh workflow run release.yml --ref main -f versions="ssplayer-wgpu@${VERSIO
 gh run watch "${RUN:?}" --exit-status
 gh run download "${RUN:?}" -n ssplayer-wgpu-release-dist -D "qa/$RUN"
 gh run view "${RUN:?}" --exit-status > /dev/null  # run が失敗していればブロックも失敗する
+```
+
+`main` で、他者のコードを写した箇所が無いかも照合します。`scripts/scan-snippets.sh` は、`HEAD` で追跡しているファイルを、SCANOSS で公開されているオープンソースのコードと照合します。送るのはコードではなく指紋です。報告を `qa/scanoss-<commit>.json` に書き、一致を表示します。このスクリプトは手元で実行し、Python 3 が要ります。SCANOSS の無料のサービスはアドレスごとに回数を制限していて、GitHub のランナーはすでに制限されたアドレスを共有していることが多いためです。`provenance.yml` は ScanCode で著作権表示とライセンスの記述を見つけ、報告と一覧を run に残します（`provenance`）。ブロックはそれを `qa/<run ID>` にダウンロードし、一覧を表示します。**一致は人が仕分けます。** 以前の SpriteStudio の Player・SDK との一致は、自社のコードです。このリポジトリが同梱するライブラリとの一致は、`THIRD_PARTY_NOTICES.md` に載っていなければなりません。それ以外は書き直します。残せるのは、出所で確かめたライセンスが BSD-3-Clause と両立し、そのライセンスが求める表示をコードに残すときだけです。一致を直すときは、手順 5 の前にプルリクエストで `main` を直し、このブロックをもう一度実行します。
+
+```bash
+git switch main && git pull --ff-only &&
+  RUN=$(gh workflow run provenance.yml --ref main | sed 's|.*/||') &&
+  scripts/scan-snippets.sh &&
+  gh run watch "${RUN:?}" --exit-status &&
+  gh run download "${RUN:?}" -n provenance -D "qa/$RUN" &&
+  cat "qa/$RUN/summary.md"
 ```
 
 ### 5. リリースを実行する
