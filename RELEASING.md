@@ -66,11 +66,13 @@ gh run download "${RUN:?}" -n ssplayer-wgpu-release-dist -D "qa/$RUN"
 gh run view "${RUN:?}" --exit-status > /dev/null  # the block fails when the run did
 ```
 
-Scan `main` too, for code copied from others. `provenance.yml` runs SCANOSS, which matches the tracked files against public open-source code by sending their fingerprints rather than the code, and ScanCode, which finds copyright and license notices. It keeps both reports and a summary of what they found on the run (`provenance`); the block downloads them into `qa/<run ID>` and prints the summary. **A person sorts the matches.** A match with the earlier SpriteStudio Players and SDK is our own code. A match with a library this repository bundles must be listed in `THIRD_PARTY_NOTICES.md`. Anything else is rewritten, unless its license, read at its source, is compatible with BSD-3-Clause and the code keeps the notice that license asks for. Fix a match by a pull request into `main` before step 5, and run the block again.
+Scan `main` too, for code copied from others. `scripts/scan-snippets.sh` matches the files tracked at `HEAD` against public open-source code with SCANOSS, sending their fingerprints rather than the code; it writes its report to `qa/scanoss-<commit>.json` and prints the matches. It runs on this machine, and needs Python 3: SCANOSS's free service limits calls per address, and GitHub's runners share addresses it has often limited already. `provenance.yml` runs ScanCode, which finds copyright and license notices, and keeps its report and a summary on the run (`provenance`); the block downloads them into `qa/<run ID>` and prints the summary. **A person sorts the matches.** A match with the earlier SpriteStudio Players and SDK is our own code. A match with a library this repository bundles must be listed in `THIRD_PARTY_NOTICES.md`. Anything else is rewritten, unless its license, read at its source, is compatible with BSD-3-Clause and the code keeps the notice that license asks for. Fix a match by a pull request into `main` before step 5, and run the block again.
 
 ```bash
-RUN=$(gh workflow run provenance.yml --ref main | sed 's|.*/||')
-gh run watch "${RUN:?}" --exit-status &&
+git switch main && git pull --ff-only &&
+  RUN=$(gh workflow run provenance.yml --ref main | sed 's|.*/||') &&
+  scripts/scan-snippets.sh &&
+  gh run watch "${RUN:?}" --exit-status &&
   gh run download "${RUN:?}" -n provenance -D "qa/$RUN" &&
   cat "qa/$RUN/summary.md"
 ```
@@ -231,11 +233,13 @@ gh run download "${RUN:?}" -n ssplayer-wgpu-release-dist -D "qa/$RUN"
 gh run view "${RUN:?}" --exit-status > /dev/null  # run が失敗していればブロックも失敗する
 ```
 
-`main` で、他者のコードを写した箇所が無いかも照合します。`provenance.yml` は SCANOSS と ScanCode を実行します。SCANOSS は、追跡しているファイルを公開されているオープンソースのコードと照合します。送るのはコードではなく指紋です。ScanCode は、著作権表示とライセンスの記述を見つけます。2 つの報告と、見つかったものの一覧は run に残ります（`provenance`）。ブロックはそれを `qa/<run ID>` にダウンロードし、一覧を表示します。**一致は人が仕分けます。** 以前の SpriteStudio の Player・SDK との一致は、自社のコードです。このリポジトリが同梱するライブラリとの一致は、`THIRD_PARTY_NOTICES.md` に載っていなければなりません。それ以外は書き直します。残せるのは、出所で確かめたライセンスが BSD-3-Clause と両立し、そのライセンスが求める表示をコードに残すときだけです。一致を直すときは、手順 5 の前にプルリクエストで `main` を直し、このブロックをもう一度実行します。
+`main` で、他者のコードを写した箇所が無いかも照合します。`scripts/scan-snippets.sh` は、`HEAD` で追跡しているファイルを、SCANOSS で公開されているオープンソースのコードと照合します。送るのはコードではなく指紋です。報告を `qa/scanoss-<commit>.json` に書き、一致を表示します。このスクリプトは手元で実行し、Python 3 が要ります。SCANOSS の無料のサービスはアドレスごとに回数を制限していて、GitHub のランナーはすでに制限されたアドレスを共有していることが多いためです。`provenance.yml` は ScanCode で著作権表示とライセンスの記述を見つけ、報告と一覧を run に残します（`provenance`）。ブロックはそれを `qa/<run ID>` にダウンロードし、一覧を表示します。**一致は人が仕分けます。** 以前の SpriteStudio の Player・SDK との一致は、自社のコードです。このリポジトリが同梱するライブラリとの一致は、`THIRD_PARTY_NOTICES.md` に載っていなければなりません。それ以外は書き直します。残せるのは、出所で確かめたライセンスが BSD-3-Clause と両立し、そのライセンスが求める表示をコードに残すときだけです。一致を直すときは、手順 5 の前にプルリクエストで `main` を直し、このブロックをもう一度実行します。
 
 ```bash
-RUN=$(gh workflow run provenance.yml --ref main | sed 's|.*/||')
-gh run watch "${RUN:?}" --exit-status &&
+git switch main && git pull --ff-only &&
+  RUN=$(gh workflow run provenance.yml --ref main | sed 's|.*/||') &&
+  scripts/scan-snippets.sh &&
+  gh run watch "${RUN:?}" --exit-status &&
   gh run download "${RUN:?}" -n provenance -D "qa/$RUN" &&
   cat "qa/$RUN/summary.md"
 ```
