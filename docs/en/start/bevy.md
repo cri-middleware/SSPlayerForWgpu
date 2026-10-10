@@ -23,26 +23,14 @@ resolving a single `wgpu`.
 
 ## Install
 
-=== "Released"
+```toml
+[dependencies]
+ssplayer-bevy = { git = "https://github.com/cri-middleware/SSPlayerForWgpu" }
+```
 
-    🚧 **Not on crates.io yet** — it waits on `ssplayer-wgpu`, which waits on the SDK crates.
-    When it lands:
-
-    ```toml
-    [dependencies]
-    ssplayer-bevy = "7.0.0-alpha.1"
-    ```
-
-=== "From source"
-
-    ```toml
-    [dependencies]
-    ssplayer-bevy = { git = "https://github.com/cri-middleware/SSPlayerForWgpu" }
-    ```
-
-    It pulls `ssplayer-wgpu` in; you do not depend on both. To vendor the source instead, point at
-    `libs/ssplayer-bevy` inside a checkout of this repository and run
-    `git submodule update --init --recursive` there.
+It pulls `ssplayer-wgpu` in; you do not depend on both. To vendor the source instead, point at
+`libs/ssplayer-bevy` inside a checkout of this repository and run
+`git submodule update --init --recursive` there.
 
 ## A whole app
 

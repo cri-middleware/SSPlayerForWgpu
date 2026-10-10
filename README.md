@@ -22,16 +22,15 @@ files, no re-authoring, no engine lock-in.
 
 - [**Documentation site**](https://cri-middleware.github.io/SSPlayerForWgpu/) — start here: one path per
   host (Rust / Bevy / C・C++ / WebGPU), a shared guide, the API reference for every face, and the
-  live WebGPU demo. 🚧 Live once this repository's Pages workflow is published; until then build it
-  locally with `./scripts/build-pages.sh serve=yes`, or read [`docs/en/`](./docs/en/index.md)
+  live WebGPU demo. Its source is [`docs/en/`](./docs/en/index.md) in the repository
 - [**日本語ドキュメント**](https://cri-middleware.github.io/SSPlayerForWgpu/ja/) — the same site
   ([`docs/ja/`](./docs/ja/index.md) in the repository)
 - [**Limitations & Scope**](./docs/en/limitations.md) — what this player draws today, and what it leaves to the host
 - [**Migrating from SS6Player for CPP**](./docs/en/migration/from-ss6-cpp.md)
 - [**ROADMAP**](./ROADMAP.md) — what is implemented, what is planned, and what was deliberately declined
-- [**For AI assistants**](https://cri-middleware.github.io/SSPlayerForWgpu/llms.txt) — these docs as Markdown: `llms.txt` indexes the pages and `llms-full.txt` holds all of them in one file — 🚧 live after the first release
+- [**For AI assistants**](https://cri-middleware.github.io/SSPlayerForWgpu/llms.txt) — these docs as Markdown: `llms.txt` indexes the pages and `llms-full.txt` holds all of them in one file
 - [**SpriteStudio Docs (portal)**](https://cri-middleware.github.io/SpriteStudio-Docs/) — the SDK and every
-  official player in one place — 🚧 live after the first release
+  official player in one place
 
 ## 📦 Installation
 
@@ -41,9 +40,8 @@ device-loss recovery) is the same path further in, in the [crate README](./libs/
 and the [documentation](./docs/en/index.md).
 **Working on the player itself?** [Contributing](#-contributing).
 
-> **While the `SpriteStudio-SDK` repository is private, every route below needs access to it.** The
-> player links `ssruntime` and `ssab` as Rust crates rather than through a released C-API, so the SDK
-> comes in as a git submodule.
+> The player links `ssruntime` and `ssab` as Rust crates rather than through a released C-API, so the
+> SDK comes in as a git submodule.
 
 ### Rust
 
@@ -54,9 +52,6 @@ needed:
 [dependencies]
 ssplayer-wgpu = { git = "https://github.com/cri-middleware/SSPlayerForWgpu" }
 ```
-
-> 🚧 **Not on crates.io yet.** `cargo publish` refuses a crate whose dependencies have no version
-> requirement, so this waits on the SDK crates being published first — see [ROADMAP](./ROADMAP.md).
 
 Inside a **Bevy** app, depend on the adapter instead — it pulls the player in and adds the three
 components (`SsPlayer` / `SsTransform` / `SsPlayback`) that draw a character as part of Bevy's own 2D rendering:
@@ -72,7 +67,16 @@ surprise.
 
 ### C and C++
 
-The C face is a cdylib / staticlib plus a generated header. 🚧 **Until there are prebuilt downloads** (see the note below this block), building it from a checkout is the install route for this host:
+The C face is a cdylib / staticlib plus a generated header. Each
+[`ssplayer-wgpu` Release](https://github.com/cri-middleware/SSPlayerForWgpu/releases?q=ssplayer-wgpu&expanded=true)
+carries the static library as one zip per platform under **Assets** —
+`ssplayer-wgpu-windows-x86_64.zip` (MSVC, `/MD` runtime) and `ssplayer-wgpu-macos-universal.zip`
+(arm64 + x86_64) — each holding `include/`, `lib/`, `LICENSE.md`, `LICENSE.ja.md` and
+`THIRD_PARTY_NOTICES.md`, with `SHA256SUMS` beside them.
+[Get started with C / C++](./docs/en/start/cpp.md) covers linking it, and building for the static
+runtime (`/MT`).
+
+On Linux, or for the shared library, build it from a checkout:
 
 ```bash
 git clone --recursive https://github.com/cri-middleware/SSPlayerForWgpu.git
@@ -94,13 +98,6 @@ Point your build at those two directories. The C++ viewers under [`examples/`](#
 that through CMake and are the shortest working reference — one drives Metal on macOS, one DX12 on
 Windows, one Vulkan on Linux, and each is self-contained enough to copy out whole.
 
-> 🚧 **No prebuilt downloads yet.** The intended route is a per-platform archive on
-> [GitHub Releases](https://github.com/cri-middleware/SSPlayerForWgpu/releases),
-> `ssplayer-wgpu-<platform>-<arch>.zip`, matching how the SDK and the other players ship: the same
-> header and licenses, with the library directly under `lib/`. The release workflow and its
-> `SHA256SUMS` already exist; what is missing is a macOS signing and
-> notarization step and the first release itself — see [ROADMAP](./ROADMAP.md).
-
 ### Browser (WebGPU)
 
 The browser face is an npm package, [`@spritestudio/ssplayer-wgpu`](./packages/ssplayer-wgpu) — the
@@ -116,7 +113,13 @@ per canvas, any number of characters in one pass — and the custom element is t
 convenience wrapper over them, in its own entry point so a bundle that does not use it does not carry
 it. The package's own [README](./packages/ssplayer-wgpu/README.md) is the JavaScript-facing one.
 
-Build it from this repository with:
+Install it from npm:
+
+```bash
+npm i @spritestudio/ssplayer-wgpu@beta
+```
+
+To build it from this repository instead:
 
 ```bash
 ./scripts/build.sh platform=web     # wasm-pack → packages/ssplayer-wgpu/wasm, tsdown → dist
@@ -125,10 +128,6 @@ Build it from this repository with:
 That needs `pnpm` (`corepack enable`) as well as `wasm-pack`, and it publishes from that directory as
 it stands. The same build is staged into [`examples/web`](./examples/web), so the demo drives exactly
 what an `npm i` gets. The wasm side is `libs/ssplayer-wgpu/src/web.rs`, behind the `web` feature.
-
-> 🚧 **Not on npm yet.** The package now has its shipping shape (scoped name, the element as an entry
-> point, its own README), but nothing publishes it: the version bump and the `npm publish` step are
-> still to come. See [ROADMAP](./ROADMAP.md).
 
 ## ⚡ Usage
 

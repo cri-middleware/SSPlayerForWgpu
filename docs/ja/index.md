@@ -73,14 +73,14 @@ Windows のゲームも、macOS のアプリも、4 本の移植版ではなく�
 
 ## 📦 成果物
 
-ライブラリは 1 つ、パッケージは 4 つ。**まだどれも公開されていません** — 現時点ではすべてソースからビルドする経路になります。何が公開の条件かは各ページに書いてあります。
+ライブラリは 1 つ、パッケージは 4 つ。Rust のクレートはこのリポジトリへの git 依存、C ライブラリは各 [`ssplayer-wgpu` の Release](https://github.com/cri-middleware/SSPlayerForWgpu/releases?q=ssplayer-wgpu&expanded=true) に付いた zip、Web のパッケージは npm にあります。
 
-| Face | 公開形態 | 状況 |
-|---|---|---|
-| Rust | crates.io の `ssplayer-wgpu` | 🚧 先に SDK のクレート公開が必要 |
-| Bevy | crates.io の `ssplayer-bevy` | 🚧 同上（＋ Player 本体の公開） |
-| C / C++ | GitHub Releases の `ssplayer-wgpu-<platform>-<arch>.zip`（`include/` `lib/` `LICENSE.md` `LICENSE.ja.md` `THIRD_PARTY_NOTICES.md`） | 🚧 ワークフローはあるがリリース未実施 |
-| Web | npm の `@spritestudio/ssplayer-wgpu` | 🚧 npm 未公開 |
+| Face | 配布形態 |
+|---|---|
+| Rust | `ssplayer-wgpu` クレート（git 依存） |
+| Bevy | `ssplayer-bevy` クレート（git 依存） |
+| C / C++ | `ssplayer-wgpu-windows-x86_64.zip` と `ssplayer-wgpu-macos-universal.zip`（`include/` `lib/` `LICENSE.md` `LICENSE.ja.md` `THIRD_PARTY_NOTICES.md`） |
+| Web | npm の `@spritestudio/ssplayer-wgpu` |
 
 ## 🗺️ エディタから画面まで
 

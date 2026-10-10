@@ -21,24 +21,13 @@ workspace が 1 つの `wgpu` に解決することで担保しています。
 
 ## 導入 { #install }
 
-=== "リリース版"
+```toml
+[dependencies]
+ssplayer-bevy = { git = "https://github.com/cri-middleware/SSPlayerForWgpu" }
+```
 
-    🚧 **crates.io には未公開です。** `ssplayer-wgpu` の公開待ちで、そちらは SDK クレートの公開待ちです。公開されればこうなります：
-
-    ```toml
-    [dependencies]
-    ssplayer-bevy = "7.0.0-alpha.1"
-    ```
-
-=== "ソースから"
-
-    ```toml
-    [dependencies]
-    ssplayer-bevy = { git = "https://github.com/cri-middleware/SSPlayerForWgpu" }
-    ```
-
-    これが `ssplayer-wgpu` を引き込むので、両方に依存する必要はありません。ソースを取り込む場合はチェックアウト内の `libs/ssplayer-bevy` を指し、そこで
-    `git submodule update --init --recursive` を実行してください。
+これが `ssplayer-wgpu` を引き込むので、両方に依存する必要はありません。ソースを取り込む場合はチェックアウト内の `libs/ssplayer-bevy` を指し、そこで
+`git submodule update --init --recursive` を実行してください。
 
 ## アプリ全体
 

@@ -107,33 +107,13 @@ repository-wide constraint: check Slint's supported major before bumping it.
 
 ## Using it in your own project
 
-**A git dependency works today**, and cargo checks out the `SpriteStudio-SDK`
-submodule for you:
+Add it as a git dependency; cargo checks out the `SpriteStudio-SDK` submodule
+for you:
 
 ```toml
 [dependencies]
 ssplayer-wgpu = { git = "https://github.com/cri-middleware/SSPlayerForWgpu" }
 ```
-
-The one requirement is that the SDK repository is reachable for whoever builds
-it, and that the commit this repository's submodule points at has been pushed.
-While the SDK is private, only people with access to it can build against this
-crate.
-
-**Publishing to crates.io** removes that requirement and is not possible yet:
-`cargo publish` refuses a crate whose dependencies have no version requirement,
-so it needs, in order:
-
-1. `ssab` and `ssruntime` published from the SDK repository (both names are
-   still free on crates.io).
-2. `version = "..."` added alongside `path` in this workspace's `ssruntime` and
-   `ssab` dependencies. Cargo strips the `path` and keeps the version when
-   packaging, so local development is unaffected.
-3. `cargo publish -p ssplayer-wgpu`, then any adapter crates.
-
-Until then `cargo publish --dry-run` fails with *"all dependencies must have a
-version requirement specified when publishing"* — expected, not a
-misconfiguration.
 
 ## Why the SDK is a submodule
 

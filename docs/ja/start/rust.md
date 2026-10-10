@@ -15,40 +15,26 @@ title: Rust ではじめる
 |---|---|
 | Rust | 1.99 以降、edition 2024 |
 | wgpu | **30** 系 — アプリと Player は 1 つの `wgpu` に解決される必要があるため、メジャーが違うとコンパイルエラーになります |
-| SDK へのアクセス | [SpriteStudio-SDK](https://github.com/cri-middleware/SpriteStudio-SDK) が private の間は、ビルドする人にアクセス権が必要です |
 
 ## 導入 { #install }
 
-=== "リリース版"
+クレートを git 依存として追加します。`SpriteStudio-SDK` サブモジュールは cargo が取得します：
 
-    🚧 **crates.io には未公開です。** `cargo publish` はバージョン要件を持たない依存を拒否するため、先に SDK 側の `ssab` / `ssruntime` の公開が必要です。公開されればこうなります：
+```toml
+[dependencies]
+ssplayer-wgpu = { git = "https://github.com/cri-middleware/SSPlayerForWgpu" }
+```
 
-    ```toml
-    [dependencies]
-    ssplayer-wgpu = "7.0.0-beta.1"
-    ```
+**自分のツリーにソースを取り込む**場合（自リポジトリのサブモジュールにする、手元で patch するなど）は、リポジトリのルートではなく**クレートのディレクトリ**を指します：
 
-    コード側は何も変わりません。下の git 依存でビルドされるものと同じクレートです。
+```toml
+[dependencies]
+ssplayer-wgpu = { path = "third_party/SSPlayerForWgpu/libs/ssplayer-wgpu" }
+```
 
-=== "ソースから"
-
-    git 依存は今すぐ使えます。`SpriteStudio-SDK` サブモジュールは cargo が取得します：
-
-    ```toml
-    [dependencies]
-    ssplayer-wgpu = { git = "https://github.com/cri-middleware/SSPlayerForWgpu" }
-    ```
-
-    **自分のツリーにソースを取り込む**場合（自リポジトリのサブモジュールにする、手元で patch するなど）は、リポジトリのルートではなく**クレートのディレクトリ**を指します：
-
-    ```toml
-    [dependencies]
-    ssplayer-wgpu = { path = "third_party/SSPlayerForWgpu/libs/ssplayer-wgpu" }
-    ```
-
-    このパスは workspace ではなく 1 クレートなので、あなたの workspace にそのまま収まります。チェックアウト先で
-    `git submodule update --init --recursive` を忘れずに — Player 自身の `SpriteStudio-SDK` サブモジュールが
-    path 依存になっており、これが無いと `ssruntime` / `ssab` を解決できません。
+このパスは workspace ではなく 1 クレートなので、あなたの workspace にそのまま収まります。チェックアウト先で
+`git submodule update --init --recursive` を忘れずに — Player 自身の `SpriteStudio-SDK` サブモジュールが
+path 依存になっており、これが無いと `ssruntime` / `ssab` を解決できません。
 
 ## 3 つのオブジェクト
 
