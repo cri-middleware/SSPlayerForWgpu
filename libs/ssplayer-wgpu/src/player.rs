@@ -2797,7 +2797,8 @@ fn step_slots(node: &mut PlaybackNode, frame_no: f32, delta_secs: f32, node_loop
         let ev = node.context.get_active_effect_event(part_idx as u32);
         // vert_stride=2 (packed XY), y_flip=true: the context runs Y-down, so the
         // particles are mirrored with the parts around them rather than against.
-        let r = effect.slot.step(ev, frame_no, delta_secs, fps, node_looped, true, 2);
+        // draw=true: this runs before get_frame_data, so draw_order is not known yet.
+        let r = effect.slot.step(ev, frame_no, delta_secs, fps, node_looped, true, 2, true);
         effect.plan.clear();
         if r.visible && !r.draw_plan_buf.is_null() && r.draw_plan_len > 0 {
             // SAFETY: the slot just built this buffer and owns it until its next
