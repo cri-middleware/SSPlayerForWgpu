@@ -29,8 +29,8 @@ rather than the invariant. The five that catch newcomers most often:
   field** — that rule is what keeps "1 canvas = 1 player" from coming back.
 - **There is no vertex buffer.** The runtime's SoA arrays are memcpy'd into the
   scene's arena and expanded in the vertex stage from `@builtin(vertex_index)`;
-  the CPU writes one 80-byte `Prim` per part and nothing per vertex. Add a
-  feature by putting it on the `Prim`, not by reintroducing per-vertex CPU work.
+  the CPU writes one `Prim` per part and nothing per vertex. Add a feature by
+  putting it on the `Prim`, not by reintroducing per-vertex CPU work.
 - **No per-frame allocations in the playback hot path.** `FrameChunk::reset`
   empties every buffer and keeps its capacity, and GPU buffers only grow; a new
   per-frame buffer goes on the chunk.
@@ -226,7 +226,7 @@ SSPlayerForWgpu にご関心をお寄せいただき、ありがとうござい�
 不変条件を破る変更は、不変条件側ではなく変更側を直していただくことになります。特に見落とされやすいのは次の 5 つです。
 
 - **プレイヤーは wgpu の状態を所有しません。** `Device` / `Queue` / `Surface` / `SSRenderer` はホストのもので、フレームごとに貸し出されます。これらの所有権を取る API は誤りで、**`SSPlayer` に wgpu 型のフィールドを持たせてはいけません**。「1 canvas = 1 player」に戻らないのはこの規則のおかげです。
-- **頂点バッファはありません。** ランタイムの SoA 配列をシーンのアリーナへ memcpy し、頂点ステージが `@builtin(vertex_index)` から展開します。CPU が書くのはパーツごとに 80 バイトの `Prim` 1 つだけで、頂点ごとには何も書きません。機能を足すときは `Prim` に載せてください。頂点ごとの CPU 処理を復活させないこと。
+- **頂点バッファはありません。** ランタイムの SoA 配列をシーンのアリーナへ memcpy し、頂点ステージが `@builtin(vertex_index)` から展開します。CPU が書くのはパーツごとに `Prim` 1 つだけで、頂点ごとには何も書きません。機能を足すときは `Prim` に載せてください。頂点ごとの CPU 処理を復活させないこと。
 - **再生中は毎フレームのヒープ確保をしません。** `FrameChunk::reset` はバッファを空にしても容量を残し、GPU バッファは伸びるだけです。毎フレーム使うバッファを足すときは chunk に置いてください。
 - **SDK との分離。** アニメーションのロジックは `SpriteStudio-SDK` submodule (`ssruntime`・`ssab`) にあります。アルゴリズムやコアロジックの変更は**あちらへの**プルリクエストと、こちらでの submodule 更新の組で行います。このリポジトリはレンダラーと、ホストに面した 3 つのフェイスです。
 - **3 つのフェイスは歩調を揃えます。** API の本体は Rust で、C (`cbindgen`) と JavaScript (`wasm-bindgen`) はその薄いラッパーです。`ffi.rs` にロジックは置きません（引数検証・型変換・エラーコード対応のみ）。必要なものは `host.rs` か `player.rs` に置き、Rust API 側にも行き渡らせてください。

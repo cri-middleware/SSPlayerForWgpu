@@ -115,8 +115,7 @@ Both draw the same packs from one atlas upload. A regression test
 ## Why there is no vertex buffer
 
 The runtime's structure-of-arrays data is copied into the scene's arena and expanded by the vertex
-stage from `@builtin(vertex_index)`. The CPU writes one 80-byte primitive per part and nothing per
-vertex.
+stage from `@builtin(vertex_index)`. The CPU writes one primitive per part and nothing per vertex.
 
 What that means for you: the cost of a character scales with its part count, not with the geometry
 those parts expand into, and there is no vertex buffer for you to supply, share or resize.

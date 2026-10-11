@@ -10,7 +10,7 @@
 use crate::frame::FrameView;
 use crate::mask::{MaskOp, MaskWriter, ScopedWriter, StencilTest};
 use crate::metrics::{GpuTimer, SceneStats};
-use crate::renderer::{COVERAGE_FORMAT, GeomClass, PipelineKey, PipelineKind, SHADER_PARAM_STRIDE, SHADER_PARAM_STRIDE_F32, SHAPE_FAN_VERTS, SSRenderer, blend_index, ss_shader_entry};
+use crate::renderer::{COVERAGE_FORMAT, GeomClass, MESH_DRAW_PRIMS, MESH_PRIM_SHIFT, PipelineKey, PipelineKind, SHADER_PARAM_STRIDE, SHADER_PARAM_STRIDE_F32, SHAPE_FAN_VERTS, SSRenderer, blend_index, ss_shader_entry};
 
 use ssruntime::runtime::effect_draw_plan::ss::runtime::root_as_effect_draw_plan_unchecked;
 use ssruntime::runtime::framedata::ss::runtime::{BlendType, DrawBatchKind, PartAttributeShader, root_as_frame_data_unchecked};
@@ -141,6 +141,10 @@ struct BatchDrawCall {
     /// class's own arithmetic — 6 per quad or particle, 30 per shape,
     /// one stream entry per mesh vertex.
     vertices: std::ops::Range<u32>,
+    /// The `instance_index` range to issue: always one instance, the draw's
+    /// first primitive for Mesh, which its stream entries count from, and
+    /// zero for every other class.
+    instances: std::ops::Range<u32>,
     /// Index of this part's block in the shader-params buffer, for
     /// [`PipelineKey::Shader`] draws — the dynamic offset for bind group(2).
     shader_slot: Option<u32>,
@@ -154,17 +158,18 @@ struct BatchDrawCall {
 /// handful of per-part values that are not in the runtime's buffers.
 ///
 /// This is the record that stands in for a vertex buffer: the CPU does not
-/// transform corners, it copies the runtime's SoA arrays into the arena and
-/// writes one of these (80 bytes) per part.
+/// transform corners, it copies each drawn part's slice of the runtime's SoA
+/// arrays into the arena and writes one of these per part.
 ///
 /// Field meanings are per geometry class; see the `Prim` comment in the WGSL,
 /// which this must stay in step with.
 #[repr(C)]
 #[derive(Copy, Clone, Debug, bytemuck::Pod, bytemuck::Zeroable)]
 struct Prim {
-    /// Quad/Shape: world matrix base. Mesh: the Y vertex array. Effect: unused.
+    /// Quad/Shape: world matrix base. Mesh: the part's Y vertices. Effect: unused.
     aux_base: u32,
-    /// Local vertices (Quad), mesh X (Mesh), shape vertices (Shape), particle XY.
+    /// Local vertices (Quad), the part's X vertices (Mesh), shape vertices
+    /// (Shape), particle XY.
     pos_base: u32,
     /// Local UVs (Quad/Mesh, texture pixels), box coords (Shape), particle UVs.
     uv_base: u32,
@@ -250,28 +255,19 @@ fn target_mask_info(seq: u32, inside: bool) -> u32 {
     MASK_INFO_ACTIVE | polarity | (seq.min(0xFF_FFFF) << 8)
 }
 
-/// Where one node's slice of the frame arena starts.
+/// Where one node's placement and coverage block sit in the frame arena.
 ///
-/// [`FrameChunk::begin_node`] copies the runtime's SoA buffers in — once per node
-/// per frame, as a handful of memcpys — and hands back the offsets. Every
-/// primitive that node contributes then refers to the arena rather than carrying
-/// its own expanded geometry.
+/// [`FrameChunk::push_transform`] copies the placement in. A node's parts copy
+/// their own geometry in as their primitives are recorded, so only what is
+/// drawn reaches the arena.
 #[derive(Clone, Copy, Debug)]
 pub struct NodeSlot {
     /// The node's placement matrix (16 floats).
     transform: u32,
-    world_matrices: u32,
-    local_vertices: u32,
-    local_uvs: u32,
-    mesh_x: u32,
-    mesh_y: u32,
-    mesh_uvs: u32,
-    shape_vertices: u32,
-    shape_box_coords: u32,
     /// Arena offset of this node's coverage block, or [`NO_COVERAGE`].
     ///
     /// Written by [`FrameChunk::set_node_coverage`] *after* the writers are
-    /// planned, which is why it cannot be filled in by `begin_node`: the block
+    /// planned, which is why it cannot be filled in by `push_transform`: the block
     /// describes the writer group, and the group is not known until the walk has
     /// looked at the frame.
     coverage: u32,
@@ -280,18 +276,10 @@ pub struct NodeSlot {
     coverage_layer: u32,
 }
 
-/// One node's claim on the frame's coverage array.
-///
-/// The layer index is this entry's position in [`FrameChunk::coverage_nodes`],
-/// which is why merging chunks has to renumber: two players built side by side
-/// both start counting from zero.
+/// One node's claim on the frame's coverage array. The layer index is this
+/// entry's position in [`FrameChunk::coverage_nodes`].
 #[derive(Clone, Copy, Debug)]
 struct CoverageNode {
-    /// Arena offset of the node's coverage block, so [`FrameChunk::absorb`] can
-    /// reach in and rewrite the layer the block advertises. `None` on a layer a
-    /// tree with more writers than one layer holds spills into: the block names
-    /// only its first layer, and the replay counts on from there.
-    block_base: Option<u32>,
     /// Player-local width and height of the writer group, which is what decides
     /// the bitmap's size class — a mask twice as wide wants twice the texels.
     extent: (f32, f32),
@@ -305,7 +293,7 @@ const NO_COVERAGE: u32 = u32::MAX;
 // `Default` would quietly make every slot claim the first node's coverage block.
 impl Default for NodeSlot {
     fn default() -> Self {
-        Self { transform: 0, world_matrices: 0, local_vertices: 0, local_uvs: 0, mesh_x: 0, mesh_y: 0, mesh_uvs: 0, shape_vertices: 0, shape_box_coords: 0, coverage: NO_COVERAGE, coverage_layer: 0 }
+        Self { transform: 0, coverage: NO_COVERAGE, coverage_layer: 0 }
     }
 }
 
@@ -313,9 +301,6 @@ impl Default for NodeSlot {
 /// node-local -> coverage-UV affine, the array layer the bitmap lives in, and
 /// the writer count.
 pub(crate) const COVERAGE_HEADER_F32: usize = 8;
-
-/// Offset of the layer index inside a coverage block header.
-const COVERAGE_LAYER_F32: usize = 6;
 
 /// Smallest coverage bitmap edge. Below this the quantisation costs more in
 /// reallocation than the texels are worth.
@@ -365,22 +350,26 @@ pub struct SSScene {
 
     /// The projection matrix. Part of group(0) along with the frame buffers.
     globals_buffer: wgpu::Buffer,
-    /// group(0), rebuilt whenever one of the frame buffers below is reallocated.
+    /// group(0), rebuilt whenever the frame buffer below is reallocated.
     scene_bind_group: Option<wgpu::BindGroup>,
     /// Last viewport passed to [`SSScene::set_viewport`], re-applied on restore
     /// (the projection lives in a buffer that dies with the device).
     viewport: Option<(f32, f32, bool)>,
 
-    arena_buffer: Option<wgpu::Buffer>,
-    prim_buffer: Option<wgpu::Buffer>,
-    mesh_stream_buffer: Option<wgpu::Buffer>,
+    /// The frame's arena, primitive table and mesh stream, in that order, in one
+    /// buffer: wgpu stages every write through a new buffer of its own, and
+    /// making one costs more than a frame's copy, so one write it is.
+    frame_buffer: Option<wgpu::Buffer>,
+    /// The bytes each of group(0)'s three storage bindings covers, so the most
+    /// a frame may put in each. They only grow, and the buffer holds all three.
+    frame_capacity: [u64; 3],
+    /// Where this frame's primitive table and mesh stream start in the buffer:
+    /// group(0)'s dynamic offsets. The arena starts at zero.
+    frame_offsets: [u32; 2],
 
-    /// Every player's chunk concatenated, in `order`. This is what reaches the
-    /// GPU.
+    /// This frame's geometry, every player's in `order`. This is what reaches
+    /// the GPU.
     frame: FrameChunk,
-    /// Per-player chunks, recycled across frames. One per player, filled
-    /// independently — in parallel where the platform has threads.
-    pool: Vec<FrameChunk>,
 
     // --- Integration shaders (`ss-*`). Only touched when a frame has
     // shader parts; shader-free animations never build any of this. ---
@@ -461,11 +450,10 @@ impl SSScene {
             globals_buffer,
             scene_bind_group: None,
             viewport: None,
-            arena_buffer: None,
-            prim_buffer: None,
-            mesh_stream_buffer: None,
+            frame_buffer: None,
+            frame_capacity: [0; 3],
+            frame_offsets: [0; 2],
             frame: FrameChunk::new(*config),
-            pool: Vec::new(),
             ss_params_buffer: None,
             ss_params_bind_group: None,
             stats: SceneStats::default(),
@@ -544,12 +532,12 @@ impl SSScene {
                 occlusion_query_set: None,
                 multiview_mask: None,
             });
-            pass.set_bind_group(0, scene_bg, &[]);
+            pass.set_bind_group(0, scene_bg, &self.frame_offsets);
             for call in self.frame.coverage_calls.iter().filter(|call| call.cov_layer == Some(layer)) {
                 let Some(pipeline) = renderer.pipelines.get(&call.key) else { continue };
                 pass.set_pipeline(pipeline);
                 pass.set_bind_group(1, renderer.texture_bind_group(call.texture_hash), &[]);
-                pass.draw(call.vertices.clone(), 0..1);
+                pass.draw(call.vertices.clone(), call.instances.clone());
             }
         }
         self.stats.coverage_layers = layers;
@@ -662,37 +650,20 @@ impl SSScene {
     /// Players are drawn in ascending [`crate::SSPlayer::order`], ties keeping the
     /// order the caller passed them in (the sort is stable). The scene borrows
     /// them rather than owning them, so they can live wherever the
-    /// host keeps them — a `Vec`, an ECS, an engine's scene graph.
-    /// Building each player's geometry is independent — separate `Context`s,
-    /// separate runtime buffers, separate chunk — so the walk happens in
-    /// parallel where the platform has threads. The merge
-    /// afterwards is in `order`, so the result does not depend on how the work
-    /// was divided.
+    /// host keeps them — a `Vec`, an ECS, an engine's scene graph. Each player
+    /// appends its geometry straight to the frame, in that order.
     pub fn update(&mut self, renderer: &mut SSRenderer, device: &wgpu::Device, queue: &wgpu::Queue, delta_secs: f32, players: &mut [&mut crate::SSPlayer]) {
         self.begin_frame();
         players.sort_by_key(|p| p.order());
 
-        // Serial, and before the parallel walk: this is the one step that needs
-        // `&mut SSRenderer`. It does nothing at all except on the frames right
-        // after a pack is loaded.
+        // Before the walk: this is the one step that needs `&mut SSRenderer`. It
+        // does nothing at all except on the frames right after a pack is loaded.
         for player in players.iter_mut() {
             player.flush_textures(renderer, device, queue);
         }
 
-        // One chunk per player, recycled from the pool.
-        let config = self.config();
-        while self.pool.len() < players.len() {
-            self.pool.push(FrameChunk::new(config));
-        }
-        let chunks = &mut self.pool[..players.len()];
-        for chunk in chunks.iter_mut() {
-            chunk.reset(config);
-        }
-        build_chunks(players, chunks, renderer, delta_secs);
-
-        for chunk_index in 0..players.len() {
-            let (merged, chunk) = (&mut self.frame, &self.pool[chunk_index]);
-            merged.absorb(chunk);
+        for player in players.iter_mut() {
+            player.build_frame(&mut self.frame, renderer, delta_secs);
         }
         self.stats.players = players.iter().filter(|p| p.draws()).count() as u32;
         self.end_frame(renderer, device, queue);
@@ -725,27 +696,26 @@ impl SSScene {
             return;
         }
 
-        // Growing any of the three invalidates group(0), so they are sized
-        // together and the bind group is rebuilt only when one actually moved.
-        let mut rebuild = self.scene_bind_group.is_none();
-        rebuild |= ensure_storage(&mut self.arena_buffer, device, "SpriteStudio Arena", std::mem::size_of_val(self.frame.arena.as_slice()));
-        rebuild |= ensure_storage(&mut self.prim_buffer, device, "SpriteStudio Prims", std::mem::size_of_val(self.frame.prims.as_slice()));
-        rebuild |= ensure_storage(&mut self.mesh_stream_buffer, device, "SpriteStudio Mesh Stream", std::mem::size_of_val(self.frame.mesh_stream.as_slice()));
-        if rebuild {
+        // Each array starts at the first aligned offset past the one before it.
+        let bytes = [std::mem::size_of_val(self.frame.arena.as_slice()), std::mem::size_of_val(self.frame.prims.as_slice()), std::mem::size_of_val(self.frame.mesh_stream.as_slice())].map(|n| n as u64);
+        let prims_at = bytes[0].next_multiple_of(FRAME_ALIGN);
+        let stream_at = (prims_at + bytes[1]).next_multiple_of(FRAME_ALIGN);
+        self.frame_offsets = [prims_at as u32, stream_at as u32];
+
+        // Growing any of the three invalidates group(0), so the buffer is sized
+        // for all of them and the bind group rebuilt only when it actually moved.
+        if self.ensure_frame_buffer(device, bytes) || self.scene_bind_group.is_none() {
+            let buffer = self.frame_buffer.as_ref().expect("ensure_frame_buffer just built it");
+            let binding = |binding, size| wgpu::BindGroupEntry { binding, resource: wgpu::BindingResource::Buffer(wgpu::BufferBinding { buffer, offset: 0, size: wgpu::BufferSize::new(size) }) };
             self.scene_bind_group = Some(device.create_bind_group(&wgpu::BindGroupDescriptor {
                 label: Some("SpriteStudio Scene Bind Group"),
                 layout: &renderer.scene_bind_group_layout,
-                entries: &[
-                    wgpu::BindGroupEntry { binding: 0, resource: self.globals_buffer.as_entire_binding() },
-                    wgpu::BindGroupEntry { binding: 1, resource: self.arena_buffer.as_ref().unwrap().as_entire_binding() },
-                    wgpu::BindGroupEntry { binding: 2, resource: self.prim_buffer.as_ref().unwrap().as_entire_binding() },
-                    wgpu::BindGroupEntry { binding: 3, resource: self.mesh_stream_buffer.as_ref().unwrap().as_entire_binding() },
-                ],
+                entries: &[wgpu::BindGroupEntry { binding: 0, resource: self.globals_buffer.as_entire_binding() }, binding(1, self.frame_capacity[0]), binding(2, self.frame_capacity[1]), binding(3, self.frame_capacity[2])],
             }));
         }
-        write_slice(queue, self.arena_buffer.as_ref(), &self.frame.arena);
-        write_slice(queue, self.prim_buffer.as_ref(), &self.frame.prims);
-        write_slice(queue, self.mesh_stream_buffer.as_ref(), &self.frame.mesh_stream);
+        if let Some(buffer) = self.frame_buffer.as_ref() {
+            upload_frame(queue, buffer, &self.frame, self.frame_offsets);
+        }
 
         // Compile whatever this frame draws with and has not drawn with before. After the first few frames every key is a cache hit, so
         // this is a walk over the draw list and nothing more. Indexed rather
@@ -818,7 +788,7 @@ impl SSScene {
         let Some(scene_bg) = self.scene_bind_group.as_ref() else { return 0 };
 
         // No vertex or index buffer: group(0) *is* the geometry.
-        rpass.set_bind_group(0, scene_bg, &[]);
+        rpass.set_bind_group(0, scene_bg, &self.frame_offsets);
         if self.stencil_enabled() {
             // Stencil ref is always 0; ops/compare are baked into the pipelines.
             rpass.set_stencil_reference(0);
@@ -854,7 +824,7 @@ impl SSScene {
                 let Some(coverage) = self.coverage.as_ref() else { continue };
                 rpass.set_bind_group(2, &coverage.bind_group, &[]);
             }
-            rpass.draw(call.vertices.clone(), 0..1);
+            rpass.draw(call.vertices.clone(), call.instances.clone());
             issued += 1;
         }
 
@@ -862,39 +832,81 @@ impl SSScene {
     }
 }
 
-/// Make sure `buffer` can hold `size` bytes, reallocating (with headroom) if not.
-/// Returns whether it was replaced — the caller's bind group is stale if so.
-fn ensure_storage(buffer: &mut Option<wgpu::Buffer>, device: &wgpu::Device, label: &str, size: usize) -> bool {
-    if buffer.as_ref().is_some_and(|b| b.size() >= size as u64) {
-        return false;
+/// Where each of the frame's three arrays may start in the frame buffer.
+///
+/// The largest `min_storage_buffer_offset_alignment` a device may ask for, so
+/// every device takes it: the limit is a power of two no larger than this.
+const FRAME_ALIGN: u64 = 256;
+
+impl SSScene {
+    /// Make sure each of group(0)'s three bindings can hold `bytes` of its array,
+    /// reallocating the buffer (with headroom) if not. Returns whether it was
+    /// replaced — the bind group is stale if so.
+    fn ensure_frame_buffer(&mut self, device: &wgpu::Device, bytes: [u64; 3]) -> bool {
+        if self.frame_buffer.is_some() && bytes.iter().zip(&self.frame_capacity).all(|(needed, held)| needed <= held) {
+            return false;
+        }
+        for (held, &needed) in self.frame_capacity.iter_mut().zip(&bytes) {
+            // A binding cannot be empty, hence the floor; an array with no
+            // entries this frame still needs one to bind.
+            if needed > *held || *held == 0 {
+                *held = (needed * 2).max(1024).next_multiple_of(FRAME_ALIGN);
+            }
+        }
+        // The binding past each start is a whole capacity long, and a start is
+        // never later than the capacities before it add up to: the arena's
+        // binding overlaps the arrays after it, which read-only bindings may.
+        let size = self.frame_capacity.iter().sum();
+        self.frame_buffer = Some(device.create_buffer(&wgpu::BufferDescriptor { label: Some("SpriteStudio Frame"), size, usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST, mapped_at_creation: false }));
+        true
     }
-    // A zero-length frame array still needs a bindable buffer, hence the floor.
-    let new_size = (size * 2).max(1024) as u64;
-    *buffer = Some(device.create_buffer(&wgpu::BufferDescriptor { label: Some(label), size: new_size, usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST, mapped_at_creation: false }));
-    true
 }
 
-fn write_slice<T: bytemuck::Pod>(queue: &wgpu::Queue, buffer: Option<&wgpu::Buffer>, data: &[T]) {
-    if let (Some(buffer), false) = (buffer, data.is_empty()) {
-        queue.write_buffer(buffer, 0, bytemuck::cast_slice(data));
+/// The `f32`s of a FlatBuffers vector's payload, which is little-endian and
+/// not necessarily aligned for `f32`.
+fn f32s(bytes: &[u8]) -> impl Iterator<Item = f32> + '_ {
+    bytes.as_chunks::<4>().0.iter().map(|word| f32::from_le_bytes(*word))
+}
+
+/// Write the frame's three arrays where `offsets` put them.
+///
+/// Natively in one `write_buffer_with`, so the frame goes up through one staging
+/// buffer. The browser's `writeBuffer` stages for us and reads straight out of
+/// wasm memory, while `write_buffer_with` there fills a zeroed copy on the heap
+/// first, so on the web the arrays go up as three writes.
+fn upload_frame(queue: &wgpu::Queue, buffer: &wgpu::Buffer, frame: &FrameChunk, offsets: [u32; 2]) {
+    let arena: &[u8] = bytemuck::cast_slice(&frame.arena);
+    let prims: &[u8] = bytemuck::cast_slice(&frame.prims);
+    let stream: &[u8] = bytemuck::cast_slice(&frame.mesh_stream);
+    let [prims_at, stream_at] = offsets.map(|at| at as usize);
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        let Some(size) = wgpu::BufferSize::new((stream_at + stream.len()) as u64) else { return };
+        let Some(mut view) = queue.write_buffer_with(buffer, 0, size) else { return };
+        view.slice(..arena.len()).copy_from_slice(arena);
+        view.slice(arena.len()..prims_at).fill(0);
+        view.slice(prims_at..prims_at + prims.len()).copy_from_slice(prims);
+        view.slice(prims_at + prims.len()..stream_at).fill(0);
+        view.slice(stream_at..).copy_from_slice(stream);
+    }
+    #[cfg(target_arch = "wasm32")]
+    for (at, bytes) in [(0, arena), (prims_at, prims), (stream_at, stream)] {
+        if !bytes.is_empty() {
+            queue.write_buffer(buffer, at as u64, bytes);
+        }
     }
 }
 
-/// One player's contribution to a frame, built on its own.
-///
-/// A chunk holds the arena / primitive / draw-call trio for **one** player, so
-/// players are built independently of each other and concatenated afterwards.
-///
-/// Offsets inside a chunk are chunk-relative; [`SSScene`] rebases them as it
-/// merges, in the players' `order`, so the merged frame does not depend on how
-/// the work was divided.
+/// One frame of one render target: the arena / primitive / draw-call trio every
+/// player sharing the target appends to, in its `order`.
 pub struct FrameChunk {
-    /// The target this chunk is being built for — needed for pipeline keys.
+    /// The target this frame is being built for — needed for pipeline keys.
     config: SceneConfig,
     /// Runtime SoA buffers and node transforms, copied verbatim.
     arena: Vec<f32>,
     prims: Vec<Prim>,
-    /// `(primitive, vertex)` pairs, one per mesh vertex.
+    /// One entry per mesh vertex drawn: the runtime's own index into its part's
+    /// vertices, tagged with the part's primitive (see [`MESH_PRIM_SHIFT`]).
     mesh_stream: Vec<u32>,
     draw_calls: Vec<BatchDrawCall>,
     /// Writer draws for the coverage bitmap, kept apart from `draw_calls` because
@@ -904,21 +916,16 @@ pub struct FrameChunk {
     coverage_calls: Vec<BatchDrawCall>,
     /// One entry per node that writes coverage this frame, in layer order.
     coverage_nodes: Vec<CoverageNode>,
-    /// Arena offsets of sub-animation coverage blocks that borrow a parent's
-    /// layer rather than owning one. They are not in `coverage_nodes` (they add
-    /// no layer), so `absorb` needs this list to rebase the layer they name when
-    /// players merge — miss it and a merged child samples a lower player's bitmap.
-    coverage_shared: Vec<u32>,
     /// Per-part integration-shader params, one `SHADER_PARAM_STRIDE_F32` slot each.
     ss_params: Vec<f32>,
 }
 
 impl FrameChunk {
     fn new(config: SceneConfig) -> Self {
-        Self { config, arena: Vec::new(), prims: Vec::new(), mesh_stream: Vec::new(), draw_calls: Vec::new(), coverage_calls: Vec::new(), coverage_nodes: Vec::new(), coverage_shared: Vec::new(), ss_params: Vec::new() }
+        Self { config, arena: Vec::new(), prims: Vec::new(), mesh_stream: Vec::new(), draw_calls: Vec::new(), coverage_calls: Vec::new(), coverage_nodes: Vec::new(), ss_params: Vec::new() }
     }
 
-    /// Empty it for reuse, keeping the allocations — a chunk is recycled every
+    /// Empty it for reuse, keeping the allocations — the frame is rebuilt every
     /// frame, so this is what stops a per-frame allocation storm.
     fn reset(&mut self, config: SceneConfig) {
         self.config = config;
@@ -928,7 +935,6 @@ impl FrameChunk {
         self.draw_calls.clear();
         self.coverage_calls.clear();
         self.coverage_nodes.clear();
-        self.coverage_shared.clear();
         self.ss_params.clear();
     }
 
@@ -945,63 +951,6 @@ impl FrameChunk {
     /// *appended as* differs.
     pub fn mask_backend(&self) -> MaskBackend {
         if self.config.mask == MaskBackend::Stencil && self.config.stencil_format.is_none() { MaskBackend::None } else { self.config.mask }
-    }
-
-    /// Append `other` to this chunk, rebasing every offset it carries.
-    ///
-    /// A chunk is built without knowing what precedes it, so all its indices are
-    /// chunk-relative: arena offsets inside each `Prim`, primitive indices inside
-    /// the mesh stream, and — because each geometry class turns a primitive index
-    /// into a fixed span of `vertex_index` — the draw calls' vertex
-    /// ranges too. Rebasing them here is what lets the walk be parallel while the
-    /// merged frame stays byte for byte what the serial walk produced.
-    fn absorb(&mut self, other: &FrameChunk) {
-        let arena_base = self.arena.len() as u32;
-        let prim_base = self.prims.len() as u32;
-        let stream_base = (self.mesh_stream.len() / 2) as u32;
-        let param_base = (self.ss_params.len() / SHADER_PARAM_STRIDE_F32) as u32;
-
-        self.arena.extend_from_slice(&other.arena);
-        self.ss_params.extend_from_slice(&other.ss_params);
-        // `cov_base` moves with the rest: it is an arena offset like the others,
-        // and rebasing it unconditionally costs nothing — a primitive that is not
-        // coverage-masked never reads it.
-        self.prims.extend(other.prims.iter().map(|p| Prim { aux_base: p.aux_base + arena_base, pos_base: p.pos_base + arena_base, uv_base: p.uv_base + arena_base, node_base: p.node_base + arena_base, cov_base: p.cov_base + arena_base, ..*p }));
-        // Pairs of (primitive, vertex); only the primitive moves.
-        self.mesh_stream.extend(other.mesh_stream.as_chunks::<2>().0.iter().flat_map(|pair| [pair[0] + prim_base, pair[1]]));
-
-        let rebase = |call: &BatchDrawCall| {
-            let shift = match call.key.kind.geom_class() {
-                GeomClass::Quad | GeomClass::Effect => prim_base * 6,
-                GeomClass::Shape => prim_base * SHAPE_FAN_VERTS,
-                // Mesh draws index the stream, not the primitive table.
-                GeomClass::Mesh => stream_base,
-            };
-            BatchDrawCall { vertices: call.vertices.start + shift..call.vertices.end + shift, shader_slot: call.shader_slot.map(|slot| slot + param_base), ..call.clone() }
-        };
-        self.draw_calls.extend(other.draw_calls.iter().map(&rebase));
-
-        // Every chunk numbers its coverage layers from zero, so merging has to
-        // renumber — in the arena block each node advertises *and* on the draw
-        // calls that pick a layer to rasterise into. Miss either and two players
-        // masking in the same frame share one bitmap.
-        let layer_base = self.coverage_nodes.len() as u32;
-        for node in &other.coverage_nodes {
-            let block_base = node.block_base.map(|base| base + arena_base);
-            if let Some(base) = block_base {
-                self.arena[base as usize + COVERAGE_LAYER_F32] += layer_base as f32;
-            }
-            self.coverage_nodes.push(CoverageNode { block_base, ..*node });
-        }
-        // Sub-animation blocks borrow a parent's layer instead of owning one, so
-        // the loop above skips them — but the layer they name still moves by the
-        // same base, or a merged child reads a lower player's bitmap.
-        for &block_base in &other.coverage_shared {
-            let block_base = block_base + arena_base;
-            self.arena[block_base as usize + COVERAGE_LAYER_F32] += layer_base as f32;
-            self.coverage_shared.push(block_base);
-        }
-        self.coverage_calls.extend(other.coverage_calls.iter().map(|call| BatchDrawCall { cov_layer: call.cov_layer.map(|layer| layer + layer_base), ..rebase(call) }));
     }
 
     /// Cache key for a content draw. Without a stencil buffer every draw uses the
@@ -1022,39 +971,6 @@ impl FrameChunk {
         PipelineKey { kind, color_format: self.config.color_format, stencil_format: self.config.stencil_format }
     }
 
-    /// Copy one node's runtime buffers into the frame arena and return where they
-    /// landed. Call once per node per frame, before appending any of
-    /// its batches.
-    ///
-    /// This is the whole CPU side of the vertex path: a handful of
-    /// `extend_from_slice` calls over buffers `ssruntime` already laid out
-    /// contiguously. Nothing is transformed here — the vertex stage does that,
-    /// reading the same numbers the runtime produced.
-    ///
-    /// `transform` is the node's placement: the player's for a root, the
-    /// composition with the parent instance part's world matrix for a child.
-    pub fn begin_node(&mut self, frame: &FrameView, transform: &[f32; 16]) -> NodeSlot {
-        let mut push = |src: &[f32]| -> u32 {
-            let base = self.arena.len() as u32;
-            self.arena.extend_from_slice(src);
-            base
-        };
-        NodeSlot {
-            transform: push(transform),
-            world_matrices: push(frame.world_matrices),
-            local_vertices: push(frame.local_vertices),
-            local_uvs: push(frame.local_uvs),
-            mesh_x: push(frame.mesh_vertices_x),
-            mesh_y: push(frame.mesh_vertices_y),
-            mesh_uvs: push(frame.mesh_uvs),
-            shape_vertices: push(frame.shape_vertices),
-            shape_box_coords: push(frame.shape_vertex_box_coords),
-            // Filled in by `set_node_coverage`, once the walk knows the writers.
-            coverage: NO_COVERAGE,
-            coverage_layer: 0,
-        }
-    }
-
     /// Attach the player's coverage block to its top node, once the whole tree's
     /// writers are planned.
     ///
@@ -1068,11 +984,11 @@ impl FrameChunk {
     pub fn set_node_coverage(&mut self, node: &mut NodeSlot, uv: &[f32; 6], extent: (f32, f32), writers: &[ScopedWriter]) {
         let layer = self.coverage_nodes.len() as u32;
         let base = self.push_coverage_block(uv, layer, writers);
-        self.coverage_nodes.push(CoverageNode { block_base: Some(base), extent });
+        self.coverage_nodes.push(CoverageNode { extent });
         // One more layer per `COVERAGE_LAYER_BITS` writers, consecutive, so a
         // writer's layer is the block's plus its bit's quotient.
         for _ in 1..writers.len().div_ceil(crate::mask::COVERAGE_LAYER_BITS) {
-            self.coverage_nodes.push(CoverageNode { block_base: None, extent });
+            self.coverage_nodes.push(CoverageNode { extent });
         }
         node.coverage = base;
         node.coverage_layer = layer;
@@ -1086,11 +1002,7 @@ impl FrameChunk {
     /// instance placements so the child's own local coordinates land in the top
     /// node's coverage.
     pub fn inherit_node_coverage(&mut self, node: &mut NodeSlot, uv: &[f32; 6], layer: u32, writers: &[ScopedWriter]) {
-        let base = self.push_coverage_block(uv, layer, writers);
-        // Not a `coverage_node` — it owns no layer — but `absorb` must still find
-        // it to rebase the borrowed layer when players merge.
-        self.coverage_shared.push(base);
-        node.coverage = base;
+        node.coverage = self.push_coverage_block(uv, layer, writers);
         node.coverage_layer = layer;
     }
 
@@ -1115,11 +1027,13 @@ impl FrameChunk {
         base
     }
 
-    /// Copy a standalone placement matrix into the arena.
+    /// Copy a placement matrix into the arena: a node's, before any of its
+    /// primitives, or an effect's, whose particles the plan already placed
+    /// relative to it.
     ///
-    /// An effect draws from its own `EffectDrawPlan`, not from the node's runtime
-    /// buffers, so the only arena slot it needs is its composed transform — the
-    /// rest of the returned [`NodeSlot`] is unused and must stay so.
+    /// `transform` is the player's placement for a root, composed with the
+    /// world matrix of every instance part above it for a child, and with the
+    /// effect part's for an effect.
     pub fn push_transform(&mut self, transform: &[f32; 16]) -> NodeSlot {
         let base = self.arena.len() as u32;
         self.arena.extend_from_slice(transform);
@@ -1150,7 +1064,7 @@ impl FrameChunk {
             // Mesh draws are driven by the stream, not by primitive arithmetic.
             GeomClass::Mesh => return,
         };
-        self.draw_calls.push(BatchDrawCall { key, texture_hash, vertices: first * stride..last * stride, shader_slot, cov_layer: None });
+        self.draw_calls.push(BatchDrawCall { key, texture_hash, vertices: first * stride..last * stride, instances: 0..1, shader_slot, cov_layer: None });
     }
 
     /// Append one Normal/Mesh DrawBatch's geometry into the frame accumulation,
@@ -1259,8 +1173,13 @@ impl FrameChunk {
             }
             DrawBatchKind::Mesh => {
                 let key = self.content_key(blend_type, stencil, GeomClass::Mesh);
-                let stream_start = (self.mesh_stream.len() / 2) as u32;
+                let (mut stream_start, mut draw_prim) = (self.mesh_stream.len() as u32, first_prim);
                 for rank in start_rank..start_rank + count {
+                    if self.prims.len() as u32 - draw_prim == MESH_DRAW_PRIMS {
+                        let call = self.mesh_draw(key, texture_hash, stream_start, draw_prim, None);
+                        self.draw_calls.extend(call);
+                        (stream_start, draw_prim) = (self.mesh_stream.len() as u32, self.prims.len() as u32);
+                    }
                     let part_idx = draw_order.get(rank) as usize;
                     let part = parts.get(part_idx);
 
@@ -1276,12 +1195,10 @@ impl FrameChunk {
                         })
                         .unwrap_or((WHITE, part.alpha(), 1.0, mode::MUL));
 
-                    self.push_mesh_prim(frame, node, part_idx, Prim { mode, alpha, tint, z: part.position_z(), colors: [color; 4], alphas: [part_alpha; 4], rates: [rate; 4], cov_base, mask_info, ..Default::default() });
+                    self.push_mesh_prim(frame, part_idx, draw_prim, Prim { mode, alpha, tint, node_base: node.transform, z: part.position_z(), colors: [color; 4], alphas: [part_alpha; 4], rates: [rate; 4], cov_base, mask_info, ..Default::default() });
                 }
-                let stream_end = (self.mesh_stream.len() / 2) as u32;
-                if stream_end > stream_start {
-                    self.draw_calls.push(BatchDrawCall { key, texture_hash, vertices: stream_start..stream_end, shader_slot: None, cov_layer: None });
-                }
+                let call = self.mesh_draw(key, texture_hash, stream_start, draw_prim, None);
+                self.draw_calls.extend(call);
             }
             DrawBatchKind::Shape => {
                 let key = self.content_key(blend_type, stencil, GeomClass::Shape);
@@ -1409,13 +1326,10 @@ impl FrameChunk {
                 GeomClass::Quad
             }
             GeomKind::Mesh => {
-                let stream_start = (self.mesh_stream.len() / 2) as u32;
-                self.push_mesh_prim(frame, node, writer.part_idx, prim);
-                let stream_end = (self.mesh_stream.len() / 2) as u32;
-                if stream_end > stream_start {
-                    let call = BatchDrawCall { key: self.key(kind_of(GeomClass::Mesh)), texture_hash: writer.texture_hash, vertices: stream_start..stream_end, shader_slot: None, cov_layer };
-                    self.writer_calls(dest).push(call);
-                }
+                let stream_start = self.mesh_stream.len() as u32;
+                self.push_mesh_prim(frame, writer.part_idx, first_prim, Prim { node_base: node.transform, ..prim });
+                let call = self.mesh_draw(self.key(kind_of(GeomClass::Mesh)), writer.texture_hash, stream_start, first_prim, cov_layer);
+                self.writer_calls(dest).extend(call);
                 return;
             }
             GeomKind::Shape => {
@@ -1448,73 +1362,85 @@ impl FrameChunk {
             // Mesh draws are driven by the stream, not by primitive arithmetic.
             GeomClass::Mesh => return,
         };
-        let call = BatchDrawCall { key, texture_hash, vertices: first * stride..last * stride, shader_slot: None, cov_layer };
+        let call = BatchDrawCall { key, texture_hash, vertices: first * stride..last * stride, instances: 0..1, shader_slot: None, cov_layer };
         self.writer_calls(dest).push(call);
     }
 
-    /// Record one sprite quad for `part_idx`: point `prim` at the part's slice of
-    /// this node's arena copy and append it. The corners themselves are expanded
-    /// by `vs_quad`.
+    /// Record one sprite quad for `part_idx`: copy the part's world matrix, local
+    /// vertices and local UVs into the arena, point `prim` at them and append it.
+    /// The corners themselves are expanded by `vs_quad`.
     fn push_quad_prim(&mut self, frame: &FrameView, node: &NodeSlot, part_idx: usize, prim: Prim) {
-        // Bounds are still checked here: the vertex stage indexes the arena
-        // unconditionally, so a part the runtime has no geometry for must not
-        // produce a primitive at all.
-        if (part_idx + 1) * 16 > frame.world_matrices.len() || (part_idx + 1) * 10 > frame.local_vertices.len() || (part_idx + 1) * 10 > frame.local_uvs.len() {
+        // A part the runtime has no geometry for must not produce a primitive at
+        // all: the vertex stage reads whatever its offsets point at.
+        let (Some(matrix), Some(vertices), Some(uvs)) = (frame.world_matrices.get(part_idx * 16..part_idx * 16 + 16), frame.local_vertices.get(part_idx * 10..part_idx * 10 + 10), frame.local_uvs.get(part_idx * 10..part_idx * 10 + 10)) else {
             return;
-        }
-        self.push_prim(Prim { aux_base: node.world_matrices + (part_idx * 16) as u32, pos_base: node.local_vertices + (part_idx * 10) as u32, uv_base: node.local_uvs + (part_idx * 10) as u32, node_base: node.transform, ..prim });
+        };
+        let aux_base = self.arena.len() as u32;
+        self.arena.extend_from_slice(matrix);
+        self.arena.extend_from_slice(vertices);
+        self.arena.extend_from_slice(uvs);
+        self.push_prim(Prim { aux_base, pos_base: aux_base + 16, uv_base: aux_base + 26, node_base: node.transform, ..prim });
     }
 
-    /// Record one skinned-mesh part. Mesh geometry is the one irregular case, so
-    /// besides the primitive this appends a `(primitive, vertex)` pair per index —
-    /// the runtime's own triangle list, rebased onto the arena.
-    fn push_mesh_prim(&mut self, frame: &FrameView, node: &NodeSlot, part_idx: usize, prim: Prim) {
-        let offsets = &frame.mesh_vertex_offsets;
-        if offsets.is_empty() || part_idx >= offsets.len() - 1 {
+    /// Record one skinned-mesh part, the primitive after `draw_prim` in its draw.
+    ///
+    /// A mesh's vertex count varies by part, so its geometry is copied per drawn
+    /// part rather than per node: its vertices into the arena as the runtime laid
+    /// them out, and its triangle list into the mesh stream, each index tagged
+    /// with the part's place in its draw.
+    fn push_mesh_prim(&mut self, frame: &FrameView, part_idx: usize, draw_prim: u32, prim: Prim) {
+        let (vertices, indices) = (&frame.mesh_vertex_offsets, &frame.mesh_index_offsets);
+        if part_idx + 1 >= vertices.len() || part_idx + 1 >= indices.len() {
             return;
         }
-        let start_vert = offsets[part_idx] as usize;
-        let end_vert = offsets[part_idx + 1] as usize;
-        if end_vert <= start_vert {
+        let (start, end) = (vertices[part_idx] as usize, vertices[part_idx + 1] as usize);
+        let (Some(x), Some(y), Some(uvs), Some(triangles)) =
+            (frame.mesh_vertices_x.get(start..end), frame.mesh_vertices_y.get(start..end), frame.mesh_uvs.get(start * 2..end * 2), frame.mesh_indices.get(indices[part_idx] as usize..indices[part_idx + 1] as usize))
+        else {
+            return;
+        };
+        if x.is_empty() || triangles.is_empty() {
             return;
         }
 
-        let index = self.push_prim(Prim {
-            // Mesh vertices come as two parallel world-space arrays.
-            aux_base: node.mesh_y,
-            pos_base: node.mesh_x,
-            uv_base: node.mesh_uvs,
-            node_base: node.transform,
-            ..prim
-        });
-
-        let start_idx = frame.mesh_index_offsets[part_idx] as usize;
-        let end_idx = frame.mesh_index_offsets[part_idx + 1] as usize;
-        for &rel_idx in &frame.mesh_indices[start_idx..end_idx] {
-            self.mesh_stream.push(index);
-            self.mesh_stream.push(start_vert as u32 + rel_idx as u32);
-        }
+        let pos_base = self.arena.len() as u32;
+        self.arena.extend_from_slice(x);
+        let aux_base = self.arena.len() as u32;
+        self.arena.extend_from_slice(y);
+        let uv_base = self.arena.len() as u32;
+        self.arena.extend_from_slice(uvs);
+        let tag = (self.prims.len() as u32 - draw_prim) << MESH_PRIM_SHIFT;
+        self.mesh_stream.extend(triangles.iter().map(|&index| tag | index as u32));
+        self.push_prim(Prim { aux_base, pos_base, uv_base, ..prim });
     }
 
-    /// Record one Shape part, drawn as a fan from vertex 0 by `vs_shape`.
+    /// The draw over the stream from `stream_start` to its end, whose first
+    /// primitive is `draw_prim`, or `None` when that is empty.
+    fn mesh_draw(&self, key: PipelineKey, texture_hash: u32, stream_start: u32, draw_prim: u32, cov_layer: Option<u32>) -> Option<BatchDrawCall> {
+        let stream_end = self.mesh_stream.len() as u32;
+        (stream_end > stream_start).then(|| BatchDrawCall { key, texture_hash, vertices: stream_start..stream_end, instances: draw_prim..draw_prim + 1, shader_slot: None, cov_layer })
+    }
+
+    /// Record one Shape part, drawn as a fan from vertex 0 by `vs_shape`: copy
+    /// its world matrix and its live vertices and box coordinates into the arena.
     /// No-op if the part is not a shape or has fewer than 3 live vertices.
     fn push_shape_prim(&mut self, frame: &FrameView, node: &NodeSlot, part_idx: usize, prim: Prim) {
         // Layout: `shape_vertices[part_idx * SHAPE_VERTICES_STRIDE + 2*v]` = local xy.
-        let counts = &frame.shape_vertex_counts;
-        if part_idx >= counts.len() || (part_idx + 1) * 16 > frame.world_matrices.len() {
-            return;
-        }
-        let count = counts[part_idx].max(0) as usize;
+        let count = frame.shape_vertex_counts.get(part_idx).copied().unwrap_or(0).max(0) as usize;
         // The fan pattern is baked into the vertex stage at a fixed stride, so a
         // shape with more vertices than that would silently lose triangles.
         if count < 3 || count > (SHAPE_FAN_VERTS as usize / 3) + 2 {
             return;
         }
         let base = part_idx * crate::frame::SHAPE_VERTICES_STRIDE;
-        if base + count * 2 > frame.shape_vertices.len() || base + count * 2 > frame.shape_vertex_box_coords.len() {
+        let (Some(matrix), Some(vertices), Some(box_coords)) = (frame.world_matrices.get(part_idx * 16..part_idx * 16 + 16), frame.shape_vertices.get(base..base + count * 2), frame.shape_vertex_box_coords.get(base..base + count * 2)) else {
             return;
-        }
-        self.push_prim(Prim { aux_base: node.world_matrices + (part_idx * 16) as u32, pos_base: node.shape_vertices + base as u32, uv_base: node.shape_box_coords + base as u32, node_base: node.transform, count: count as u32, ..prim });
+        };
+        let aux_base = self.arena.len() as u32;
+        self.arena.extend_from_slice(matrix);
+        self.arena.extend_from_slice(vertices);
+        self.arena.extend_from_slice(box_coords);
+        self.push_prim(Prim { aux_base, pos_base: aux_base + 16, uv_base: aux_base + 16 + (count * 2) as u32, node_base: node.transform, count: count as u32, ..prim });
     }
 
     /// Append an effect slot's `EffectDrawPlan` (a raw FlatBuffer) into the
@@ -1541,9 +1467,9 @@ impl FrameChunk {
             StencilTest::None => (0, 0),
         };
         let plan = unsafe { root_as_effect_draw_plan_unchecked(plan_buf) };
-        let stride = plan.vert_stride() as usize;
-        let verts = plan.verts();
-        let uvs = plan.uvs();
+        // XY pairs, four to a particle: `step_effects` asks every slot for a
+        // vertex stride of 2.
+        let (verts, uvs) = (plan.verts().bytes(), plan.uvs().bytes());
         let colors = plan.colors();
 
         for cmd in plan.commands().iter() {
@@ -1566,15 +1492,9 @@ impl FrameChunk {
             // already put them in world space. Only the effect part's own
             // placement is left, and the vertex stage applies that.
             let pos_base = self.arena.len() as u32;
-            for vi in vert_first..vert_last {
-                self.arena.push(verts.get(vi * stride));
-                self.arena.push(verts.get(vi * stride + 1));
-            }
+            self.arena.extend(f32s(&verts[vert_first * 8..vert_last * 8]));
             let uv_base = self.arena.len() as u32;
-            for vi in vert_first..vert_last {
-                self.arena.push(uvs.get(vi * 2));
-                self.arena.push(uvs.get(vi * 2 + 1));
-            }
+            self.arena.extend(f32s(&uvs[vert_first * 8..vert_last * 8]));
 
             // One primitive per particle. The runtime emits every particle as a
             // quad with the same corner order this player uses (see
@@ -1601,20 +1521,5 @@ impl FrameChunk {
             }
             self.push_draw(key, GeomClass::Effect, texture_hash, first_prim, None);
         }
-    }
-}
-
-/// Fill one chunk per player.
-///
-/// Each player owns its own `Context`, its own runtime buffers and its own
-/// chunk, so nothing is shared but the immutable [`SSRenderer`]. The walk is
-/// serial: threading it was measured and did not pay, and `wasm32-unknown-unknown`
-/// has no threads at all.
-///
-/// The chunk split stays, because it costs nothing serially (`absorb`'s rebase,
-/// nothing more) and keeps the players decoupled.
-fn build_chunks(players: &mut [&mut crate::SSPlayer], chunks: &mut [FrameChunk], renderer: &SSRenderer, delta_secs: f32) {
-    for (player, chunk) in players.iter_mut().zip(chunks.iter_mut()) {
-        player.build_frame(chunk, renderer, delta_secs);
     }
 }

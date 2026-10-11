@@ -8,8 +8,61 @@
 
 use crate::mask::{MaskOp, StencilTest};
 use std::collections::HashMap;
+use std::hash::{BuildHasherDefault, Hasher};
 
 use ssruntime::runtime::framedata::ss::runtime::BlendType;
+
+/// The hasher behind the renderer's per-draw lookups.
+///
+/// Every draw looks up a pipeline and a texture, under keys this crate makes
+/// itself — a [`PipelineKey`], a texture key — so SipHash's defence against
+/// chosen keys buys nothing here, and it was a tenth of a masked frame's update.
+/// A multiply-rotate per word, as `rustc` hashes its own tables.
+#[derive(Default)]
+pub(crate) struct KeyHasher(u64);
+
+impl KeyHasher {
+    fn add(&mut self, word: u64) {
+        self.0 = (self.0.rotate_left(5) ^ word).wrapping_mul(0x517c_c1b7_2722_0a95);
+    }
+}
+
+impl Hasher for KeyHasher {
+    fn finish(&self) -> u64 {
+        self.0
+    }
+
+    fn write(&mut self, bytes: &[u8]) {
+        for chunk in bytes.chunks(8) {
+            let mut word = [0; 8];
+            word[..chunk.len()].copy_from_slice(chunk);
+            self.add(u64::from_le_bytes(word));
+        }
+    }
+
+    fn write_u8(&mut self, n: u8) {
+        self.add(n.into());
+    }
+
+    fn write_u16(&mut self, n: u16) {
+        self.add(n.into());
+    }
+
+    fn write_u32(&mut self, n: u32) {
+        self.add(n.into());
+    }
+
+    fn write_u64(&mut self, n: u64) {
+        self.add(n);
+    }
+
+    fn write_usize(&mut self, n: usize) {
+        self.add(n as u64);
+    }
+}
+
+/// A map hashed with [`KeyHasher`].
+type KeyMap<K, V> = HashMap<K, V, BuildHasherDefault<KeyHasher>>;
 
 /// Which vertex stage expands a draw's primitives.
 ///
@@ -23,8 +76,9 @@ pub(crate) enum GeomClass {
     /// Sprite quad: 6 vertices per primitive, indexless. `vertex_index / 6` is the
     /// primitive, `% 6` picks a corner through the fixed triangle pattern.
     Quad,
-    /// Skinned mesh: irregular, so a per-vertex `(primitive, vertex)` stream
-    /// drives it — the one class that cannot be addressed by arithmetic alone.
+    /// Skinned mesh: irregular, so a per-vertex stream drives it — the one class
+    /// that cannot be addressed by arithmetic alone. Each entry names its
+    /// primitive relative to the draw's first, which arrives as `instance_index`.
     Mesh,
     /// Shape fan: a fixed [`SHAPE_FAN_VERTS`] vertices per primitive, with the
     /// unused triangles collapsed to zero area.
@@ -69,6 +123,7 @@ impl GeomClass {
 fn wgsl_consts() -> String {
     format!(
         "const SHAPE_FAN_VERTS: u32 = {SHAPE_FAN_VERTS}u;\n\
+         const MESH_PRIM_SHIFT: u32 = {MESH_PRIM_SHIFT}u;\n\
          const COVERAGE_HEADER: u32 = {}u;\n\
          const COVERAGE_STRIDE: u32 = {}u;\n\
          const MAX_MASK_WRITERS: u32 = {}u;\n\
@@ -93,6 +148,20 @@ pub(crate) const COVERAGE_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Rgb
 /// Triangles past the live count collapse to a single vertex and rasterise
 /// nothing, and shapes are rare enough that the wasted invocations do not matter.
 pub(crate) const SHAPE_FAN_VERTS: u32 = 30;
+
+/// Where a mesh-stream entry's primitive starts: the bits above this name which
+/// primitive of its draw the vertex belongs to, the bits below which of that
+/// part's own vertices it is.
+///
+/// One entry per vertex, so an entry is a mesh part's own index with its tag
+/// ORed in — one copy of the runtime's triangle list, not a pair built per
+/// index. A draw names at most [`MESH_DRAW_PRIMS`] primitives, and a part may
+/// have up to 2^24 vertices.
+pub(crate) const MESH_PRIM_SHIFT: u32 = 24;
+
+/// The most primitives one mesh draw can name: the batch starts a new draw past
+/// this.
+pub(crate) const MESH_DRAW_PRIMS: u32 = 1 << (32 - MESH_PRIM_SHIFT);
 
 /// What a pipeline does, before the render target is taken into account.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
@@ -119,18 +188,6 @@ pub(crate) enum PipelineKind {
     /// stencil-tested — shader parts are not masked in v1 — and always
     /// [`GeomClass::Quad`], because only Normal parts carry a SHDR attribute.
     Shader(u32, usize),
-}
-
-impl PipelineKind {
-    /// Which vertex stage expands this pipeline's draws — and therefore how a
-    /// primitive index maps to `vertex_index`.
-    pub(crate) fn geom_class(self) -> GeomClass {
-        match self {
-            PipelineKind::Content(_, _, class) | PipelineKind::ContentCoverage(_, _, class) | PipelineKind::Mask(_, class) | PipelineKind::Coverage(class) => class,
-            // SHDR is a Normal-part attribute, so shader draws are quads.
-            PipelineKind::Shader(..) => GeomClass::Quad,
-        }
-    }
 }
 
 /// What distinguishes one render pipeline from another.
@@ -218,7 +275,7 @@ impl TexInfo {
 /// so targets that disagree share one renderer.
 pub struct SSRenderer {
     /// Every pipeline used so far, built on first use.
-    pub(crate) pipelines: HashMap<PipelineKey, wgpu::RenderPipeline>,
+    pub(crate) pipelines: KeyMap<PipelineKey, wgpu::RenderPipeline>,
     /// Inputs the lazy builder needs: the sprite/mask WGSL module and its layout.
     shader_module: wgpu::ShaderModule,
     pipeline_layout: wgpu::PipelineLayout,
@@ -253,7 +310,7 @@ pub struct SSRenderer {
 
     /// Atlas textures by fnv1a hash. Shared, so N players showing the same
     /// character upload it once.
-    textures: HashMap<u32, TextureEntry>,
+    textures: KeyMap<u32, TextureEntry>,
     /// Retained pixels for [`Retention::Retain`] uploads, so a device loss can be
     /// recovered without the host re-supplying them.
     ///
@@ -409,11 +466,12 @@ fn depth_stencil_state(format: Option<wgpu::TextureFormat>, compare: wgpu::Compa
 /// primitives into vertices. Prefixed onto [`WGSL_SHADER`] and [`SS_SHADER_WGSL`],
 /// which add only their fragment stages.
 ///
-/// **There is no vertex buffer.** The runtime's `world_matrices` /
-/// `local_vertices` / `local_uvs` / `mesh_*` / shape arrays are copied into
-/// `f_arena` verbatim, one memcpy per node per frame, and the vertex stage reads
-/// them at the offsets a 80-byte `Prim` record points at. WebGL2 cannot do this —
-/// no storage buffers — and it is the single largest reason this player exists.
+/// **There is no vertex buffer.** Each drawn part's slice of the runtime's
+/// `world_matrices` / `local_vertices` / `local_uvs` / mesh / shape arrays is
+/// copied into `f_arena` verbatim as its primitive is recorded, and the vertex
+/// stage reads them at the offsets the part's `Prim` record points at. WebGL2
+/// cannot do this — no storage buffers — and it is the single largest reason
+/// this player exists.
 ///
 /// The position maths is written out scalar by scalar rather than as matrix
 /// products, so it performs the same operations in the same order as the CPU path
@@ -446,7 +504,7 @@ struct Globals {
 // | aux_base | pos_base | uv_base | count
 // ---------+---------------+-----------------+------------------+-------
 // vs_quad | world matrix | local vertices | local UVs (px) | -
-// vs_mesh | mesh Y | mesh X | mesh UVs (px) | -
+// vs_mesh | part's Y | part's X | part's UVs (px)| -
 // vs_shape | world matrix | shape vertices | shape box coords | vertices
 // vs_effect| - | particle XY | particle UVs | -
 //
@@ -486,7 +544,10 @@ const MASK_INFO_INSIDE: u32 = 4u;
 // The frame's SoA arena: runtime buffers and node transforms, copied verbatim.
 @group(0) @binding(1) var<storage, read> f_arena: array<f32>;
 @group(0) @binding(2) var<storage, read> prims: array<Prim>;
-// (primitive, vertex) pairs for `vs_mesh` — indexed directly by vertex_index.
+// One entry per mesh vertex drawn, indexed directly by vertex_index: which
+// primitive of its draw it belongs to from `MESH_PRIM_SHIFT` up, and which of
+// that part's own vertices below. The draw's first primitive arrives as its
+// `instance_index`.
 @group(0) @binding(3) var<storage, read> mesh_stream: array<u32>;
 
 @group(1) @binding(0) var t_diffuse: texture_2d<f32>;
@@ -645,10 +706,13 @@ fn vs_quad(@builtin(vertex_index) vi: u32) -> VertexOutput {
     return out;
 }
 
+const MESH_VERTEX_MASK: u32 = (1u << MESH_PRIM_SHIFT) - 1u;
+
 @vertex
-fn vs_mesh(@builtin(vertex_index) vi: u32) -> VertexOutput {
-    let pi = mesh_stream[vi * 2u];
-    let k = mesh_stream[vi * 2u + 1u];
+fn vs_mesh(@builtin(vertex_index) vi: u32, @builtin(instance_index) first: u32) -> VertexOutput {
+    let entry = mesh_stream[vi];
+    let pi = first + (entry >> MESH_PRIM_SHIFT);
+    let k = entry & MESH_VERTEX_MASK;
     let p = &prims[pi];
     // Mesh vertices arrive already in world space (the runtime skins them), so
     // only the node's placement is left to apply.
@@ -760,9 +824,10 @@ fn vs_cov_quad(@builtin(vertex_index) vi: u32) -> VertexOutput {
 }
 
 @vertex
-fn vs_cov_mesh(@builtin(vertex_index) vi: u32) -> VertexOutput {
-    let pi = mesh_stream[vi * 2u];
-    let k = mesh_stream[vi * 2u + 1u];
+fn vs_cov_mesh(@builtin(vertex_index) vi: u32, @builtin(instance_index) first: u32) -> VertexOutput {
+    let entry = mesh_stream[vi];
+    let pi = first + (entry >> MESH_PRIM_SHIFT);
+    let k = entry & MESH_VERTEX_MASK;
     let p = &prims[pi];
     let mx = f_arena[(*p).pos_base + k];
     let my = f_arena[(*p).aux_base + k];
@@ -1286,22 +1351,24 @@ impl SSRenderer {
         // group(0) is the scene: the projection, plus the frame's SoA
         // arena, primitive table and mesh stream — everything the vertex stages
         // read instead of a vertex buffer. Only the layout is shared; the
-        // buffers behind it belong to the render target.
-        let storage = |binding: u32| wgpu::BindGroupLayoutEntry {
+        // buffer behind it belongs to the render target. The three share one
+        // buffer, the arena first, and the other two start wherever the frame's
+        // arena ended: hence their dynamic offsets.
+        let storage = |binding: u32, has_dynamic_offset: bool| wgpu::BindGroupLayoutEntry {
             binding,
             // The fragment stage reads the arena too: the coverage replay walks
             // the node's writer records there, per fragment.
             visibility: wgpu::ShaderStages::VERTEX_FRAGMENT,
-            ty: wgpu::BindingType::Buffer { ty: wgpu::BufferBindingType::Storage { read_only: true }, has_dynamic_offset: false, min_binding_size: None },
+            ty: wgpu::BindingType::Buffer { ty: wgpu::BufferBindingType::Storage { read_only: true }, has_dynamic_offset, min_binding_size: None },
             count: None,
         };
         let scene_bind_group_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
             label: Some("SpriteStudio Scene Layout"),
             entries: &[
                 wgpu::BindGroupLayoutEntry { binding: 0, visibility: wgpu::ShaderStages::VERTEX, ty: wgpu::BindingType::Buffer { ty: wgpu::BufferBindingType::Uniform, has_dynamic_offset: false, min_binding_size: None }, count: None },
-                storage(1),
-                storage(2),
-                storage(3),
+                storage(1, false),
+                storage(2, true),
+                storage(3, true),
             ],
         });
 
@@ -1402,7 +1469,7 @@ impl SSRenderer {
         });
 
         Self {
-            pipelines: HashMap::new(),
+            pipelines: KeyMap::default(),
             shader_module,
             pipeline_layout,
             ss_shader_module,
@@ -1416,7 +1483,7 @@ impl SSRenderer {
             white_texture,
             white_bind_group,
             white_ready: false,
-            textures: HashMap::new(),
+            textures: KeyMap::default(),
             texture_sources: HashMap::new(),
             texture_digests: HashMap::new(),
             texture_uploads: 0,

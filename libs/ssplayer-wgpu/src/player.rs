@@ -10,7 +10,7 @@
 
 use crate::events::{SsEvent, decode_events};
 use crate::frame::FrameView;
-use crate::mask::{GeomKind, MaskOp, MaskWriter, MaskWriters, PartMaskFlags, ScopedWriter, StencilTest, plan_writers};
+use crate::mask::{GeomKind, MaskOp, MaskWriter, PartMaskFlags, ScopedWriter, StencilTest, plan_writers_into};
 use crate::pack::{EmbeddedImage, SSPack, TextureRef};
 use crate::renderer::{Retention, SSRenderer};
 use crate::scene::{BatchInfo, FrameChunk, NodeSlot, pack_tint};
@@ -177,7 +177,7 @@ pub trait AssetLoader {
 /// Point every planned writer's cutout at the renderer key its node's pack
 /// resolved to. A writer's `texture_hash` comes from the batch it belongs to, so
 /// it arrives in cellmap-hash terms like every other one.
-fn retarget(writers: &mut MaskWriters, keys: &AtlasKeys) {
+fn retarget(writers: &mut [MaskWriter], keys: &AtlasKeys) {
     for writer in writers.iter_mut() {
         writer.texture_hash = keys.resolve(writer.texture_hash);
     }
@@ -553,6 +553,10 @@ struct InstanceChild {
     frame_no: f32,
     /// Whether the slot says the child is showing this frame.
     visible: bool,
+    /// The child's node in this frame's walk, or `None` when the walk did not
+    /// prepare it. Set for every instance part in its node's `draw_order`, which
+    /// are the only ones the draw walk looks up.
+    prep: Option<usize>,
 }
 
 /// One effect part: its slot, and the draw plan the last [`step_effects`] produced.
@@ -722,6 +726,8 @@ pub struct SSPlayer {
     /// Private override keys a restore has retired, dropped from the renderer on
     /// the next flush. Deferred for the same reason as the uploads.
     pending_forgets: Vec<u32>,
+    /// What one frame's draw walk fills, emptied after it rather than dropped.
+    walk: Walk,
 }
 
 /// The transport settings of [`SSPlayer::transport`](SSPlayer), at the
@@ -822,6 +828,7 @@ impl SSPlayer {
             overrides: HashMap::new(),
             pending_overrides: Vec::new(),
             pending_forgets: Vec::new(),
+            walk: Walk::default(),
         }
     }
 
@@ -2677,7 +2684,7 @@ impl SSPlayer {
 
         let draw = NodeDraw { alpha: self.alpha, tint: pack_tint(self.tint) };
         let mut build = FrameBuild { scene, renderer, sub_frame: self.sub_frame };
-        render_tree(root, &mut build, &self.transform, frame_no, draw);
+        render_tree(root, &mut self.walk, &mut build, &self.transform, frame_no, draw);
         // The nodes the walk did not prepare draw nothing, and their effect slots
         // still have to keep time: a hidden instance part's sub-animation, a child
         // its slot says is not showing.
@@ -2776,7 +2783,7 @@ fn build_rig(
                         && let Some(child) = build_node(packs, atlas_keys, inst.ref_anime_pack(), inst.ref_anime_name())
                     {
                         let frame_no = child.context.get_frame_no();
-                        instances.insert(i, InstanceChild { slot: InstanceSlot::new(), node: Box::new(child), frame_no, visible: false });
+                        instances.insert(i, InstanceChild { slot: InstanceSlot::new(), node: Box::new(child), frame_no, visible: false, prep: None });
                     }
                 }
                 PartType::PartTypeEffect => {
@@ -2955,9 +2962,8 @@ impl InheritedMask {
 /// node's: a clipping mask written inside an instance keeps clipping its callers'
 /// later parts however deep it sits, so every writer and every part's place in
 /// the drawing order has to be known before the first part draws. Preparing is
-/// also where each node's frame is fetched and copied into the arena, **once** —
-/// fetching a frame again rebuilds the runtime's buffers under any slice still
-/// pointing into them.
+/// also where each node's frame is fetched, **once** — fetching a frame again
+/// rebuilds the runtime's buffers under any slice still pointing into them.
 struct NodePrep<'r> {
     frame: FrameView<'r>,
     slot: NodeSlot,
@@ -2968,11 +2974,32 @@ struct NodePrep<'r> {
     /// coverage bitmap is pinned to the player, not to the screen.
     to_root: [f32; 16],
     ctx: InheritedMask,
-    /// Each rank's place on the tree sequence (see [`ScopedWriter`]). Empty when
-    /// the scene does not mask.
+    /// Where this node's ranks start in [`Walk::seq`].
+    seq: usize,
+}
+
+/// What one frame's walk over a player's instance tree fills, kept on the player
+/// so that the walk allocates nothing once the first frames have sized it.
+struct Walk {
+    /// Every node prepared this frame, the top one first.
+    ///
+    /// `'static` in type only. The views point into the runtime's buffers, which
+    /// the node's next fetch rebuilds, so the walk empties this before it
+    /// returns and no view outlives its frame.
+    preps: Vec<NodePrep<'static>>,
+    /// Each prepared node's ranks' places on the tree sequence (see
+    /// [`ScopedWriter`]), at the node's [`NodePrep::seq`].
     seq: Vec<i32>,
-    /// `(instance part index, prep index)` for each visible instance child.
-    children: Vec<(usize, usize)>,
+    /// The writers planned for the nodes being prepared: a node's own run at the
+    /// end while it is, dropped once it is placed.
+    planned: Vec<MaskWriter>,
+    mask: TreeMask,
+}
+
+impl Default for Walk {
+    fn default() -> Self {
+        Self { preps: Vec::new(), seq: Vec::new(), planned: Vec::new(), mask: TreeMask::new(crate::MaskBackend::None) }
+    }
 }
 
 /// Where a pure mask of the top animation opens: before the first part.
@@ -3012,6 +3039,16 @@ struct TreeMask {
 impl TreeMask {
     fn new(backend: crate::MaskBackend) -> Self {
         Self { backend, writers: Vec::new(), writer_nodes: Vec::new(), events: Vec::new(), cursor: 0, coverage: None }
+    }
+
+    /// Empty it for a new frame drawn under `backend`, keeping the allocations.
+    fn reset(&mut self, backend: crate::MaskBackend) {
+        self.backend = backend;
+        self.writers.clear();
+        self.writer_nodes.clear();
+        self.events.clear();
+        self.cursor = 0;
+        self.coverage = None;
     }
 
     fn masking(&self) -> bool {
@@ -3141,88 +3178,90 @@ const IDENTITY_MATRIX: [f32; 16] = [1.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0,
 
 /// Draw one player's instance tree: prepare every node, settle the tree's mask,
 /// then walk it in drawing order.
-fn render_tree(root: &mut PlaybackNode, build: &mut FrameBuild<'_>, transform: &[f32; 16], frame_no: f32, draw: NodeDraw) {
-    let mut mask = TreeMask::new(build.scene.mask_backend());
-    let mut preps = Vec::new();
+fn render_tree(root: &mut PlaybackNode, walk: &mut Walk, build: &mut FrameBuild<'_>, transform: &[f32; 16], frame_no: f32, draw: NodeDraw) {
+    walk.mask.reset(build.scene.mask_backend());
     let mut next_seq = 0;
-    let Some(top) = prepare_node(root, build, frame_no, *transform, IDENTITY_MATRIX, InheritedMask::ROOT, TREE_START, &mut next_seq, &mut preps, &mut mask) else { return };
+    if let Some(top) = prepare_node(root, build, frame_no, *transform, IDENTITY_MATRIX, InheritedMask::ROOT, TREE_START, &mut next_seq, walk) {
+        match walk.mask.backend {
+            crate::MaskBackend::Coverage => bake_coverage(build, &mut walk.preps, &mut walk.mask),
+            crate::MaskBackend::Stencil => walk.mask.schedule(),
+            crate::MaskBackend::None => {}
+        }
 
-    match mask.backend {
-        crate::MaskBackend::Coverage => bake_coverage(build, &mut preps, &mut mask),
-        crate::MaskBackend::Stencil => mask.schedule(),
-        crate::MaskBackend::None => {}
+        render_node(root, top, &walk.preps, &walk.seq, build, draw, &mut walk.mask);
+
+        if walk.mask.backend == crate::MaskBackend::Stencil {
+            walk.mask.finish(build, &walk.preps);
+        }
     }
-
-    render_node(root, top, &preps, build, draw, &mut mask);
-
-    if mask.backend == crate::MaskBackend::Stencil {
-        mask.finish(build, &preps);
-    }
+    walk.preps.clear();
+    walk.seq.clear();
 }
 
 /// Fetch a node's frame, copy it into the arena, step its effect slots, number
 /// its ranks on the tree sequence and place its writers — then the same for each
 /// visible instance child, in its instance part's place. Returns the node's
-/// index in `preps`.
+/// index in `walk.preps`.
 ///
 /// `open` is where this node's animation starts on the sequence: the top
 /// animation's before its first part, a sub-animation's at its instance part.
 #[allow(clippy::too_many_arguments)]
-fn prepare_node<'r>(node: &mut PlaybackNode, build: &mut FrameBuild<'_>, frame_no: f32, transform: [f32; 16], to_root: [f32; 16], ctx: InheritedMask, open: i32, next_seq: &mut i32, preps: &mut Vec<NodePrep<'r>>, mask: &mut TreeMask) -> Option<usize> {
+fn prepare_node(node: &mut PlaybackNode, build: &mut FrameBuild<'_>, frame_no: f32, transform: [f32; 16], to_root: [f32; 16], ctx: InheritedMask, open: i32, next_seq: &mut i32, walk: &mut Walk) -> Option<usize> {
     // The DISPLAY frame. The playhead keeps its fraction whatever this is set to;
     // flooring it here is the whole of what turning sub-frame off does.
     let frame_no = if build.sub_frame { frame_no } else { frame_no.floor() };
-    let frame_data: &'r [u8] = match node.context.get_frame_data(frame_no) {
+    let frame_data: &'static [u8] = match node.context.get_frame_data(frame_no) {
         Ok(bytes) => unsafe { std::slice::from_raw_parts(bytes.as_ptr(), bytes.len()) },
         Err(_) => return None,
     };
     let frame = frame_view(&mut node.context, frame_data);
-    // Hand this node's runtime buffers to the scene once, up front: everything
-    // after refers to them by arena offset rather than expanding them.
-    let slot = build.scene.begin_node(&frame, &transform);
-    let index = preps.len();
-    preps.push(NodePrep { frame, slot, transform, to_root, ctx, seq: Vec::new(), children: Vec::new() });
-
-    let mut own = if mask.masking() { plan_writers(&frame, &node.mask_flags) } else { MaskWriters::default() };
-    retarget(&mut own, &node.atlas_keys);
-    // `plan_writers` hands them back in ascending rank.
-    let mut own = own.iter().peekable();
-
+    // The node's placement goes into the arena first; each part it draws copies
+    // its own geometry in after it.
+    let slot = build.scene.push_transform(&transform);
+    let index = walk.preps.len();
     let fd = unsafe { root_as_frame_data_unchecked(frame.frame_data) };
+    let draw_order = fd.draw_order();
+    let seq = walk.seq.len();
+    walk.seq.resize(seq + draw_order.len(), 0);
+    walk.preps.push(NodePrep { frame, slot, transform, to_root, ctx, seq });
+
+    // `plan_writers_into` appends them in ascending rank.
+    let planned = walk.planned.len();
+    if walk.mask.masking() {
+        plan_writers_into(&frame, &node.mask_flags, &mut walk.planned);
+    }
+    retarget(&mut walk.planned[planned..], &node.atlas_keys);
+    let (mut own, own_end) = (planned, walk.planned.len());
+
     // The runtime leaves a hidden part out of `draw_order`, so its own hide flag
     // is whether the effect it plays is drawn.
     let parts = fd.parts();
     step_effects(node, |part_idx| part_idx < parts.len() && !parts.get(part_idx).hide());
 
-    let draw_order = fd.draw_order();
-    let mut seq = Vec::with_capacity(if mask.masking() { draw_order.len() } else { 0 });
-    let mut children = Vec::new();
     for rank in 0..draw_order.len() {
         let here = *next_seq;
         *next_seq += 1;
-        if mask.masking() {
-            seq.push(here);
-        }
-        while let Some(w) = own.next_if(|w| w.rank <= rank) {
-            mask.place(w, here, open, index, ctx);
+        walk.seq[seq + rank] = here;
+        while own < own_end && walk.planned[own].rank <= rank {
+            let writer = walk.planned[own];
+            walk.mask.place(&writer, here, open, index, ctx);
+            own += 1;
         }
 
         // A visible instance's sub-animation is drawn in its instance part's
         // place, so it is numbered right there, ahead of the next part.
         let part_idx = draw_order.get(rank) as usize;
         let Some(child) = node.instances.get_mut(&part_idx) else { continue };
+        child.prep = None;
         if !child.visible || (part_idx + 1) * 16 > frame.world_matrices.len() {
             continue;
         }
         let m: [f32; 16] = frame.world_matrices[part_idx * 16..part_idx * 16 + 16].try_into().unwrap();
         let child_ctx = InheritedMask::of_instance(&node.mask_flags.get(part_idx).copied().unwrap_or_default());
         let child_frame_no = child.frame_no;
-        if let Some(ci) = prepare_node(&mut child.node, build, child_frame_no, mat4_mul(&transform, &m), mat4_mul(&to_root, &m), child_ctx, here, next_seq, preps, mask) {
-            children.push((part_idx, ci));
-        }
+        child.prep = prepare_node(&mut child.node, build, child_frame_no, mat4_mul(&transform, &m), mat4_mul(&to_root, &m), child_ctx, here, next_seq, walk);
     }
-    preps[index].seq = seq;
-    preps[index].children = children;
+    walk.planned.truncate(planned);
     Some(index)
 }
 
@@ -3278,11 +3317,11 @@ fn bake_coverage(build: &mut FrameBuild<'_>, preps: &mut [NodePrep<'_>], mask: &
 /// target and its polarity from its own flags and its instance part's
 /// ([`InheritedMask`]), and whether any writer of the tree is in scope from its
 /// place on the tree sequence ([`TreeMask::part`]).
-fn render_node(node: &mut PlaybackNode, index: usize, preps: &[NodePrep<'_>], build: &mut FrameBuild<'_>, draw: NodeDraw, mask: &mut TreeMask) {
+fn render_node(node: &mut PlaybackNode, index: usize, preps: &[NodePrep<'_>], seqs: &[i32], build: &mut FrameBuild<'_>, draw: NodeDraw, mask: &mut TreeMask) {
     let NodeDraw { alpha, tint } = draw;
     let prep = &preps[index];
     let (frame, node_slot, transform, ctx) = (&prep.frame, &prep.slot, &prep.transform, prep.ctx);
-    let seq_of = |rank: usize| prep.seq.get(rank).copied().unwrap_or(0);
+    let seq_of = |rank: usize| seqs[prep.seq + rank];
 
     let fd = unsafe { root_as_frame_data_unchecked(frame.frame_data) };
     let draw_order = fd.draw_order();
@@ -3329,9 +3368,9 @@ fn render_node(node: &mut PlaybackNode, index: usize, preps: &[NodePrep<'_>], bu
             DrawBatchKind::Instance => {
                 for rank in start_rank..start_rank + count {
                     let part_idx = draw_order.get(rank) as usize;
-                    // Prepared only when visible; the prep is the draw's go-ahead.
-                    let Some(&(_, child_index)) = prep.children.iter().find(|&&(p, _)| p == part_idx) else { continue };
                     let Some(child) = node.instances.get_mut(&part_idx) else { continue };
+                    // Prepared only when visible; the prep is the draw's go-ahead.
+                    let Some(child_index) = child.prep else { continue };
                     // Fold the instance part's own opacity into the chain the child
                     // draws with. SpriteStudio modulates a sub-animation by its
                     // instance part's effective alpha (SS6/SS7.5 `RateOpacity`, an
@@ -3339,7 +3378,7 @@ fn render_node(node: &mut PlaybackNode, index: usize, preps: &[NodePrep<'_>], bu
                     // hierarchical value. Colour deliberately does not cross the
                     // boundary — no player propagates an instance part's tint.
                     let child_alpha = alpha * fd.parts().get(part_idx).alpha();
-                    render_node(&mut child.node, child_index, preps, build, NodeDraw { alpha: child_alpha, tint }, mask);
+                    render_node(&mut child.node, child_index, preps, seqs, build, NodeDraw { alpha: child_alpha, tint }, mask);
                 }
             }
             DrawBatchKind::Effect => {
