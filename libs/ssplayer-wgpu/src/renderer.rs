@@ -466,12 +466,12 @@ fn depth_stencil_state(format: Option<wgpu::TextureFormat>, compare: wgpu::Compa
 /// primitives into vertices. Prefixed onto [`WGSL_SHADER`] and [`SS_SHADER_WGSL`],
 /// which add only their fragment stages.
 ///
-/// **There is no vertex buffer.** The runtime's `world_matrices` /
-/// `local_vertices` / `local_uvs` / shape arrays are copied into `f_arena`
-/// verbatim, one memcpy per node per frame, a drawn mesh part's vertices one
-/// memcpy per part, and the vertex stage reads them at the offsets a `Prim`
-/// record points at. WebGL2 cannot do this — no storage buffers — and it is the
-/// single largest reason this player exists.
+/// **There is no vertex buffer.** Each drawn part's slice of the runtime's
+/// `world_matrices` / `local_vertices` / `local_uvs` / mesh / shape arrays is
+/// copied into `f_arena` verbatim as its primitive is recorded, and the vertex
+/// stage reads them at the offsets the part's `Prim` record points at. WebGL2
+/// cannot do this — no storage buffers — and it is the single largest reason
+/// this player exists.
 ///
 /// The position maths is written out scalar by scalar rather than as matrix
 /// products, so it performs the same operations in the same order as the CPU path

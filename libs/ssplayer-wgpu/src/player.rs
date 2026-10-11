@@ -2962,9 +2962,8 @@ impl InheritedMask {
 /// node's: a clipping mask written inside an instance keeps clipping its callers'
 /// later parts however deep it sits, so every writer and every part's place in
 /// the drawing order has to be known before the first part draws. Preparing is
-/// also where each node's frame is fetched and copied into the arena, **once** —
-/// fetching a frame again rebuilds the runtime's buffers under any slice still
-/// pointing into them.
+/// also where each node's frame is fetched, **once** — fetching a frame again
+/// rebuilds the runtime's buffers under any slice still pointing into them.
 struct NodePrep<'r> {
     frame: FrameView<'r>,
     slot: NodeSlot,
@@ -3216,9 +3215,9 @@ fn prepare_node(node: &mut PlaybackNode, build: &mut FrameBuild<'_>, frame_no: f
         Err(_) => return None,
     };
     let frame = frame_view(&mut node.context, frame_data);
-    // Hand this node's runtime buffers to the scene once, up front: everything
-    // after refers to them by arena offset rather than expanding them.
-    let slot = build.scene.begin_node(&frame, &transform);
+    // The node's placement goes into the arena first; each part it draws copies
+    // its own geometry in after it.
+    let slot = build.scene.push_transform(&transform);
     let index = walk.preps.len();
     let fd = unsafe { root_as_frame_data_unchecked(frame.frame_data) };
     let draw_order = fd.draw_order();

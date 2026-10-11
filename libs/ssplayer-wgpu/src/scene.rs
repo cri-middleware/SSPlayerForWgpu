@@ -158,8 +158,8 @@ struct BatchDrawCall {
 /// handful of per-part values that are not in the runtime's buffers.
 ///
 /// This is the record that stands in for a vertex buffer: the CPU does not
-/// transform corners, it copies the runtime's SoA arrays into the arena and
-/// writes one of these (80 bytes) per part.
+/// transform corners, it copies each drawn part's slice of the runtime's SoA
+/// arrays into the arena and writes one of these per part.
 ///
 /// Field meanings are per geometry class; see the `Prim` comment in the WGSL,
 /// which this must stay in step with.
@@ -255,25 +255,19 @@ fn target_mask_info(seq: u32, inside: bool) -> u32 {
     MASK_INFO_ACTIVE | polarity | (seq.min(0xFF_FFFF) << 8)
 }
 
-/// Where one node's slice of the frame arena starts.
+/// Where one node's placement and coverage block sit in the frame arena.
 ///
-/// [`FrameChunk::begin_node`] copies the runtime's SoA buffers in — once per node
-/// per frame, as a handful of memcpys — and hands back the offsets. Every
-/// primitive that node contributes then refers to the arena rather than carrying
-/// its own expanded geometry.
+/// [`FrameChunk::push_transform`] copies the placement in. A node's parts copy
+/// their own geometry in as their primitives are recorded, so only what is
+/// drawn reaches the arena.
 #[derive(Clone, Copy, Debug)]
 pub struct NodeSlot {
     /// The node's placement matrix (16 floats).
     transform: u32,
-    world_matrices: u32,
-    local_vertices: u32,
-    local_uvs: u32,
-    shape_vertices: u32,
-    shape_box_coords: u32,
     /// Arena offset of this node's coverage block, or [`NO_COVERAGE`].
     ///
     /// Written by [`FrameChunk::set_node_coverage`] *after* the writers are
-    /// planned, which is why it cannot be filled in by `begin_node`: the block
+    /// planned, which is why it cannot be filled in by `push_transform`: the block
     /// describes the writer group, and the group is not known until the walk has
     /// looked at the frame.
     coverage: u32,
@@ -299,7 +293,7 @@ const NO_COVERAGE: u32 = u32::MAX;
 // `Default` would quietly make every slot claim the first node's coverage block.
 impl Default for NodeSlot {
     fn default() -> Self {
-        Self { transform: 0, world_matrices: 0, local_vertices: 0, local_uvs: 0, shape_vertices: 0, shape_box_coords: 0, coverage: NO_COVERAGE, coverage_layer: 0 }
+        Self { transform: 0, coverage: NO_COVERAGE, coverage_layer: 0 }
     }
 }
 
@@ -971,36 +965,6 @@ impl FrameChunk {
         PipelineKey { kind, color_format: self.config.color_format, stencil_format: self.config.stencil_format }
     }
 
-    /// Copy one node's runtime buffers into the frame arena and return where they
-    /// landed. Call once per node per frame, before appending any of
-    /// its batches.
-    ///
-    /// This is the whole CPU side of the vertex path: a handful of
-    /// `extend_from_slice` calls over buffers `ssruntime` already laid out
-    /// contiguously. Nothing is transformed here — the vertex stage does that,
-    /// reading the same numbers the runtime produced.
-    ///
-    /// `transform` is the node's placement: the player's for a root, the
-    /// composition with the parent instance part's world matrix for a child.
-    pub fn begin_node(&mut self, frame: &FrameView, transform: &[f32; 16]) -> NodeSlot {
-        let mut push = |src: &[f32]| -> u32 {
-            let base = self.arena.len() as u32;
-            self.arena.extend_from_slice(src);
-            base
-        };
-        NodeSlot {
-            transform: push(transform),
-            world_matrices: push(frame.world_matrices),
-            local_vertices: push(frame.local_vertices),
-            local_uvs: push(frame.local_uvs),
-            shape_vertices: push(frame.shape_vertices),
-            shape_box_coords: push(frame.shape_vertex_box_coords),
-            // Filled in by `set_node_coverage`, once the walk knows the writers.
-            coverage: NO_COVERAGE,
-            coverage_layer: 0,
-        }
-    }
-
     /// Attach the player's coverage block to its top node, once the whole tree's
     /// writers are planned.
     ///
@@ -1057,11 +1021,13 @@ impl FrameChunk {
         base
     }
 
-    /// Copy a standalone placement matrix into the arena.
+    /// Copy a placement matrix into the arena: a node's, before any of its
+    /// primitives, or an effect's, whose particles the plan already placed
+    /// relative to it.
     ///
-    /// An effect draws from its own `EffectDrawPlan`, not from the node's runtime
-    /// buffers, so the only arena slot it needs is its composed transform — the
-    /// rest of the returned [`NodeSlot`] is unused and must stay so.
+    /// `transform` is the player's placement for a root, composed with the
+    /// world matrix of every instance part above it for a child, and with the
+    /// effect part's for an effect.
     pub fn push_transform(&mut self, transform: &[f32; 16]) -> NodeSlot {
         let base = self.arena.len() as u32;
         self.arena.extend_from_slice(transform);
@@ -1394,17 +1360,20 @@ impl FrameChunk {
         self.writer_calls(dest).push(call);
     }
 
-    /// Record one sprite quad for `part_idx`: point `prim` at the part's slice of
-    /// this node's arena copy and append it. The corners themselves are expanded
-    /// by `vs_quad`.
+    /// Record one sprite quad for `part_idx`: copy the part's world matrix, local
+    /// vertices and local UVs into the arena, point `prim` at them and append it.
+    /// The corners themselves are expanded by `vs_quad`.
     fn push_quad_prim(&mut self, frame: &FrameView, node: &NodeSlot, part_idx: usize, prim: Prim) {
-        // Bounds are still checked here: the vertex stage indexes the arena
-        // unconditionally, so a part the runtime has no geometry for must not
-        // produce a primitive at all.
-        if (part_idx + 1) * 16 > frame.world_matrices.len() || (part_idx + 1) * 10 > frame.local_vertices.len() || (part_idx + 1) * 10 > frame.local_uvs.len() {
+        // A part the runtime has no geometry for must not produce a primitive at
+        // all: the vertex stage reads whatever its offsets point at.
+        let (Some(matrix), Some(vertices), Some(uvs)) = (frame.world_matrices.get(part_idx * 16..part_idx * 16 + 16), frame.local_vertices.get(part_idx * 10..part_idx * 10 + 10), frame.local_uvs.get(part_idx * 10..part_idx * 10 + 10)) else {
             return;
-        }
-        self.push_prim(Prim { aux_base: node.world_matrices + (part_idx * 16) as u32, pos_base: node.local_vertices + (part_idx * 10) as u32, uv_base: node.local_uvs + (part_idx * 10) as u32, node_base: node.transform, ..prim });
+        };
+        let aux_base = self.arena.len() as u32;
+        self.arena.extend_from_slice(matrix);
+        self.arena.extend_from_slice(vertices);
+        self.arena.extend_from_slice(uvs);
+        self.push_prim(Prim { aux_base, pos_base: aux_base + 16, uv_base: aux_base + 26, node_base: node.transform, ..prim });
     }
 
     /// Record one skinned-mesh part, the primitive after `draw_prim` in its draw.
@@ -1446,25 +1415,26 @@ impl FrameChunk {
         (stream_end > stream_start).then(|| BatchDrawCall { key, texture_hash, vertices: stream_start..stream_end, instances: draw_prim..draw_prim + 1, shader_slot: None, cov_layer })
     }
 
-    /// Record one Shape part, drawn as a fan from vertex 0 by `vs_shape`.
+    /// Record one Shape part, drawn as a fan from vertex 0 by `vs_shape`: copy
+    /// its world matrix and its live vertices and box coordinates into the arena.
     /// No-op if the part is not a shape or has fewer than 3 live vertices.
     fn push_shape_prim(&mut self, frame: &FrameView, node: &NodeSlot, part_idx: usize, prim: Prim) {
         // Layout: `shape_vertices[part_idx * SHAPE_VERTICES_STRIDE + 2*v]` = local xy.
-        let counts = &frame.shape_vertex_counts;
-        if part_idx >= counts.len() || (part_idx + 1) * 16 > frame.world_matrices.len() {
-            return;
-        }
-        let count = counts[part_idx].max(0) as usize;
+        let count = frame.shape_vertex_counts.get(part_idx).copied().unwrap_or(0).max(0) as usize;
         // The fan pattern is baked into the vertex stage at a fixed stride, so a
         // shape with more vertices than that would silently lose triangles.
         if count < 3 || count > (SHAPE_FAN_VERTS as usize / 3) + 2 {
             return;
         }
         let base = part_idx * crate::frame::SHAPE_VERTICES_STRIDE;
-        if base + count * 2 > frame.shape_vertices.len() || base + count * 2 > frame.shape_vertex_box_coords.len() {
+        let (Some(matrix), Some(vertices), Some(box_coords)) = (frame.world_matrices.get(part_idx * 16..part_idx * 16 + 16), frame.shape_vertices.get(base..base + count * 2), frame.shape_vertex_box_coords.get(base..base + count * 2)) else {
             return;
-        }
-        self.push_prim(Prim { aux_base: node.world_matrices + (part_idx * 16) as u32, pos_base: node.shape_vertices + base as u32, uv_base: node.shape_box_coords + base as u32, node_base: node.transform, count: count as u32, ..prim });
+        };
+        let aux_base = self.arena.len() as u32;
+        self.arena.extend_from_slice(matrix);
+        self.arena.extend_from_slice(vertices);
+        self.arena.extend_from_slice(box_coords);
+        self.push_prim(Prim { aux_base, pos_base: aux_base + 16, uv_base: aux_base + 16 + (count * 2) as u32, node_base: node.transform, count: count as u32, ..prim });
     }
 
     /// Append an effect slot's `EffectDrawPlan` (a raw FlatBuffer) into the
