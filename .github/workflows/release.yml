@@ -3,22 +3,40 @@ name: Release
 # version; everything after that is this workflow's, and the same ref with the
 # same inputs always produces the same result:
 #
-#   versions   `<package>@<version>` (today `ssplayer-wgpu@X.Y.Z`).
-#              scripts/set-versions.mjs writes it in every job, so each one
-#              builds the same tree, and turns the package's `## [Unreleased]`
-#              notes into that version's CHANGELOG.md section. The package job
-#              commits it to main only once every platform has built and
-#              build-release.sh has checked the result. Empty sets nothing and
-#              releases the current version if it has no Release yet: the retry
-#              after a run that died halfway.
+#   versions     `<package>@<version>` (today `ssplayer-wgpu@X.Y.Z`).
+#                scripts/set-versions.mjs writes it in every job, so each one
+#                builds the same tree, and turns the package's `## [Unreleased]`
+#                notes into that version's CHANGELOG.md section. The package job
+#                commits it to main only once every platform has built and
+#                build-release.sh has checked the result. Empty sets nothing and
+#                releases the current version wherever it is not out yet: the
+#                retry after a run that died halfway.
 #
-#   dry_run    Build and check everything with the version applied, and commit,
-#              tag and release nothing. The look before a release.
+#   publish_npm  The npm package's tarball -- the very file build-release.sh
+#                packed, checked and attached to the Release -- is staged on npm
+#                through trusted publishing, unless npm already has that
+#                version, staged or published. Nothing is public until a
+#                maintainer approves it with 2FA, on npmjs.com or with
+#                `npm stage approve`. A version with a prerelease part
+#                (X.Y.Z-beta.N) is staged under that word's dist-tag, so
+#                `latest` stays on the last full release. Off, the Release still
+#                carries the tarball. That is how the package's first version
+#                ships: npm sets up a trusted publisher only for a package it
+#                already has, so a maintainer publishes that version by hand
+#                from the tarball (RELEASING.md).
+#
+#   dry_run      Build and check everything with the version applied, and
+#                commit, tag, release and stage nothing. The look before a
+#                release.
 #
 # A release gets a `ssplayer-wgpu-v<version>` tag and a DRAFT GitHub Release
-# carrying the zips, SHA256SUMS and a link to the package's CHANGELOG.md, which
-# is where the notes are. A maintainer checks and publishes it, and publishing is
-# what starts pages.yml.
+# carrying the zips, the npm tarball, SHA256SUMS and a link to the package's
+# CHANGELOG.md, which is where the notes are. A maintainer checks and publishes
+# it, and publishing is what starts pages.yml.
+#
+# Staging needs no secret. The package on npm has a trusted publisher for this
+# repository and this workflow file, allowed to stage, and the package job's
+# id-token is what npm trusts.
 on:
   workflow_dispatch:
     inputs:
@@ -26,8 +44,12 @@ on:
         description: 'Version to set, as <package>@<version> (ssplayer-wgpu@X.Y.Z). Empty releases the current version.'
         type: string
         default: ''
+      publish_npm:
+        description: 'Stage the npm package on npm, for a maintainer to approve (its Release is drafted either way)'
+        type: boolean
+        default: true
       dry_run:
-        description: 'Build and check everything, but commit, tag and release nothing'
+        description: 'Build and check everything, but commit, tag, release and stage nothing'
         type: boolean
         default: false
 
@@ -217,9 +239,9 @@ jobs:
     name: 📦 Package
     needs: build
     runs-on: ubuntu-latest
-    # The version commit, the tag and the draft Release.
     permissions:
-      contents: write
+      contents: write # the version commit, the tag and the draft Release
+      id-token: write # trusted publishing on npm
 
     steps:
       # No submodule here: this job assembles what the matrix already built, so
@@ -228,6 +250,13 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 0
+
+      # npm packs the package in build-release.sh and stages it at the end.
+      - name: Setup Node
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 22
+          registry-url: 'https://registry.npmjs.org'
 
       - name: Set the versions
         if: inputs.versions != ''
@@ -241,17 +270,19 @@ jobs:
         with:
           path: artifacts
 
-      # scripts/build-release.sh IS the release package: one zip per platform
-      # holding include/, lib/ and the licence, the npm package as its own, and
-      # SHA256SUMS over all of them. Every option is spelled out so a release
-      # cannot change because a default did, and so this is the command a human
-      # runs locally — after `gh run download <this run> -D artifacts` — to
-      # reproduce these exact archives without rebuilding four platforms.
+      # scripts/build-release.sh IS the release package: one zip per native
+      # platform holding include/, lib/ and the licence, the npm package as the
+      # tarball npm is given, and SHA256SUMS over all of them. Every option is
+      # spelled out so a release cannot change because a default did, and so
+      # this is the command a human runs locally — after
+      # `gh run download <this run> -D artifacts` — to reproduce these exact
+      # archives without rebuilding four platforms.
       #
       # Its checks are the ones nothing else does: that every platform is present
       # rather than three of four, that the cbindgen header is byte-identical
-      # across them (it is not, if one job built an older commit), and that each
-      # finished zip actually holds the library it is named for.
+      # across them (it is not, if one job built an older commit), that each
+      # finished zip actually holds the library it is named for, and that the
+      # tarball holds what the package advertises.
       - name: Build the release
         run: ./scripts/build-release.sh in=artifacts out=release-dist verify=yes clean=yes
 
@@ -288,7 +319,7 @@ jobs:
           version="$(scripts/release-version.sh)"
           tag="ssplayer-wgpu-v${version}"
           if gh release view "$tag" > /dev/null 2>&1; then
-            echo "::notice::${tag} already has a Release — nothing to do."
+            echo "::notice::${tag} already has a Release — skipping."
             exit 0
           fi
           # A run that tagged and then died left the tag behind; it is reused.
@@ -301,5 +332,40 @@ jobs:
           notes="See [CHANGELOG.md](${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/blob/${tag}/libs/ssplayer-wgpu/CHANGELOG.md) for what changed."
           args=(--verify-tag --title "SpriteStudio Player for wgpu v${version}" --notes "$notes" --draft)
           case "$version" in *-*) args+=(--prerelease) ;; esac
-          gh release create "$tag" release-dist/*.zip release-dist/SHA256SUMS "${args[@]}"
+          gh release create "$tag" release-dist/*.zip release-dist/*.tgz release-dist/SHA256SUMS "${args[@]}"
           echo "::notice::Drafted ${tag} — check it and publish it from the Releases page."
+
+      # npm 11.21 is the first CLI that sets a dist-tag through trusted
+      # publishing, and Node 22 ships npm 10.
+      - name: Update npm
+        if: inputs.publish_npm && !inputs.dry_run
+        run: npm install -g npm@11.21.0
+
+      # Last, so that a failure here leaves the tag and the draft in place, for a
+      # re-run with `versions` empty or a maintainer to finish. npm lists a
+      # staged version only once it is approved, so staging one again is refused
+      # with a 409, which is skipped like a version npm already has.
+      - name: Stage on npm
+        if: inputs.publish_npm && !inputs.dry_run
+        run: |
+          set -euo pipefail
+          version="$(scripts/release-version.sh)"
+          name="$(node -p "require('./packages/ssplayer-wgpu/package.json').name")"
+          if [ -n "$(npm view "${name}@${version}" version 2>/dev/null || true)" ]; then
+            echo "::notice::${name}@${version} is already on npm — skipping."
+            exit 0
+          fi
+          case "$version" in
+            *-*) dist_tag="${version#*-}"; dist_tag="${dist_tag%%.*}" ;;
+            *)   dist_tag="latest" ;;
+          esac
+          if ! out="$(npm stage publish release-dist/*.tgz --tag "$dist_tag" --access public 2>&1)"; then
+            echo "$out"
+            if grep -qE "409 Conflict.*previously (published|staged) version \"${version}\"" <<< "$out"; then
+              echo "::notice::${name}@${version} is already staged — skipping."
+              exit 0
+            fi
+            exit 1
+          fi
+          echo "$out"
+          echo "::notice::Staged ${name}@${version} under '${dist_tag}' — approve it on npmjs.com or with npm stage approve."
