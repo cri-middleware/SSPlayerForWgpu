@@ -76,8 +76,9 @@ pub(crate) enum GeomClass {
     /// Sprite quad: 6 vertices per primitive, indexless. `vertex_index / 6` is the
     /// primitive, `% 6` picks a corner through the fixed triangle pattern.
     Quad,
-    /// Skinned mesh: irregular, so a per-vertex `(primitive, vertex)` stream
-    /// drives it — the one class that cannot be addressed by arithmetic alone.
+    /// Skinned mesh: irregular, so a per-vertex stream drives it — the one class
+    /// that cannot be addressed by arithmetic alone. Each entry names its
+    /// primitive relative to the draw's first, which arrives as `instance_index`.
     Mesh,
     /// Shape fan: a fixed [`SHAPE_FAN_VERTS`] vertices per primitive, with the
     /// unused triangles collapsed to zero area.
@@ -122,6 +123,7 @@ impl GeomClass {
 fn wgsl_consts() -> String {
     format!(
         "const SHAPE_FAN_VERTS: u32 = {SHAPE_FAN_VERTS}u;\n\
+         const MESH_PRIM_SHIFT: u32 = {MESH_PRIM_SHIFT}u;\n\
          const COVERAGE_HEADER: u32 = {}u;\n\
          const COVERAGE_STRIDE: u32 = {}u;\n\
          const MAX_MASK_WRITERS: u32 = {}u;\n\
@@ -146,6 +148,20 @@ pub(crate) const COVERAGE_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Rgb
 /// Triangles past the live count collapse to a single vertex and rasterise
 /// nothing, and shapes are rare enough that the wasted invocations do not matter.
 pub(crate) const SHAPE_FAN_VERTS: u32 = 30;
+
+/// Where a mesh-stream entry's primitive starts: the bits above this name which
+/// primitive of its draw the vertex belongs to, the bits below which of that
+/// part's own vertices it is.
+///
+/// One entry per vertex, so an entry is a mesh part's own index with its tag
+/// ORed in — one copy of the runtime's triangle list, not a pair built per
+/// index. A draw names at most [`MESH_DRAW_PRIMS`] primitives, and a part may
+/// have up to 2^24 vertices.
+pub(crate) const MESH_PRIM_SHIFT: u32 = 24;
+
+/// The most primitives one mesh draw can name: the batch starts a new draw past
+/// this.
+pub(crate) const MESH_DRAW_PRIMS: u32 = 1 << (32 - MESH_PRIM_SHIFT);
 
 /// What a pipeline does, before the render target is taken into account.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
@@ -451,10 +467,11 @@ fn depth_stencil_state(format: Option<wgpu::TextureFormat>, compare: wgpu::Compa
 /// which add only their fragment stages.
 ///
 /// **There is no vertex buffer.** The runtime's `world_matrices` /
-/// `local_vertices` / `local_uvs` / `mesh_*` / shape arrays are copied into
-/// `f_arena` verbatim, one memcpy per node per frame, and the vertex stage reads
-/// them at the offsets a 80-byte `Prim` record points at. WebGL2 cannot do this —
-/// no storage buffers — and it is the single largest reason this player exists.
+/// `local_vertices` / `local_uvs` / shape arrays are copied into `f_arena`
+/// verbatim, one memcpy per node per frame, a drawn mesh part's vertices one
+/// memcpy per part, and the vertex stage reads them at the offsets a `Prim`
+/// record points at. WebGL2 cannot do this — no storage buffers — and it is the
+/// single largest reason this player exists.
 ///
 /// The position maths is written out scalar by scalar rather than as matrix
 /// products, so it performs the same operations in the same order as the CPU path
@@ -487,7 +504,7 @@ struct Globals {
 // | aux_base | pos_base | uv_base | count
 // ---------+---------------+-----------------+------------------+-------
 // vs_quad | world matrix | local vertices | local UVs (px) | -
-// vs_mesh | mesh Y | mesh X | mesh UVs (px) | -
+// vs_mesh | part's Y | part's X | part's UVs (px)| -
 // vs_shape | world matrix | shape vertices | shape box coords | vertices
 // vs_effect| - | particle XY | particle UVs | -
 //
@@ -527,7 +544,10 @@ const MASK_INFO_INSIDE: u32 = 4u;
 // The frame's SoA arena: runtime buffers and node transforms, copied verbatim.
 @group(0) @binding(1) var<storage, read> f_arena: array<f32>;
 @group(0) @binding(2) var<storage, read> prims: array<Prim>;
-// (primitive, vertex) pairs for `vs_mesh` — indexed directly by vertex_index.
+// One entry per mesh vertex drawn, indexed directly by vertex_index: which
+// primitive of its draw it belongs to from `MESH_PRIM_SHIFT` up, and which of
+// that part's own vertices below. The draw's first primitive arrives as its
+// `instance_index`.
 @group(0) @binding(3) var<storage, read> mesh_stream: array<u32>;
 
 @group(1) @binding(0) var t_diffuse: texture_2d<f32>;
@@ -686,10 +706,13 @@ fn vs_quad(@builtin(vertex_index) vi: u32) -> VertexOutput {
     return out;
 }
 
+const MESH_VERTEX_MASK: u32 = (1u << MESH_PRIM_SHIFT) - 1u;
+
 @vertex
-fn vs_mesh(@builtin(vertex_index) vi: u32) -> VertexOutput {
-    let pi = mesh_stream[vi * 2u];
-    let k = mesh_stream[vi * 2u + 1u];
+fn vs_mesh(@builtin(vertex_index) vi: u32, @builtin(instance_index) first: u32) -> VertexOutput {
+    let entry = mesh_stream[vi];
+    let pi = first + (entry >> MESH_PRIM_SHIFT);
+    let k = entry & MESH_VERTEX_MASK;
     let p = &prims[pi];
     // Mesh vertices arrive already in world space (the runtime skins them), so
     // only the node's placement is left to apply.
@@ -801,9 +824,10 @@ fn vs_cov_quad(@builtin(vertex_index) vi: u32) -> VertexOutput {
 }
 
 @vertex
-fn vs_cov_mesh(@builtin(vertex_index) vi: u32) -> VertexOutput {
-    let pi = mesh_stream[vi * 2u];
-    let k = mesh_stream[vi * 2u + 1u];
+fn vs_cov_mesh(@builtin(vertex_index) vi: u32, @builtin(instance_index) first: u32) -> VertexOutput {
+    let entry = mesh_stream[vi];
+    let pi = first + (entry >> MESH_PRIM_SHIFT);
+    let k = entry & MESH_VERTEX_MASK;
     let p = &prims[pi];
     let mx = f_arena[(*p).pos_base + k];
     let my = f_arena[(*p).aux_base + k];

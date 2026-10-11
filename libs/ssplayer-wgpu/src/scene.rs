@@ -10,7 +10,7 @@
 use crate::frame::FrameView;
 use crate::mask::{MaskOp, MaskWriter, ScopedWriter, StencilTest};
 use crate::metrics::{GpuTimer, SceneStats};
-use crate::renderer::{COVERAGE_FORMAT, GeomClass, PipelineKey, PipelineKind, SHADER_PARAM_STRIDE, SHADER_PARAM_STRIDE_F32, SHAPE_FAN_VERTS, SSRenderer, blend_index, ss_shader_entry};
+use crate::renderer::{COVERAGE_FORMAT, GeomClass, MESH_DRAW_PRIMS, MESH_PRIM_SHIFT, PipelineKey, PipelineKind, SHADER_PARAM_STRIDE, SHADER_PARAM_STRIDE_F32, SHAPE_FAN_VERTS, SSRenderer, blend_index, ss_shader_entry};
 
 use ssruntime::runtime::effect_draw_plan::ss::runtime::root_as_effect_draw_plan_unchecked;
 use ssruntime::runtime::framedata::ss::runtime::{BlendType, DrawBatchKind, PartAttributeShader, root_as_frame_data_unchecked};
@@ -141,6 +141,10 @@ struct BatchDrawCall {
     /// class's own arithmetic — 6 per quad or particle, 30 per shape,
     /// one stream entry per mesh vertex.
     vertices: std::ops::Range<u32>,
+    /// The `instance_index` range to issue: always one instance, the draw's
+    /// first primitive for Mesh, which its stream entries count from, and
+    /// zero for every other class.
+    instances: std::ops::Range<u32>,
     /// Index of this part's block in the shader-params buffer, for
     /// [`PipelineKey::Shader`] draws — the dynamic offset for bind group(2).
     shader_slot: Option<u32>,
@@ -162,9 +166,10 @@ struct BatchDrawCall {
 #[repr(C)]
 #[derive(Copy, Clone, Debug, bytemuck::Pod, bytemuck::Zeroable)]
 struct Prim {
-    /// Quad/Shape: world matrix base. Mesh: the Y vertex array. Effect: unused.
+    /// Quad/Shape: world matrix base. Mesh: the part's Y vertices. Effect: unused.
     aux_base: u32,
-    /// Local vertices (Quad), mesh X (Mesh), shape vertices (Shape), particle XY.
+    /// Local vertices (Quad), the part's X vertices (Mesh), shape vertices
+    /// (Shape), particle XY.
     pos_base: u32,
     /// Local UVs (Quad/Mesh, texture pixels), box coords (Shape), particle UVs.
     uv_base: u32,
@@ -263,9 +268,6 @@ pub struct NodeSlot {
     world_matrices: u32,
     local_vertices: u32,
     local_uvs: u32,
-    mesh_x: u32,
-    mesh_y: u32,
-    mesh_uvs: u32,
     shape_vertices: u32,
     shape_box_coords: u32,
     /// Arena offset of this node's coverage block, or [`NO_COVERAGE`].
@@ -297,7 +299,7 @@ const NO_COVERAGE: u32 = u32::MAX;
 // `Default` would quietly make every slot claim the first node's coverage block.
 impl Default for NodeSlot {
     fn default() -> Self {
-        Self { transform: 0, world_matrices: 0, local_vertices: 0, local_uvs: 0, mesh_x: 0, mesh_y: 0, mesh_uvs: 0, shape_vertices: 0, shape_box_coords: 0, coverage: NO_COVERAGE, coverage_layer: 0 }
+        Self { transform: 0, world_matrices: 0, local_vertices: 0, local_uvs: 0, shape_vertices: 0, shape_box_coords: 0, coverage: NO_COVERAGE, coverage_layer: 0 }
     }
 }
 
@@ -541,7 +543,7 @@ impl SSScene {
                 let Some(pipeline) = renderer.pipelines.get(&call.key) else { continue };
                 pass.set_pipeline(pipeline);
                 pass.set_bind_group(1, renderer.texture_bind_group(call.texture_hash), &[]);
-                pass.draw(call.vertices.clone(), 0..1);
+                pass.draw(call.vertices.clone(), call.instances.clone());
             }
         }
         self.stats.coverage_layers = layers;
@@ -828,7 +830,7 @@ impl SSScene {
                 let Some(coverage) = self.coverage.as_ref() else { continue };
                 rpass.set_bind_group(2, &coverage.bind_group, &[]);
             }
-            rpass.draw(call.vertices.clone(), 0..1);
+            rpass.draw(call.vertices.clone(), call.instances.clone());
             issued += 1;
         }
 
@@ -903,7 +905,8 @@ pub struct FrameChunk {
     /// Runtime SoA buffers and node transforms, copied verbatim.
     arena: Vec<f32>,
     prims: Vec<Prim>,
-    /// `(primitive, vertex)` pairs, one per mesh vertex.
+    /// One entry per mesh vertex drawn: the runtime's own index into its part's
+    /// vertices, tagged with the part's primitive (see [`MESH_PRIM_SHIFT`]).
     mesh_stream: Vec<u32>,
     draw_calls: Vec<BatchDrawCall>,
     /// Writer draws for the coverage bitmap, kept apart from `draw_calls` because
@@ -990,9 +993,6 @@ impl FrameChunk {
             world_matrices: push(frame.world_matrices),
             local_vertices: push(frame.local_vertices),
             local_uvs: push(frame.local_uvs),
-            mesh_x: push(frame.mesh_vertices_x),
-            mesh_y: push(frame.mesh_vertices_y),
-            mesh_uvs: push(frame.mesh_uvs),
             shape_vertices: push(frame.shape_vertices),
             shape_box_coords: push(frame.shape_vertex_box_coords),
             // Filled in by `set_node_coverage`, once the walk knows the writers.
@@ -1092,7 +1092,7 @@ impl FrameChunk {
             // Mesh draws are driven by the stream, not by primitive arithmetic.
             GeomClass::Mesh => return,
         };
-        self.draw_calls.push(BatchDrawCall { key, texture_hash, vertices: first * stride..last * stride, shader_slot, cov_layer: None });
+        self.draw_calls.push(BatchDrawCall { key, texture_hash, vertices: first * stride..last * stride, instances: 0..1, shader_slot, cov_layer: None });
     }
 
     /// Append one Normal/Mesh DrawBatch's geometry into the frame accumulation,
@@ -1201,8 +1201,13 @@ impl FrameChunk {
             }
             DrawBatchKind::Mesh => {
                 let key = self.content_key(blend_type, stencil, GeomClass::Mesh);
-                let stream_start = (self.mesh_stream.len() / 2) as u32;
+                let (mut stream_start, mut draw_prim) = (self.mesh_stream.len() as u32, first_prim);
                 for rank in start_rank..start_rank + count {
+                    if self.prims.len() as u32 - draw_prim == MESH_DRAW_PRIMS {
+                        let call = self.mesh_draw(key, texture_hash, stream_start, draw_prim, None);
+                        self.draw_calls.extend(call);
+                        (stream_start, draw_prim) = (self.mesh_stream.len() as u32, self.prims.len() as u32);
+                    }
                     let part_idx = draw_order.get(rank) as usize;
                     let part = parts.get(part_idx);
 
@@ -1218,12 +1223,10 @@ impl FrameChunk {
                         })
                         .unwrap_or((WHITE, part.alpha(), 1.0, mode::MUL));
 
-                    self.push_mesh_prim(frame, node, part_idx, Prim { mode, alpha, tint, z: part.position_z(), colors: [color; 4], alphas: [part_alpha; 4], rates: [rate; 4], cov_base, mask_info, ..Default::default() });
+                    self.push_mesh_prim(frame, part_idx, draw_prim, Prim { mode, alpha, tint, node_base: node.transform, z: part.position_z(), colors: [color; 4], alphas: [part_alpha; 4], rates: [rate; 4], cov_base, mask_info, ..Default::default() });
                 }
-                let stream_end = (self.mesh_stream.len() / 2) as u32;
-                if stream_end > stream_start {
-                    self.draw_calls.push(BatchDrawCall { key, texture_hash, vertices: stream_start..stream_end, shader_slot: None, cov_layer: None });
-                }
+                let call = self.mesh_draw(key, texture_hash, stream_start, draw_prim, None);
+                self.draw_calls.extend(call);
             }
             DrawBatchKind::Shape => {
                 let key = self.content_key(blend_type, stencil, GeomClass::Shape);
@@ -1351,13 +1354,10 @@ impl FrameChunk {
                 GeomClass::Quad
             }
             GeomKind::Mesh => {
-                let stream_start = (self.mesh_stream.len() / 2) as u32;
-                self.push_mesh_prim(frame, node, writer.part_idx, prim);
-                let stream_end = (self.mesh_stream.len() / 2) as u32;
-                if stream_end > stream_start {
-                    let call = BatchDrawCall { key: self.key(kind_of(GeomClass::Mesh)), texture_hash: writer.texture_hash, vertices: stream_start..stream_end, shader_slot: None, cov_layer };
-                    self.writer_calls(dest).push(call);
-                }
+                let stream_start = self.mesh_stream.len() as u32;
+                self.push_mesh_prim(frame, writer.part_idx, first_prim, Prim { node_base: node.transform, ..prim });
+                let call = self.mesh_draw(self.key(kind_of(GeomClass::Mesh)), writer.texture_hash, stream_start, first_prim, cov_layer);
+                self.writer_calls(dest).extend(call);
                 return;
             }
             GeomKind::Shape => {
@@ -1390,7 +1390,7 @@ impl FrameChunk {
             // Mesh draws are driven by the stream, not by primitive arithmetic.
             GeomClass::Mesh => return,
         };
-        let call = BatchDrawCall { key, texture_hash, vertices: first * stride..last * stride, shader_slot: None, cov_layer };
+        let call = BatchDrawCall { key, texture_hash, vertices: first * stride..last * stride, instances: 0..1, shader_slot: None, cov_layer };
         self.writer_calls(dest).push(call);
     }
 
@@ -1407,35 +1407,43 @@ impl FrameChunk {
         self.push_prim(Prim { aux_base: node.world_matrices + (part_idx * 16) as u32, pos_base: node.local_vertices + (part_idx * 10) as u32, uv_base: node.local_uvs + (part_idx * 10) as u32, node_base: node.transform, ..prim });
     }
 
-    /// Record one skinned-mesh part. Mesh geometry is the one irregular case, so
-    /// besides the primitive this appends a `(primitive, vertex)` pair per index —
-    /// the runtime's own triangle list, rebased onto the arena.
-    fn push_mesh_prim(&mut self, frame: &FrameView, node: &NodeSlot, part_idx: usize, prim: Prim) {
-        let offsets = &frame.mesh_vertex_offsets;
-        if offsets.is_empty() || part_idx >= offsets.len() - 1 {
+    /// Record one skinned-mesh part, the primitive after `draw_prim` in its draw.
+    ///
+    /// A mesh's vertex count varies by part, so its geometry is copied per drawn
+    /// part rather than per node: its vertices into the arena as the runtime laid
+    /// them out, and its triangle list into the mesh stream, each index tagged
+    /// with the part's place in its draw.
+    fn push_mesh_prim(&mut self, frame: &FrameView, part_idx: usize, draw_prim: u32, prim: Prim) {
+        let (vertices, indices) = (&frame.mesh_vertex_offsets, &frame.mesh_index_offsets);
+        if part_idx + 1 >= vertices.len() || part_idx + 1 >= indices.len() {
             return;
         }
-        let start_vert = offsets[part_idx] as usize;
-        let end_vert = offsets[part_idx + 1] as usize;
-        if end_vert <= start_vert {
+        let (start, end) = (vertices[part_idx] as usize, vertices[part_idx + 1] as usize);
+        let (Some(x), Some(y), Some(uvs), Some(triangles)) =
+            (frame.mesh_vertices_x.get(start..end), frame.mesh_vertices_y.get(start..end), frame.mesh_uvs.get(start * 2..end * 2), frame.mesh_indices.get(indices[part_idx] as usize..indices[part_idx + 1] as usize))
+        else {
+            return;
+        };
+        if x.is_empty() || triangles.is_empty() {
             return;
         }
 
-        let index = self.push_prim(Prim {
-            // Mesh vertices come as two parallel world-space arrays.
-            aux_base: node.mesh_y,
-            pos_base: node.mesh_x,
-            uv_base: node.mesh_uvs,
-            node_base: node.transform,
-            ..prim
-        });
+        let pos_base = self.arena.len() as u32;
+        self.arena.extend_from_slice(x);
+        let aux_base = self.arena.len() as u32;
+        self.arena.extend_from_slice(y);
+        let uv_base = self.arena.len() as u32;
+        self.arena.extend_from_slice(uvs);
+        let tag = (self.prims.len() as u32 - draw_prim) << MESH_PRIM_SHIFT;
+        self.mesh_stream.extend(triangles.iter().map(|&index| tag | index as u32));
+        self.push_prim(Prim { aux_base, pos_base, uv_base, ..prim });
+    }
 
-        let start_idx = frame.mesh_index_offsets[part_idx] as usize;
-        let end_idx = frame.mesh_index_offsets[part_idx + 1] as usize;
-        for &rel_idx in &frame.mesh_indices[start_idx..end_idx] {
-            self.mesh_stream.push(index);
-            self.mesh_stream.push(start_vert as u32 + rel_idx as u32);
-        }
+    /// The draw over the stream from `stream_start` to its end, whose first
+    /// primitive is `draw_prim`, or `None` when that is empty.
+    fn mesh_draw(&self, key: PipelineKey, texture_hash: u32, stream_start: u32, draw_prim: u32, cov_layer: Option<u32>) -> Option<BatchDrawCall> {
+        let stream_end = self.mesh_stream.len() as u32;
+        (stream_end > stream_start).then(|| BatchDrawCall { key, texture_hash, vertices: stream_start..stream_end, instances: draw_prim..draw_prim + 1, shader_slot: None, cov_layer })
     }
 
     /// Record one Shape part, drawn as a fan from vertex 0 by `vs_shape`.
