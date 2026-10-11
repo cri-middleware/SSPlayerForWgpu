@@ -354,15 +354,22 @@ pub struct SSScene {
 
     /// The projection matrix. Part of group(0) along with the frame buffers.
     globals_buffer: wgpu::Buffer,
-    /// group(0), rebuilt whenever one of the frame buffers below is reallocated.
+    /// group(0), rebuilt whenever the frame buffer below is reallocated.
     scene_bind_group: Option<wgpu::BindGroup>,
     /// Last viewport passed to [`SSScene::set_viewport`], re-applied on restore
     /// (the projection lives in a buffer that dies with the device).
     viewport: Option<(f32, f32, bool)>,
 
-    arena_buffer: Option<wgpu::Buffer>,
-    prim_buffer: Option<wgpu::Buffer>,
-    mesh_stream_buffer: Option<wgpu::Buffer>,
+    /// The frame's arena, primitive table and mesh stream, in that order, in one
+    /// buffer: wgpu stages every write through a new buffer of its own, and
+    /// making one costs more than a frame's copy, so one write it is.
+    frame_buffer: Option<wgpu::Buffer>,
+    /// The bytes each of group(0)'s three storage bindings covers, so the most
+    /// a frame may put in each. They only grow, and the buffer holds all three.
+    frame_capacity: [u64; 3],
+    /// Where this frame's primitive table and mesh stream start in the buffer:
+    /// group(0)'s dynamic offsets. The arena starts at zero.
+    frame_offsets: [u32; 2],
 
     /// This frame's geometry, every player's in `order`. This is what reaches
     /// the GPU.
@@ -447,9 +454,9 @@ impl SSScene {
             globals_buffer,
             scene_bind_group: None,
             viewport: None,
-            arena_buffer: None,
-            prim_buffer: None,
-            mesh_stream_buffer: None,
+            frame_buffer: None,
+            frame_capacity: [0; 3],
+            frame_offsets: [0; 2],
             frame: FrameChunk::new(*config),
             ss_params_buffer: None,
             ss_params_bind_group: None,
@@ -529,7 +536,7 @@ impl SSScene {
                 occlusion_query_set: None,
                 multiview_mask: None,
             });
-            pass.set_bind_group(0, scene_bg, &[]);
+            pass.set_bind_group(0, scene_bg, &self.frame_offsets);
             for call in self.frame.coverage_calls.iter().filter(|call| call.cov_layer == Some(layer)) {
                 let Some(pipeline) = renderer.pipelines.get(&call.key) else { continue };
                 pass.set_pipeline(pipeline);
@@ -693,27 +700,26 @@ impl SSScene {
             return;
         }
 
-        // Growing any of the three invalidates group(0), so they are sized
-        // together and the bind group is rebuilt only when one actually moved.
-        let mut rebuild = self.scene_bind_group.is_none();
-        rebuild |= ensure_storage(&mut self.arena_buffer, device, "SpriteStudio Arena", std::mem::size_of_val(self.frame.arena.as_slice()));
-        rebuild |= ensure_storage(&mut self.prim_buffer, device, "SpriteStudio Prims", std::mem::size_of_val(self.frame.prims.as_slice()));
-        rebuild |= ensure_storage(&mut self.mesh_stream_buffer, device, "SpriteStudio Mesh Stream", std::mem::size_of_val(self.frame.mesh_stream.as_slice()));
-        if rebuild {
+        // Each array starts at the first aligned offset past the one before it.
+        let bytes = [std::mem::size_of_val(self.frame.arena.as_slice()), std::mem::size_of_val(self.frame.prims.as_slice()), std::mem::size_of_val(self.frame.mesh_stream.as_slice())].map(|n| n as u64);
+        let prims_at = bytes[0].next_multiple_of(FRAME_ALIGN);
+        let stream_at = (prims_at + bytes[1]).next_multiple_of(FRAME_ALIGN);
+        self.frame_offsets = [prims_at as u32, stream_at as u32];
+
+        // Growing any of the three invalidates group(0), so the buffer is sized
+        // for all of them and the bind group rebuilt only when it actually moved.
+        if self.ensure_frame_buffer(device, bytes) || self.scene_bind_group.is_none() {
+            let buffer = self.frame_buffer.as_ref().expect("ensure_frame_buffer just built it");
+            let binding = |binding, size| wgpu::BindGroupEntry { binding, resource: wgpu::BindingResource::Buffer(wgpu::BufferBinding { buffer, offset: 0, size: wgpu::BufferSize::new(size) }) };
             self.scene_bind_group = Some(device.create_bind_group(&wgpu::BindGroupDescriptor {
                 label: Some("SpriteStudio Scene Bind Group"),
                 layout: &renderer.scene_bind_group_layout,
-                entries: &[
-                    wgpu::BindGroupEntry { binding: 0, resource: self.globals_buffer.as_entire_binding() },
-                    wgpu::BindGroupEntry { binding: 1, resource: self.arena_buffer.as_ref().unwrap().as_entire_binding() },
-                    wgpu::BindGroupEntry { binding: 2, resource: self.prim_buffer.as_ref().unwrap().as_entire_binding() },
-                    wgpu::BindGroupEntry { binding: 3, resource: self.mesh_stream_buffer.as_ref().unwrap().as_entire_binding() },
-                ],
+                entries: &[wgpu::BindGroupEntry { binding: 0, resource: self.globals_buffer.as_entire_binding() }, binding(1, self.frame_capacity[0]), binding(2, self.frame_capacity[1]), binding(3, self.frame_capacity[2])],
             }));
         }
-        write_slice(queue, self.arena_buffer.as_ref(), &self.frame.arena);
-        write_slice(queue, self.prim_buffer.as_ref(), &self.frame.prims);
-        write_slice(queue, self.mesh_stream_buffer.as_ref(), &self.frame.mesh_stream);
+        if let Some(buffer) = self.frame_buffer.as_ref() {
+            upload_frame(queue, buffer, &self.frame, self.frame_offsets);
+        }
 
         // Compile whatever this frame draws with and has not drawn with before. After the first few frames every key is a cache hit, so
         // this is a walk over the draw list and nothing more. Indexed rather
@@ -786,7 +792,7 @@ impl SSScene {
         let Some(scene_bg) = self.scene_bind_group.as_ref() else { return 0 };
 
         // No vertex or index buffer: group(0) *is* the geometry.
-        rpass.set_bind_group(0, scene_bg, &[]);
+        rpass.set_bind_group(0, scene_bg, &self.frame_offsets);
         if self.stencil_enabled() {
             // Stencil ref is always 0; ops/compare are baked into the pipelines.
             rpass.set_stencil_reference(0);
@@ -830,21 +836,62 @@ impl SSScene {
     }
 }
 
-/// Make sure `buffer` can hold `size` bytes, reallocating (with headroom) if not.
-/// Returns whether it was replaced — the caller's bind group is stale if so.
-fn ensure_storage(buffer: &mut Option<wgpu::Buffer>, device: &wgpu::Device, label: &str, size: usize) -> bool {
-    if buffer.as_ref().is_some_and(|b| b.size() >= size as u64) {
-        return false;
+/// Where each of the frame's three arrays may start in the frame buffer.
+///
+/// The largest `min_storage_buffer_offset_alignment` a device may ask for, so
+/// every device takes it: the limit is a power of two no larger than this.
+const FRAME_ALIGN: u64 = 256;
+
+impl SSScene {
+    /// Make sure each of group(0)'s three bindings can hold `bytes` of its array,
+    /// reallocating the buffer (with headroom) if not. Returns whether it was
+    /// replaced — the bind group is stale if so.
+    fn ensure_frame_buffer(&mut self, device: &wgpu::Device, bytes: [u64; 3]) -> bool {
+        if self.frame_buffer.is_some() && bytes.iter().zip(&self.frame_capacity).all(|(needed, held)| needed <= held) {
+            return false;
+        }
+        for (held, &needed) in self.frame_capacity.iter_mut().zip(&bytes) {
+            // A binding cannot be empty, hence the floor; an array with no
+            // entries this frame still needs one to bind.
+            if needed > *held || *held == 0 {
+                *held = (needed * 2).max(1024).next_multiple_of(FRAME_ALIGN);
+            }
+        }
+        // The binding past each start is a whole capacity long, and a start is
+        // never later than the capacities before it add up to: the arena's
+        // binding overlaps the arrays after it, which read-only bindings may.
+        let size = self.frame_capacity.iter().sum();
+        self.frame_buffer = Some(device.create_buffer(&wgpu::BufferDescriptor { label: Some("SpriteStudio Frame"), size, usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST, mapped_at_creation: false }));
+        true
     }
-    // A zero-length frame array still needs a bindable buffer, hence the floor.
-    let new_size = (size * 2).max(1024) as u64;
-    *buffer = Some(device.create_buffer(&wgpu::BufferDescriptor { label: Some(label), size: new_size, usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST, mapped_at_creation: false }));
-    true
 }
 
-fn write_slice<T: bytemuck::Pod>(queue: &wgpu::Queue, buffer: Option<&wgpu::Buffer>, data: &[T]) {
-    if let (Some(buffer), false) = (buffer, data.is_empty()) {
-        queue.write_buffer(buffer, 0, bytemuck::cast_slice(data));
+/// Write the frame's three arrays where `offsets` put them.
+///
+/// Natively in one `write_buffer_with`, so the frame goes up through one staging
+/// buffer. The browser's `writeBuffer` stages for us and reads straight out of
+/// wasm memory, while `write_buffer_with` there fills a zeroed copy on the heap
+/// first, so on the web the arrays go up as three writes.
+fn upload_frame(queue: &wgpu::Queue, buffer: &wgpu::Buffer, frame: &FrameChunk, offsets: [u32; 2]) {
+    let arena: &[u8] = bytemuck::cast_slice(&frame.arena);
+    let prims: &[u8] = bytemuck::cast_slice(&frame.prims);
+    let stream: &[u8] = bytemuck::cast_slice(&frame.mesh_stream);
+    let [prims_at, stream_at] = offsets.map(|at| at as usize);
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        let Some(size) = wgpu::BufferSize::new((stream_at + stream.len()) as u64) else { return };
+        let Some(mut view) = queue.write_buffer_with(buffer, 0, size) else { return };
+        view.slice(..arena.len()).copy_from_slice(arena);
+        view.slice(arena.len()..prims_at).fill(0);
+        view.slice(prims_at..prims_at + prims.len()).copy_from_slice(prims);
+        view.slice(prims_at + prims.len()..stream_at).fill(0);
+        view.slice(stream_at..).copy_from_slice(stream);
+    }
+    #[cfg(target_arch = "wasm32")]
+    for (at, bytes) in [(0, arena), (prims_at, prims), (stream_at, stream)] {
+        if !bytes.is_empty() {
+            queue.write_buffer(buffer, at as u64, bytes);
+        }
     }
 }
 

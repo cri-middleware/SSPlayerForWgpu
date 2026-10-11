@@ -1274,22 +1274,24 @@ impl SSRenderer {
         // group(0) is the scene: the projection, plus the frame's SoA
         // arena, primitive table and mesh stream — everything the vertex stages
         // read instead of a vertex buffer. Only the layout is shared; the
-        // buffers behind it belong to the render target.
-        let storage = |binding: u32| wgpu::BindGroupLayoutEntry {
+        // buffer behind it belongs to the render target. The three share one
+        // buffer, the arena first, and the other two start wherever the frame's
+        // arena ended: hence their dynamic offsets.
+        let storage = |binding: u32, has_dynamic_offset: bool| wgpu::BindGroupLayoutEntry {
             binding,
             // The fragment stage reads the arena too: the coverage replay walks
             // the node's writer records there, per fragment.
             visibility: wgpu::ShaderStages::VERTEX_FRAGMENT,
-            ty: wgpu::BindingType::Buffer { ty: wgpu::BufferBindingType::Storage { read_only: true }, has_dynamic_offset: false, min_binding_size: None },
+            ty: wgpu::BindingType::Buffer { ty: wgpu::BufferBindingType::Storage { read_only: true }, has_dynamic_offset, min_binding_size: None },
             count: None,
         };
         let scene_bind_group_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
             label: Some("SpriteStudio Scene Layout"),
             entries: &[
                 wgpu::BindGroupLayoutEntry { binding: 0, visibility: wgpu::ShaderStages::VERTEX, ty: wgpu::BindingType::Buffer { ty: wgpu::BufferBindingType::Uniform, has_dynamic_offset: false, min_binding_size: None }, count: None },
-                storage(1),
-                storage(2),
-                storage(3),
+                storage(1, false),
+                storage(2, true),
+                storage(3, true),
             ],
         });
 
