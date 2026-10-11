@@ -8,8 +8,61 @@
 
 use crate::mask::{MaskOp, StencilTest};
 use std::collections::HashMap;
+use std::hash::{BuildHasherDefault, Hasher};
 
 use ssruntime::runtime::framedata::ss::runtime::BlendType;
+
+/// The hasher behind the renderer's per-draw lookups.
+///
+/// Every draw looks up a pipeline and a texture, under keys this crate makes
+/// itself — a [`PipelineKey`], a texture key — so SipHash's defence against
+/// chosen keys buys nothing here, and it was a tenth of a masked frame's update.
+/// A multiply-rotate per word, as `rustc` hashes its own tables.
+#[derive(Default)]
+pub(crate) struct KeyHasher(u64);
+
+impl KeyHasher {
+    fn add(&mut self, word: u64) {
+        self.0 = (self.0.rotate_left(5) ^ word).wrapping_mul(0x517c_c1b7_2722_0a95);
+    }
+}
+
+impl Hasher for KeyHasher {
+    fn finish(&self) -> u64 {
+        self.0
+    }
+
+    fn write(&mut self, bytes: &[u8]) {
+        for chunk in bytes.chunks(8) {
+            let mut word = [0; 8];
+            word[..chunk.len()].copy_from_slice(chunk);
+            self.add(u64::from_le_bytes(word));
+        }
+    }
+
+    fn write_u8(&mut self, n: u8) {
+        self.add(n.into());
+    }
+
+    fn write_u16(&mut self, n: u16) {
+        self.add(n.into());
+    }
+
+    fn write_u32(&mut self, n: u32) {
+        self.add(n.into());
+    }
+
+    fn write_u64(&mut self, n: u64) {
+        self.add(n);
+    }
+
+    fn write_usize(&mut self, n: usize) {
+        self.add(n as u64);
+    }
+}
+
+/// A map hashed with [`KeyHasher`].
+type KeyMap<K, V> = HashMap<K, V, BuildHasherDefault<KeyHasher>>;
 
 /// Which vertex stage expands a draw's primitives.
 ///
@@ -206,7 +259,7 @@ impl TexInfo {
 /// so targets that disagree share one renderer.
 pub struct SSRenderer {
     /// Every pipeline used so far, built on first use.
-    pub(crate) pipelines: HashMap<PipelineKey, wgpu::RenderPipeline>,
+    pub(crate) pipelines: KeyMap<PipelineKey, wgpu::RenderPipeline>,
     /// Inputs the lazy builder needs: the sprite/mask WGSL module and its layout.
     shader_module: wgpu::ShaderModule,
     pipeline_layout: wgpu::PipelineLayout,
@@ -241,7 +294,7 @@ pub struct SSRenderer {
 
     /// Atlas textures by fnv1a hash. Shared, so N players showing the same
     /// character upload it once.
-    textures: HashMap<u32, TextureEntry>,
+    textures: KeyMap<u32, TextureEntry>,
     /// Retained pixels for [`Retention::Retain`] uploads, so a device loss can be
     /// recovered without the host re-supplying them.
     ///
@@ -1392,7 +1445,7 @@ impl SSRenderer {
         });
 
         Self {
-            pipelines: HashMap::new(),
+            pipelines: KeyMap::default(),
             shader_module,
             pipeline_layout,
             ss_shader_module,
@@ -1406,7 +1459,7 @@ impl SSRenderer {
             white_texture,
             white_bind_group,
             white_ready: false,
-            textures: HashMap::new(),
+            textures: KeyMap::default(),
             texture_sources: HashMap::new(),
             texture_digests: HashMap::new(),
             texture_uploads: 0,
