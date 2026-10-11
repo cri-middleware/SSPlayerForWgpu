@@ -6,6 +6,12 @@ on:
       - '**/*.md'
       - '.gitignore'
       - 'LICENSE*'
+  # Writes the main caches that PRs restore from, since PRs do not save (see
+  # save-if on each Rust cache step). Weekly is enough: when Cargo.lock differs,
+  # rust-cache still restores the newest cache built by the same toolchain, so a
+  # PR that changes dependencies rebuilds only what changed.
+  schedule:
+    - cron: '0 0 * * 0'
   workflow_dispatch:
 
 env:
@@ -42,6 +48,16 @@ jobs:
 
       - name: Setup Rust cache
         uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+        with:
+          # Only main writes caches. A PR's cache is visible to that PR alone, so
+          # saving one per PR would only fill the 10 GB quota and evict the main
+          # caches every PR restores from.
+          save-if: ${{ github.ref == 'refs/heads/main' }}
+          # deploy-examples.sh builds ssconverter-cli inside the SDK checkout,
+          # into the SDK's own target dir, which the default "." would miss.
+          workspaces: |
+            . -> target
+            SpriteStudio-SDK -> target
 
       - name: Format check
         run: cargo fmt --all -- --check
@@ -125,6 +141,8 @@ jobs:
 
       - name: Setup Rust cache
         uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+        with:
+          save-if: ${{ github.ref == 'refs/heads/main' }}
 
       # The Win32 half of the C face compiles on no other runner: `ffi.rs`'s
       # `SS_WINDOW_WIN32` arm and the whole of examples/viewer-dx12-cpp are
@@ -160,6 +178,8 @@ jobs:
 
       - name: Setup Rust cache
         uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+        with:
+          save-if: ${{ github.ref == 'refs/heads/main' }}
 
       - name: Install wasm target
         run: rustup target add wasm32-unknown-unknown
