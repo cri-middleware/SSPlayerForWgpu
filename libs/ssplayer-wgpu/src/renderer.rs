@@ -121,18 +121,6 @@ pub(crate) enum PipelineKind {
     Shader(u32, usize),
 }
 
-impl PipelineKind {
-    /// Which vertex stage expands this pipeline's draws — and therefore how a
-    /// primitive index maps to `vertex_index`.
-    pub(crate) fn geom_class(self) -> GeomClass {
-        match self {
-            PipelineKind::Content(_, _, class) | PipelineKind::ContentCoverage(_, _, class) | PipelineKind::Mask(_, class) | PipelineKind::Coverage(class) => class,
-            // SHDR is a Normal-part attribute, so shader draws are quads.
-            PipelineKind::Shader(..) => GeomClass::Quad,
-        }
-    }
-}
-
 /// What distinguishes one render pipeline from another.
 ///
 /// wgpu bakes blend, depth/stencil state **and the target's formats** into the

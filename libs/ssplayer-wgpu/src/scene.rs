@@ -280,18 +280,10 @@ pub struct NodeSlot {
     coverage_layer: u32,
 }
 
-/// One node's claim on the frame's coverage array.
-///
-/// The layer index is this entry's position in [`FrameChunk::coverage_nodes`],
-/// which is why merging chunks has to renumber: two players built side by side
-/// both start counting from zero.
+/// One node's claim on the frame's coverage array. The layer index is this
+/// entry's position in [`FrameChunk::coverage_nodes`].
 #[derive(Clone, Copy, Debug)]
 struct CoverageNode {
-    /// Arena offset of the node's coverage block, so [`FrameChunk::absorb`] can
-    /// reach in and rewrite the layer the block advertises. `None` on a layer a
-    /// tree with more writers than one layer holds spills into: the block names
-    /// only its first layer, and the replay counts on from there.
-    block_base: Option<u32>,
     /// Player-local width and height of the writer group, which is what decides
     /// the bitmap's size class — a mask twice as wide wants twice the texels.
     extent: (f32, f32),
@@ -313,9 +305,6 @@ impl Default for NodeSlot {
 /// node-local -> coverage-UV affine, the array layer the bitmap lives in, and
 /// the writer count.
 pub(crate) const COVERAGE_HEADER_F32: usize = 8;
-
-/// Offset of the layer index inside a coverage block header.
-const COVERAGE_LAYER_F32: usize = 6;
 
 /// Smallest coverage bitmap edge. Below this the quantisation costs more in
 /// reallocation than the texels are worth.
@@ -375,12 +364,9 @@ pub struct SSScene {
     prim_buffer: Option<wgpu::Buffer>,
     mesh_stream_buffer: Option<wgpu::Buffer>,
 
-    /// Every player's chunk concatenated, in `order`. This is what reaches the
-    /// GPU.
+    /// This frame's geometry, every player's in `order`. This is what reaches
+    /// the GPU.
     frame: FrameChunk,
-    /// Per-player chunks, recycled across frames. One per player, filled
-    /// independently — in parallel where the platform has threads.
-    pool: Vec<FrameChunk>,
 
     // --- Integration shaders (`ss-*`). Only touched when a frame has
     // shader parts; shader-free animations never build any of this. ---
@@ -465,7 +451,6 @@ impl SSScene {
             prim_buffer: None,
             mesh_stream_buffer: None,
             frame: FrameChunk::new(*config),
-            pool: Vec::new(),
             ss_params_buffer: None,
             ss_params_bind_group: None,
             stats: SceneStats::default(),
@@ -662,37 +647,20 @@ impl SSScene {
     /// Players are drawn in ascending [`crate::SSPlayer::order`], ties keeping the
     /// order the caller passed them in (the sort is stable). The scene borrows
     /// them rather than owning them, so they can live wherever the
-    /// host keeps them — a `Vec`, an ECS, an engine's scene graph.
-    /// Building each player's geometry is independent — separate `Context`s,
-    /// separate runtime buffers, separate chunk — so the walk happens in
-    /// parallel where the platform has threads. The merge
-    /// afterwards is in `order`, so the result does not depend on how the work
-    /// was divided.
+    /// host keeps them — a `Vec`, an ECS, an engine's scene graph. Each player
+    /// appends its geometry straight to the frame, in that order.
     pub fn update(&mut self, renderer: &mut SSRenderer, device: &wgpu::Device, queue: &wgpu::Queue, delta_secs: f32, players: &mut [&mut crate::SSPlayer]) {
         self.begin_frame();
         players.sort_by_key(|p| p.order());
 
-        // Serial, and before the parallel walk: this is the one step that needs
-        // `&mut SSRenderer`. It does nothing at all except on the frames right
-        // after a pack is loaded.
+        // Before the walk: this is the one step that needs `&mut SSRenderer`. It
+        // does nothing at all except on the frames right after a pack is loaded.
         for player in players.iter_mut() {
             player.flush_textures(renderer, device, queue);
         }
 
-        // One chunk per player, recycled from the pool.
-        let config = self.config();
-        while self.pool.len() < players.len() {
-            self.pool.push(FrameChunk::new(config));
-        }
-        let chunks = &mut self.pool[..players.len()];
-        for chunk in chunks.iter_mut() {
-            chunk.reset(config);
-        }
-        build_chunks(players, chunks, renderer, delta_secs);
-
-        for chunk_index in 0..players.len() {
-            let (merged, chunk) = (&mut self.frame, &self.pool[chunk_index]);
-            merged.absorb(chunk);
+        for player in players.iter_mut() {
+            player.build_frame(&mut self.frame, renderer, delta_secs);
         }
         self.stats.players = players.iter().filter(|p| p.draws()).count() as u32;
         self.end_frame(renderer, device, queue);
@@ -880,16 +848,10 @@ fn write_slice<T: bytemuck::Pod>(queue: &wgpu::Queue, buffer: Option<&wgpu::Buff
     }
 }
 
-/// One player's contribution to a frame, built on its own.
-///
-/// A chunk holds the arena / primitive / draw-call trio for **one** player, so
-/// players are built independently of each other and concatenated afterwards.
-///
-/// Offsets inside a chunk are chunk-relative; [`SSScene`] rebases them as it
-/// merges, in the players' `order`, so the merged frame does not depend on how
-/// the work was divided.
+/// One frame of one render target: the arena / primitive / draw-call trio every
+/// player sharing the target appends to, in its `order`.
 pub struct FrameChunk {
-    /// The target this chunk is being built for — needed for pipeline keys.
+    /// The target this frame is being built for — needed for pipeline keys.
     config: SceneConfig,
     /// Runtime SoA buffers and node transforms, copied verbatim.
     arena: Vec<f32>,
@@ -904,21 +866,16 @@ pub struct FrameChunk {
     coverage_calls: Vec<BatchDrawCall>,
     /// One entry per node that writes coverage this frame, in layer order.
     coverage_nodes: Vec<CoverageNode>,
-    /// Arena offsets of sub-animation coverage blocks that borrow a parent's
-    /// layer rather than owning one. They are not in `coverage_nodes` (they add
-    /// no layer), so `absorb` needs this list to rebase the layer they name when
-    /// players merge — miss it and a merged child samples a lower player's bitmap.
-    coverage_shared: Vec<u32>,
     /// Per-part integration-shader params, one `SHADER_PARAM_STRIDE_F32` slot each.
     ss_params: Vec<f32>,
 }
 
 impl FrameChunk {
     fn new(config: SceneConfig) -> Self {
-        Self { config, arena: Vec::new(), prims: Vec::new(), mesh_stream: Vec::new(), draw_calls: Vec::new(), coverage_calls: Vec::new(), coverage_nodes: Vec::new(), coverage_shared: Vec::new(), ss_params: Vec::new() }
+        Self { config, arena: Vec::new(), prims: Vec::new(), mesh_stream: Vec::new(), draw_calls: Vec::new(), coverage_calls: Vec::new(), coverage_nodes: Vec::new(), ss_params: Vec::new() }
     }
 
-    /// Empty it for reuse, keeping the allocations — a chunk is recycled every
+    /// Empty it for reuse, keeping the allocations — the frame is rebuilt every
     /// frame, so this is what stops a per-frame allocation storm.
     fn reset(&mut self, config: SceneConfig) {
         self.config = config;
@@ -928,7 +885,6 @@ impl FrameChunk {
         self.draw_calls.clear();
         self.coverage_calls.clear();
         self.coverage_nodes.clear();
-        self.coverage_shared.clear();
         self.ss_params.clear();
     }
 
@@ -945,63 +901,6 @@ impl FrameChunk {
     /// *appended as* differs.
     pub fn mask_backend(&self) -> MaskBackend {
         if self.config.mask == MaskBackend::Stencil && self.config.stencil_format.is_none() { MaskBackend::None } else { self.config.mask }
-    }
-
-    /// Append `other` to this chunk, rebasing every offset it carries.
-    ///
-    /// A chunk is built without knowing what precedes it, so all its indices are
-    /// chunk-relative: arena offsets inside each `Prim`, primitive indices inside
-    /// the mesh stream, and — because each geometry class turns a primitive index
-    /// into a fixed span of `vertex_index` — the draw calls' vertex
-    /// ranges too. Rebasing them here is what lets the walk be parallel while the
-    /// merged frame stays byte for byte what the serial walk produced.
-    fn absorb(&mut self, other: &FrameChunk) {
-        let arena_base = self.arena.len() as u32;
-        let prim_base = self.prims.len() as u32;
-        let stream_base = (self.mesh_stream.len() / 2) as u32;
-        let param_base = (self.ss_params.len() / SHADER_PARAM_STRIDE_F32) as u32;
-
-        self.arena.extend_from_slice(&other.arena);
-        self.ss_params.extend_from_slice(&other.ss_params);
-        // `cov_base` moves with the rest: it is an arena offset like the others,
-        // and rebasing it unconditionally costs nothing — a primitive that is not
-        // coverage-masked never reads it.
-        self.prims.extend(other.prims.iter().map(|p| Prim { aux_base: p.aux_base + arena_base, pos_base: p.pos_base + arena_base, uv_base: p.uv_base + arena_base, node_base: p.node_base + arena_base, cov_base: p.cov_base + arena_base, ..*p }));
-        // Pairs of (primitive, vertex); only the primitive moves.
-        self.mesh_stream.extend(other.mesh_stream.as_chunks::<2>().0.iter().flat_map(|pair| [pair[0] + prim_base, pair[1]]));
-
-        let rebase = |call: &BatchDrawCall| {
-            let shift = match call.key.kind.geom_class() {
-                GeomClass::Quad | GeomClass::Effect => prim_base * 6,
-                GeomClass::Shape => prim_base * SHAPE_FAN_VERTS,
-                // Mesh draws index the stream, not the primitive table.
-                GeomClass::Mesh => stream_base,
-            };
-            BatchDrawCall { vertices: call.vertices.start + shift..call.vertices.end + shift, shader_slot: call.shader_slot.map(|slot| slot + param_base), ..call.clone() }
-        };
-        self.draw_calls.extend(other.draw_calls.iter().map(&rebase));
-
-        // Every chunk numbers its coverage layers from zero, so merging has to
-        // renumber — in the arena block each node advertises *and* on the draw
-        // calls that pick a layer to rasterise into. Miss either and two players
-        // masking in the same frame share one bitmap.
-        let layer_base = self.coverage_nodes.len() as u32;
-        for node in &other.coverage_nodes {
-            let block_base = node.block_base.map(|base| base + arena_base);
-            if let Some(base) = block_base {
-                self.arena[base as usize + COVERAGE_LAYER_F32] += layer_base as f32;
-            }
-            self.coverage_nodes.push(CoverageNode { block_base, ..*node });
-        }
-        // Sub-animation blocks borrow a parent's layer instead of owning one, so
-        // the loop above skips them — but the layer they name still moves by the
-        // same base, or a merged child reads a lower player's bitmap.
-        for &block_base in &other.coverage_shared {
-            let block_base = block_base + arena_base;
-            self.arena[block_base as usize + COVERAGE_LAYER_F32] += layer_base as f32;
-            self.coverage_shared.push(block_base);
-        }
-        self.coverage_calls.extend(other.coverage_calls.iter().map(|call| BatchDrawCall { cov_layer: call.cov_layer.map(|layer| layer + layer_base), ..rebase(call) }));
     }
 
     /// Cache key for a content draw. Without a stencil buffer every draw uses the
@@ -1068,11 +967,11 @@ impl FrameChunk {
     pub fn set_node_coverage(&mut self, node: &mut NodeSlot, uv: &[f32; 6], extent: (f32, f32), writers: &[ScopedWriter]) {
         let layer = self.coverage_nodes.len() as u32;
         let base = self.push_coverage_block(uv, layer, writers);
-        self.coverage_nodes.push(CoverageNode { block_base: Some(base), extent });
+        self.coverage_nodes.push(CoverageNode { extent });
         // One more layer per `COVERAGE_LAYER_BITS` writers, consecutive, so a
         // writer's layer is the block's plus its bit's quotient.
         for _ in 1..writers.len().div_ceil(crate::mask::COVERAGE_LAYER_BITS) {
-            self.coverage_nodes.push(CoverageNode { block_base: None, extent });
+            self.coverage_nodes.push(CoverageNode { extent });
         }
         node.coverage = base;
         node.coverage_layer = layer;
@@ -1086,11 +985,7 @@ impl FrameChunk {
     /// instance placements so the child's own local coordinates land in the top
     /// node's coverage.
     pub fn inherit_node_coverage(&mut self, node: &mut NodeSlot, uv: &[f32; 6], layer: u32, writers: &[ScopedWriter]) {
-        let base = self.push_coverage_block(uv, layer, writers);
-        // Not a `coverage_node` — it owns no layer — but `absorb` must still find
-        // it to rebase the borrowed layer when players merge.
-        self.coverage_shared.push(base);
-        node.coverage = base;
+        node.coverage = self.push_coverage_block(uv, layer, writers);
         node.coverage_layer = layer;
     }
 
@@ -1601,20 +1496,5 @@ impl FrameChunk {
             }
             self.push_draw(key, GeomClass::Effect, texture_hash, first_prim, None);
         }
-    }
-}
-
-/// Fill one chunk per player.
-///
-/// Each player owns its own `Context`, its own runtime buffers and its own
-/// chunk, so nothing is shared but the immutable [`SSRenderer`]. The walk is
-/// serial: threading it was measured and did not pay, and `wasm32-unknown-unknown`
-/// has no threads at all.
-///
-/// The chunk split stays, because it costs nothing serially (`absorb`'s rebase,
-/// nothing more) and keeps the players decoupled.
-fn build_chunks(players: &mut [&mut crate::SSPlayer], chunks: &mut [FrameChunk], renderer: &SSRenderer, delta_secs: f32) {
-    for (player, chunk) in players.iter_mut().zip(chunks.iter_mut()) {
-        player.build_frame(chunk, renderer, delta_secs);
     }
 }
