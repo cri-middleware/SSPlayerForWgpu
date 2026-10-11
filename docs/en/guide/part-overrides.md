@@ -47,6 +47,9 @@ set_part_visibility_override(part, hide, cascade)
 under it — a whole arm, not just the upper arm. **A keyframe hide never cascades, so this is the only
 way to hide a sub-tree.** Clearing puts the part back under the animator's control.
 
+Like every override, it shows from the next update: `is_part_hidden` read before then reports the
+frame the last update built.
+
 ## Cell
 
 Swap the image a part draws for another cell of any cell map the pack has:

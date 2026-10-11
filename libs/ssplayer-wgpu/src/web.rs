@@ -1771,8 +1771,9 @@ impl SsPlayerWeb {
         with_player!(self, |p| p.part_transform(part).map(|m| m.to_vec()).unwrap_or_default())
     }
 
-    /// Whether the part is hidden on the frame currently displayed, or `null`
-    /// when the pack has no such part.
+    /// Whether the part is hidden on the frame the last `frame()` built, or
+    /// `null` when the pack has no such part. An override shows from the next
+    /// `frame()`.
     ///
     /// The companion to `partTransform`, which reports where a part *would* be
     /// whether or not it is drawn — a host following a part needs both.

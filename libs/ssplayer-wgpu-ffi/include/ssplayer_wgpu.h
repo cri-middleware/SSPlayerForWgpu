@@ -1357,9 +1357,10 @@ int32_t ss_player_is_part_skinned_mesh(ss_player_t *handle, const char *part);
 int32_t ss_player_is_part_skinned_mesh_by_index(ss_player_t *handle, uint32_t part);
 
 /*
- Whether `part` is hidden on the frame currently displayed: `1` hidden, `0`
- shown, or `-1` when the name is unknown, `part` is not valid UTF-8, or no
- animation is set up.
+ Whether `part` is hidden on the frame the last `ss_scene_update` built: `1`
+ hidden, `0` shown or no frame built yet, or `-1` when the name is unknown,
+ `part` is not valid UTF-8, or no animation is set up. An override shows from
+ the next update.
 
  The companion to `ss_player_part_transform`, which reports where a part
  *would* be whether or not it is drawn: a host following a part needs both.

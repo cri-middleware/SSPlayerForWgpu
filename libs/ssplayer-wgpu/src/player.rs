@@ -2024,39 +2024,46 @@ impl SSPlayer {
         Some([m[0], m[4], m[1], m[5], m[12], m[13]])
     }
 
-    /// Whether `part` is hidden on the frame that is currently displayed, or
-    /// `None` when the pack has no such part.
+    /// Whether `part` is hidden on the frame the last [`SSScene::update`] built,
+    /// or `None` when no animation is set up or it has no such part.
     ///
     /// The companion to [`SSPlayer::part_transform`], which reports where a part
-    /// *would* be whether or not it is drawn. A host following a part with its
-    /// own scene graph needs both: the pose to place its follower, and this to
-    /// decide whether to show it — the `on_hide` option the sibling Players
-    /// offer on their built-in attachments.
+    /// *would* be whether or not it is drawn, on the same frame. A host following
+    /// a part with its own scene graph needs both: the pose to place its
+    /// follower, and this to decide whether to show it — the `on_hide` option the
+    /// sibling Players offer on their built-in attachments.
     ///
-    /// **Takes `&mut self`, unlike the other read-outs.** The hide flag lives in
-    /// the frame's `FrameData`, which the runtime rebuilds into its own buffer on
-    /// demand (`Context::get_frame_data`), where the world matrices this reads
-    /// alongside are already sitting in memory. A caller reading it every frame
-    /// is doing what the renderer does anyway.
-    pub fn is_part_hidden(&mut self, part: &str) -> Option<bool> {
+    /// It reads that frame and builds none, so a read is a lookup however often
+    /// it is made, and never changes what the next update builds. An override
+    /// therefore shows from the next update; a read before then reports the
+    /// frame before it. A player that is not [`visible`](SSPlayer::set_visible)
+    /// still builds its frame every update, so this keeps following the
+    /// animation; a [culled](SSPlayer::set_culled) one, like a tick whose frame
+    /// could not be built, leaves the last frame in place, as
+    /// [`SSPlayer::part_transform`] does. `Some(false)` until the first update
+    /// has built a frame.
+    ///
+    /// [`SSScene::update`]: crate::SSScene::update
+    pub fn is_part_hidden(&self, part: &str) -> Option<bool> {
         self.is_part_hidden_by_index(self.find_part_index(part)?)
     }
 
     /// Index form of [`SSPlayer::is_part_hidden`], for a caller that already
     /// resolved the name.
-    pub fn is_part_hidden_by_index(&mut self, part: u32) -> Option<bool> {
-        // The DISPLAY frame, floored when sub-frame is off -- the same frame the
-        // renderer asks for, so this cannot disagree with what is on screen.
-        let frame_no = if self.sub_frame { self.frame_no() } else { self.frame_no().floor() };
-        let root = self.root.as_mut()?;
-        let bytes = root.context.get_frame_data(frame_no).ok()?;
-        // SAFETY: the buffer is the runtime's own, built by the call above.
-        let frame_data = unsafe { root_as_frame_data_unchecked(bytes) };
-        let parts = frame_data.parts();
-        if part as usize >= parts.len() {
+    pub fn is_part_hidden_by_index(&self, part: u32) -> Option<bool> {
+        if part as usize >= self.part_count() {
             return None;
         }
-        Some(parts.get(part as usize).hide())
+        let context = &self.root.as_ref()?.context;
+        let ptr = context.get_frame_data_ptr();
+        if ptr.is_null() {
+            return Some(false);
+        }
+        // SAFETY: the frame the root context built last. Only the next
+        // `get_frame_data` replaces it, and that takes the context mutably.
+        let frame_data = unsafe { root_as_frame_data_unchecked(std::slice::from_raw_parts(ptr, context.get_frame_data_len())) };
+        let parts = frame_data.parts();
+        Some((part as usize) < parts.len() && parts.get(part as usize).hide())
     }
 
     /// Whether `part` is a **skinned** mesh — a mesh part whose vertices are
@@ -2077,7 +2084,7 @@ impl SSPlayer {
     /// or more, matching the sibling Players' `is_part_skinned_mesh`.
     ///
     /// Unlike [`SSPlayer::is_part_hidden`], this is a static property of the pack,
-    /// not a per-frame state, so it takes `&self` and reads the `.ssab` directly.
+    /// not a per-frame state, so it reads the `.ssab` directly.
     pub fn is_part_skinned_mesh(&self, part: &str) -> Option<bool> {
         self.is_part_skinned_mesh_by_index(self.find_part_index(part)?)
     }
@@ -2673,9 +2680,9 @@ impl SSPlayer {
             // Hidden, not culled: the clocks move, but nothing is drawn, so no
             // effect slot builds a plan.
             step_undrawn_effects(root);
-            // The root's frame is still built, because the part read-outs read the
-            // world matrices it leaves behind — without it a follower pinned to a
-            // hidden character would freeze where the character was last drawn.
+            // The root's frame is still built, because the part read-outs read what
+            // it leaves behind — without it a follower pinned to a hidden character
+            // would freeze where the character was last drawn.
             // The display frame, as `prepare_node` asks for it.
             let frame_no = if self.sub_frame { frame_no } else { frame_no.floor() };
             let _ = root.context.get_frame_data(frame_no);
