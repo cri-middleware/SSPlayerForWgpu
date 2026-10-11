@@ -4,7 +4,7 @@
 //! enabled must differ from rendering with it disabled (masks ignored). Skips
 //! cleanly when no GPU adapter is available.
 
-use ssplayer_wgpu::{MaskBackend, Retention, SSPlayer, SSRenderer, SSScene, SceneConfig};
+use ssplayer_wgpu::{BlendOp, MaskBackend, OverridePriority, Retention, SSPlayer, SSRenderer, SSScene, SceneConfig};
 use std::path::Path;
 
 const W: u32 = 256;
@@ -394,4 +394,44 @@ fn render_embedded_ssab() {
     eprintln!("Basic.ssab embedded drawn pixels: {drawn} (reference {})", drawn_pixels(&reference));
     assert!(drawn > 5_000, "embedded Basic.ssab drew too little ({drawn}) — embedded atlas not decoded/uploaded");
     assert_eq!(embedded, reference, "embedded render differs from reference — texture hash/premul mismatch");
+}
+
+/// A NON override set between `play()` and the first update wins the segment of
+/// the key it was set on, whether or not the host reads `is_part_hidden` in
+/// between: the read builds no frame, so the update's is still the override's
+/// first. `MIX_Whole` in PartsColor.ssab carries a colour key on frame 0, the
+/// one a NON colour override set there has to outlast.
+#[test]
+fn a_part_read_before_the_first_update_keeps_a_non_override() {
+    let instance = wgpu::Instance::new(wgpu::InstanceDescriptor::new_without_display_handle());
+    let Ok(adapter) = pollster::block_on(instance.request_adapter(&wgpu::RequestAdapterOptions::default())) else {
+        eprintln!("no GPU adapter available, skipping headless render test");
+        return;
+    };
+    let (device, queue) = pollster::block_on(adapter.request_device(&wgpu::DeviceDescriptor::default())).expect("request_device");
+    let mut renderer = SSRenderer::new(&device);
+    load_textures(&mut renderer, &device, &queue, Path::new(asset_dir()));
+
+    let mut first_frame = |overridden: bool, read: bool| {
+        let mut scene = SSScene::new(&device, &SceneConfig { color_format: COLOR_FORMAT, stencil_format: None, mask: MaskBackend::None });
+        scene.set_viewport(&queue, W as f32, H as f32, false);
+        let mut player = SSPlayer::new();
+        player.load_ssab("PartsColor", &std::fs::read(format!("{}/PartsColor.ssab", asset_dir())).unwrap()).unwrap();
+        let anim = player.animation_names().unwrap()[0].clone();
+        player.set_animation(&anim).unwrap();
+        player.play();
+        if overridden {
+            player.set_part_color_override("MIX_Whole", 0x00FF00FF, BlendOp::Mix, OverridePriority::OverwriteOnNextKeyframe).unwrap();
+        }
+        if read {
+            assert_eq!(player.is_part_hidden("MIX_Whole"), Some(false));
+        }
+        render_to_rgba(&device, &queue, &mut renderer, &mut scene, &mut player, false, 1)
+    };
+    let plain = first_frame(false, false);
+    let overridden = first_frame(true, false);
+    let read = first_frame(true, true);
+
+    assert_ne!(overridden, plain, "the override does not show on the first frame — fixture problem");
+    assert!(read == overridden, "a read before the first update handed the override back to the animation");
 }

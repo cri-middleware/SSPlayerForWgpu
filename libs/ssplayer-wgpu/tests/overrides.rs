@@ -1,7 +1,9 @@
 //! Per-part overrides on `SSPlayer`.
 //!
-//! None of this needs a GPU: an override is a write into the runtime's override
-//! table, which `SSPlayer` reaches through the root context alone.
+//! Setting one needs no GPU: an override is a write into the runtime's override
+//! table, which `SSPlayer` reaches through the root context alone. Reading what
+//! it hid does, because only `SSScene::update` builds the frame that read
+//! reports; those tests skip when no adapter is available.
 //!
 //! What is worth pinning here is not that the calls forward — it is the three
 //! ways they can be got wrong silently:
@@ -13,10 +15,24 @@
 //! * that a cell override resolves its names against the pack *now*, so a
 //!   wrong name fails at the call rather than at draw time.
 
-use ssplayer_wgpu::{BlendOp, OverridePriority, SSPlayer};
+use ssplayer_wgpu::{BlendOp, MaskBackend, OverridePriority, SSPlayer, SSRenderer, SSScene, SceneConfig};
 
 fn asset_root() -> &'static str {
     concat!(env!("CARGO_MANIFEST_DIR"), "/../../assets")
+}
+
+fn gpu() -> Option<(wgpu::Device, wgpu::Queue)> {
+    let instance = wgpu::Instance::new(wgpu::InstanceDescriptor::new_without_display_handle());
+    let adapter = pollster::block_on(instance.request_adapter(&wgpu::RequestAdapterOptions::default())).ok()?;
+    pollster::block_on(adapter.request_device(&wgpu::DeviceDescriptor::default())).ok()
+}
+
+/// A scene to drive players through: its `update` builds the frame the
+/// read-outs read.
+fn scene(device: &wgpu::Device, queue: &wgpu::Queue) -> SSScene {
+    let mut scene = SSScene::new(device, &SceneConfig { color_format: wgpu::TextureFormat::Rgba8Unorm, stencil_format: None, mask: MaskBackend::None });
+    scene.set_viewport(queue, 256.0, 256.0, false);
+    scene
 }
 
 /// A player with `Basic.ssab` loaded and its first animation selected.
@@ -193,27 +209,64 @@ fn part_names_are_index_aligned_with_find_part_index() {
 }
 
 #[test]
-fn is_part_hidden_tracks_the_visibility_override() {
-    // No device and no stepping: the hide flag comes out of the FrameData the
-    // runtime builds on demand for the frame the playhead is on, which a
-    // set-up animation already has.
+fn is_part_hidden_reads_the_frame_the_last_update_built() {
+    let Some((device, queue)) = gpu() else {
+        eprintln!("no adapter — skipping");
+        return;
+    };
+    let mut renderer = SSRenderer::new(&device);
+    let mut scene = scene(&device, &queue);
     let mut player = loaded();
     let names = player.part_names().expect("a bound pack has parts");
     let name = names.iter().find(|n| !n.is_empty()).expect("a named part").clone();
 
+    assert_eq!(player.is_part_hidden(&name), Some(false), "no frame built yet reads as shown");
+    scene.update(&mut renderer, &device, &queue, 1.0 / 60.0, &mut [&mut player]);
     assert_eq!(player.is_part_hidden(&name), Some(false), "nothing hides it yet");
 
-    // The override layer is the one thing that can hide a part on demand, so it
-    // is what pins that this reads the live frame rather than a load-time table.
+    // The override reaches the frame the next update builds, and no read before
+    // then builds one: however often it is asked, the answer is the last frame's.
     player.set_part_visibility_override(&name, true, false).expect("the override should apply");
+    for _ in 0..3 {
+        assert_eq!(player.is_part_hidden(&name), Some(false), "a read showed the override before an update built it");
+    }
+    scene.update(&mut renderer, &device, &queue, 1.0 / 60.0, &mut [&mut player]);
     assert_eq!(player.is_part_hidden(&name), Some(true));
 
     player.clear_part_visibility_override(&name).expect("clearing should apply");
+    assert_eq!(player.is_part_hidden(&name), Some(true));
+    scene.update(&mut renderer, &device, &queue, 1.0 / 60.0, &mut [&mut player]);
     assert_eq!(player.is_part_hidden(&name), Some(false));
 
     // Out of range is None rather than a read past the parts vector.
+    assert!(player.is_part_hidden_by_index(player.part_count() as u32).is_none());
     assert!(player.is_part_hidden_by_index(u32::MAX).is_none());
     assert!(player.is_part_hidden("NOT_A_REAL_PART").is_none());
+}
+
+#[test]
+fn a_cascading_visibility_override_hides_the_subtree_from_the_next_update() {
+    let Some((device, queue)) = gpu() else {
+        eprintln!("no adapter — skipping");
+        return;
+    };
+    let mut renderer = SSRenderer::new(&device);
+    let mut scene = scene(&device, &queue);
+    // In Basic.ssab, SCL_XY is parented under LSCL_XY and CELL is not.
+    let mut player = loaded();
+    let read = |player: &SSPlayer| ["LSCL_XY", "SCL_XY", "CELL"].map(|name| player.is_part_hidden(name).expect("Basic.ssab has the part"));
+    scene.update(&mut renderer, &device, &queue, 1.0 / 60.0, &mut [&mut player]);
+    assert_eq!(read(&player), [false; 3], "the Setup pose shows all three — fixture problem");
+
+    player.set_part_visibility_override("LSCL_XY", true, true).unwrap();
+    assert_eq!(read(&player), [false; 3]);
+    scene.update(&mut renderer, &device, &queue, 1.0 / 60.0, &mut [&mut player]);
+    assert_eq!(read(&player), [true, true, false], "the cascade did not reach the child, or reached past it");
+
+    player.set_part_visibility_override("LSCL_XY", true, false).unwrap();
+    assert_eq!(read(&player), [true, true, false]);
+    scene.update(&mut renderer, &device, &queue, 1.0 / 60.0, &mut [&mut player]);
+    assert_eq!(read(&player), [true, false, false], "without the cascade the child follows its own keys");
 }
 
 #[test]
