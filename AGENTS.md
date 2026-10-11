@@ -52,6 +52,8 @@ and C/C++ (`cbindgen`) as thin wrappers on top.
 *   **There is no vertex buffer.** The SoA arrays are memcpy'd into the scene's arena and expanded in the
     vertex stage from `@builtin(vertex_index)`; the CPU writes one 80-byte `Prim` per part and nothing per
     vertex. Put a new feature on the `Prim`.
+*   **No per-frame allocations in the playback hot path.** `FrameChunk::reset` empties every buffer and
+    keeps its capacity, and GPU buffers only ever grow; a new per-frame buffer goes on the chunk.
 *   **Textures are borrowed, not owned**, and **every texture list must read both `cellmaps()` and
     `external_textures()`**. `set_texture` takes a `TextureView` the supplier owns and `SSPack` holds CPU
     data only; per-texture facts that vary (`AlphaMode`, texel size) go in the group(1) `TexInfo` uniform,
