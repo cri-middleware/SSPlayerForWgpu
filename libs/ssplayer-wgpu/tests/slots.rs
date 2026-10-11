@@ -23,7 +23,7 @@
 //! Skips cleanly when no GPU adapter is available: stepping happens inside
 //! `SSScene::update`, which borrows a device.
 
-use ssplayer_wgpu::{MaskBackend, SSPlayer, SSRenderer, SSScene, SceneConfig};
+use ssplayer_wgpu::{MaskBackend, Retention, SSPlayer, SSRenderer, SSScene, SceneConfig};
 
 const W: u32 = 256;
 const H: u32 = 256;
@@ -117,6 +117,125 @@ fn a_hidden_independent_child_keeps_its_clock() {
         }
     }
     assert!(worst.0 <= 2, "the independent child's frame stood still for {} ticks (up to tick {}): its clock stopped while the part was hidden, which is what stepping from the draw order does. frames={frames:?}", worst.0, worst.1);
+}
+
+/// `Effect.ssab` playing `anime_1`, whose parts are all effects or nulls — so
+/// every primitive it draws is a particle.
+fn effect_player() -> Option<SSPlayer> {
+    let bytes = std::fs::read(format!("{}/Effect.ssab", asset_dir())).ok()?;
+    let mut player = SSPlayer::new();
+    player.load_ssab("Effect", &bytes).ok()?;
+    player.set_animation("anime_1").ok()?;
+    player.play();
+    Some(player)
+}
+
+/// Upload every atlas in the asset dir, keyed as the reference-mode packs name them.
+fn load_textures(renderer: &mut SSRenderer, device: &wgpu::Device, queue: &wgpu::Queue) {
+    for entry in std::fs::read_dir(asset_dir()).unwrap().flatten() {
+        let path = entry.path();
+        if path.extension().and_then(|s| s.to_str()) != Some("png") {
+            continue;
+        }
+        let stem = path.file_stem().and_then(|s| s.to_str()).unwrap_or_default();
+        let img = image::open(&path).unwrap().to_rgba8();
+        let (w, h) = img.dimensions();
+        renderer.upload_texture(device, queue, ssruntime::fnv1a_hash_str(stem), &img, (w, h), Retention::Retain);
+    }
+}
+
+/// Draw `scene` into a fresh W x H target and read it back as RGBA8.
+fn render(device: &wgpu::Device, queue: &wgpu::Queue, renderer: &SSRenderer, scene: &SSScene) -> Vec<u8> {
+    let color = device.create_texture(&wgpu::TextureDescriptor {
+        label: None,
+        size: wgpu::Extent3d { width: W, height: H, depth_or_array_layers: 1 },
+        mip_level_count: 1,
+        sample_count: 1,
+        dimension: wgpu::TextureDimension::D2,
+        format: wgpu::TextureFormat::Rgba8Unorm,
+        usage: wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::COPY_SRC,
+        view_formats: &[],
+    });
+    let view = color.create_view(&wgpu::TextureViewDescriptor::default());
+    let buffer = device.create_buffer(&wgpu::BufferDescriptor { label: None, size: (W * H * 4) as u64, usage: wgpu::BufferUsages::MAP_READ | wgpu::BufferUsages::COPY_DST, mapped_at_creation: false });
+    let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor { label: None });
+    {
+        let mut rpass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+            label: None,
+            color_attachments: &[Some(wgpu::RenderPassColorAttachment { view: &view, resolve_target: None, ops: wgpu::Operations { load: wgpu::LoadOp::Clear(wgpu::Color::BLACK), store: wgpu::StoreOp::Store }, depth_slice: None })],
+            depth_stencil_attachment: None,
+            timestamp_writes: None,
+            occlusion_query_set: None,
+            multiview_mask: None,
+        });
+        scene.draw(renderer, &mut rpass);
+    }
+    encoder.copy_texture_to_buffer(
+        wgpu::TexelCopyTextureInfo { texture: &color, mip_level: 0, origin: wgpu::Origin3d::ZERO, aspect: wgpu::TextureAspect::All },
+        wgpu::TexelCopyBufferInfo { buffer: &buffer, layout: wgpu::TexelCopyBufferLayout { offset: 0, bytes_per_row: Some(W * 4), rows_per_image: Some(H) } },
+        wgpu::Extent3d { width: W, height: H, depth_or_array_layers: 1 },
+    );
+    queue.submit(std::iter::once(encoder.finish()));
+    let (tx, rx) = std::sync::mpsc::channel();
+    buffer.slice(..).map_async(wgpu::MapMode::Read, move |r| {
+        let _ = tx.send(r);
+    });
+    device.poll(wgpu::PollType::Wait { submission_index: None, timeout: None }).unwrap();
+    rx.recv().unwrap().unwrap();
+    let data = buffer.slice(..).get_mapped_range().unwrap().to_vec();
+    buffer.unmap();
+    data
+}
+
+/// A hidden effect part steps without building particles, and its clock still
+/// moves: shown again, it draws what a player that never hid it draws. The
+/// fixture's effects start on frame 0 and on a later key, synced and
+/// independent, and the particles are checked to be there, so two players
+/// drawing none would not pass.
+#[test]
+fn a_hidden_effect_draws_what_the_never_hidden_draws_once_shown() {
+    let (Some(mut shown), Some(mut hidden)) = (effect_player(), effect_player()) else {
+        eprintln!("Effect.ssab missing; run scripts/deploy-examples.sh. skipping.");
+        return;
+    };
+    let Some((device, queue)) = gpu() else {
+        eprintln!("no GPU adapter available, skipping");
+        return;
+    };
+    let mut renderer = SSRenderer::new(&device);
+    load_textures(&mut renderer, &device, &queue);
+    let make_scene = || {
+        let mut scene = SSScene::new(&device, &SceneConfig { color_format: wgpu::TextureFormat::Rgba8Unorm, stencil_format: None, mask: MaskBackend::None });
+        scene.set_viewport(&queue, W as f32, H as f32, false);
+        scene
+    };
+    let (mut shown_scene, mut hidden_scene) = (make_scene(), make_scene());
+
+    let mut compared = 0;
+    for tick in 0..90 {
+        // Part 0 is the root, so the cascade hides every effect part with it.
+        if tick == 10 {
+            hidden.set_part_visibility_override_by_index(0, true, true).unwrap();
+        }
+        if tick == 50 {
+            hidden.clear_part_visibility_override_by_index(0).unwrap();
+        }
+        shown_scene.update(&mut renderer, &device, &queue, 1.0 / 60.0, &mut [&mut shown]);
+        hidden_scene.update(&mut renderer, &device, &queue, 1.0 / 60.0, &mut [&mut hidden]);
+        if (10..50).contains(&tick) {
+            assert_eq!(hidden_scene.stats().prims, 0, "tick {tick}: the hidden player still draws");
+        }
+        if tick < 60 {
+            continue;
+        }
+        let (prims, hidden_prims) = (shown_scene.stats().prims, hidden_scene.stats().prims);
+        assert_eq!(prims, hidden_prims, "tick {tick}: {hidden_prims} particles where the never-hidden player draws {prims} — the effect lost the time it spent hidden");
+        assert!(render(&device, &queue, &renderer, &shown_scene) == render(&device, &queue, &renderer, &hidden_scene), "tick {tick}: the effect draws differently from the never-hidden player's — it lost the time it spent hidden");
+        if prims > 0 {
+            compared += 1;
+        }
+    }
+    assert!(compared > 0, "no particle was drawn after the hidden stretch — the test would pass either way");
 }
 
 /// A synced child follows its parent on the tick its key is reached, too.
