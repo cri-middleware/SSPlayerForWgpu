@@ -8,14 +8,48 @@
 //! ([`SSPack::decode_embedded`]); whoever owns GPU memory registers them with
 //! [`crate::SSRenderer`].
 //!
-//! Cloning a pack is cheap — an `Arc` bump and two small shared slices — so "the
-//! same character twenty times" costs one parse and one atlas.
+//! "The same character twenty times" costs one parse and one atlas, however the
+//! twenty arrived: cloning a pack is an `Arc` bump and two small shared slices,
+//! and loading bytes that a live pack already holds shares that pack's parse.
 
 use ssab::ssab::ss::format::root_as_ss_anime_binary_unchecked;
 use ssruntime::error::SSRuntimeError;
 use ssruntime::{SsabData, SsabResource};
 use std::collections::HashMap;
-use std::sync::Arc;
+use std::sync::{Arc, Mutex, PoisonError, Weak};
+
+/// Every parse a pack still holds, so that loading the same bytes again shares
+/// it instead of building a second.
+///
+/// The runtime keeps everything it derives from a pack on the parse — the
+/// decoded keys, each played animation's part caches and setup pose, the mesh
+/// data — so twenty players that each load Ringo would otherwise hold twenty
+/// copies of it. Held weakly: the last pack to drop a parse frees it.
+static PARSES: Mutex<Vec<Weak<SsabResource>>> = Mutex::new(Vec::new());
+
+/// The live parse of `bytes`, or a new one.
+///
+/// Matched on the bytes themselves, not on where they came from: the same file
+/// reached by two paths is one parse, and a file re-exported under the same path
+/// is a new one.
+///
+/// # Safety
+///
+/// `bytes` must be a valid `.ssab`, as for [`SsabResource::new`].
+unsafe fn parse(bytes: &[u8]) -> Result<Arc<SsabResource>, SSRuntimeError> {
+    let mut parses = PARSES.lock().unwrap_or_else(PoisonError::into_inner);
+    parses.retain(|parse| parse.strong_count() > 0);
+    if let Some(shared) = parses.iter().filter_map(Weak::upgrade).find(|parse| parse.data().as_slice() == bytes) {
+        return Ok(shared);
+    }
+    // SAFETY: the caller's contract.
+    let resource = unsafe { SsabResource::new(SsabData::load_copy(bytes)?) };
+    if resource.resource_static_ptr().is_null() {
+        return Err(SSRuntimeError::NotLoaded);
+    }
+    parses.push(Arc::downgrade(&resource));
+    Ok(resource)
+}
 
 /// One atlas image decoded out of an embedded `.ssab`.
 ///
@@ -94,7 +128,8 @@ pub struct TextureRef {
 
 /// A loaded `.ssab`, shareable between players.
 ///
-/// Loading costs a parse; sharing costs an `Arc` clone. [`SSPlayer::set_pack`]
+/// Loading costs a parse, unless a live pack already holds the same bytes;
+/// sharing costs an `Arc` clone. [`SSPlayer::set_pack`]
 /// selects the pack to play from and [`SSPlayer::add_pack`] registers the extra
 /// packs that external instance parts reference by name.
 ///
@@ -137,10 +172,7 @@ impl SSPack {
     fn build(name: Option<&str>, bytes: &[u8]) -> Result<Self, SSRuntimeError> {
         // SAFETY: `load` and `load_named` require the host to pass a valid `.ssab` (their
         // docs); neither this crate nor the runtime checks it.
-        let resource = unsafe { SsabResource::new(SsabData::load_copy(bytes)?) };
-        if resource.resource_static_ptr().is_null() {
-            return Err(SSRuntimeError::NotLoaded);
-        }
+        let resource = unsafe { parse(bytes)? };
 
         // SAFETY: the same bytes, which the host guaranteed are a valid `.ssab` (above), read
         // from the copy the resource owns, which outlives this borrow.
@@ -340,5 +372,33 @@ impl SSPack {
     /// The runtime resource this pack wraps, for building playback contexts.
     pub(crate) fn resource(&self) -> &Arc<SsabResource> {
         &self.resource
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn fixture(name: &str) -> Option<Vec<u8>> {
+        std::fs::read(format!("{}/../../assets/overall/{name}.ssab", env!("CARGO_MANIFEST_DIR"))).ok()
+    }
+
+    /// Players that each load the same `.ssab` hold one parse between them,
+    /// whatever they name it, and the parse goes with the last pack holding it.
+    #[test]
+    fn loading_the_same_bytes_again_shares_the_parse() {
+        let (Some(basic), Some(mask)) = (fixture("Basic"), fixture("Mask")) else {
+            eprintln!("fixture missing; run scripts/deploy-examples.sh. skipping.");
+            return;
+        };
+        let first = SSPack::load(&basic).unwrap();
+        let named = SSPack::load_named("renamed", &basic).unwrap();
+        assert!(Arc::ptr_eq(first.resource(), named.resource()), "the same bytes were parsed twice");
+        assert_eq!(named.name(), "renamed");
+        assert!(!Arc::ptr_eq(first.resource(), SSPack::load(&mask).unwrap().resource()), "different bytes shared a parse");
+
+        let parse = Arc::downgrade(first.resource());
+        drop((first, named));
+        assert!(parse.upgrade().is_none(), "the parse outlived every pack holding it");
     }
 }
