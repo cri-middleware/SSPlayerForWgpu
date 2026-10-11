@@ -72,8 +72,12 @@ jobs:
         run: cargo fmt --all -- --check
 
       - name: Generate demo assets
-        # Also proves the SDK submodule still builds against this checkout.
-        run: ./scripts/deploy-examples.sh
+        # Also proves the SDK submodule still builds against this checkout. A
+        # debug converter converts the samples just as well, and compiles in a
+        # fraction of the release build's time (locally 1-7 s against 37 s). The
+        # weekly run builds the same profile, since it writes the cache PRs
+        # restore; the release converter is SpriteStudio-SDK's to build.
+        run: ./scripts/deploy-examples.sh build=debug
 
       - name: Clippy
         run: cargo clippy --workspace --all-targets -- -D warnings
@@ -167,13 +171,17 @@ jobs:
       # `cfg`-ed or `#include`-d out everywhere else. The runner has no GPU, so
       # this is a compile check and nothing more — DX12 itself still has to be
       # exercised by running the viewer on real hardware.
+      #
+      # Debug, on pull requests and in the weekly run alike: a compile check
+      # needs no optimizer, the weekly run writes the cache PRs restore so both
+      # must build the same profile, and release.yml builds the release library.
       - name: Build the ffi face (MSVC)
-        run: cargo build -p ssplayer-wgpu-ffi --release
+        run: cargo build -p ssplayer-wgpu-ffi
 
       - name: Build the DX12 C++ viewer
         run: |
           cmake -S examples/viewer-dx12-cpp -B examples/viewer-dx12-cpp/build
-          cmake --build examples/viewer-dx12-cpp/build --config Release
+          cmake --build examples/viewer-dx12-cpp/build --config Debug
 
   wasm:
     name: 🌐 Web (wasm32)
