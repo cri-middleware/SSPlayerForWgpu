@@ -53,6 +53,11 @@ jobs:
           # saving one per PR would only fill the 10 GB quota and evict the main
           # caches every PR restores from.
           save-if: ${{ github.ref == 'refs/heads/main' }}
+          # deploy-examples.sh builds ssconverter-cli inside the SDK checkout,
+          # into the SDK's own target dir, which the default "." would miss.
+          workspaces: |
+            . -> target
+            SpriteStudio-SDK -> target
 
       - name: Format check
         run: cargo fmt --all -- --check
