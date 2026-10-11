@@ -862,6 +862,12 @@ impl SSScene {
     }
 }
 
+/// The `f32`s of a FlatBuffers vector's payload, which is little-endian and
+/// not necessarily aligned for `f32`.
+fn f32s(bytes: &[u8]) -> impl Iterator<Item = f32> + '_ {
+    bytes.as_chunks::<4>().0.iter().map(|word| f32::from_le_bytes(*word))
+}
+
 /// Write the frame's three arrays where `offsets` put them.
 ///
 /// Natively in one `write_buffer_with`, so the frame goes up through one staging
@@ -1461,9 +1467,9 @@ impl FrameChunk {
             StencilTest::None => (0, 0),
         };
         let plan = unsafe { root_as_effect_draw_plan_unchecked(plan_buf) };
-        let stride = plan.vert_stride() as usize;
-        let verts = plan.verts();
-        let uvs = plan.uvs();
+        // XY pairs, four to a particle: `step_effects` asks every slot for a
+        // vertex stride of 2.
+        let (verts, uvs) = (plan.verts().bytes(), plan.uvs().bytes());
         let colors = plan.colors();
 
         for cmd in plan.commands().iter() {
@@ -1486,15 +1492,9 @@ impl FrameChunk {
             // already put them in world space. Only the effect part's own
             // placement is left, and the vertex stage applies that.
             let pos_base = self.arena.len() as u32;
-            for vi in vert_first..vert_last {
-                self.arena.push(verts.get(vi * stride));
-                self.arena.push(verts.get(vi * stride + 1));
-            }
+            self.arena.extend(f32s(&verts[vert_first * 8..vert_last * 8]));
             let uv_base = self.arena.len() as u32;
-            for vi in vert_first..vert_last {
-                self.arena.push(uvs.get(vi * 2));
-                self.arena.push(uvs.get(vi * 2 + 1));
-            }
+            self.arena.extend(f32s(&uvs[vert_first * 8..vert_last * 8]));
 
             // One primitive per particle. The runtime emits every particle as a
             // quad with the same corner order this player uses (see
