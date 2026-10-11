@@ -2,98 +2,71 @@
 
 ## Operating rules
 
-*   Keep changes scoped to the requested task. Unrequested hardening is a suggestion, not a commit; a defect
-    you actually hit in the code you touched is not — fix it, or say plainly why you did not.
-*   Do not commit, push, or open PRs unless the user explicitly asks.
-*   Before editing, read enough surrounding context to understand callers and invariants, the ones below
-    included. If the read tool truncated a file, read the remaining ranges first.
-*   Follow the existing style of the file you touch (naming, type usage, control flow, error handling).
-*   **Anything that exists twice changes twice** — a page and its translation, a `.sh` and its `.ps1`. A
-    change that lands in one half is the defect this family produces most.
-*   **Never break a line between two Japanese characters**: Chrome draws that break as a visible space.
-*   **Finish by running this repository's checks**: the matrix in [CONTRIBUTING.md](./CONTRIBUTING.md). For
-    `clippy --fix`, `git add` your own edits first and pass `--allow-staged`, never `--allow-dirty`. Read
-    what a run says it verified rather than its exit code — several checks here pass, or skip themselves,
-    when a prerequisite is missing.
-*   **Do not restate here what another file owns.** The table below says which file that is; a fact that
-    belongs to none of them goes where it will be seen to go stale.
-*   **Never commit inside the `SpriteStudio-SDK` submodule.** A change the core needs is a pull request in
-    the SDK repository, followed by a submodule bump here.
-*   **Playback and rendering semantics are the SDK's** — see [its AGENTS.md](./SpriteStudio-SDK/AGENTS.md)
-    and the porting guide in `SpriteStudio-SDK/libs/ssruntime/docs/`. This player is the guide's reference
-    reading: where the guide is silent, what is settled here goes into the guide in the same change.
-*   **Code comments do not cite the SDK's porting guide** — no section numbers, page paths or quotes.
-    Its sections move as it is revised and nothing checks a citation inside a comment; say what breaks
-    if the code changes, and leave the rule to the guide.
+*   **Unrequested hardening is a suggestion, not a commit.** A defect you hit in code you touched is not:
+    fix it, or say why you did not.
+*   **Anything that exists twice changes twice** — a page and its translation, a `.sh` and its `.ps1`.
+    Missing one half is this family's most common defect.
+*   **Never break a line between two Japanese characters**; Chrome renders the break as a space.
+*   **Finish with this repository's checks**: the matrix in [CONTRIBUTING.md](./CONTRIBUTING.md). For
+    `clippy --fix`, `git add` your edits first and pass `--allow-staged`, never `--allow-dirty`. Read what a
+    run says it verified, not its exit code — several checks pass, or skip themselves, without a
+    prerequisite.
+*   **Do not restate what another file owns**; the table below says which file. A fact no file owns goes
+    where its staleness will be noticed.
+*   **Never commit inside the `SpriteStudio-SDK` submodule.** A core change is an SDK pull request, then a
+    submodule bump here.
+*   **Playback and rendering semantics are the SDK's**: its [AGENTS.md](./SpriteStudio-SDK/AGENTS.md) and
+    the porting guide in `SpriteStudio-SDK/libs/ssruntime/docs/`. This player is the guide's reference:
+    what it settles where the guide is silent goes into the guide in the same change.
+*   **Code comments never cite the porting guide** (sections, paths, quotes): it moves, and nothing checks
+    the citation. Say what breaks instead.
 
 ## What this repo is
 
-A wgpu renderer for SpriteStudio, and first of all a **Rust** player: a clean Rust API over
-`ssruntime`, which it links as a crate rather than through the C-API, with WebGPU (`wasm-bindgen`)
-and C/C++ (`cbindgen`) as thin wrappers on top.
+A wgpu renderer for SpriteStudio and, first of all, a **Rust** player: a Rust API over `ssruntime`,
+linked as a crate rather than through the C-API, with WebGPU (`wasm-bindgen`) and C/C++ (`cbindgen`)
+faces as thin wrappers.
 
 ## Where each answer is written
 
 | Question | File |
 |---|---|
-| What the player does, and how to use each face | [README.md](./README.md), the [docs site](./docs/en/) |
-| How to build, run and verify, the docs site included, and what each script takes | [CONTRIBUTING.md](./CONTRIBUTING.md), each script's `--help` |
-| How a release is cut | [RELEASING.md](./RELEASING.md), maintainers only |
-| What to build next, and what was measured and declined | [ROADMAP.md](./ROADMAP.md), plus the entry that outgrew it: [PREVIEW.md](./PREVIEW.md) |
+| Use, per face | [README.md](./README.md), the [docs site](./docs/en/) |
+| Constraints, build, verify, docs, scripts | [CONTRIBUTING.md](./CONTRIBUTING.md), each script's `--help` |
+| Releases, maintainers only | [RELEASING.md](./RELEASING.md) |
+| Plans, and what was measured and declined | [ROADMAP.md](./ROADMAP.md), and [PREVIEW.md](./PREVIEW.md) |
 
 ## Invariants
 
-*   **Borrow model, and resources at their widest scope.** The player never owns or stores `Device` /
-    `Queue` / `Surface` / `SSRenderer`. Pipelines, samplers and the texture map are device-scoped
+*   **Resources live at their widest scope.** Pipelines, samplers and textures are device-scoped
     (`SSRenderer`), the projection uniform and frame arena target-scoped (`SSScene`), and only the playback
-    tree, transform and order are per player — so **`SSPlayer` must not gain a wgpu-typed field**, which
-    keeps "1 canvas = 1 player" from coming back. One device per host or page. `.ssab` is the player's and
-    borrowed by `ssruntime`; FrameData and SoA are `ssruntime`'s, never held across frames.
-*   **There is no vertex buffer.** The SoA arrays are memcpy'd into the scene's arena and expanded in the
-    vertex stage from `@builtin(vertex_index)`; the CPU writes one 80-byte `Prim` per part and nothing per
-    vertex. Put a new feature on the `Prim`.
+    tree, transform and order belong to a player. One device per host or page; FrameData and SoA are never
+    held across frames.
 *   **No per-frame allocations in the playback hot path.** `FrameChunk::reset` empties every buffer and
-    keeps its capacity, and GPU buffers only ever grow; a new per-frame buffer goes on the chunk.
-*   **Textures are borrowed, not owned**, and **every texture list must read both `cellmaps()` and
-    `external_textures()`**. `set_texture` takes a `TextureView` the supplier owns and `SSPack` holds CPU
-    data only; per-texture facts that vary (`AlphaMode`, texel size) go in the group(1) `TexInfo` uniform,
-    never the pipeline key. `DrawBatch.texture_hash` is a cellmap's `name_hash` for an ordinary part but a
-    texture *file name*'s for one carrying a TextureChange, and missing that second table fails quietly: the
-    hash falls back to the 1x1 white texture and the part draws as a white silhouette. One file may be named
-    twice, so dedupe by path, never by hash.
-*   **The workspace has two fixed points, and one exclusion.** wgpu is pinned to the 30 line, because
-    Slint's `unstable-wgpu-NN` wants an exact major and one workspace resolves exactly one wgpu;
-    `[workspace] exclude = ["SpriteStudio-SDK"]` stops cargo claiming the SDK crates as members here; and no
-    engine may appear in `ssplayer-wgpu`, adapters being separate crates under `libs/`. **`ffi.rs` holds no
-    logic** either — validation, conversion and error-code mapping only, so anything more lives in `host.rs`
-    or `player.rs`, where the Rust API gets it too.
-*   **The playback contract, in four parts.** Selecting an animation and starting it are separate calls, and
-    **`play()` is a head-out, not a resume** — it rewinds to the section start and re-arms the loop count,
-    while `resume()` carries on in place; the four transport verbs stay distinct on every face. **Slots step
-    from the part list, never from the draw order**, because the runtime drops hidden parts from
-    `draw_order` and a slot would stall the moment its part is hidden; the pulse they re-arm on is
-    `Context::is_looped()`. **A pack outlives every tree built from it** — `build_node` binds each `Context`
-    to its pack's resource by raw pointer, so re-registering a name never changes what is already playing.
-    And **a tick that did not run reports nothing**: `set_culled(true)` skips the advance, so
-    `build_frame` clears `events` / `looped` / `finished_edge` / `started_edge`, while `prev_finished` and
-    `start_pending` stay: the latch that stops a consumed completion edge firing twice, and a `play` no tick
-    has reported yet.
-*   **Each player leaves the stencil buffer as it found it** (`TreeMask::finish`), or the first player's mask
-    clips the second in a shared pass. **The two mask backends must agree**: which one a scene uses is the
-    host's property, never the animation's, so keep the coverage path inside the mask doc's numbers —
-    deviating forks a spec the Godot Player implements too. It **bakes and samples in one encoder, never
-    across frames**, hence no mask lag here.
-*   **Loading is one call on every face**, written once — never add an API that makes a host collect
-    textures by hand. The only per-platform part is `AssetLoader`, whose contract `tests/loader_contract.rs`
-    pins: `reset_base()`, then `read` gets `src` verbatim, *then* `set_base(src)`, and every path after that
-    is a bare name. **The walk builds no paths and never looks inside `src`.** `load` takes no `Device` /
-    `Queue` / `SSRenderer`, so right after it `texture_size(hash)` is still `None`; and `std::fs` cannot
-    replace the loader seam, since it compiles on wasm32 and fails at runtime. A load reports `Err` only for
-    an unreadable `.ssab`; everything else comes back from `missing_assets()`.
-*   **Three faces compile under no default command**: `web.rs` behind `web`, the C face behind `ffi`, and
-    the npm layer typed against wasm-pack's `.d.ts`. Build all three after touching public API.
-*   **Atlas decoding at load time is threaded; the per-frame walk is not.** It is a `std::thread::scope`
-    gone before the call returns, never a pool beside the host's, and `flush_textures` settles which hash
-    wins before dispatching.
-*   **When changing rasterisation, dump the readback to a PNG and look at it** — pixel counts alone have
+    keeps its capacity, and GPU buffers only grow; a new per-frame buffer goes on the chunk.
+*   **Textures are borrowed**: `set_texture` takes a supplier-owned `TextureView`, and `SSPack` holds CPU
+    data only. Per-texture facts that vary (`AlphaMode`, texel size) go in the group(1) `TexInfo` uniform,
+    never the pipeline key. Every texture list reads `external_textures()` as well as `cellmaps()` — a
+    missed TextureChange hash draws a white silhouette — and dedupes by path, since one file may be named
+    twice.
+*   **The four transport verbs stay distinct on every face.** Selecting an animation and starting it are
+    separate calls; `play()` rewinds to the section start and re-arms the loop count, and `resume()`
+    continues in place.
+*   **Slots step from the part list, never the draw order**: the runtime drops hidden parts from
+    `draw_order`. They re-arm on `Context::is_looped()`.
+*   **A pack outlives every tree built from it**: `build_node` binds each `Context` to its pack by raw
+    pointer, so re-registering a name never changes what is already playing.
+*   **A tick that did not run reports nothing.** `set_culled(true)` skips the advance, and `build_frame`
+    clears the frame's events and edges.
+*   **The two mask backends must agree**: which one a scene uses is the host's choice, not the animation's.
+    Keep the coverage path inside the mask doc's numbers, which the Godot Player implements too. It bakes
+    and samples in one encoder, never across frames.
+*   **Loading is one call on every face**; never make a host collect textures. Only `AssetLoader` is per
+    platform, and `tests/loader_contract.rs` pins its contract. `load` takes no `Device` / `Queue` /
+    `SSRenderer`, so `texture_size(hash)` is `None` right after it. `std::fs` cannot stand in for the
+    loader: it compiles on wasm32 and fails at runtime. Only an unreadable `.ssab` is an `Err`; the rest
+    comes back from `missing_assets()`.
+*   **Three faces compile under no default command** — `web.rs` behind `web`, the C face behind `ffi`, the
+    npm layer against wasm-pack's `.d.ts`. Build all three after touching public API.
+*   **When changing rasterisation, dump the readback to a PNG and look at it**; pixel counts alone have
     hidden real regressions.
