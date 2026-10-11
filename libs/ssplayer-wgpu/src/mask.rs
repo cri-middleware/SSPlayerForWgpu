@@ -160,14 +160,12 @@ pub struct ScopedWriter {
     pub close: i32,
 }
 
-/// A frame's planned writers, held inline.
+/// One frame's planned writers, held inline: what [`plan_writers`] hands back.
 ///
-/// The plan is capped at `MAX_MASK_WRITERS` and [`plan_writers`] runs once per
-/// node per frame, so a `Vec` here spent its life growing from empty to a bound
-/// it already knew — a string of reallocations to reach a buffer of a few
-/// kilobytes, on every masking node of every frame. A fixed array costs the same bytes and
-/// none of the allocator. Everything that reads a plan reads it as a slice
-/// (`Deref`), which is what it read when this was a `Vec`.
+/// The draw walk does not use it. It plans once per node per frame into a list
+/// the player keeps across frames, which costs neither the allocator nor the
+/// kilobytes of this array a plan would otherwise fill and copy for every node,
+/// masks or none. Everything that reads a plan reads it as a slice (`Deref`).
 #[derive(Clone, Copy, Debug)]
 pub struct MaskWriters {
     writers: [MaskWriter; MAX_MASK_WRITERS],
@@ -308,10 +306,23 @@ pub fn writer_bounds(frame: &FrameView, writers: &[MaskWriter]) -> Option<[f32; 
 /// `op_invert` is the part's own `mask_influence`; inside an instance the caller
 /// ANDs it with the instance part's before the writer is drawn.
 pub fn plan_writers(frame: &FrameView, mask_flags: &[PartMaskFlags]) -> MaskWriters {
+    let mut planned = Vec::new();
+    plan_writers_into(frame, mask_flags, &mut planned);
     let mut writers = MaskWriters::default();
-    if frame.frame_data.is_empty() {
-        return writers;
+    for writer in planned {
+        writers.push(writer);
     }
+    writers
+}
+
+/// [`plan_writers`], appending to `out` instead: the draw walk's form, which
+/// keeps one list for the whole tree across frames. The cap counts this call's
+/// writers only.
+pub(crate) fn plan_writers_into(frame: &FrameView, mask_flags: &[PartMaskFlags], out: &mut Vec<MaskWriter>) {
+    if frame.frame_data.is_empty() {
+        return;
+    }
+    let start = out.len();
     // SAFETY: `frame_data` is a valid FlatBuffers `FrameData` produced by the
     // runtime for this frame (same contract as the render loop).
     let fd = unsafe { root_as_frame_data_unchecked(frame.frame_data) };
@@ -349,13 +360,11 @@ pub fn plan_writers(frame: &FrameView, mask_flags: &[PartMaskFlags]) -> MaskWrit
             // texture 0 (pure masks / shapes) → no cutout.
             let threshold = if texture_hash != 0 { (255.0 - mask_val) / 255.0 } else { -1.0 };
 
-            writers.push(MaskWriter { part_idx, rank, op_invert: flags.mask_influence, is_clipping, threshold, texture_hash, geom: flags.geom });
+            out.push(MaskWriter { part_idx, rank, op_invert: flags.mask_influence, is_clipping, threshold, texture_hash, geom: flags.geom });
 
-            if writers.len() >= MAX_MASK_WRITERS {
+            if out.len() - start >= MAX_MASK_WRITERS {
                 break 'batches;
             }
         }
     }
-
-    writers
 }
