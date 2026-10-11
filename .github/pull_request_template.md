@@ -1,6 +1,6 @@
 <!--
 Thanks for contributing! See CONTRIBUTING.md for the constraints this project works under
-(the player owns no wgpu state, no vertex buffer, the three faces stay in step).
+(the player owns no wgpu state, no vertex buffer, no per-frame allocation, the three faces stay in step).
 CONTRIBUTING.md に本プロジェクトの制約が記載されています。日本語でも英語でも構いません。
 -->
 
@@ -32,6 +32,7 @@ that is useful information, not a problem.
 - [ ] Anything that exists twice changed twice — a page and its translation, a `.sh` and its `.ps1`.
 - [ ] `SSPlayer` gains no wgpu-typed field; `Device` / `Queue` / `Surface` / `SSRenderer` stay the host's.
 - [ ] No vertex buffer: one `Prim` per part, nothing per vertex on the CPU.
+- [ ] No per-frame allocations: a per-frame buffer lives on the `FrameChunk` and keeps its capacity.
 - [ ] The three faces stay in step: `ffi.rs` holds no logic, and `include/ssplayer_wgpu.h` is regenerated and committed.
 - [ ] wgpu stays on the 30 line, and no engine appears in `ssplayer-wgpu`.
 
