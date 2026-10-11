@@ -121,25 +121,6 @@ player, where every host and the C ABI reach it, and the host half belongs in an
 
 ## Distribution & verification
 
-- [ ] **Publish the npm package** — `packages/ssplayer-wgpu` is
-      `@spritestudio/ssplayer-wgpu` in its shipping shape — scoped name, the
-      custom element as its own `./element` entry point, its own JavaScript-facing
-      README, `prepack` refusing a package whose `dist/` or `wasm/` is missing —
-      and `scripts/build.sh platform=web` fills it. Today it ships only as
-      `ssplayer-wgpu-web-wasm32.zip` on the Release. The channel follows
-      `SSPlayerForWeb`'s, with no token anywhere:
-  - [ ] Publish the first version by hand, with 2FA, from the package on its
-        Release: npm sets up a trusted publisher only for a package it already has.
-  - [ ] Set up a trusted publisher on npmjs.com for `release.yml`, allowed to
-        stage.
-  - [ ] A `publish_npm` input on `release.yml`, and a last step that stages the
-        package through trusted publishing with npm CLI 11.21 or later: under the
-        dist-tag its version names — the prerelease's word, or `latest`, which
-        `publishConfig.tag` (`beta`) would otherwise keep a full release out of —
-        and skipping a version npm already has or has staged. A maintainer
-        approves it with 2FA, on npmjs.com or with `npm stage approve`, and
-        `RELEASING.md` says so. Provenance comes with trusted publishing once
-        this repository is public.
 - [ ] **macOS signing and notarization** — for the cdylib. Portable from the sibling
       players, using the existing organisation secrets.
 - [x] **Version stamping** — versions are hand-written and the SDK is a submodule rather

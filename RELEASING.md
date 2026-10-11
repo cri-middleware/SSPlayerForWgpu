@@ -4,13 +4,13 @@ Maintainers only. Contributors do not run any of this — see [CONTRIBUTING.md](
 
 ## Cutting a release
 
-Anyone with the Write role on this repository can cut a release: it is one run of the **Release** workflow on `main`, so nothing depends on whose machine starts it. You need `git` and `gh` 2.87 or later (run `gh auth login` once), and for steps 2 and 3, the toolchain [CONTRIBUTING.md](./CONTRIBUTING.md) sets up. The repository needs GitHub Pages enabled with GitHub Actions as its source, and a `*-v*` tag rule on its `github-pages` environment, or publishing a Release deploys nothing; both are settings a repository admin makes. The commands are bash: in zsh, run `setopt interactive_comments` first, so that the `#` comments are not taken as arguments; on Windows, use Git Bash.
+Anyone with the Write role on this repository can cut a release: it is one run of the **Release** workflow on `main`, so nothing depends on whose machine starts it. You need `git` and `gh` 2.87 or later (run `gh auth login` once), for steps 2 and 3, the toolchain [CONTRIBUTING.md](./CONTRIBUTING.md) sets up, and for step 7, `npm` signed in to an account that can publish to the `@spritestudio` scope. The repository needs GitHub Pages enabled with GitHub Actions as its source, and a `*-v*` tag rule on its `github-pages` environment, or publishing a Release deploys nothing; both are settings a repository admin makes. The package on npm needs a trusted publisher for this repository's `release.yml`, allowed to stage. npm sets one up only for a package it already has, so the package's first version goes out by hand (step 7). The commands are bash: in zsh, run `setopt interactive_comments` first, so that the `#` comments are not taken as arguments; on Windows, use Git Bash.
 
-This releases the player — the `ssplayer-wgpu` crate, its C face and the npm package — as zips on a GitHub Release. The packages here are versioned independently, and a release names the version it sets, as `<package>@<version>`; the Bevy adapter `ssplayer-bevy` has a version of its own and no release route yet. The player's version is `[workspace.package] version` in `Cargo.toml`, which `ssplayer-wgpu` and `ssplayer-wgpu-ffi` inherit, with the copy npm needs in `packages/ssplayer-wgpu/package.json`. `scripts/set-versions.mjs` writes all of them, and turns the `## [Unreleased]` notes in `libs/ssplayer-wgpu/CHANGELOG.md` into that version's section; `scripts/release-version.sh` prints the version and refuses while the copies disagree. What each version gained is written in that changelog and nowhere else: a Release carries the zips and a link to it. A contributor's pull request carries no version and no changelog entry — both are written here. There is no release branch: what `main` holds is what goes out, so `main` holds only what can ship.
+This releases the player — the `ssplayer-wgpu` crate, its C face and the npm package `@spritestudio/ssplayer-wgpu` — as zips and the package's tarball on a GitHub Release, and that tarball on npm. The packages here are versioned independently, and a release names the version it sets, as `<package>@<version>`; the Bevy adapter `ssplayer-bevy` has a version of its own and no release route yet. The player's version is `[workspace.package] version` in `Cargo.toml`, which `ssplayer-wgpu` and `ssplayer-wgpu-ffi` inherit, with the copy npm needs in `packages/ssplayer-wgpu/package.json`. `scripts/set-versions.mjs` writes all of them, and turns the `## [Unreleased]` notes in `libs/ssplayer-wgpu/CHANGELOG.md` into that version's section; `scripts/release-version.sh` prints the version and refuses while the copies disagree. What each version gained is written in that changelog and nowhere else: a Release carries the zips, the tarball and a link to it. A contributor's pull request carries no version and no changelog entry — both are written here. There is no release branch: what `main` holds is what goes out, so `main` holds only what can ship.
 
-Every block runs as written in a new shell: it works out what it needs from git and GitHub. One value is set by hand, written as a placeholder to fill in: `<version>`, the version from step 1, as in `7.0.0-beta.2`, in steps 4 and 5 and their retry under [Undoing a release](#undoing-a-release). The block that assembles a run's artifacts takes the run as `<run-id>` the same way. Left as it is, a placeholder stops its line with a syntax error.
+Every block runs as written in a new shell: it works out what it needs from git and GitHub. One value is set by hand, written as a placeholder to fill in: `<version>`, the version from step 1, as in `7.0.0-beta.2`, in steps 4 and 5 and their retry under [Undoing a release](#undoing-a-release). The block that assembles a run's artifacts takes the run as `<run-id>` the same way, and a block that acts on a staged version takes it as `<stage-id>`. Left as it is, a placeholder stops its line with a syntax error.
 
-An agent can run every block. A person sorts the scan's matches in step 4 and decides two steps: the merge in step 2, which puts the notes on `main`, and step 6, which publishes the Release for good.
+An agent can run every block. A person sorts the scan's matches in step 4 and decides two steps: the merge in step 2, which puts the notes on `main`, and step 8, which publishes the Release for good. Step 7, which asks for a 2FA code, is a person's too.
 
 ### 1. Decide the version
 
@@ -56,7 +56,7 @@ scripts/build-pages.sh                            # -> site/, the site pages.yml
 
 ### 4. Look at it first
 
-A dry run builds every platform with the version applied and checks the result, and commits, tags and releases nothing. Its zips stay on the run (`ssplayer-wgpu-release-dist`); the block downloads them into `qa/<run ID>`, and fails when the run did.
+A dry run builds every platform with the version applied and checks the result, and commits, tags, releases and stages nothing. Its zips and tarball stay on the run (`ssplayer-wgpu-release-dist`); the block downloads them into `qa/<run ID>`, and fails when the run did.
 
 ```bash
 VERSION=<version>                                 # the version from step 1
@@ -85,7 +85,7 @@ RUN=$(gh workflow run release.yml --ref main -f versions="ssplayer-wgpu@${VERSIO
 gh run watch "${RUN:?}" --exit-status
 ```
 
-The run first checks the changelog, then builds the library for Windows and macOS (universal) and the npm package, all with the version applied, then assembles and checks the zips, and only then commits the version and the dated changelog to `main`, tags `ssplayer-wgpu-v<version>` and creates a **draft** Release carrying the three zips, `SHA256SUMS` and a link to the changelog. A failure before the commit leaves `main` untouched, and so does a `main` that moved during the run, which rejects the push. Then see what it made:
+The run first checks the changelog, then builds the library for Windows and macOS (universal) and the npm package, all with the version applied, then assembles and checks the zips and the package's tarball, and only then commits the version and the dated changelog to `main`, tags `ssplayer-wgpu-v<version>`, creates a **draft** Release carrying the two zips, the tarball, `SHA256SUMS` and a link to the changelog, and stages that tarball on npm, where it waits for step 7. A failure before the commit leaves `main` untouched, and so does a `main` that moved during the run, which rejects the push. Then see what it made:
 
 ```bash
 git fetch origin --tags
@@ -93,16 +93,44 @@ git log --oneline -1 origin/main                  # chore(release): ssplayer-wgp
 gh release list --json tagName,isDraft -q '.[] | select(.isDraft) | .tagName'   # its draft
 ```
 
-### 6. Publish
+npm cannot stage a package it does not have yet, so the run that releases the package's first version — the first release — adds `-f publish_npm=false`, and step 7 publishes it by hand.
 
-Nothing on the draft needs writing, and a version with a `-` is already marked as a pre-release. Check the attachments first: `ssplayer-wgpu-windows-x86_64.zip`, `ssplayer-wgpu-macos-universal.zip`, `ssplayer-wgpu-web-wasm32.zip` and `SHA256SUMS`.
+### 6. Check the draft
+
+Nothing on the draft needs writing, and a version with a `-` is already marked as a pre-release. Check the attachments: `ssplayer-wgpu-windows-x86_64.zip`, `ssplayer-wgpu-macos-universal.zip`, `spritestudio-ssplayer-wgpu-<version>.tgz` and `SHA256SUMS`. Look at them before anything on npm is approved: until then, a fault is undone by deleting the draft and rejecting what was staged (see [Undoing a release](#undoing-a-release)), and after it, only a new version fixes it. The block lists the attachments, then what the tarball holds — what npm is given.
 
 ```bash
 tag=$(gh release list --json tagName,isDraft -q '[.[] | select(.isDraft) | .tagName | select(startswith("ssplayer-wgpu-v"))][0] // empty')
 gh release view "${tag:?}" --json assets -q '.assets[].name'
+dir=$(mktemp -d)
+gh release download "${tag:?}" -p '*.tgz' -D "$dir" && tar -tzf "$dir"/*.tgz
 ```
 
-Then **a person publishes it**: a published Release is permanent. Publishing also starts `pages.yml`, which deploys the [documentation site](https://cri-middleware.github.io/SSPlayerForWgpu/) with the rustdoc and the WebGPU demo.
+### 7. Approve on npm
+
+**A person runs this step**: approving, like publishing by hand, asks for a 2FA code. A version the run staged stays out of sight on npm until a maintainer approves it, and approving applies the dist-tag it was staged under. Approve before the Release is published, so that by the time the Release announces the version, `npm install` and the CDN snippets in the READMEs and `examples/cdn` find it. Approve on npmjs.com, or here:
+
+```bash
+npm login                                         # once
+npm stage list @spritestudio/ssplayer-wgpu        # each staged version, with its stage id
+npm stage approve <stage-id>
+```
+
+A version the run did not stage — every run with `publish_npm=false`, the first release among them, and any after a failed **Stage on npm** — is published by hand instead, from the very tarball on the draft. The block takes the dist-tag from the version: the prerelease's word (`beta`), or `latest` for a full release.
+
+```bash
+tag=$(gh release list --json tagName,isDraft -q '[.[] | select(.isDraft) | .tagName | select(startswith("ssplayer-wgpu-v"))][0] // empty')
+version=${tag#ssplayer-wgpu-v}
+case "$version" in *-*) dist=${version#*-}; dist=${dist%%.*} ;; *) dist=latest ;; esac
+dir=$(mktemp -d)
+gh release download "${tag:?}" -p '*.tgz' -D "$dir" &&
+  npm publish "$dir"/*.tgz --tag "$dist" --access public &&
+  npm view @spritestudio/ssplayer-wgpu dist-tags
+```
+
+### 8. Publish
+
+Then **a person publishes the Release**: a published Release is permanent. Publishing also starts `pages.yml`, which deploys the [documentation site](https://cri-middleware.github.io/SSPlayerForWgpu/) with the rustdoc and the WebGPU demo.
 
 ```bash
 tag=$(gh release list --json tagName,isDraft -q '[.[] | select(.isDraft) | .tagName | select(startswith("ssplayer-wgpu-v"))][0] // empty')
@@ -125,7 +153,7 @@ Then open the site. A failed run leaves the Release published and the site as it
 
 ## Undoing a release
 
-Until the Release is published, it can be undone:
+**A version npm has made public is permanent**, whether approved or published by hand: it cannot be withdrawn, only superseded. So is a published Release, whose tag and assets hosts have downloaded. A fault found after either is fixed by a new patch version. A staged version is not public yet, and `npm stage reject <stage-id>` removes it (a person, with 2FA). Before that:
 
 *   A run that failed before its commit reached `main` is run again with the same version, once the cause is fixed in `main`. The **Re-run** button would replay the old commit, and its push would be rejected.
 
@@ -135,25 +163,28 @@ Until the Release is published, it can be undone:
     gh run watch "${RUN:?}" --exit-status
     ```
 
-*   A run that failed after its commit reached `main` is run again with `versions` empty, before anything else is merged into `main`: it releases the version `main` now carries, reusing a tag it had pushed.
+*   A run that failed after its commit reached `main` is run again with `versions` empty, before anything else is merged into `main`: it releases the version `main` now carries, reusing a tag it had pushed, drafting the Release if it is missing and staging the tarball if npm does not have that version, staged or published.
 
     ```bash
     RUN=$(gh workflow run release.yml --ref main | sed 's|.*/||')
     gh run watch "${RUN:?}" --exit-status
     ```
 
-*   A fault in the draft takes the tag down too: delete the draft and its tag, merge the fix into `main` — correcting the version's changelog section if it needs it — and run again with `versions` empty, which tags the same version on the fixed `main`. The block finds the tag among the drafts, so it never touches a published Release.
+*   A fault in the draft takes the tag down too: delete the draft and its tag, have a person reject what the run staged — a retry skips a version npm has staged, so the faulty tarball would stay the one waiting for approval — merge the fix into `main`, correcting the version's changelog section if it needs it, and run again with `versions` empty, which tags the same version on the fixed `main` and stages it again. The block finds the tag among the drafts, so it never touches a published Release.
 
     ```bash
     tag=$(gh release list --json tagName,isDraft -q '[.[] | select(.isDraft) | .tagName | select(startswith("ssplayer-wgpu-v"))][0] // empty')
     gh release delete "${tag:?}" --cleanup-tag --yes  # deletes the tag too, here and on GitHub
     ```
 
-**Once published, the tag and its assets are permanent** — hosts have downloaded the zips by that tag — so a fix is a new patch version.
+    ```bash
+    npm stage list @spritestudio/ssplayer-wgpu        # the staged version, with its stage id
+    npm stage reject <stage-id>                       # a person, with 2FA
+    ```
 
 ## Building the release locally
 
-`scripts/build-release.sh` is the release package, and `release.yml`'s package job runs exactly this script. It builds nothing — the two native platforms need an operating system each — so it assembles a run's artifacts instead: one zip per platform, the npm package as its own, and `SHA256SUMS` over them. Its checks are the ones nothing else does: every platform is present, the C header is the same in all of them, every platform links the same SDK release — a release, not `local` — and each zip holds the library it is named for. `<run-id>` is the `release.yml` run whose artifacts it assembles.
+`scripts/build-release.sh` is the release package, and `release.yml`'s package job runs exactly this script. It builds nothing — the two native platforms need an operating system each — so it assembles a run's artifacts instead: one zip per native platform, the npm package as the tarball npm is given (`npm pack`, so it needs `npm`), and `SHA256SUMS` over them. Its checks are the ones nothing else does: every platform is present, the C header is the same in all of them, every platform links the same SDK release — a release, not `local` — the npm package carries the version being released, each zip holds the library it is named for, and the tarball holds what the package advertises. `<run-id>` is the `release.yml` run whose artifacts it assembles.
 
 ```bash
 RUN=<run-id>
@@ -171,13 +202,13 @@ scripts/build-release.sh                          # -> release-dist/
 
 ## リリースの手順
 
-このリポジトリの Write ロールを持つ人なら誰でもリリースできます。リリースは `main` での **Release** ワークフローの実行 1 回なので、誰の手元から始めても結果は変わりません。必要なのは `git` と `gh` 2.87 以降（最初に一度 `gh auth login`）、それに手順 2・3 のための、[CONTRIBUTING.md](./CONTRIBUTING.md) が用意するツールチェーンです。リポジトリ側では、GitHub Pages を有効にしてソースを GitHub Actions にし、`github-pages` environment に `*-v*` のタグのルールを足しておく必要があります。どちらかが欠けると、Release を公開しても何もデプロイされません。どちらもリポジトリの admin が行う設定です。コマンドは bash です。zsh では、`#` のコメントが引数として渡されないよう、先に `setopt interactive_comments` を実行します。Windows では Git Bash を使います。
+このリポジトリの Write ロールを持つ人なら誰でもリリースできます。リリースは `main` での **Release** ワークフローの実行 1 回なので、誰の手元から始めても結果は変わりません。必要なのは `git` と `gh` 2.87 以降（最初に一度 `gh auth login`）、手順 2・3 のための、[CONTRIBUTING.md](./CONTRIBUTING.md) が用意するツールチェーン、それに手順 7 のための `npm` で、`@spritestudio` scope に publish できるアカウントでログインしておきます。リポジトリ側では、GitHub Pages を有効にしてソースを GitHub Actions にし、`github-pages` environment に `*-v*` のタグのルールを足しておく必要があります。どちらかが欠けると、Release を公開しても何もデプロイされません。どちらもリポジトリの admin が行う設定です。npm 側では、パッケージに、このリポジトリの `release.yml` を trusted publisher として登録し、stage を許可しておきます。npm はすでにあるパッケージにしか trusted publisher を設定できないので、パッケージの最初のバージョンは手作業で出します（手順 7）。コマンドは bash です。zsh では、`#` のコメントが引数として渡されないよう、先に `setopt interactive_comments` を実行します。Windows では Git Bash を使います。
 
-ここでリリースするのは Player 本体 — `ssplayer-wgpu` クレート、その C フェイス、npm パッケージ — で、GitHub Release の zip として出します。このリポジトリのパッケージは独立にバージョンを持ち、リリースは設定するバージョンを `<package>@<version>` で指定します。Bevy アダプタ `ssplayer-bevy` は独自のバージョンを持ち、リリースの経路はまだありません。Player のバージョンは `Cargo.toml` の `[workspace.package] version` で、`ssplayer-wgpu` と `ssplayer-wgpu-ffi` がそれを継承し、`packages/ssplayer-wgpu/package.json` が npm に必要な写しを持ちます。`scripts/set-versions.mjs` がそのすべてを書き、`libs/ssplayer-wgpu/CHANGELOG.md` の `## [Unreleased]` のノートをそのバージョンの節に書き換えます。`scripts/release-version.sh` はバージョンを出力します（写しが食い違っている間は出力を拒否します）。各バージョンで何が変わったかは、この changelog にだけ書きます。Release が持つのは zip と、その changelog へのリンクです。コントリビューターのプルリクエストはバージョンも changelog の項目も持ちません。どちらもここで書きます。release ブランチはありません。`main` にあるものがそのまま出るので、`main` には出せるものだけを置きます。
+ここでリリースするのは Player 本体 — `ssplayer-wgpu` クレート、その C フェイス、npm パッケージ `@spritestudio/ssplayer-wgpu` — で、GitHub Release の zip とパッケージの tarball として出し、その tarball を npm にも出します。このリポジトリのパッケージは独立にバージョンを持ち、リリースは設定するバージョンを `<package>@<version>` で指定します。Bevy アダプタ `ssplayer-bevy` は独自のバージョンを持ち、リリースの経路はまだありません。Player のバージョンは `Cargo.toml` の `[workspace.package] version` で、`ssplayer-wgpu` と `ssplayer-wgpu-ffi` がそれを継承し、`packages/ssplayer-wgpu/package.json` が npm に必要な写しを持ちます。`scripts/set-versions.mjs` がそのすべてを書き、`libs/ssplayer-wgpu/CHANGELOG.md` の `## [Unreleased]` のノートをそのバージョンの節に書き換えます。`scripts/release-version.sh` はバージョンを出力します（写しが食い違っている間は出力を拒否します）。各バージョンで何が変わったかは、この changelog にだけ書きます。Release が持つのは zip と tarball、その changelog へのリンクです。コントリビューターのプルリクエストはバージョンも changelog の項目も持ちません。どちらもここで書きます。release ブランチはありません。`main` にあるものがそのまま出るので、`main` には出せるものだけを置きます。
 
-どのブロックも、新しいシェルで書かれたとおりに実行できます。必要なものは git と GitHub から求めます。手で設定する値は 1 つで、埋めるプレースホルダとして書いてあります。手順 4・5 と「リリースの取り消し」にあるその再実行の `<version>` で、手順 1 で決めたバージョン（`7.0.0-beta.2` など）を入れます。run の成果物を組み立てるブロックも、その run を `<run-id>` で受け取ります。埋めずに実行すると、その行は構文エラーで止まります。
+どのブロックも、新しいシェルで書かれたとおりに実行できます。必要なものは git と GitHub から求めます。手で設定する値は 1 つで、埋めるプレースホルダとして書いてあります。手順 4・5 と「リリースの取り消し」にあるその再実行の `<version>` で、手順 1 で決めたバージョン（`7.0.0-beta.2` など）を入れます。run の成果物を組み立てるブロックも、その run を `<run-id>` で受け取り、stage したバージョンに対して操作するブロックは、それを `<stage-id>` で受け取ります。埋めずに実行すると、その行は構文エラーで止まります。
 
-どのブロックもエージェントに実行させられます。手順 4 の照合の一致は人が仕分けます。2 つの手順は人が判断します。ノートを `main` に入れる手順 2 のマージと、取り消せない公開を行う手順 6 です。
+どのブロックもエージェントに実行させられます。手順 4 の照合の一致は人が仕分けます。2 つの手順は人が判断します。ノートを `main` に入れる手順 2 のマージと、取り消せない公開を行う手順 8 です。2FA のコードを求められる手順 7 も人が行います。
 
 ### 1. バージョンを決める
 
@@ -223,7 +254,7 @@ scripts/build-pages.sh                            # -> site/。pages.yml がデ�
 
 ### 4. 先に確かめる
 
-dry run は、バージョンを適用して全プラットフォームをビルドし、結果を検査します。コミットもタグも Release も作りません。zip は run に残ります（`ssplayer-wgpu-release-dist`）。ブロックはそれを `qa/<run ID>` にダウンロードし、run が失敗していればブロックも失敗します。
+dry run は、バージョンを適用して全プラットフォームをビルドし、結果を検査します。コミットもタグも Release も作らず、npm への stage もしません。zip と tarball は run に残ります（`ssplayer-wgpu-release-dist`）。ブロックはそれを `qa/<run ID>` にダウンロードし、run が失敗していればブロックも失敗します。
 
 ```bash
 VERSION=<version>                                 # 手順 1 で決めたバージョン
@@ -252,7 +283,7 @@ RUN=$(gh workflow run release.yml --ref main -f versions="ssplayer-wgpu@${VERSIO
 gh run watch "${RUN:?}" --exit-status
 ```
 
-run はまず changelog を検査し、続けて Windows・macOS（ユニバーサル）向けのライブラリと npm パッケージを、どれもバージョンを適用してビルドし、zip を組み立てて検査します。そのあとで初めてバージョンと日付を入れた changelog を `main` へコミットし、`ssplayer-wgpu-v<version>` のタグを打ち、3 つの zip と `SHA256SUMS`、changelog へのリンク付きで**下書き**の Release を作ります。コミットより前に失敗すれば `main` は変わりません。run の途中で `main` が進んでいた場合も、push が拒否されるので同じです。終わったら、できたものを確かめます。
+run はまず changelog を検査し、続けて Windows・macOS（ユニバーサル）向けのライブラリと npm パッケージを、どれもバージョンを適用してビルドし、zip とパッケージの tarball を組み立てて検査します。そのあとで初めてバージョンと日付を入れた changelog を `main` へコミットし、`ssplayer-wgpu-v<version>` のタグを打ち、2 つの zip と tarball、`SHA256SUMS`、changelog へのリンク付きで**下書き**の Release を作り、その tarball を npm に stage します。stage したものは手順 7 を待ちます。コミットより前に失敗すれば `main` は変わりません。run の途中で `main` が進んでいた場合も、push が拒否されるので同じです。終わったら、できたものを確かめます。
 
 ```bash
 git fetch origin --tags
@@ -260,16 +291,44 @@ git log --oneline -1 origin/main                  # chore(release): ssplayer-wgp
 gh release list --json tagName,isDraft -q '.[] | select(.isDraft) | .tagName'   # できた下書き
 ```
 
-### 6. 公開
+npm はまだ無いパッケージを stage できないので、パッケージの最初のバージョンを出す run（初回のリリースがそうです）には `-f publish_npm=false` を足し、手順 7 で手作業で publish します。
 
-下書きに書き足すものはありません。`-` を含むバージョンは、すでに pre-release になっています。先に添付を確かめます。`ssplayer-wgpu-windows-x86_64.zip`、`ssplayer-wgpu-macos-universal.zip`、`ssplayer-wgpu-web-wasm32.zip`、`SHA256SUMS` の 4 つです。
+### 6. 下書きを確かめる
+
+下書きに書き足すものはありません。`-` を含むバージョンは、すでに pre-release になっています。添付を確かめます。`ssplayer-wgpu-windows-x86_64.zip`、`ssplayer-wgpu-macos-universal.zip`、`spritestudio-ssplayer-wgpu-<version>.tgz`、`SHA256SUMS` の 4 つです。npm で承認する前に確かめます。それまでなら、下書きを消して stage したものを取り下げれば取り消せますが（「リリースの取り消し」を参照）、承認した後は新しいバージョンでしか直せません。ブロックは添付を一覧し、続けて tarball の中身（npm に渡すもの）を一覧します。
 
 ```bash
 tag=$(gh release list --json tagName,isDraft -q '[.[] | select(.isDraft) | .tagName | select(startswith("ssplayer-wgpu-v"))][0] // empty')
 gh release view "${tag:?}" --json assets -q '.assets[].name'
+dir=$(mktemp -d)
+gh release download "${tag:?}" -p '*.tgz' -D "$dir" && tar -tzf "$dir"/*.tgz
 ```
 
-確かめたら公開します。**公開は人が行います。** 公開した Release は取り消せないためです。公開すると `pages.yml` が動き、[ドキュメントサイト](https://cri-middleware.github.io/SSPlayerForWgpu/) を rustdoc と WebGPU デモ付きでデプロイします。
+### 7. npm で承認する
+
+**この手順は人が行います。** 承認も、手作業の publish も、2FA のコードを求められるためです。run が stage したバージョンは、maintainer が承認するまで npm 上で見えないままで、承認すると stage したときの dist-tag が付きます。Release を公開するより先に承認し、Release がバージョンを告知する時点で、`npm install` と README・`examples/cdn` の CDN スニペットがそのバージョンを見つけられるようにします。承認は npmjs.com でも、次のコマンドでもできます。
+
+```bash
+npm login                                         # 最初に一度
+npm stage list @spritestudio/ssplayer-wgpu        # stage されたバージョンと、その stage id
+npm stage approve <stage-id>
+```
+
+run が stage しなかったバージョンは、下書きに添付された tarball そのものを手作業で publish します。`publish_npm=false` で実行した run（初回のリリースを含む）と、**Stage on npm** が失敗した後がこれにあたります。ブロックは dist-tag をバージョンから決めます。プレリリースならその語（`beta`）、正式版なら `latest` です。
+
+```bash
+tag=$(gh release list --json tagName,isDraft -q '[.[] | select(.isDraft) | .tagName | select(startswith("ssplayer-wgpu-v"))][0] // empty')
+version=${tag#ssplayer-wgpu-v}
+case "$version" in *-*) dist=${version#*-}; dist=${dist%%.*} ;; *) dist=latest ;; esac
+dir=$(mktemp -d)
+gh release download "${tag:?}" -p '*.tgz' -D "$dir" &&
+  npm publish "$dir"/*.tgz --tag "$dist" --access public &&
+  npm view @spritestudio/ssplayer-wgpu dist-tags
+```
+
+### 8. 公開
+
+続けて Release を公開します。**Release の公開は人が行います。** 公開した Release は取り消せないためです。公開すると `pages.yml` が動き、[ドキュメントサイト](https://cri-middleware.github.io/SSPlayerForWgpu/) を rustdoc と WebGPU デモ付きでデプロイします。
 
 ```bash
 tag=$(gh release list --json tagName,isDraft -q '[.[] | select(.isDraft) | .tagName | select(startswith("ssplayer-wgpu-v"))][0] // empty')
@@ -292,7 +351,7 @@ gh run watch "${RUN:?}" --exit-status
 
 ## リリースの取り消し
 
-Release を公開するまでは取り消せます。
+**npm で公開されたバージョンは恒久的です。** 承認したものも手作業で publish したものも、取り下げられず、新しいバージョンで置き換えるしかありません。公開した Release も同じで、ホストはそのタグでアセットを取得しています。どちらかの後に見つかった不具合は、新しいパッチバージョンで直します。stage しただけのバージョンはまだ公開されておらず、`npm stage reject <stage-id>` で取り下げられます（人が 2FA で行います）。それより前なら次のとおりです。
 
 *   コミットが `main` に届く前に失敗した run は、原因を `main` で直してから、同じバージョンで実行し直します。**Re-run** ボタンは古いコミットを再生するので、その push は拒否されます。
 
@@ -302,25 +361,28 @@ Release を公開するまでは取り消せます。
     gh run watch "${RUN:?}" --exit-status
     ```
 
-*   コミットが `main` に届いた後に失敗した run は、ほかの変更が `main` にマージされる前に、`versions` を空にして実行し直します。`main` が今持っているバージョンを出し、push 済みのタグはそのまま使います。
+*   コミットが `main` に届いた後に失敗した run は、ほかの変更が `main` にマージされる前に、`versions` を空にして実行し直します。`main` が今持っているバージョンを出し、push 済みのタグはそのまま使い、Release の下書きが無ければ作り、npm にそのバージョンが無ければ（stage 済みでも publish 済みでもなければ）tarball を stage します。
 
     ```bash
     RUN=$(gh workflow run release.yml --ref main | sed 's|.*/||')
     gh run watch "${RUN:?}" --exit-status
     ```
 
-*   下書きに不具合があればタグも取り下げます。下書きとそのタグを消し、修正を `main` へマージして（必要ならそのバージョンの changelog の節も直して）、`versions` を空にして実行し直します。直した `main` に同じバージョンのタグが打たれます。ブロックは下書きの中からタグを探すので、公開済みの Release に触れることはありません。
+*   下書きに不具合があればタグも取り下げます。下書きとそのタグを消し、run が stage したものを人が取り下げ（やり直しの run は npm が stage 済みのバージョンを飛ばすので、取り下げないと不具合のある tarball が承認待ちのまま残ります）、修正を `main` へマージして（必要ならそのバージョンの changelog の節も直して）、`versions` を空にして実行し直します。直した `main` に同じバージョンのタグが打たれ、もう一度 stage されます。ブロックは下書きの中からタグを探すので、公開済みの Release に触れることはありません。
 
     ```bash
     tag=$(gh release list --json tagName,isDraft -q '[.[] | select(.isDraft) | .tagName | select(startswith("ssplayer-wgpu-v"))][0] // empty')
     gh release delete "${tag:?}" --cleanup-tag --yes  # タグも手元と GitHub の両方から消える
     ```
 
-**公開した後のタグとアセットは恒久的です。** ホストはそのタグで zip を取得しているので、修正は新しいパッチバージョンで出します。
+    ```bash
+    npm stage list @spritestudio/ssplayer-wgpu        # stage されたバージョンと、その stage id
+    npm stage reject <stage-id>                       # 人が 2FA で行う
+    ```
 
 ## リリースのローカルビルド
 
-`scripts/build-release.sh` がリリースのパッケージそのもので、`release.yml` の package ジョブはこのスクリプトを実行しているだけです。何もビルドしません（ネイティブの 2 プラットフォームには、それぞれの OS が要ります）。代わりに run の成果物を組み立てます。プラットフォームごとの zip、npm パッケージの zip、それらに対する `SHA256SUMS` です。ほかのどこもしない検査を受け持ちます。全プラットフォームが揃っていること、C ヘッダがどれも同じであること、全プラットフォームが同じ SDK のリリース（`local` ではなくリリース）をリンクしていること、各 zip が名前どおりのライブラリを持っていることです。`<run-id>` は、成果物を組み立てる `release.yml` の run の ID です。
+`scripts/build-release.sh` がリリースのパッケージそのもので、`release.yml` の package ジョブはこのスクリプトを実行しているだけです。何もビルドしません（ネイティブの 2 プラットフォームには、それぞれの OS が要ります）。代わりに run の成果物を組み立てます。ネイティブのプラットフォームごとの zip、npm に渡す tarball にした npm パッケージ（`npm pack` なので `npm` が要ります）、それらに対する `SHA256SUMS` です。ほかのどこもしない検査を受け持ちます。全プラットフォームが揃っていること、C ヘッダがどれも同じであること、全プラットフォームが同じ SDK のリリース（`local` ではなくリリース）をリンクしていること、npm パッケージがリリースするバージョンを持っていること、各 zip が名前どおりのライブラリを持っていること、tarball がパッケージの告知するものを持っていることです。`<run-id>` は、成果物を組み立てる `release.yml` の run の ID です。
 
 ```bash
 RUN=<run-id>
