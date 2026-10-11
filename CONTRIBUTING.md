@@ -157,7 +157,7 @@ design; do not add a stall to make it current.
 
 Pages live as both `docs/en/<path>` and `docs/ja/<path>`, and `nav` lives in both locale configs,
 so adding or renaming a page means editing both. If you edit a page, build both locales before you
-finish: nothing builds the docs on a pull request, so that local build is the only gate.
+finish: nothing builds the docs on a pull request, so that local build is the only gate before the merge (CI builds them weekly).
 
 ```bash
 ./scripts/prepare-docs.sh            # once: .venv + the pins in docs/requirements.txt
@@ -287,7 +287,7 @@ cargo test -p ssplayer-wgpu --features ffi --lib
 
 ### ドキュメント
 
-ページは `docs/en/<path>` と `docs/ja/<path>` の両方にあり、`nav` も両方のロケール設定にあります。ページの追加・改名は両方を編集してください。ページを編集したら、仕上げる前に両ロケールをビルドしてください。プルリクエストでは docs はビルドされないため、手元のビルドが唯一のゲートです。
+ページは `docs/en/<path>` と `docs/ja/<path>` の両方にあり、`nav` も両方のロケール設定にあります。ページの追加・改名は両方を編集してください。ページを編集したら、仕上げる前に両ロケールをビルドしてください。プルリクエストでは docs はビルドされないため、マージ前のゲートは手元のビルドだけです（CI がビルドするのは週次です）。
 
 ```bash
 ./scripts/prepare-docs.sh            # 一度だけ: .venv と docs/requirements.txt のピン
