@@ -1,11 +1,12 @@
 #!/usr/bin/env bash
 #
 # Assemble the release: take the per-platform trees the build matrix produced,
-# lay each one out as the drop-in a C or C++ host expects, and zip them.
+# lay each native one out as the drop-in a C or C++ host expects and zip it, and
+# pack the npm package into the tarball npm is given.
 #
 #   scripts/build-release.sh                       # assemble from artifacts/
 #   scripts/build-release.sh out=/tmp/rel          # somewhere else
-#   scripts/build-release.sh verify=no             # skip re-opening the zips
+#   scripts/build-release.sh verify=no             # skip re-opening the archives
 #
 # release.yml's package job runs this script for the assets it uploads, so CI
 # and a local run cannot drift. The workflow keeps only what is GitHub's -- the
@@ -65,9 +66,9 @@ usage () {
   echo "  in=<dir>                Where the per-platform artifact trees are (default:"
   echo "                          $IN). One subdirectory per upload-artifact name, which"
   echo "                          is exactly what 'gh run download -D <dir>' produces."
-  echo "  out=<dir>               Where the zips and SHA256SUMS land (default: $OUT)."
+  echo "  out=<dir>               Where the archives and SHA256SUMS land (default: $OUT)."
   echo "                          Relative paths resolve against the current directory."
-  echo "  verify=<yes|no>         Re-open the finished zips and check them (default:"
+  echo "  verify=<yes|no>         Re-open the finished archives and check them (default:"
   echo "                          $VERIFY)."
   echo "  clean=<yes|no>          Delete <out> before assembling (default: $CLEAN)."
     echo "  sdk= skip=              Accepted and ignored here. The family's build-release"
@@ -78,8 +79,9 @@ echo "  -h | --help             Show this help"
   echo "Output, in <out>:"
   echo "  ssplayer-wgpu-<platform>-<arch>.zip   include/, lib/ (the library and VERSION),"
   echo "                                        LICENSE.md, LICENSE.ja.md, THIRD_PARTY_NOTICES.md"
-  echo "  ssplayer-wgpu-web-wasm32.zip          the npm package (dist/, wasm/, package.json)"
-  echo "  SHA256SUMS                            covers every zip above"
+  echo "  spritestudio-ssplayer-wgpu-<version>.tgz"
+  echo "                                        the npm package, packed by 'npm pack'"
+  echo "  SHA256SUMS                            covers every archive above"
   echo ""
   echo "Every platform the matrix builds must be present: a partial release is not a"
   echo "thing worth producing, so a missing one is an error that lists everything else"
@@ -149,9 +151,9 @@ echo "  version => $VERSION"
 echo "  tag     => ${TAG:-(none)}"
 echo "             ($TAG_SOURCE)"
 
-# A tag that disagrees with the version is not a warning: the npm package in the
-# web zip carries the version, so the Release would be called one thing and hold
-# a package that says another.
+# A tag that disagrees with the version is not a warning: the npm package
+# carries the version, so the Release would be called one thing and hold a
+# package that says another.
 if [ -n "$TAG" ] && [ "$TAG" != "ssplayer-wgpu-v$VERSION" ]; then
   echo "" >&2
   echo "$APP: tag $TAG does not match the player's version (ssplayer-wgpu-v$VERSION)." >&2
@@ -162,12 +164,16 @@ fi
 
 # --- preflight ------------------------------------------------------------
 
-for tool in zip unzip; do
+for tool in zip unzip tar; do
   command -v "$tool" > /dev/null 2>&1 || {
-    echo "$APP: $tool not found -- it is what packages the archives" >&2
+    echo "$APP: $tool not found -- it is what packages and checks the archives" >&2
     exit 1
   }
 done
+command -v npm > /dev/null 2>&1 || {
+  echo "$APP: npm not found -- it is what packs the npm package" >&2
+  exit 1
+}
 
 # The runners have sha256sum (coreutils); macOS ships shasum instead. Both write
 # the same `<hash>  <name>` lines and both take -c, so SHA256SUMS is identical
@@ -270,6 +276,19 @@ if [ "$SDK" = "local" ]; then
 fi
 echo "   $SDK, in every artifact"
 
+# The web job wrote the version into the package's own package.json, and that copy
+# is what npm is given. One from another run would go out under a version the
+# Release is not tagged with, and release.yml would ask npm whether it has the
+# wrong one.
+step "checking the npm package's version"
+PKG_VERSION="$(node -p 'require(process.argv[1]).version' "$IN/$WEB/package.json")"
+if [ "$PKG_VERSION" != "$VERSION" ]; then
+  echo "$APP: $WEB/package.json says $PKG_VERSION, where this checkout says $VERSION" >&2
+  echo "$APP: the artifacts are not from this commit" >&2
+  exit 1
+fi
+echo "   $PKG_VERSION, as this checkout says"
+
 # --- assemble -------------------------------------------------------------
 step "assembling in $OUT"
 
@@ -281,7 +300,7 @@ mkdir -p "$OUT"
 WORK="$ROOT_DIR/build/release-staging"
 rm -rf "$WORK"
 
-ZIPS=""
+ASSETS=""
 
 for p in $NATIVE; do
   os="${p%%-*}"; arch="${p#*-}"
@@ -298,27 +317,31 @@ for p in $NATIVE; do
 
   zipname="ssplayer-wgpu-$p.zip"
   ( cd "$stage" && zip -qry "$OUT/$zipname" . )
-  ZIPS="$ZIPS $zipname"
+  ASSETS="$ASSETS $zipname"
   echo "   $zipname ($lib)"
 done
 
 # The web face is a package, not a library file: build.sh already assembled
 # packages/ssplayer-wgpu -- the wasm-pack runtime under wasm/, the tsdown output
-# under dist/, the manifest and the READMEs beside them -- so it ships as it is.
-# The zip is therefore installable on its own (`npm i ./ssplayer-wgpu-web-wasm32`),
-# which is what makes it useful to someone who cannot reach the registry.
-stage="$WORK/$WEB"
-mkdir -p "$stage"
-cp -R "$IN/$WEB/." "$stage/"
-zipname="ssplayer-wgpu-$WEB.zip"
-( cd "$stage" && zip -qry "$OUT/$zipname" . )
-ZIPS="$ZIPS $zipname"
-echo "   $zipname (npm package)"
+# under dist/, the manifest and the READMEs beside them -- so it ships as the
+# tarball `npm pack` makes of it. That one file is what release.yml attaches to
+# the Release and stages on npm, and what a maintainer publishes by hand; it
+# installs on its own too (`npm i ./<tarball>`), for someone who cannot reach the
+# registry.
+#
+# The package's `prepack` refuses a package whose build outputs are missing, but
+# it reaches its script by `../../scripts/`, which holds only inside a checkout.
+# So the script is run here on the artifact itself, and the pack skips the hook.
+node "$ROOT_DIR/scripts/verify-publish-artifacts.mjs" "$IN/$WEB"
+TGZ="$(npm pack "$IN/$WEB" --pack-destination "$OUT" --ignore-scripts --json |
+  node -p 'JSON.parse(require("fs").readFileSync(0, "utf8"))[0].filename')"
+ASSETS="$ASSETS $TGZ"
+echo "   $TGZ (npm package)"
 
 # Canonical checksum manifest so a consumer can verify what they downloaded
 # (`sha256sum -c SHA256SUMS --ignore-missing`).
 step "writing SHA256SUMS"
-( cd "$OUT" && sha256 $ZIPS > SHA256SUMS )
+( cd "$OUT" && sha256 $ASSETS > SHA256SUMS )
 echo "   $(wc -l < "$OUT/SHA256SUMS" | tr -d ' ') entries"
 
 # --- verify ---------------------------------------------------------------
@@ -340,13 +363,15 @@ if [ "$VERIFY" = "yes" ]; then
     [ "${bytes:-0}" -gt 262144 ] || fail "$zipname's lib/$lib is only ${bytes:-0} bytes"
   done
 
-  names="$(unzip -Z1 "$OUT/ssplayer-wgpu-$WEB.zip")"
+  # npm decides what goes in by `files` and its own ignore rules, so the tarball
+  # is read back rather than the directory it was packed from.
+  names="$(tar -tzf "$OUT/$TGZ")"
   for want in "wasm/ssplayer_wgpu_bg.wasm" "wasm/ssplayer_wgpu.js" "wasm/ssplayer_wgpu.d.ts" "wasm/VERSION" \
-              "dist/index.js" "dist/index.d.ts" "dist/element.js" "package.json" "THIRD_PARTY_NOTICES.md"; do
-    printf '%s\n' "$names" | grep -qx "$want" || fail "ssplayer-wgpu-$WEB.zip does not contain $want"
+              "dist/index.js" "dist/index.d.ts" "dist/element.js" "package.json" "LICENSE.md" "THIRD_PARTY_NOTICES.md"; do
+    printf '%s\n' "$names" | grep -qx "package/$want" || fail "$TGZ does not contain $want"
   done
 
-  ( cd "$OUT" && sha256 -c SHA256SUMS > /dev/null 2>&1 ) || fail "SHA256SUMS does not match the zips it covers"
+  ( cd "$OUT" && sha256 -c SHA256SUMS > /dev/null 2>&1 ) || fail "SHA256SUMS does not match the archives it covers"
 
   if [ -n "$FAILED" ]; then
     echo "$APP: the assembled release is not right:$FAILED" >&2
