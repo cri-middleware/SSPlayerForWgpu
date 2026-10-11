@@ -522,6 +522,9 @@ struct PlaybackNode {
     /// Effect slots keyed by part index. Effects reuse this node's context
     /// (no separate context, unlike instances).
     effects: HashMap<usize, EffectPart>,
+    /// The clock [`step_slots`] handed this node's effect slots for the tick,
+    /// held until [`step_effects`] steps them; `None` once it has.
+    effect_clock: Option<EffectClock>,
     /// Static per-part mask flags, indexed by part index. Read once from ssab
     /// `PartData` at build time. Empty when the pack has no ssab data.
     mask_flags: Vec<PartMaskFlags>,
@@ -552,19 +555,30 @@ struct InstanceChild {
     visible: bool,
 }
 
-/// One effect part: its slot, and the draw plan the last [`step_slots`] produced.
+/// One effect part: its slot, and the draw plan the last [`step_effects`] produced.
 struct EffectPart {
     slot: EffectSlot<'static>,
-    /// This frame's plan, empty when the effect produced nothing.
+    /// This frame's plan, empty when the effect produced nothing or its part is
+    /// not drawn.
     ///
     /// Copied rather than borrowed: the buffer behind `step`'s result belongs to
-    /// the slot, and the draw walk that consumes it runs after every slot has
-    /// stepped. Keeping the raw pointer instead would additionally cost
+    /// the slot, and the draw walk that consumes it is a later walk than the one
+    /// that steps. Keeping the raw pointer instead would additionally cost
     /// `SSPlayer: Send`, which `SSScene::update` does not require now that its
     /// walk is serial again, but a host that moves players
     /// between its own threads does. The allocation is reused frame to frame, so
     /// the price is one memcpy per effect.
     plan: Vec<u8>,
+}
+
+/// What an effect slot steps with, as [`step_slots`] read it for the slot's node:
+/// the node's playhead (raw, never floored), the time the tick is worth to it, and
+/// its loop edge.
+#[derive(Clone, Copy)]
+struct EffectClock {
+    frame_no: f32,
+    delta_secs: f32,
+    looped: bool,
 }
 
 /// The SpriteStudio player. One instance owns one animation-instance tree.
@@ -2649,7 +2663,9 @@ impl SSPlayer {
         step_slots(root, frame_no, delta_secs, looped);
 
         if !self.visible {
-            // Hidden, not culled: the clocks above have moved, but nothing is drawn.
+            // Hidden, not culled: the clocks move, but nothing is drawn, so no
+            // effect slot builds a plan.
+            step_undrawn_effects(root);
             // The root's frame is still built, because the part read-outs read the
             // world matrices it leaves behind — without it a follower pinned to a
             // hidden character would freeze where the character was last drawn.
@@ -2662,6 +2678,10 @@ impl SSPlayer {
         let draw = NodeDraw { alpha: self.alpha, tint: pack_tint(self.tint) };
         let mut build = FrameBuild { scene, renderer, sub_frame: self.sub_frame };
         render_tree(root, &mut build, &self.transform, frame_no, draw);
+        // The nodes the walk did not prepare draw nothing, and their effect slots
+        // still have to keep time: a hidden instance part's sub-animation, a child
+        // its slot says is not showing.
+        step_undrawn_effects(root);
     }
 
     /// What frame each instance child of the root is on, keyed by part index.
@@ -2711,7 +2731,7 @@ fn build_node(packs: &HashMap<String, SSPack>, atlas_keys: &HashMap<String, Arc<
     context.set_coordinate_system(ssruntime::SsCoordinateSystem::YDown);
     context.setup_animation(anime).ok()?;
     let (instances, effects, mask_flags) = build_rig(&context, static_res, packs, atlas_keys);
-    Some(PlaybackNode { context, instances, effects, mask_flags, pack: pack.to_string(), atlas_keys: node_atlas_keys(atlas_keys, pack), res: static_res })
+    Some(PlaybackNode { context, instances, effects, effect_clock: None, mask_flags, pack: pack.to_string(), atlas_keys: node_atlas_keys(atlas_keys, pack), res: static_res })
 }
 
 /// The per-animation half of a node: which instance children it mounts, which
@@ -2774,8 +2794,8 @@ fn build_rig(
     (instances, effects, mask_flags)
 }
 
-/// Advance every instance and effect slot this node owns, and recurse through
-/// the instance children — **over the parts, not over what is drawn**.
+/// Advance every slot this node owns, and recurse through the instance
+/// children — **over the parts, not over what is drawn**.
 ///
 /// This is deliberately a separate walk from [`render_node`], because the two
 /// answer different questions: *whose clock moves* is every slot in the pack,
@@ -2790,22 +2810,12 @@ fn build_rig(
 /// list in [`build_node`], so they are all here to walk.
 ///
 /// What the draw walk needs afterwards is left on each slot: the child's frame
-/// and visibility, and the effect's draw plan.
+/// and visibility. An effect slot is only handed its clock here, and steps in
+/// [`step_effects`] once its node's frame is fetched: the frame is what says
+/// whether the effect's part is drawn, and a child's frame is not known until
+/// its slot has stepped.
 fn step_slots(node: &mut PlaybackNode, frame_no: f32, delta_secs: f32, node_looped: bool) {
-    let fps = node.context.get_frame_rate() as f32;
-    for (&part_idx, effect) in node.effects.iter_mut() {
-        let ev = node.context.get_active_effect_event(part_idx as u32);
-        // vert_stride=2 (packed XY), y_flip=true: the context runs Y-down, so the
-        // particles are mirrored with the parts around them rather than against.
-        // draw=true: this runs before get_frame_data, so draw_order is not known yet.
-        let r = effect.slot.step(ev, frame_no, delta_secs, fps, node_looped, true, 2, true);
-        effect.plan.clear();
-        if r.visible && !r.draw_plan_buf.is_null() && r.draw_plan_len > 0 {
-            // SAFETY: the slot just built this buffer and owns it until its next
-            // step; nothing steps it between here and the copy.
-            effect.plan.extend_from_slice(unsafe { std::slice::from_raw_parts(r.draw_plan_buf, r.draw_plan_len) });
-        }
-    }
+    node.effect_clock = Some(EffectClock { frame_no, delta_secs, looped: node_looped });
 
     for (&part_idx, child) in node.instances.iter_mut() {
         let ev = node.context.get_active_event_instance(part_idx as u32);
@@ -2833,6 +2843,41 @@ fn step_slots(node: &mut PlaybackNode, frame_no: f32, delta_secs: f32, node_loop
         // *child's* loop rather than the parent animation's: an independent child
         // runs on its own clock, so that is the edge they must re-fire on.
         step_slots(&mut child.node, child.frame_no, child_delta, r.child_looped);
+    }
+}
+
+/// Step every effect slot of `node` on the clock [`step_slots`] left it — once a
+/// tick, so a node already stepped is left alone.
+///
+/// Every slot steps, drawn or not, for the reason [`step_slots`] walks the parts.
+/// `drawn` says whether a part is in the node's `draw_order` this frame; a slot
+/// whose part is not keeps time and builds no plan. The step reads only the
+/// node's playhead and effect keys, which fetching the frame leaves as they are,
+/// so it steps after the fetch exactly as it would before it.
+fn step_effects(node: &mut PlaybackNode, drawn: impl Fn(usize) -> bool) {
+    let Some(EffectClock { frame_no, delta_secs, looped }) = node.effect_clock.take() else { return };
+    let fps = node.context.get_frame_rate() as f32;
+    for (&part_idx, effect) in node.effects.iter_mut() {
+        let ev = node.context.get_active_effect_event(part_idx as u32);
+        // vert_stride=2 (packed XY), y_flip=true: the context runs Y-down, so the
+        // particles are mirrored with the parts around them rather than against.
+        let r = effect.slot.step(ev, frame_no, delta_secs, fps, looped, true, 2, drawn(part_idx));
+        effect.plan.clear();
+        if r.visible && !r.draw_plan_buf.is_null() && r.draw_plan_len > 0 {
+            // SAFETY: the slot just built this buffer and owns it until its next
+            // step; nothing steps it between here and the copy.
+            effect.plan.extend_from_slice(unsafe { std::slice::from_raw_parts(r.draw_plan_buf, r.draw_plan_len) });
+        }
+    }
+}
+
+/// Step, undrawn, every effect slot under `node` that [`step_effects`] has not
+/// stepped this tick: the nodes the draw walk did not prepare, or the whole tree
+/// when nothing is drawn.
+fn step_undrawn_effects(node: &mut PlaybackNode) {
+    step_effects(node, |_| false);
+    for child in node.instances.values_mut() {
+        step_undrawn_effects(&mut child.node);
     }
 }
 
@@ -3115,9 +3160,10 @@ fn render_tree(root: &mut PlaybackNode, build: &mut FrameBuild<'_>, transform: &
     }
 }
 
-/// Fetch a node's frame, copy it into the arena, number its ranks on the tree
-/// sequence and place its writers — then the same for each visible instance
-/// child, in its instance part's place. Returns the node's index in `preps`.
+/// Fetch a node's frame, copy it into the arena, step its effect slots, number
+/// its ranks on the tree sequence and place its writers — then the same for each
+/// visible instance child, in its instance part's place. Returns the node's
+/// index in `preps`.
 ///
 /// `open` is where this node's animation starts on the sequence: the top
 /// animation's before its first part, a sub-animation's at its instance part.
@@ -3143,6 +3189,11 @@ fn prepare_node<'r>(node: &mut PlaybackNode, build: &mut FrameBuild<'_>, frame_n
     let mut own = own.iter().peekable();
 
     let fd = unsafe { root_as_frame_data_unchecked(frame.frame_data) };
+    // The runtime leaves a hidden part out of `draw_order`, so its own hide flag
+    // is whether the effect it plays is drawn.
+    let parts = fd.parts();
+    step_effects(node, |part_idx| part_idx < parts.len() && !parts.get(part_idx).hide());
+
     let draw_order = fd.draw_order();
     let mut seq = Vec::with_capacity(if mask.masking() { draw_order.len() } else { 0 });
     let mut children = Vec::new();
@@ -3219,9 +3270,9 @@ fn bake_coverage(build: &mut FrameBuild<'_>, preps: &mut [NodePrep<'_>], mask: &
 /// Append one prepared node's geometry, recursing into its instance children in
 /// their instance parts' places.
 ///
-/// Draw only: every slot was advanced by [`step_slots`] and every node prepared
-/// by [`prepare_node`] before this walk began, so this reads what they left
-/// behind rather than driving it.
+/// Draw only: every instance slot was advanced by [`step_slots`], and every node
+/// prepared, its effect slots stepped with it, by [`prepare_node`] before this
+/// walk began, so this reads what they left behind rather than driving it.
 ///
 /// Masking is decided per part, the same way at every depth: whether it is a
 /// target and its polarity from its own flags and its instance part's
@@ -3294,8 +3345,8 @@ fn render_node(node: &mut PlaybackNode, index: usize, preps: &[NodePrep<'_>], bu
             DrawBatchKind::Effect => {
                 for rank in start_rank..start_rank + count {
                     let part_idx = draw_order.get(rank) as usize;
-                    // Whatever `step_slots` produced for this part earlier in the
-                    // frame; empty when the effect had nothing to draw.
+                    // Whatever `step_effects` produced for this part when the node
+                    // was prepared; empty when the effect had nothing to draw.
                     let Some(plan) = node.effects.get(&part_idx).map(|e| e.plan.as_slice()).filter(|p| !p.is_empty()) else { continue };
                     // Each emitter meets the mask on its own flags and place, like
                     // any drawn part — it draws into its own slot anyway.
