@@ -87,8 +87,8 @@ cmake --build build
 ./build/ssviewer-vulkan              # or: ./build/ssviewer-vulkan --x11 "" Mask
 ```
 
-CMake runs `cargo build -p ssplayer-wgpu --features ffi` for you, which also
-regenerates `libs/ssplayer-wgpu/include/ssplayer_wgpu.h` via cbindgen. The
+CMake runs `cargo build -p ssplayer-wgpu-ffi` for you, which also
+regenerates `libs/ssplayer-wgpu-ffi/include/ssplayer_wgpu.h` via cbindgen. The
 executable gets an rpath into `target/`, so `libssplayer_wgpu.so` does not have
 to be copied anywhere. Configure with `-DCMAKE_BUILD_TYPE=Debug` to link the
 debug library instead; cargo's debug build of wgpu is slow but works.
