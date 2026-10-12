@@ -121,13 +121,18 @@ import { defineSsPlayerWebGPUElement } from '@spritestudio/ssplayer-wgpu/element
 | | |
 |---|---|
 | `setTrackAnimation(track, name)` | トラックにアニメーションを載せる（それまでの再生内容を置き換える） |
-| `crossfade(track, name, ms)` | トラックを別のアニメーションへフェードで切り替える |
+| `crossfade(track, name, ms)` | トラックを別のアニメーションへフェードで切り替える。トラック 0 では、呼んだ時点から `currentAnimation()` が替わる |
 | `fadeTrack(track, target, ms)` / `cancelTrackFade(track)` | トラックの alpha を目標値へ動かす／フェードをその場で止める |
 | `trackFadeProgress(track)` | 0〜1。フェードしていないときは `undefined` |
 | `setTrackAlpha(track, a)` / `trackAlpha(track)` | トラックの強さ |
 | `setTrackBlend(track, b)` / `trackBlend(track)` | `0` が mix、`1` が additive |
 | `setTrackSync(track, s)` / `trackSync(track)` | `0` が free、`1` が start。載せる前に設定する |
 | `setTrackFrame` / `trackFrame` / `setTrackSpeed` | トラックのスクラブ。速度 0 で止まる |
+| `trackSpeed` / `setTrackFrameRate` / `trackFrameRate` / `setTrackFrameSkipEnabled` / `trackFrameSkipEnabled` | トラックごとの再生設定。トラック 0 の設定は再生制御の呼び出し |
+| `setTrackPlaybackDirection(track, direction, style)` / `trackPlaybackDirection` / `trackPlaybackStyle` | `setPlaybackDirection` と同じ `0` / `1` |
+| `setTrackLoopCount` / `trackLoopCount` | トラックのアニメーションのループ回数。載せた後で設定する。`-1` は無限 |
+| `isTrackFinished` / `trackJustLooped` | トラックの終了（状態）とループ（その update だけ） |
+| `setTrackOutgoingEventThreshold` / `trackOutgoingEventThreshold` | クロスフェードの出ていく側が、どこまでイベントを発火し続けるか。既定の `Infinity` では発火しない |
 | `trackCount()` / `clearTrack(track)` | トラックの数／トラックを空にする（トラック 0 は不可） |
 | `trackMainSource(track)` | トラックのアニメーションを担うソース |
 | `addTrackSource(track, name, weight)` | 別のアニメーションを横に載せ、weight で混ぜる。ハンドルを返す |

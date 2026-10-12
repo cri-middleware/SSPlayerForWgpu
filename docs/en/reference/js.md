@@ -126,13 +126,18 @@ The track stack: tracks fold onto the setup pose in ascending order, track 0 bei
 | | |
 |---|---|
 | `setTrackAnimation(track, name)` | Lay an animation on a track, replacing what it played |
-| `crossfade(track, name, ms)` | Fade a track over to another animation |
+| `crossfade(track, name, ms)` | Fade a track over to another animation. On track 0 it is `currentAnimation()` from the call on |
 | `fadeTrack(track, target, ms)` / `cancelTrackFade(track)` | Drive a track's alpha somewhere / stop the fade where it stands |
 | `trackFadeProgress(track)` | 0 to 1; `undefined` when the track is not fading |
 | `setTrackAlpha(track, a)` / `trackAlpha(track)` | A track's strength |
 | `setTrackBlend(track, b)` / `trackBlend(track)` | `0` mix or `1` additive |
 | `setTrackSync(track, s)` / `trackSync(track)` | `0` free or `1` start — set it before laying |
 | `setTrackFrame` / `trackFrame` / `setTrackSpeed` | Scrub a track; speed 0 parks it |
+| `trackSpeed` / `setTrackFrameRate` / `trackFrameRate` / `setTrackFrameSkipEnabled` / `trackFrameSkipEnabled` | A track's own playback settings; track 0's are the transport calls |
+| `setTrackPlaybackDirection(track, direction, style)` / `trackPlaybackDirection` / `trackPlaybackStyle` | `0` / `1`, as `setPlaybackDirection` |
+| `setTrackLoopCount` / `trackLoopCount` | The loop count of a track's animation — set it after laying one; `-1` loops forever |
+| `isTrackFinished` / `trackJustLooped` | A track's end (a state) and its loop (one update) |
+| `setTrackOutgoingEventThreshold` / `trackOutgoingEventThreshold` | How far into a crossfade the outgoing side keeps firing events; `Infinity` (the default) silences it |
 | `trackCount()` / `clearTrack(track)` | How many tracks; silence one (not track 0) |
 | `trackMainSource(track)` | The source carrying a track's animation |
 | `addTrackSource(track, name, weight)` | Lay another animation beside it, mixed by weight; returns its handle |

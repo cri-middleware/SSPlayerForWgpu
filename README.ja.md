@@ -129,7 +129,7 @@ API の全体 — 3 つのスコープ、ロード、トランスポート、パ
 C と JavaScript のフェイスは名前が違うだけで同じ形をしており、以下の各サンプルがそれぞれの環境について自分で説明しています。
 
 **1 体のキャラクターに複数のアニメーションを重ねられます。** トラックのスタックがセットアップポーズへ順に畳み込まれます。`set_animation` がトラック 0 を決めて構造を担い、その上に `set_track_animation` /
-`set_track_alpha` / `set_track_blend` でオーバーレイを重ねます（下に歩き、上に照準）。`crossfade` を使えばカットなしで別のアニメーションへ移れます。どのフェイスからも使えます。C・JavaScript のフェイスでは名前が違うだけで、Bevy アダプタでは `SsTrackCommand` メッセージで操作します。モデルと各 API は[モーションブレンディング](./docs/ja/guide/motion-blending.md)にあります。
+`set_track_alpha` / `set_track_blend` でオーバーレイを重ねます（下に歩き、上に照準）。`crossfade` を使えばカットなしで別のアニメーションへ移れます。どのフェイスからも使えます。C・JavaScript のフェイスでは名前が違うだけで、Bevy アダプタでは `SsTrackCommand` メッセージで操作します（トラック 0 は、`transition_ms` を設定して `SsPlayer::animation` を替えるとクロスフェードします）。モデルと各 API は[モーションブレンディング](./docs/ja/guide/motion-blending.md)にあります。
 
 ### その `.ssab` はどこから来るのか
 

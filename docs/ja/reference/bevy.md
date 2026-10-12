@@ -27,7 +27,10 @@ extract / prepare / draw のシステムを追加し、レンダーワールド�
 | フィールド | | |
 |---|---|---|
 | `pack: Handle<SsPack>` | `asset_server.load(...)` で得た `.ssab` | **変更すると、新しいパックが読み終わった時点で再生ツリーを再構築します** |
-| `animation: String` | 選択するアニメーション。空文字は「まだ選ばない」 | 同上 |
+| `animation: String` | 選択するアニメーション。空文字は「まだ選ばない」 | 同上。ただし `transition_ms` を設定したときを除く。値が変わったときだけ働くので、システムが毎フレーム書いても構わない |
+| `transition_ms: f32` | `animation` の替え方。`0`（既定）ならすぐ切り替え、0 より大きければその時間（ミリ秒）でクロスフェードする | 最初のアニメーションと、`pack` を替えた後の最初のアニメーションは、常にすぐ切り替わる |
+
+トラック 0 のアニメーションを替える方法は `animation` だけです。トラック 0 にアニメーションを載せる `TrackCommand` は拒否されるので、`animation` が指す名前と、トラック 0 が再生しているものが食い違うことはありません。
 
 `SsTransform` / `SsPlayback` / `SsPlaybackState` / `SsTrackState` は **required component** なので、`SsPlayer` だけを
 spawn すれば 5 つとも既定値で付きます。
@@ -87,7 +90,7 @@ spawn すれば 5 つとも既定値で付きます。
 
 | フィールド | |
 |---|---|
-| `tracks: Vec<SsTrackInfo>` | トラックごとに 1 つ（トラック 0 が先頭）。`main_source`・`alpha`・`blend`・`sync`・`frame`・`fade_progress`（フェードしていないときは `None`） |
+| `tracks: Vec<SsTrackInfo>` | トラックごとに 1 つ（トラック 0 が先頭）。`main_source`・`alpha`・`blend`・`sync`・`frame`・`fade_progress`（フェードしていないときは `None`）、再生設定の `speed`・`frame_rate`・`frame_skip_enabled`・`direction`・`style`、`loop_count`（空のトラックでは `None`）、`finished`・`just_looped`・`outgoing_event_threshold` |
 | `sources: Vec<SsSourceInfo>` | `TrackCommand::AddSource` で載せ、まだ再生中のソース。`source`（ハンドル）・`track`・`animation`・`weight`・`frame` |
 
 ### `SsCellmapTextures` — ランタイムテクスチャ差し替え（任意）
@@ -120,17 +123,29 @@ spawn すれば 5 つとも既定値で付きます。
 
 ### モーションブレンディング { #motion-blending }
 
-`SsTrackCommand { entity, command }` は、キャラクターのトラックスタックに対する操作を 1 つ行います。`command` は `TrackCommand` で、各値は `SSPlayer` の同名の呼び出しに対応します（`SetAnimation`・`Crossfade`・`FadeTrack`・`CancelFade`・`Clear`・`SetAlpha`・`SetBlend`・`SetSync`・`SetFrame`・`SetSpeed`・`AddSource`・`SetSourceWeight`・`SetSourceFrame`・`SetSourceEventThreshold`）。上の 3 つと違い、**送ったものはすべて、送った順に反映されます**。パックの読み込み前に送ったものは、アニメーションの準備ができてから反映されます。拒否された操作はログに出ます。結果は [`SsTrackState`](#sstrackstate) に戻り、`AddSource` で載せたソースのハンドルもそこで分かります。
+`SsTrackCommand { entity, command }` は、キャラクターのトラックスタックに対する操作を 1 つ行います。`command` は `TrackCommand` で、各値は `SSPlayer` の同名の呼び出しに対応します（`SetAnimation`・`Crossfade`・`FadeTrack`・`CancelFade`・`Clear`・`SetAlpha`・`SetBlend`・`SetSync`・`SetFrame`・`SetSpeed`・`SetFrameRate`・`SetFrameSkipEnabled`・`SetPlaybackDirection`・`SetLoopCount`・`SetOutgoingEventThreshold`・`AddSource`・`SetSourceWeight`・`SetSourceFrame`・`SetSourceEventThreshold`）。`SetAnimation` と `Crossfade` は、トラック 0 では拒否されます（トラック 0 は `SsPlayer::animation` が設定します）。トラック 0 の再生設定は `SsPlayback` で設定してください。コマンドより `SsPlayback` が優先されます。上の 3 つと違い、**送ったものはすべて、送った順に反映されます**。パックの読み込み前に送ったものは、アニメーションの準備ができてから反映されます。拒否された操作はログに出ます。結果は [`SsTrackState`](#sstrackstate) に戻り、`AddSource` で載せたソースのハンドルもそこで分かります。
 
 ```rust
-fn run(mut tracks: MessageWriter<SsTrackCommand>, character: Single<Entity, With<SsPlayer>>) {
-    let entity = *character;
+fn run(mut tracks: MessageWriter<SsTrackCommand>, character: Single<(Entity, &mut SsPlayer)>) {
+    let (entity, mut player) = character.into_inner();
     tracks.write(SsTrackCommand { entity, command: TrackCommand::SetSync { track: 0, sync: TrackSync::Start } });
-    tracks.write(SsTrackCommand { entity, command: TrackCommand::Crossfade { track: 0, animation: "run".into(), duration_ms: 300.0 } });
+    // トラック 0 はコンポーネントでクロスフェードする。
+    player.transition_ms = 300.0;
+    player.animation = "run".into();
+}
+
+fn react(mut tracks: MessageWriter<SsTrackCommand>, character: Single<Entity, With<SsPlayer>>) {
+    let entity = *character;
+    for command in [
+        TrackCommand::SetAnimation { track: 1, animation: "hit_react".into() },
+        TrackCommand::SetLoopCount { track: 1, count: 1 },   // 1 回再生して、最後のフレームで止まる
+    ] {
+        tracks.write(SsTrackCommand { entity, command });
+    }
 }
 ```
 
-**`SsPlayer::animation` を変えると、スタックはトラック 0 だけに戻ります**（`set_animation` と同じ）。オーバーレイやトラックの設定は、そのあと送り直してください。[モーションブレンディング](../guide/motion-blending.md)を参照。
+**`transition_ms` が 0 のまま `SsPlayer::animation` を変えると、スタックはトラック 0 だけに戻ります**（`set_animation` と同じ）。オーバーレイやトラックの設定は、そのあと送り直してください。`transition_ms` を設定していれば、`crossfade` と同じくスタックはそのまま残ります。[モーションブレンディング](../guide/motion-blending.md)を参照。
 ```rust
 fn jump(mut seeks: MessageWriter<SsSeek>, character: Single<Entity, With<SsPlayer>>) {
     seeks.write(SsSeek { entity: *character, frame: 18.0 });

@@ -1385,7 +1385,8 @@ int32_t ss_player_is_part_hidden_by_index(ss_player_t *handle, uint32_t part);
 /*
  Put `anim_name` on `track`, replacing what it was playing. Track 0 is better
  set with `ss_player_set_animation`, which rebuilds the instance tree; this is
- for the overlay tracks above it.
+ for the overlay tracks above it. On track 0 it still makes `anim_name` the
+ current animation.
 
  # Safety
  `handle` must be a live handle or null; `anim_name` a NUL-terminated UTF-8 string.
@@ -1461,8 +1462,11 @@ uint32_t ss_player_track_sync(ss_player_t *handle, uint32_t track);
 
 /*
  Fade `track` to `anim_name` over `duration_ms`, starting from whatever it is
- playing. Advanced by `ss_scene_update`. On track 0 it does not rebuild the
- instance tree, so animations whose instance parts differ are out of scope.
+ playing. Advanced by `ss_scene_update`. On track 0, `anim_name` takes over
+ from the call on: it is the current animation, its state is what
+ `ss_player_is_finished` reports, and it plays with the speed, direction and
+ loop count the host set. The instance tree is not rebuilt; the instance and
+ effect parts belong to the pack, so the running children carry on.
 
  # Safety
  `handle` must be a live handle or null; `anim_name` a NUL-terminated UTF-8 string.
@@ -1519,6 +1523,132 @@ float ss_player_track_frame(ss_player_t *handle, uint32_t track);
  `handle` must be a live handle or null.
  */
 int32_t ss_player_set_track_speed(ss_player_t *handle, uint32_t track, float speed);
+
+/*
+ What `ss_player_set_track_speed` stored; 0 for a track that does not exist.
+
+ # Safety
+ `handle` must be a live handle or null.
+ */
+float ss_player_track_speed(ss_player_t *handle, uint32_t track);
+
+/*
+ `ss_player_set_frame_rate` for one track.
+
+ # Safety
+ `handle` must be a live handle or null.
+ */
+int32_t ss_player_set_track_frame_rate(ss_player_t *handle, uint32_t track, int32_t fps);
+
+/*
+ The rate `track`'s animation plays at, the override or the authored rate; 0
+ for a track with neither, or that does not exist.
+
+ # Safety
+ `handle` must be a live handle or null.
+ */
+int32_t ss_player_track_frame_rate(ss_player_t *handle, uint32_t track);
+
+/*
+ `ss_player_set_frame_skip_enabled` for one track.
+
+ # Safety
+ `handle` must be a live handle or null.
+ */
+int32_t ss_player_set_track_frame_skip_enabled(ss_player_t *handle, uint32_t track, bool skip);
+
+/*
+ `false` for a track that does not exist.
+
+ # Safety
+ `handle` must be a live handle or null.
+ */
+bool ss_player_track_frame_skip_enabled(ss_player_t *handle, uint32_t track);
+
+/*
+ `ss_player_set_playback_direction` for one track: `direction` and `style`
+ take the same `0` / `1` values.
+
+ # Safety
+ `handle` must be a live handle or null.
+ */
+int32_t ss_player_set_track_playback_direction(ss_player_t *handle,
+                                               uint32_t track,
+                                               int32_t direction,
+                                               int32_t style);
+
+/*
+ `0` forward, `1` backward; 0 for a track that does not exist.
+
+ # Safety
+ `handle` must be a live handle or null.
+ */
+int32_t ss_player_track_playback_direction(ss_player_t *handle, uint32_t track);
+
+/*
+ `0` normal, `1` ping-pong; 0 for a track that does not exist.
+
+ # Safety
+ `handle` must be a live handle or null.
+ */
+int32_t ss_player_track_playback_style(ss_player_t *handle, uint32_t track);
+
+/*
+ How many times `track`'s animation plays before it holds its last frame;
+ `-1` (or `0`) loops forever. Set it after laying the animation: one is laid
+ looping forever. Track 0's is `ss_player_set_loop_count`.
+
+ # Safety
+ `handle` must be a live handle or null.
+ */
+int32_t ss_player_set_track_loop_count(ss_player_t *handle, uint32_t track, int32_t count);
+
+/*
+ `-1` for a track that loops forever; 0 for one with no animation, a count
+ no animation reads back as.
+
+ # Safety
+ `handle` must be a live handle or null.
+ */
+int32_t ss_player_track_loop_count(ss_player_t *handle, uint32_t track);
+
+/*
+ Whether `track`'s animation has played its loop count out and holds its last
+ frame. A state, as `ss_player_is_finished` is for track 0; there is no edge.
+
+ # Safety
+ `handle` must be a live handle or null.
+ */
+bool ss_player_is_track_finished(ss_player_t *handle, uint32_t track);
+
+/*
+ Whether the last `ss_scene_update` wrapped `track`'s animation back to its
+ start, as `ss_player_just_looped` is for track 0.
+
+ # Safety
+ `handle` must be a live handle or null.
+ */
+bool ss_player_track_just_looped(ss_player_t *handle, uint32_t track);
+
+/*
+ How far into a crossfade on `track` the outgoing animation keeps firing
+ events: while its share of the track, `1 - progress`, is at least
+ `threshold`. The default, infinity, silences it from the moment the fade
+ begins; `0.5` keeps it firing for the first half. Kept by the track.
+
+ # Safety
+ `handle` must be a live handle or null.
+ */
+int32_t ss_player_set_track_outgoing_event_threshold(ss_player_t *handle, uint32_t track, float threshold);
+
+/*
+ The track's outgoing event threshold (infinity by default); 0 for a track
+ that does not exist.
+
+ # Safety
+ `handle` must be a live handle or null.
+ */
+float ss_player_track_outgoing_event_threshold(ss_player_t *handle, uint32_t track);
 
 /*
  The source carrying `track`'s animation; `SS_INVALID_SOURCE` when the track

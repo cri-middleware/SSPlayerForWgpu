@@ -23,6 +23,7 @@ pub(crate) struct ExtractedPlayer {
     /// draws white, as it does when the player loads for itself.
     pub settled: bool,
     pub animation: String,
+    pub transition_ms: f32,
     pub transform: SsTransform,
     pub playback: SsPlayback,
     /// The character's runtime texture overrides, cellmap name -> image. Empty
@@ -87,6 +88,7 @@ pub(crate) fn extract_players(
         pack: player.pack.id(),
         settled: matches!(asset_server.get_recursive_dependency_load_state(&player.pack), Some(RecursiveDependencyLoadState::Loaded | RecursiveDependencyLoadState::Failed(_))),
         animation: player.animation.clone(),
+        transition_ms: player.transition_ms,
         transform: *transform,
         playback: *playback,
         overrides: textures.map(|t| t.overrides.iter().map(|(name, handle)| (name.clone(), handle.clone())).collect()).unwrap_or_default(),

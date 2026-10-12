@@ -231,7 +231,21 @@ pub(crate) fn sync_players(mut state: Option<ResMut<SsRenderState>>, extracted: 
         // changes `pack` and `animation` together, and until the new pack settles
         // the tree is still the old one — which has no such animation.
         let built_from_named_pack = slot.pack.is_some_and(|(id, _)| id == extracted_player.pack);
-        if built_from_named_pack && !extracted_player.animation.is_empty() && slot.animation != extracted_player.animation {
+        // A crossfade needs an animation to fade from: the first one selected,
+        // and the first on a new pack, is switched to at once.
+        let crossfade = !slot.animation.is_empty() && extracted_player.transition_ms > 0.0;
+        if built_from_named_pack && !extracted_player.animation.is_empty() && slot.animation != extracted_player.animation && crossfade {
+            slot.animation.clone_from(&extracted_player.animation);
+            if let Err(err) = slot.player.crossfade(0, &extracted_player.animation, extracted_player.transition_ms) {
+                let path = packs.get(extracted_player.pack).map(|pack| pack.path.to_string()).unwrap_or_default();
+                error!("ssplayer-bevy: cannot crossfade to {:?} in {path:?} ({err:?}); it has {:?}", extracted_player.animation, slot.player.animation_names().unwrap_or_default());
+                continue;
+            }
+            // The tree plays on, and the player carries the heading and the loop
+            // count over; only the section, frame numbers of the animation it
+            // was set on, is the new animation's to be given again.
+            slot.section = None;
+        } else if built_from_named_pack && !extracted_player.animation.is_empty() && slot.animation != extracted_player.animation {
             slot.animation.clone_from(&extracted_player.animation);
             if let Err(err) = slot.player.set_animation(&extracted_player.animation) {
                 // The names come from the pack, so listing them turns a typo
@@ -366,6 +380,13 @@ pub(crate) fn sync_players(mut state: Option<ResMut<SsRenderState>>, extracted: 
 /// animation name, or a handle the runtime has already released — since the
 /// host wrote a message and has nothing to read a failure back from.
 fn apply_track_command(slot: &mut PlayerSlot, command: TrackCommand) {
+    // Track 0 changes hands through `SsPlayer::animation` alone; a command that
+    // did it behind the component's back would leave it naming an animation
+    // track 0 no longer plays, and the next write of that name doing nothing.
+    if let TrackCommand::SetAnimation { track: 0, .. } | TrackCommand::Crossfade { track: 0, .. } = command {
+        warn!("ssplayer-bevy: {command:?} refused: track 0's animation is SsPlayer::animation; set transition_ms to crossfade it");
+        return;
+    }
     let player = &mut slot.player;
     let result = match &command {
         TrackCommand::SetAnimation { track, animation } => player.set_track_animation(*track, animation),
@@ -384,6 +405,11 @@ fn apply_track_command(slot: &mut PlayerSlot, command: TrackCommand) {
         TrackCommand::SetSync { track, sync } => player.set_track_sync(*track, *sync),
         TrackCommand::SetFrame { track, frame } => player.set_track_frame(*track, *frame),
         TrackCommand::SetSpeed { track, speed } => player.set_track_speed(*track, *speed),
+        TrackCommand::SetFrameRate { track, fps } => player.set_track_frame_rate(*track, *fps),
+        TrackCommand::SetFrameSkipEnabled { track, enabled } => player.set_track_frame_skip_enabled(*track, *enabled),
+        TrackCommand::SetPlaybackDirection { track, direction, style } => player.set_track_playback_direction(*track, *direction, *style),
+        TrackCommand::SetLoopCount { track, count } => player.set_track_loop_count(*track, *count),
+        TrackCommand::SetOutgoingEventThreshold { track, threshold } => player.set_track_outgoing_event_threshold(*track, *threshold),
         TrackCommand::AddSource { track, animation, weight } => player.add_track_source(*track, animation, *weight).map(|source| {
             // A handle the runtime hands out again names the new source, not the
             // one it was released from.
@@ -412,6 +438,15 @@ fn track_feedback(slot: &mut PlayerSlot) -> (Vec<SsTrackInfo>, Vec<SsSourceInfo>
             sync: player.track_sync(track).unwrap_or(ssplayer_wgpu::TrackSync::Free),
             frame: player.track_frame(track),
             fade_progress: player.track_fade_progress(track),
+            speed: player.track_speed(track).unwrap_or(0.0),
+            frame_rate: player.track_frame_rate(track).unwrap_or(0),
+            frame_skip_enabled: player.track_frame_skip_enabled(track).unwrap_or(true),
+            direction: player.track_playback_direction(track).unwrap_or(ssplayer_wgpu::PlaybackDirection::Forward),
+            style: player.track_playback_style(track).unwrap_or(ssplayer_wgpu::PlaybackStyle::Normal),
+            loop_count: player.track_loop_count(track),
+            finished: player.is_track_finished(track),
+            just_looped: player.track_just_looped(track),
+            outgoing_event_threshold: player.track_outgoing_event_threshold(track).unwrap_or(f32::INFINITY),
         })
         .collect();
     slot.added_sources.retain(|(source, _, _)| player.source_weight(*source).is_some());

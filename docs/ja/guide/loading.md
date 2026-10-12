@@ -35,6 +35,7 @@
     commands.spawn(SsPlayer {
         pack: asset_server.load("Ringo/Ringo.ssab"),
         animation: "wait1".into(),
+        ..default()
     });
     ```
 

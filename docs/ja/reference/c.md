@@ -157,13 +157,18 @@ GPU に届きます。[テクスチャ差し替え](../guide/texture-replacement
 | | |
 |---|---|
 | `ss_player_set_track_animation(player, track, name)` | トラックにアニメーションを載せる（それまでの再生内容を置き換える） |
-| `ss_player_crossfade(player, track, name, ms)` | トラックを別のアニメーションへフェードで切り替える |
+| `ss_player_crossfade(player, track, name, ms)` | トラックを別のアニメーションへフェードで切り替える。トラック 0 では、呼んだ時点から現在のアニメーションになる |
 | `ss_player_fade_track(player, track, target, ms)` / `ss_player_cancel_track_fade(player, track)` | トラックの alpha を目標値へ動かす／フェードをその場で止める |
 | `ss_player_track_fade_progress(player, track)` | 0〜1。フェードしていないときは **-1** |
 | `ss_player_set_track_alpha` / `ss_player_track_alpha` | トラックの強さ |
 | `ss_player_set_track_blend` / `ss_player_track_blend` | `SS_TRACK_BLEND_MIX`（0）か `SS_TRACK_BLEND_ADDITIVE`（1） |
 | `ss_player_set_track_sync` / `ss_player_track_sync` | `SS_TRACK_SYNC_FREE`（0）か `SS_TRACK_SYNC_START`（1）。載せる前に設定する |
 | `ss_player_set_track_frame` / `ss_player_track_frame` / `ss_player_set_track_speed` | トラックのスクラブ。速度 0 で止まる |
+| `ss_player_track_speed` / `ss_player_set_track_frame_rate` / `ss_player_track_frame_rate` / `ss_player_set_track_frame_skip_enabled` / `ss_player_track_frame_skip_enabled` | トラックごとの再生設定。トラック 0 の設定は再生制御の呼び出し |
+| `ss_player_set_track_playback_direction(player, track, direction, style)` / `ss_player_track_playback_direction` / `ss_player_track_playback_style` | `ss_player_set_playback_direction` と同じ `0` / `1` |
+| `ss_player_set_track_loop_count` / `ss_player_track_loop_count` | トラックのアニメーションのループ回数。載せた後で設定する。`-1` は無限、**0** はアニメーションが無い |
+| `ss_player_is_track_finished` / `ss_player_track_just_looped` | トラックの終了（状態）とループ（その update だけ） |
+| `ss_player_set_track_outgoing_event_threshold` / `ss_player_track_outgoing_event_threshold` | クロスフェードの出ていく側が、どこまでイベントを発火し続けるか。既定の無限大では発火しない |
 | `ss_player_track_count(player)` / `ss_player_clear_track(player, track)` | トラックの数／トラックを空にする（トラック 0 は不可） |
 | `ss_player_track_main_source(player, track)` | トラックのアニメーションを担うソース。無いときは **`SS_INVALID_SOURCE`** |
 | `ss_player_add_track_source(player, track, name, weight, &source)` | 別のアニメーションを横に載せ、weight で混ぜる |

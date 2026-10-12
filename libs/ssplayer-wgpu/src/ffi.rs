@@ -1862,7 +1862,8 @@ fn track_status(result: Result<(), crate::SSRuntimeError>, what: std::fmt::Argum
 
 /// Put `anim_name` on `track`, replacing what it was playing. Track 0 is better
 /// set with `ss_player_set_animation`, which rebuilds the instance tree; this is
-/// for the overlay tracks above it.
+/// for the overlay tracks above it. On track 0 it still makes `anim_name` the
+/// current animation.
 ///
 /// # Safety
 /// `handle` must be a live handle or null; `anim_name` a NUL-terminated UTF-8 string.
@@ -1969,8 +1970,11 @@ pub unsafe extern "C" fn ss_player_track_sync(handle: *mut SsPlayer, track: u32)
 }
 
 /// Fade `track` to `anim_name` over `duration_ms`, starting from whatever it is
-/// playing. Advanced by `ss_scene_update`. On track 0 it does not rebuild the
-/// instance tree, so animations whose instance parts differ are out of scope.
+/// playing. Advanced by `ss_scene_update`. On track 0, `anim_name` takes over
+/// from the call on: it is the current animation, its state is what
+/// `ss_player_is_finished` reports, and it plays with the speed, direction and
+/// loop count the host set. The instance tree is not rebuilt; the instance and
+/// effect parts belong to the pack, so the running children carry on.
 ///
 /// # Safety
 /// `handle` must be a live handle or null; `anim_name` a NUL-terminated UTF-8 string.
@@ -2040,6 +2044,155 @@ pub unsafe extern "C" fn ss_player_track_frame(handle: *mut SsPlayer, track: u32
 pub unsafe extern "C" fn ss_player_set_track_speed(handle: *mut SsPlayer, track: u32, speed: f32) -> i32 {
     let Some(player) = (unsafe { player(handle) }) else { return fail(SS_ERROR_INVALID_ARGUMENT, "player handle is null or destroyed") };
     track_status(player.set_track_speed(track, speed), format_args!("track {track}"))
+}
+
+// A track's playback settings are the track's, not its animation's: they reach
+// every animation on it now, both sides of a crossfade included, and every one
+// laid on it later. Track 0's are the transport calls above
+// (`ss_player_set_speed_scale` and the rest). The loop count is the exception:
+// it belongs to the animation, and laying another one starts it looping
+// forever again.
+
+/// What `ss_player_set_track_speed` stored; 0 for a track that does not exist.
+///
+/// # Safety
+/// `handle` must be a live handle or null.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn ss_player_track_speed(handle: *mut SsPlayer, track: u32) -> f32 {
+    unsafe { player(handle) }.and_then(|p| p.track_speed(track)).unwrap_or(0.0)
+}
+
+/// `ss_player_set_frame_rate` for one track.
+///
+/// # Safety
+/// `handle` must be a live handle or null.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn ss_player_set_track_frame_rate(handle: *mut SsPlayer, track: u32, fps: i32) -> i32 {
+    let Some(player) = (unsafe { player(handle) }) else { return fail(SS_ERROR_INVALID_ARGUMENT, "player handle is null or destroyed") };
+    track_status(player.set_track_frame_rate(track, fps), format_args!("track {track}"))
+}
+
+/// The rate `track`'s animation plays at, the override or the authored rate; 0
+/// for a track with neither, or that does not exist.
+///
+/// # Safety
+/// `handle` must be a live handle or null.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn ss_player_track_frame_rate(handle: *mut SsPlayer, track: u32) -> i32 {
+    unsafe { player(handle) }.and_then(|p| p.track_frame_rate(track)).unwrap_or(0)
+}
+
+/// `ss_player_set_frame_skip_enabled` for one track.
+///
+/// # Safety
+/// `handle` must be a live handle or null.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn ss_player_set_track_frame_skip_enabled(handle: *mut SsPlayer, track: u32, skip: bool) -> i32 {
+    let Some(player) = (unsafe { player(handle) }) else { return fail(SS_ERROR_INVALID_ARGUMENT, "player handle is null or destroyed") };
+    track_status(player.set_track_frame_skip_enabled(track, skip), format_args!("track {track}"))
+}
+
+/// `false` for a track that does not exist.
+///
+/// # Safety
+/// `handle` must be a live handle or null.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn ss_player_track_frame_skip_enabled(handle: *mut SsPlayer, track: u32) -> bool {
+    unsafe { player(handle) }.and_then(|p| p.track_frame_skip_enabled(track)).unwrap_or(false)
+}
+
+/// `ss_player_set_playback_direction` for one track: `direction` and `style`
+/// take the same `0` / `1` values.
+///
+/// # Safety
+/// `handle` must be a live handle or null.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn ss_player_set_track_playback_direction(handle: *mut SsPlayer, track: u32, direction: i32, style: i32) -> i32 {
+    let Some(player) = (unsafe { player(handle) }) else { return fail(SS_ERROR_INVALID_ARGUMENT, "player handle is null or destroyed") };
+    track_status(player.set_track_playback_direction(track, PlaybackDirection::from_wire(direction), PlaybackStyle::from_wire(style)), format_args!("track {track}"))
+}
+
+/// `0` forward, `1` backward; 0 for a track that does not exist.
+///
+/// # Safety
+/// `handle` must be a live handle or null.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn ss_player_track_playback_direction(handle: *mut SsPlayer, track: u32) -> i32 {
+    unsafe { player(handle) }.and_then(|p| p.track_playback_direction(track)).map(PlaybackDirection::as_wire).unwrap_or(0)
+}
+
+/// `0` normal, `1` ping-pong; 0 for a track that does not exist.
+///
+/// # Safety
+/// `handle` must be a live handle or null.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn ss_player_track_playback_style(handle: *mut SsPlayer, track: u32) -> i32 {
+    unsafe { player(handle) }.and_then(|p| p.track_playback_style(track)).map(PlaybackStyle::as_wire).unwrap_or(0)
+}
+
+/// How many times `track`'s animation plays before it holds its last frame;
+/// `-1` (or `0`) loops forever. Set it after laying the animation: one is laid
+/// looping forever. Track 0's is `ss_player_set_loop_count`.
+///
+/// # Safety
+/// `handle` must be a live handle or null.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn ss_player_set_track_loop_count(handle: *mut SsPlayer, track: u32, count: i32) -> i32 {
+    let Some(player) = (unsafe { player(handle) }) else { return fail(SS_ERROR_INVALID_ARGUMENT, "player handle is null or destroyed") };
+    track_status(player.set_track_loop_count(track, count), format_args!("track {track}"))
+}
+
+/// `-1` for a track that loops forever; 0 for one with no animation, a count
+/// no animation reads back as.
+///
+/// # Safety
+/// `handle` must be a live handle or null.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn ss_player_track_loop_count(handle: *mut SsPlayer, track: u32) -> i32 {
+    unsafe { player(handle) }.and_then(|p| p.track_loop_count(track)).unwrap_or(0)
+}
+
+/// Whether `track`'s animation has played its loop count out and holds its last
+/// frame. A state, as `ss_player_is_finished` is for track 0; there is no edge.
+///
+/// # Safety
+/// `handle` must be a live handle or null.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn ss_player_is_track_finished(handle: *mut SsPlayer, track: u32) -> bool {
+    unsafe { player(handle) }.is_some_and(|p| p.is_track_finished(track))
+}
+
+/// Whether the last `ss_scene_update` wrapped `track`'s animation back to its
+/// start, as `ss_player_just_looped` is for track 0.
+///
+/// # Safety
+/// `handle` must be a live handle or null.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn ss_player_track_just_looped(handle: *mut SsPlayer, track: u32) -> bool {
+    unsafe { player(handle) }.is_some_and(|p| p.track_just_looped(track))
+}
+
+/// How far into a crossfade on `track` the outgoing animation keeps firing
+/// events: while its share of the track, `1 - progress`, is at least
+/// `threshold`. The default, infinity, silences it from the moment the fade
+/// begins; `0.5` keeps it firing for the first half. Kept by the track.
+///
+/// # Safety
+/// `handle` must be a live handle or null.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn ss_player_set_track_outgoing_event_threshold(handle: *mut SsPlayer, track: u32, threshold: f32) -> i32 {
+    let Some(player) = (unsafe { player(handle) }) else { return fail(SS_ERROR_INVALID_ARGUMENT, "player handle is null or destroyed") };
+    track_status(player.set_track_outgoing_event_threshold(track, threshold), format_args!("track {track}"))
+}
+
+/// The track's outgoing event threshold (infinity by default); 0 for a track
+/// that does not exist.
+///
+/// # Safety
+/// `handle` must be a live handle or null.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn ss_player_track_outgoing_event_threshold(handle: *mut SsPlayer, track: u32) -> f32 {
+    unsafe { player(handle) }.and_then(|p| p.track_outgoing_event_threshold(track)).unwrap_or(0.0)
 }
 
 /// The source carrying `track`'s animation; `SS_INVALID_SOURCE` when the track
@@ -2955,7 +3108,19 @@ mod tests {
             assert_eq!(ss_player_source_weight(null, 0), 0.0);
             assert_eq!(ss_player_source_frame(null, 0), 0.0);
             assert_eq!(ss_player_source_event_threshold(null, 0), 0.0);
+            assert_eq!(ss_player_track_speed(null, 0), 0.0);
+            assert_eq!(ss_player_track_frame_rate(null, 0), 0);
+            assert!(!ss_player_track_frame_skip_enabled(null, 0));
+            assert_eq!((ss_player_track_playback_direction(null, 0), ss_player_track_playback_style(null, 0)), (0, 0));
+            assert_eq!(ss_player_track_loop_count(null, 0), 0, "no animation reads back a count of 0");
+            assert!(!ss_player_is_track_finished(null, 0) && !ss_player_track_just_looped(null, 0));
+            assert_eq!(ss_player_track_outgoing_event_threshold(null, 0), 0.0);
 
+            assert_eq!(ss_player_set_track_frame_rate(null, 0, 24), SS_ERROR_INVALID_ARGUMENT);
+            assert_eq!(ss_player_set_track_frame_skip_enabled(null, 0, false), SS_ERROR_INVALID_ARGUMENT);
+            assert_eq!(ss_player_set_track_playback_direction(null, 0, 1, 1), SS_ERROR_INVALID_ARGUMENT);
+            assert_eq!(ss_player_set_track_loop_count(null, 0, 1), SS_ERROR_INVALID_ARGUMENT);
+            assert_eq!(ss_player_set_track_outgoing_event_threshold(null, 0, 0.5), SS_ERROR_INVALID_ARGUMENT);
             assert_eq!(ss_player_set_track_animation(null, 1, name.as_ptr()), SS_ERROR_INVALID_ARGUMENT);
             assert_eq!(ss_player_crossfade(null, 0, name.as_ptr(), 100.0), SS_ERROR_INVALID_ARGUMENT);
             assert_eq!(ss_player_set_track_sync(null, 0, SS_TRACK_SYNC_START), SS_ERROR_INVALID_ARGUMENT);

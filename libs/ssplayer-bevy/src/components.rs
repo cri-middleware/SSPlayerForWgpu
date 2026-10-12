@@ -16,7 +16,8 @@ use crate::asset::SsPack;
 /// Changing `pack` or `animation` rebuilds the playback tree on the next frame,
 /// and so does the pack's file changing under a hot-reloading app; everything
 /// else is allocation-free transport, which is why placement and playback sit in
-/// their own components.
+/// their own components. The one exception is a change of `animation` with a
+/// `transition_ms` above zero: that crossfades instead, on the tree in place.
 #[derive(Component, Clone, Debug, Default)]
 #[require(SsTransform, SsPlayback, SsPlaybackState, SsTrackState)]
 pub struct SsPlayer {
@@ -24,7 +25,18 @@ pub struct SsPlayer {
     /// The character appears once the pack and its atlases have loaded.
     pub pack: Handle<SsPack>,
     /// Animation to select. Empty means "do not select one yet".
+    ///
+    /// This is the one way to change track 0's animation: [`TrackCommand`]s
+    /// that would lay one on track 0 are refused, so what this names and what
+    /// track 0 plays never part. Only a change of value acts, so a system may
+    /// write it every frame.
     pub animation: String,
+    /// How a change of `animation` is made: `0` (the default) switches at once,
+    /// rebuilding the tree; above zero crossfades to the new animation over that
+    /// many milliseconds, as [`TrackCommand::Crossfade`] does on other tracks.
+    /// The first animation a character selects, and the first after a change of
+    /// `pack`, is always switched to at once: there is nothing to fade from.
+    pub transition_ms: f32,
 }
 
 /// Where the character sits, in the same terms
@@ -172,7 +184,10 @@ pub struct SsStop {
 /// [`ssplayer_wgpu::SSPlayer`]'s track API performs it.
 ///
 /// Tracks fold onto the setup pose in ascending order; track 0 is what
-/// [`SsPlayer::animation`] sets up. A message rather than a component because
+/// [`SsPlayer::animation`] sets up, and only it: `SetAnimation` and `Crossfade`
+/// on track 0 are refused with a warning.
+/// Crossfade track 0 by changing `animation` with [`SsPlayer::transition_ms`]
+/// set. A message rather than a component because
 /// these are operations, a crossfade above all, rather than a state: write
 /// them with a `MessageWriter<SsTrackCommand>`. Several in one frame apply in
 /// the order they were written. Ones sent before the character's pack has
@@ -190,11 +205,18 @@ pub struct SsTrackCommand {
 
 /// What an [`SsTrackCommand`] does. Each variant is the
 /// [`ssplayer_wgpu::SSPlayer`] call of the same name.
+///
+/// A track's playback settings (`SetSpeed` to `SetPlaybackDirection`) are the
+/// track's: they reach every animation on it, and every one laid on it later.
+/// Track 0's come from [`SsPlayback`], which is applied every frame, so set
+/// them there rather than with a command on track 0.
 #[derive(Clone, Debug, PartialEq)]
 pub enum TrackCommand {
-    /// Lay `animation` on `track`, replacing what it played.
+    /// Lay `animation` on `track`, replacing what it played. Not on track 0,
+    /// which [`SsPlayer::animation`] sets.
     SetAnimation { track: u32, animation: String },
-    /// Fade `track` over to `animation` in `duration_ms`.
+    /// Fade `track` over to `animation` in `duration_ms`. Not on track 0: change
+    /// [`SsPlayer::animation`] with [`SsPlayer::transition_ms`] set.
     Crossfade { track: u32, animation: String, duration_ms: f32 },
     /// Drive `track`'s alpha to `target` in `duration_ms`.
     FadeTrack { track: u32, target: f32, duration_ms: f32 },
@@ -213,6 +235,20 @@ pub enum TrackCommand {
     SetFrame { track: u32, frame: f32 },
     /// `track`'s own speed; `0` parks it.
     SetSpeed { track: u32, speed: f32 },
+    /// The frame rate `track` plays at instead of the authored one; `0` clears it.
+    SetFrameRate { track: u32, fps: i32 },
+    /// Whether `track` drops frames to keep to the wall clock.
+    SetFrameSkipEnabled { track: u32, enabled: bool },
+    /// Which way `track` plays, and what it does at the far end.
+    SetPlaybackDirection { track: u32, direction: PlaybackDirection, style: PlaybackStyle },
+    /// How many times `track`'s animation plays before it holds its last
+    /// frame; `-1` (or `0`) loops forever. It belongs to the animation: send it
+    /// after the one it is for, since each is laid looping forever.
+    SetLoopCount { track: u32, count: i32 },
+    /// How far into a crossfade on `track` the outgoing animation keeps firing
+    /// events: while its share of the track, `1 - progress`, is at least this.
+    /// `f32::INFINITY` (the default) silences it from the start of the fade.
+    SetOutgoingEventThreshold { track: u32, threshold: f32 },
     /// Lay `animation` on `track` beside what it carries, mixed by `weight`. Its
     /// handle comes back in [`SsTrackState::sources`].
     AddSource { track: u32, animation: String, weight: f32 },
@@ -252,6 +288,22 @@ pub struct SsTrackInfo {
     pub frame: Option<f32>,
     /// How far a fade on the track has got, `0..=1`; `None` when not fading.
     pub fade_progress: Option<f32>,
+    /// The track's speed, frame rate (the override or the authored rate),
+    /// frame skip and heading — what [`TrackCommand::SetSpeed`] and the
+    /// commands after it set.
+    pub speed: f32,
+    pub frame_rate: i32,
+    pub frame_skip_enabled: bool,
+    pub direction: PlaybackDirection,
+    pub style: PlaybackStyle,
+    /// `-1` for a track that loops forever; `None` on an empty track.
+    pub loop_count: Option<i32>,
+    /// The track's animation has played its loop count out and holds its last
+    /// frame.
+    pub finished: bool,
+    /// The last advance wrapped the track's animation back to its start.
+    pub just_looped: bool,
+    pub outgoing_event_threshold: f32,
 }
 
 /// A source added with [`TrackCommand::AddSource`], as it stands.

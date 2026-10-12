@@ -155,7 +155,8 @@ the same shape under different names, and each sample below documents its own.
 establishes track 0 and carries the structure, and `set_track_animation` / `set_track_alpha` /
 `set_track_blend` lay overlays above it — a walk underneath, an aim on top — with `crossfade` moving
 between two without a cut. Every face has it: the C and JavaScript faces under their own names, and
-the Bevy adapter through the `SsTrackCommand` message. The model and the calls are in
+the Bevy adapter through the `SsTrackCommand` message, with track 0 crossfading when
+`SsPlayer::animation` changes under a `transition_ms`. The model and the calls are in
 [Motion blending](./docs/en/guide/motion-blending.md).
 
 ### Where that `.ssab` comes from
