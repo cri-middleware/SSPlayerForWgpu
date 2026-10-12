@@ -645,6 +645,10 @@ pub struct SSPlayer {
     /// clears on entry to every update, so it is captured there and mirrored
     /// here for the host to read afterwards.
     looped: bool,
+    /// Whether the last update ran. A culled tick leaves the runtime's per-track
+    /// pulses where the last tick that ran left them, so the per-track reads
+    /// that pass them on check this first.
+    ran: bool,
     /// Whether the last update *completed* playback — the rising edge of the
     /// runtime's sticky `is_finished`, not the flag itself.
     finished_edge: bool,
@@ -809,6 +813,7 @@ impl SSPlayer {
             missing: Vec::new(),
             events: Vec::new(),
             looped: false,
+            ran: false,
             finished_edge: false,
             prev_finished: false,
             started_edge: false,
@@ -1649,6 +1654,98 @@ impl SSPlayer {
     pub fn set_track_speed(&mut self, track: u32, speed: f32) -> Result<(), SSRuntimeError> {
         let root = self.root.as_mut().ok_or(SSRuntimeError::NotLoaded)?;
         root.context.set_track_speed(track, speed)
+    }
+
+    // A track's playback settings are the track's, not its animation's: they
+    // reach every animation on it now, both sides of a crossfade included, and
+    // every one laid on it later. Track 0's are the transport above
+    // ([`SSPlayer::set_speed_scale`] and the rest); these address any track.
+    // The loop count is the exception, as on track 0: it belongs to the
+    // animation, and laying another one starts it looping forever again.
+
+    /// What [`SSPlayer::set_track_speed`] stored; a negative speed reads back
+    /// as the `0.0` it became.
+    pub fn track_speed(&self, track: u32) -> Option<f32> {
+        self.root.as_ref()?.context.get_track_speed(track)
+    }
+
+    /// [`SSPlayer::set_frame_rate`] for one track.
+    pub fn set_track_frame_rate(&mut self, track: u32, fps: i32) -> Result<(), SSRuntimeError> {
+        let root = self.root.as_mut().ok_or(SSRuntimeError::NotLoaded)?;
+        root.context.set_track_frame_rate(track, fps)
+    }
+
+    /// The rate the track's animation plays at: the override, or the authored
+    /// rate. `Some(0)` for a track with neither.
+    pub fn track_frame_rate(&self, track: u32) -> Option<i32> {
+        self.root.as_ref()?.context.get_track_frame_rate(track)
+    }
+
+    /// [`SSPlayer::set_frame_skip_enabled`] for one track.
+    pub fn set_track_frame_skip_enabled(&mut self, track: u32, skip: bool) -> Result<(), SSRuntimeError> {
+        let root = self.root.as_mut().ok_or(SSRuntimeError::NotLoaded)?;
+        root.context.set_track_skip_frames(track, skip)
+    }
+
+    pub fn track_frame_skip_enabled(&self, track: u32) -> Option<bool> {
+        self.root.as_ref()?.context.get_track_skip_frames(track)
+    }
+
+    /// [`SSPlayer::set_playback_direction`] for one track.
+    pub fn set_track_playback_direction(&mut self, track: u32, direction: PlaybackDirection, style: PlaybackStyle) -> Result<(), SSRuntimeError> {
+        let root = self.root.as_mut().ok_or(SSRuntimeError::NotLoaded)?;
+        root.context.set_track_playback_direction(track, direction.into(), style.into())
+    }
+
+    pub fn track_playback_direction(&self, track: u32) -> Option<PlaybackDirection> {
+        self.root.as_ref()?.context.get_track_playback_direction(track).map(Into::into)
+    }
+
+    pub fn track_playback_style(&self, track: u32) -> Option<PlaybackStyle> {
+        self.root.as_ref()?.context.get_track_playback_style(track).map(Into::into)
+    }
+
+    /// How many times the track's animation plays before it holds its last
+    /// frame; `-1` (or `0`) loops forever. Set it after laying the animation:
+    /// an animation is laid looping forever. Track 0's is
+    /// [`SSPlayer::set_loop_count`], which the player also puts back on every
+    /// animation laid there.
+    pub fn set_track_loop_count(&mut self, track: u32, count: i32) -> Result<(), SSRuntimeError> {
+        let root = self.root.as_mut().ok_or(SSRuntimeError::NotLoaded)?;
+        root.context.set_track_loop_count(track, count)
+    }
+
+    /// `-1` for a track that loops forever; `None` for one with no animation.
+    pub fn track_loop_count(&self, track: u32) -> Option<i32> {
+        self.root.as_ref()?.context.get_track_loop_count(track)
+    }
+
+    /// The track's animation has played its loop count out and holds its last
+    /// frame, still mixed in until the host fades or clears the track. A state,
+    /// as [`SSPlayer::is_finished`] is for track 0; there is no edge for it.
+    pub fn is_track_finished(&self, track: u32) -> bool {
+        self.root.as_ref().is_some_and(|r| r.context.is_track_finished(track))
+    }
+
+    /// The last update wrapped the track's animation back to its start, as
+    /// [`SSPlayer::just_looped`] is for track 0, and like it `false` after a
+    /// culled update.
+    pub fn track_just_looped(&self, track: u32) -> bool {
+        self.ran && self.root.as_ref().is_some_and(|r| r.context.track_just_looped(track))
+    }
+
+    /// How far into a crossfade on `track` the outgoing animation keeps firing
+    /// events: while its share of the track, `1 - progress`, is at least
+    /// `threshold`. The default, `+∞`, silences it from the moment the fade
+    /// begins, when the incoming one starts firing; `0.5` keeps it firing for
+    /// the first half. Kept by the track, so it holds for every crossfade on it.
+    pub fn set_track_outgoing_event_threshold(&mut self, track: u32, threshold: f32) -> Result<(), SSRuntimeError> {
+        let root = self.root.as_mut().ok_or(SSRuntimeError::NotLoaded)?;
+        root.context.set_track_outgoing_event_threshold(track, threshold)
+    }
+
+    pub fn track_outgoing_event_threshold(&self, track: u32) -> Option<f32> {
+        self.root.as_ref()?.context.get_track_outgoing_event_threshold(track)
     }
 
     // --- Sources: several animations on one track ------------------------------
@@ -2671,6 +2768,7 @@ impl SSPlayer {
             // edge readable long after it was crossed.
             self.events.clear();
             self.looped = false;
+            self.ran = false;
             self.finished_edge = false;
             self.started_edge = false;
             return;
@@ -2696,6 +2794,7 @@ impl SSPlayer {
         let finished = root.context.is_finished();
         collect_events(root, &mut self.events);
         self.looped = looped;
+        self.ran = true;
         self.finished_edge = finished && !self.prev_finished;
         self.prev_finished = finished;
 

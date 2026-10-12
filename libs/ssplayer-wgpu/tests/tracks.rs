@@ -1,14 +1,16 @@
 //! The track stack, reached through `SSPlayer`.
 //!
-//! None of this needs a GPU: tracks are runtime state and `SSPlayer` holds no
-//! wgpu types, so everything here is a pass-through check — that the player
+//! Almost none of this needs a GPU: tracks are runtime state and `SSPlayer`
+//! holds no wgpu types, so most of it is a pass-through check — that the player
 //! forwards to the right context, that track 0 stays the structure track, and
-//! that fades are advanced by the same `update` the playhead uses.
+//! that fades are advanced by the same `update` the playhead uses. Only the
+//! test that has to advance time takes a device, because stepping the tree is
+//! `SSScene::update`'s job.
 //!
 //! What the runtime *computes* is the SDK's own business and is tested there;
 //! what this file protects is the seam.
 
-use ssplayer_wgpu::{SSPlayer, TrackBlend, TrackSync};
+use ssplayer_wgpu::{MaskBackend, PlaybackDirection, PlaybackStyle, SSPlayer, SSRenderer, SSScene, SceneConfig, TrackBlend, TrackSync};
 
 fn asset_root() -> &'static str {
     concat!(env!("CARGO_MANIFEST_DIR"), "/../../assets")
@@ -234,4 +236,87 @@ fn track_calls_need_an_animation() {
     assert!(player.set_track_animation(1, "walk").is_err());
     assert!(player.set_track_alpha(1, 0.5).is_err());
     assert!(player.crossfade(0, "walk", 100.0).is_err());
+}
+
+/// A track's playback settings reach the track they name, and read back.
+#[test]
+fn a_track_s_playback_settings_reach_it() {
+    let Some((mut player, names)) = ringo() else { return };
+    player.set_track_animation(1, &names[1]).unwrap();
+
+    player.set_track_speed(1, 0.5).unwrap();
+    assert_eq!(player.track_speed(1), Some(0.5));
+    player.set_track_frame_rate(1, 24).unwrap();
+    assert_eq!(player.track_frame_rate(1), Some(24));
+    player.set_track_frame_skip_enabled(1, false).unwrap();
+    assert_eq!(player.track_frame_skip_enabled(1), Some(false));
+    player.set_track_playback_direction(1, PlaybackDirection::Backward, PlaybackStyle::PingPong).unwrap();
+    assert_eq!(player.track_playback_direction(1), Some(PlaybackDirection::Backward));
+    assert_eq!(player.track_playback_style(1), Some(PlaybackStyle::PingPong));
+    assert_eq!(player.track_outgoing_event_threshold(1), Some(f32::INFINITY), "silent by default");
+    player.set_track_outgoing_event_threshold(1, 0.5).unwrap();
+    assert_eq!(player.track_outgoing_event_threshold(1), Some(0.5));
+
+    assert_eq!(player.track_loop_count(1), Some(-1), "laid looping forever");
+    player.set_track_loop_count(1, 2).unwrap();
+    assert_eq!(player.track_loop_count(1), Some(2));
+    assert_eq!(player.track_speed(0), Some(1.0), "track 0 is untouched");
+
+    player.set_track_animation(1, &names[2]).unwrap();
+    assert_eq!(player.track_speed(1), Some(0.5), "the settings are the track's");
+    assert_eq!(player.track_loop_count(1), Some(-1), "the loop count is the animation's");
+}
+
+#[test]
+fn track_playback_settings_need_an_animation() {
+    let mut player = SSPlayer::new();
+    assert!(player.set_track_speed(0, 0.5).is_err());
+    assert!(player.set_track_loop_count(0, 1).is_err());
+    assert!(player.set_track_outgoing_event_threshold(0, 0.5).is_err());
+    assert!(player.track_speed(0).is_none());
+    assert!(!player.is_track_finished(0) && !player.track_just_looped(0));
+}
+
+fn gpu() -> Option<(wgpu::Device, wgpu::Queue)> {
+    let instance = wgpu::Instance::new(wgpu::InstanceDescriptor::new_without_display_handle());
+    let adapter = pollster::block_on(instance.request_adapter(&wgpu::RequestAdapterOptions { power_preference: wgpu::PowerPreference::default(), compatible_surface: None, force_fallback_adapter: false, apply_limit_buckets: false })).ok()?;
+    let (device, queue) = pollster::block_on(adapter.request_device(&wgpu::DeviceDescriptor::default())).ok()?;
+    Some((device, queue))
+}
+
+/// An overlay reports its own loop and, given a count, its own end, while track
+/// 0 plays on; a culled tick reports no loop, as it reports nothing else.
+#[test]
+fn an_overlay_track_reports_its_loop_and_its_end() {
+    let Some((device, queue)) = gpu() else {
+        eprintln!("no adapter — skipping");
+        return;
+    };
+    let mut renderer = SSRenderer::new(&device);
+    let mut scene = SSScene::new(&device, &SceneConfig { color_format: wgpu::TextureFormat::Rgba8Unorm, stencil_format: None, mask: MaskBackend::None });
+    scene.set_viewport(&queue, 256.0, 256.0, false);
+    let Some((mut player, _)) = ringo() else { return };
+    player.set_animation("wait1").unwrap();
+    player.play();
+    player.set_track_animation(1, "attack1").unwrap();
+    let mut tick = |player: &mut SSPlayer| scene.update(&mut renderer, &device, &queue, 1.0 / 60.0, &mut [player]);
+
+    let looped = (0..120).any(|_| {
+        tick(&mut player);
+        player.track_just_looped(1)
+    });
+    assert!(looped, "attack1 never wrapped on track 1");
+    player.set_culled(true);
+    tick(&mut player);
+    assert!(!player.track_just_looped(1), "a culled tick reported the loop of the last one that ran");
+    player.set_culled(false);
+
+    player.set_track_animation(1, "attack1").unwrap();
+    player.set_track_loop_count(1, 1).unwrap();
+    let finished = (0..120).any(|_| {
+        tick(&mut player);
+        player.is_track_finished(1)
+    });
+    assert!(finished, "attack1 never finished on track 1");
+    assert!(player.is_playing() && !player.is_finished(), "track 0 plays on");
 }
