@@ -1772,7 +1772,7 @@ impl SsPlayerWeb {
     }
 
     /// Whether the part is hidden on the frame the last `frame()` built, or
-    /// `null` when the pack has no such part. An override shows from the next
+    /// `undefined` when the pack has no such part. An override shows from the next
     /// `frame()`.
     ///
     /// The companion to `partTransform`, which reports where a part *would* be
@@ -1783,7 +1783,7 @@ impl SsPlayerWeb {
     }
 
     /// Whether the part is a **skinned** mesh — one whose vertices are drawn by
-    /// bone skinning — or `null` when the pack has no such part.
+    /// bone skinning — or `undefined` when the pack has no such part.
     ///
     /// A skinned mesh cannot be followed with `partTransform`: its node stays at
     /// the setup position (near the character root) while the bones move the

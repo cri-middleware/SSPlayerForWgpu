@@ -104,7 +104,7 @@ the calls.
 | `setPartCellOverride(part, cellmap, cell, priority)` / `clearPartCellOverride(part)` | |
 | `clearAllPartOverrides()` | |
 | `partTransform(part)` / `partTransformByIndex(i)` | `[m00, m01, m10, m11, tx, ty]` |
-| `isPartHidden(part)` / `isPartSkinnedMesh(part)` / `partCount()` | `isPartSkinnedMesh` → `true`/`false`, or `null` for an unknown part |
+| `isPartHidden(part)` / `isPartSkinnedMesh(part)` / `partCount()` | `isPartHidden` and `isPartSkinnedMesh` → `true`/`false`, or `undefined` for an unknown part |
 | `events()` | Plain objects tagged by `kind`: `'userData'` / `'signal'` / `'audio'`. Each carries `frameNo`, `partName` and `source`, the handle of the source that fired it |
 
 **Texture replacement** — swap the whole texture a cell map binds (a costume or palette change).

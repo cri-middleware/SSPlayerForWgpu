@@ -101,7 +101,7 @@ import { defineSsPlayerWebGPUElement } from '@spritestudio/ssplayer-wgpu/element
 | `setPartCellOverride(part, cellmap, cell, priority)` / `clearPartCellOverride(part)` | |
 | `clearAllPartOverrides()` | |
 | `partTransform(part)` / `partTransformByIndex(i)` | `[m00, m01, m10, m11, tx, ty]` |
-| `isPartHidden(part)` / `isPartSkinnedMesh(part)` / `partCount()` | `isPartSkinnedMesh` は `true`/`false`、不明なパーツなら `null` |
+| `isPartHidden(part)` / `isPartSkinnedMesh(part)` / `partCount()` | `isPartHidden` と `isPartSkinnedMesh` は `true`/`false`、不明なパーツなら `undefined` |
 | `events()` | `kind` で分類されたプレーンオブジェクト：`'userData'` / `'signal'` / `'audio'`。どれも `frameNo`・`partName` と、発火したソースのハンドル `source` を持つ |
 
 **テクスチャ差し替え** — セルマップがバインドするテクスチャ丸ごとを差し替えます（衣装・パレット変更）。`pack` に null でメインパック。[テクスチャ差し替え](../guide/texture-replacement.md)を参照。
