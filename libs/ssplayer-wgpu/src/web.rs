@@ -1841,7 +1841,8 @@ impl SsPlayerWeb {
     // `undefined`; a command on one throws.
 
     /// Put `name` on `track`, replacing what it was playing. Track 0 is better set
-    /// with `setAnimation`, which rebuilds the instance tree.
+    /// with `setAnimation`, which rebuilds the instance tree. On track 0 it still
+    /// makes `name` the current animation.
     #[wasm_bindgen(js_name = setTrackAnimation)]
     pub fn set_track_animation(&self, track: u32, name: &str) -> Result<(), JsValue> {
         with_player!(self, |p| p.set_track_animation(track, name).map_err(js_err)?)
@@ -1914,8 +1915,11 @@ impl SsPlayerWeb {
     }
 
     /// Fade `track` to `name` over `durationMs`, starting from whatever it is
-    /// playing. Advanced by `frame()`. On track 0 it does not rebuild the
-    /// instance tree, so animations whose instance parts differ are out of scope.
+    /// playing. Advanced by `frame()`. On track 0, `name` takes over from the
+    /// call on: it is the current animation, its state is what `isFinished`
+    /// reports, and it plays with the speed, direction and loop count the page
+    /// set. The instance tree is not rebuilt; the instance and effect parts
+    /// belong to the pack, so the running children carry on.
     pub fn crossfade(&self, track: u32, name: &str, duration_ms: f32) -> Result<(), JsValue> {
         with_player!(self, |p| p.crossfade(track, name, duration_ms).map_err(js_err)?)
     }
@@ -1955,6 +1959,102 @@ impl SsPlayerWeb {
     #[wasm_bindgen(js_name = setTrackSpeed)]
     pub fn set_track_speed(&self, track: u32, speed: f32) -> Result<(), JsValue> {
         with_player!(self, |p| p.set_track_speed(track, speed).map_err(js_err)?)
+    }
+
+    // A track's playback settings are the track's, not its animation's: they
+    // reach every animation on it now, both sides of a crossfade included, and
+    // every one laid on it later. Track 0's are the transport calls above
+    // (`setSpeedScale` and the rest). The loop count is the exception: it
+    // belongs to the animation, and laying another one starts it looping
+    // forever again.
+
+    #[wasm_bindgen(js_name = trackSpeed)]
+    pub fn track_speed(&self, track: u32) -> Result<Option<f32>, JsValue> {
+        with_player!(self, |p| p.track_speed(track))
+    }
+
+    /// `setFrameRate` for one track.
+    #[wasm_bindgen(js_name = setTrackFrameRate)]
+    pub fn set_track_frame_rate(&self, track: u32, fps: i32) -> Result<(), JsValue> {
+        with_player!(self, |p| p.set_track_frame_rate(track, fps).map_err(js_err)?)
+    }
+
+    /// The rate `track`'s animation plays at, the override or the authored
+    /// rate; 0 for a track with neither.
+    #[wasm_bindgen(js_name = trackFrameRate)]
+    pub fn track_frame_rate(&self, track: u32) -> Result<Option<i32>, JsValue> {
+        with_player!(self, |p| p.track_frame_rate(track))
+    }
+
+    /// `setFrameSkipEnabled` for one track.
+    #[wasm_bindgen(js_name = setTrackFrameSkipEnabled)]
+    pub fn set_track_frame_skip_enabled(&self, track: u32, skip: bool) -> Result<(), JsValue> {
+        with_player!(self, |p| p.set_track_frame_skip_enabled(track, skip).map_err(js_err)?)
+    }
+
+    #[wasm_bindgen(js_name = trackFrameSkipEnabled)]
+    pub fn track_frame_skip_enabled(&self, track: u32) -> Result<Option<bool>, JsValue> {
+        with_player!(self, |p| p.track_frame_skip_enabled(track))
+    }
+
+    /// `setPlaybackDirection` for one track, with the same `0` / `1` values.
+    #[wasm_bindgen(js_name = setTrackPlaybackDirection)]
+    pub fn set_track_playback_direction(&self, track: u32, direction: i32, style: i32) -> Result<(), JsValue> {
+        with_player!(self, |p| p.set_track_playback_direction(track, PlaybackDirection::from_wire(direction), PlaybackStyle::from_wire(style)).map_err(js_err)?)
+    }
+
+    /// 0 = forward, 1 = backward.
+    #[wasm_bindgen(js_name = trackPlaybackDirection)]
+    pub fn track_playback_direction(&self, track: u32) -> Result<Option<i32>, JsValue> {
+        with_player!(self, |p| p.track_playback_direction(track).map(PlaybackDirection::as_wire))
+    }
+
+    /// 0 = normal, 1 = ping-pong.
+    #[wasm_bindgen(js_name = trackPlaybackStyle)]
+    pub fn track_playback_style(&self, track: u32) -> Result<Option<i32>, JsValue> {
+        with_player!(self, |p| p.track_playback_style(track).map(PlaybackStyle::as_wire))
+    }
+
+    /// How many times `track`'s animation plays before it holds its last
+    /// frame; `-1` (or `0`) loops forever. Set it after laying the animation:
+    /// one is laid looping forever. Track 0's is `setLoopCount`.
+    #[wasm_bindgen(js_name = setTrackLoopCount)]
+    pub fn set_track_loop_count(&self, track: u32, count: i32) -> Result<(), JsValue> {
+        with_player!(self, |p| p.set_track_loop_count(track, count).map_err(js_err)?)
+    }
+
+    /// `-1` for a track that loops forever; `undefined` for one with no animation.
+    #[wasm_bindgen(js_name = trackLoopCount)]
+    pub fn track_loop_count(&self, track: u32) -> Result<Option<i32>, JsValue> {
+        with_player!(self, |p| p.track_loop_count(track))
+    }
+
+    /// Whether `track`'s animation has played its loop count out and holds its
+    /// last frame. A state, as `isFinished` is for track 0; there is no edge.
+    #[wasm_bindgen(js_name = isTrackFinished)]
+    pub fn is_track_finished(&self, track: u32) -> Result<bool, JsValue> {
+        with_player!(self, |p| p.is_track_finished(track))
+    }
+
+    /// Whether the last `frame()` wrapped `track`'s animation back to its
+    /// start, as `justLooped` is for track 0.
+    #[wasm_bindgen(js_name = trackJustLooped)]
+    pub fn track_just_looped(&self, track: u32) -> Result<bool, JsValue> {
+        with_player!(self, |p| p.track_just_looped(track))
+    }
+
+    /// How far into a crossfade on `track` the outgoing animation keeps firing
+    /// events: while its share of the track, `1 - progress`, is at least
+    /// `threshold`. The default, `Infinity`, silences it from the moment the
+    /// fade begins; `0.5` keeps it firing for the first half. Kept by the track.
+    #[wasm_bindgen(js_name = setTrackOutgoingEventThreshold)]
+    pub fn set_track_outgoing_event_threshold(&self, track: u32, threshold: f32) -> Result<(), JsValue> {
+        with_player!(self, |p| p.set_track_outgoing_event_threshold(track, threshold).map_err(js_err)?)
+    }
+
+    #[wasm_bindgen(js_name = trackOutgoingEventThreshold)]
+    pub fn track_outgoing_event_threshold(&self, track: u32) -> Result<Option<f32>, JsValue> {
+        with_player!(self, |p| p.track_outgoing_event_threshold(track))
     }
 
     /// The source carrying `track`'s animation; `undefined` when it has none.
