@@ -33,7 +33,8 @@ rather than the invariant. The five that catch newcomers most often:
   putting it on the `Prim`, not by reintroducing per-vertex CPU work.
 - **No per-frame allocations in the playback hot path.** `FrameChunk::reset`
   empties every buffer and keeps its capacity, and GPU buffers only grow; a new
-  per-frame buffer goes on the chunk.
+  per-frame buffer goes on the chunk, or on the player's `Walk` when only that
+  player's walk uses it.
 - **SDK separation.** The animation logic lives in the `SpriteStudio-SDK`
   submodule (`ssruntime`, `ssab`). Algorithm and core-logic changes are a pull
   request *there* followed by a submodule bump here; this repository is the
@@ -227,7 +228,7 @@ SSPlayerForWgpu にご関心をお寄せいただき、ありがとうござい�
 
 - **プレイヤーは wgpu の状態を所有しません。** `Device` / `Queue` / `Surface` / `SSRenderer` はホストのもので、フレームごとに貸し出されます。これらの所有権を取る API は誤りで、**`SSPlayer` に wgpu 型のフィールドを持たせてはいけません**。「1 canvas = 1 player」に戻らないのはこの規則のおかげです。
 - **頂点バッファはありません。** ランタイムの SoA 配列をシーンのアリーナへ memcpy し、頂点ステージが `@builtin(vertex_index)` から展開します。CPU が書くのはパーツごとに `Prim` 1 つだけで、頂点ごとには何も書きません。機能を足すときは `Prim` に載せてください。頂点ごとの CPU 処理を復活させないこと。
-- **再生中は毎フレームのヒープ確保をしません。** `FrameChunk::reset` はバッファを空にしても容量を残し、GPU バッファは伸びるだけです。毎フレーム使うバッファを足すときは chunk に置いてください。
+- **再生中は毎フレームのヒープ確保をしません。** `FrameChunk::reset` はバッファを空にしても容量を残し、GPU バッファは伸びるだけです。毎フレーム使うバッファを足すときは chunk に置いてください。1 体のプレイヤーのウォークだけが使うものは、そのプレイヤーの `Walk` に置きます。
 - **SDK との分離。** アニメーションのロジックは `SpriteStudio-SDK` submodule (`ssruntime`・`ssab`) にあります。アルゴリズムやコアロジックの変更は**あちらへの**プルリクエストと、こちらでの submodule 更新の組で行います。このリポジトリはレンダラーと、ホストに面した 3 つのフェイスです。
 - **3 つのフェイスは歩調を揃えます。** API の本体は Rust で、C (`cbindgen`) と JavaScript (`wasm-bindgen`) はその薄いラッパーです。`ffi.rs` にロジックは置きません（引数検証・型変換・エラーコード対応のみ）。必要なものは `host.rs` か `player.rs` に置き、Rust API 側にも行き渡らせてください。
 
