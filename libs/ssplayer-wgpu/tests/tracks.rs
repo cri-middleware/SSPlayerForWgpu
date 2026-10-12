@@ -4,7 +4,7 @@
 //! holds no wgpu types, so most of it is a pass-through check — that the player
 //! forwards to the right context, that track 0 stays the structure track, and
 //! that fades are advanced by the same `update` the playhead uses. Only the
-//! test that has to advance time takes a device, because stepping the tree is
+//! tests that have to advance time take a device, because stepping the tree is
 //! `SSScene::update`'s job.
 //!
 //! What the runtime *computes* is the SDK's own business and is tested there;
@@ -319,4 +319,189 @@ fn an_overlay_track_reports_its_loop_and_its_end() {
     });
     assert!(finished, "attack1 never finished on track 1");
     assert!(player.is_playing() && !player.is_finished(), "track 0 plays on");
+}
+
+/// What the canvas reports follows track 0 from the moment a crossfade on it
+/// begins. Ringo's `dead` is drawn on a wider canvas than its other animations.
+#[test]
+fn the_canvas_follows_a_crossfade_on_track_zero() {
+    let Some((mut player, _)) = ringo() else { return };
+    player.set_animation("wait1").unwrap();
+    assert_eq!(player.canvas_size(), Some((800.0, 600.0)), "fixture sanity");
+    player.crossfade(0, "dead", 400.0).unwrap();
+    assert_eq!(player.canvas_size(), Some((1300.0, 600.0)));
+}
+
+/// What advances a player in these tests: one renderer and scene, ticked at
+/// 60 Hz. `None` without an adapter.
+struct Clock {
+    device: wgpu::Device,
+    queue: wgpu::Queue,
+    renderer: SSRenderer,
+    scene: SSScene,
+}
+
+impl Clock {
+    fn new() -> Option<Self> {
+        let Some((device, queue)) = gpu() else {
+            eprintln!("no adapter — skipping");
+            return None;
+        };
+        let renderer = SSRenderer::new(&device);
+        let mut scene = SSScene::new(&device, &SceneConfig { color_format: wgpu::TextureFormat::Rgba8Unorm, stencil_format: None, mask: MaskBackend::None });
+        scene.set_viewport(&queue, 256.0, 256.0, false);
+        Some(Self { device, queue, renderer, scene })
+    }
+
+    fn tick(&mut self, players: &mut [&mut SSPlayer]) {
+        self.scene.update(&mut self.renderer, &self.device, &self.queue, 1.0 / 60.0, players);
+    }
+}
+
+/// A crossfade is advanced by the same update as the playhead, completes, and
+/// releases the animation it faded out; the one it faded to stays selected, and
+/// the one it left can be selected again.
+#[test]
+fn a_crossfade_advances_on_update_and_completes() {
+    let Some(mut clock) = Clock::new() else { return };
+    let Some((mut player, _)) = ringo() else { return };
+    player.set_animation("wait1").unwrap();
+    player.play();
+    let outgoing = player.track_main_source(0).unwrap();
+    player.crossfade(0, "walk", 200.0).unwrap();
+    let incoming = player.track_main_source(0).unwrap();
+
+    let mut last = 0.0;
+    for _ in 0..30 {
+        clock.tick(&mut [&mut player]);
+        match player.track_fade_progress(0) {
+            Some(progress) => {
+                assert!(progress > last, "the fade did not advance: {last} -> {progress}");
+                last = progress;
+            }
+            None => break,
+        }
+    }
+    assert!(player.track_fade_progress(0).is_none(), "a 200 ms fade outlasted half a second");
+    assert_eq!(player.track_main_source(0), Some(incoming));
+    assert!(player.source_weight(outgoing).is_none(), "the outgoing animation was not released");
+    assert_eq!(player.current_animation(), Some("walk"));
+
+    player.set_animation("wait1").unwrap();
+    assert_eq!(player.current_animation(), Some("wait1"), "the animation the fade left could not be selected again");
+}
+
+/// An overlay plays on the player's update, and the player's pause holds it.
+#[test]
+fn an_overlay_plays_on_update_and_holds_on_pause() {
+    let Some(mut clock) = Clock::new() else { return };
+    let Some((mut player, _)) = ringo() else { return };
+    player.set_animation("wait1").unwrap();
+    player.play();
+    player.set_track_animation(1, "dance").unwrap();
+
+    let start = player.track_frame(1).unwrap();
+    for _ in 0..5 {
+        clock.tick(&mut [&mut player]);
+    }
+    let moved = player.track_frame(1).unwrap();
+    assert!(moved > start, "the overlay did not advance: {start} -> {moved}");
+
+    player.pause();
+    clock.tick(&mut [&mut player]);
+    assert_eq!(player.track_frame(1), Some(moved), "the pause did not hold the overlay");
+
+    player.resume();
+    clock.tick(&mut [&mut player]);
+    assert!(player.track_frame(1).unwrap() > moved, "the resume did not release the overlay");
+}
+
+/// A crossfade on track 0 plays the incoming animation at the speed the host
+/// set, as `set_animation` would. Laid at the defaults, it played at 1×.
+#[test]
+fn a_crossfade_plays_the_incoming_animation_at_the_host_s_speed() {
+    let Some(mut clock) = Clock::new() else { return };
+    let Some((mut normal, _)) = ringo() else { return };
+    let Some((mut fast, _)) = ringo() else { return };
+    for (player, speed) in [(&mut normal, 1.0), (&mut fast, 2.0)] {
+        player.set_animation("wait1").unwrap();
+        player.set_speed_scale(speed);
+        player.play();
+        player.crossfade(0, "walk", 1000.0).unwrap();
+    }
+    for _ in 0..10 {
+        clock.tick(&mut [&mut normal, &mut fast]);
+    }
+    let (normal_frame, fast_frame) = (normal.track_frame(0).unwrap(), fast.track_frame(0).unwrap());
+    assert!(normal_frame > 0.0, "fixture sanity: walk advanced");
+    assert!((fast_frame - 2.0 * normal_frame).abs() < 1.0, "walk at 2× reached {fast_frame}, at 1× {normal_frame}");
+}
+
+/// The loop count the host set holds for the animation a crossfade hands
+/// track 0 to, so its end is reported. Laid looping forever, it never ended.
+#[test]
+fn the_incoming_animation_ends_on_the_host_s_loop_count() {
+    let Some(mut clock) = Clock::new() else { return };
+    let Some((mut player, _)) = ringo() else { return };
+    player.set_loop_count(1);
+    player.set_animation("wait1").unwrap();
+    player.play();
+    player.crossfade(0, "attack1", 100.0).unwrap();
+
+    // attack1 is 20 frames at 60 fps: a third of a second.
+    let ends = (0..60)
+        .filter(|_| {
+            clock.tick(&mut [&mut player]);
+            player.just_finished()
+        })
+        .count();
+    assert_eq!(ends, 1, "attack1 ended {ends} times in a second");
+    assert!(player.is_finished());
+}
+
+/// The animation a crossfade leaves running out does not finish the player:
+/// track 0 changed hands when the fade began, and the new animation has not.
+#[test]
+fn an_outgoing_animation_running_out_does_not_finish_the_player() {
+    let Some(mut clock) = Clock::new() else { return };
+    let Some((mut player, _)) = ringo() else { return };
+    player.set_loop_count(1);
+    player.set_animation("attack1").unwrap();
+    player.play();
+    player.seek(18.0);
+    player.crossfade(0, "wait1", 1000.0).unwrap();
+
+    // Past attack1's last frame, well short of wait1's 80.
+    for _ in 0..20 {
+        clock.tick(&mut [&mut player]);
+        assert!(!player.just_finished() && !player.is_finished(), "the outgoing animation finished the player");
+    }
+    assert!(player.track_fade_progress(0).is_some(), "fixture sanity: still fading");
+}
+
+/// A crossfade restarted mid-fade takes the fade in flight over as it stands:
+/// neither animation of the first fade jumps when the second begins. Settled
+/// first, the incoming animation of the first leapt to full weight and the
+/// outgoing one vanished.
+#[test]
+fn a_crossfade_restarted_mid_fade_carries_the_pose_over() {
+    let Some(mut clock) = Clock::new() else { return };
+    let Some((mut player, _)) = ringo() else { return };
+    player.set_animation("wait1").unwrap();
+    player.play();
+    let first = player.track_main_source(0).unwrap();
+    player.crossfade(0, "walk", 1000.0).unwrap();
+    let second = player.track_main_source(0).unwrap();
+    for _ in 0..15 {
+        clock.tick(&mut [&mut player]);
+    }
+    let (first_weight, second_weight) = (player.source_weight(first).unwrap(), player.source_weight(second).unwrap());
+    assert!(second_weight > 0.0 && first_weight > 0.0, "fixture sanity: mid-fade, {first_weight} / {second_weight}");
+
+    player.crossfade(0, "run", 1000.0).unwrap();
+    let third = player.track_main_source(0).unwrap();
+    let close = |a: Option<f32>, b: f32| a.is_some_and(|a| (a - b).abs() < 1e-4);
+    assert!(close(player.source_weight(first), first_weight), "the first animation jumped: {first_weight} -> {:?}", player.source_weight(first));
+    assert!(close(player.source_weight(second), second_weight), "the second animation jumped: {second_weight} -> {:?}", player.source_weight(second));
+    assert_eq!(player.source_weight(third), Some(0.0), "the new animation starts from nothing");
 }
