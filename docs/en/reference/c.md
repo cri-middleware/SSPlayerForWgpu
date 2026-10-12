@@ -165,13 +165,18 @@ The track stack: tracks fold onto the setup pose in ascending order, track 0 bei
 | | |
 |---|---|
 | `ss_player_set_track_animation(player, track, name)` | Lay an animation on a track, replacing what it played |
-| `ss_player_crossfade(player, track, name, ms)` | Fade a track over to another animation |
+| `ss_player_crossfade(player, track, name, ms)` | Fade a track over to another animation. On track 0 it is the current animation from the call on |
 | `ss_player_fade_track(player, track, target, ms)` / `ss_player_cancel_track_fade(player, track)` | Drive a track's alpha somewhere / stop the fade where it stands |
 | `ss_player_track_fade_progress(player, track)` | 0 to 1; **-1** when the track is not fading |
 | `ss_player_set_track_alpha` / `ss_player_track_alpha` | A track's strength |
 | `ss_player_set_track_blend` / `ss_player_track_blend` | `SS_TRACK_BLEND_MIX` (0) or `SS_TRACK_BLEND_ADDITIVE` (1) |
 | `ss_player_set_track_sync` / `ss_player_track_sync` | `SS_TRACK_SYNC_FREE` (0) or `SS_TRACK_SYNC_START` (1) — set it before laying |
 | `ss_player_set_track_frame` / `ss_player_track_frame` / `ss_player_set_track_speed` | Scrub a track; speed 0 parks it |
+| `ss_player_track_speed` / `ss_player_set_track_frame_rate` / `ss_player_track_frame_rate` / `ss_player_set_track_frame_skip_enabled` / `ss_player_track_frame_skip_enabled` | A track's own playback settings; track 0's are the transport calls |
+| `ss_player_set_track_playback_direction(player, track, direction, style)` / `ss_player_track_playback_direction` / `ss_player_track_playback_style` | `0` / `1`, as `ss_player_set_playback_direction` |
+| `ss_player_set_track_loop_count` / `ss_player_track_loop_count` | The loop count of a track's animation — set it after laying one; `-1` loops forever, **0** means no animation |
+| `ss_player_is_track_finished` / `ss_player_track_just_looped` | A track's end (a state) and its loop (one update) |
+| `ss_player_set_track_outgoing_event_threshold` / `ss_player_track_outgoing_event_threshold` | How far into a crossfade the outgoing side keeps firing events; infinity (the default) silences it |
 | `ss_player_track_count(player)` / `ss_player_clear_track(player, track)` | How many tracks; silence one (not track 0) |
 | `ss_player_track_main_source(player, track)` | The source carrying a track's animation; **`SS_INVALID_SOURCE`** when it has none |
 | `ss_player_add_track_source(player, track, name, weight, &source)` | Lay another animation beside it, mixed by weight |

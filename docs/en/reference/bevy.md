@@ -29,7 +29,11 @@ The camera, however, needs two things: `Msaa::Off` (the player's pipelines are s
 | Field | | |
 |---|---|---|
 | `pack: Handle<SsPack>` | the `.ssab`, from `asset_server.load(...)` | **Changing it rebuilds the playback tree**, once the new pack has loaded |
-| `animation: String` | animation to select. Empty means "not yet" | The same |
+| `animation: String` | animation to select. Empty means "not yet" | The same, unless `transition_ms` is set. Only a change of value acts, so a system may write it every frame |
+| `transition_ms: f32` | how a change of `animation` is made: `0` (the default) switches at once; above zero crossfades over that many milliseconds | The first animation, and the first after a change of `pack`, is always switched to at once |
+
+`animation` is the only way to change track 0's animation: a `TrackCommand` that would lay one on
+track 0 is refused, so what it names and what track 0 plays never part.
 
 `SsTransform`, `SsPlayback`, `SsPlaybackState` and `SsTrackState` are **required components**, so
 spawning `SsPlayer` alone gives you all five at their defaults.
@@ -94,7 +98,7 @@ What [`SsTrackCommand`](#motion-blending) built, refreshed every frame and **one
 
 | Field | |
 |---|---|
-| `tracks: Vec<SsTrackInfo>` | one per track, track 0 first: `main_source`, `alpha`, `blend`, `sync`, `frame` and `fade_progress` (`None` when not fading) |
+| `tracks: Vec<SsTrackInfo>` | one per track, track 0 first: `main_source`, `alpha`, `blend`, `sync`, `frame`, `fade_progress` (`None` when not fading), the playback settings `speed`, `frame_rate`, `frame_skip_enabled`, `direction` and `style`, `loop_count` (`None` on an empty track), `finished`, `just_looped` and `outgoing_event_threshold` |
 | `sources: Vec<SsSourceInfo>` | the sources laid with `TrackCommand::AddSource` that are still playing: `source` (the handle), `track`, `animation`, `weight`, `frame` |
 
 ### `SsCellmapTextures` — runtime texture replacement (optional)
@@ -138,21 +142,38 @@ Sent together in one frame they apply as play, stop, seek.
 `SsTrackCommand { entity, command }` performs one operation on the character's track stack;
 `command` is a `TrackCommand`, each variant the `SSPlayer` call of the same name — `SetAnimation`,
 `Crossfade`, `FadeTrack`, `CancelFade`, `Clear`, `SetAlpha`, `SetBlend`, `SetSync`, `SetFrame`,
-`SetSpeed`, `AddSource`, `SetSourceWeight`, `SetSourceFrame`, `SetSourceEventThreshold`. Unlike the
+`SetSpeed`, `SetFrameRate`, `SetFrameSkipEnabled`, `SetPlaybackDirection`, `SetLoopCount`,
+`SetOutgoingEventThreshold`, `AddSource`, `SetSourceWeight`, `SetSourceFrame`,
+`SetSourceEventThreshold`. `SetAnimation` and `Crossfade` are refused on track 0, which
+`SsPlayer::animation` sets; set track 0's playback settings on `SsPlayback`, which applies them over
+any command. Unlike the
 three above, **every one applies, in the order written**, and ones sent before the pack has loaded
 wait for the animation. A refused one is logged. The result comes back in
 [`SsTrackState`](#sstrackstate), where an `AddSource` finds its handle.
 
 ```rust
-fn run(mut tracks: MessageWriter<SsTrackCommand>, character: Single<Entity, With<SsPlayer>>) {
-    let entity = *character;
+fn run(mut tracks: MessageWriter<SsTrackCommand>, character: Single<(Entity, &mut SsPlayer)>) {
+    let (entity, mut player) = character.into_inner();
     tracks.write(SsTrackCommand { entity, command: TrackCommand::SetSync { track: 0, sync: TrackSync::Start } });
-    tracks.write(SsTrackCommand { entity, command: TrackCommand::Crossfade { track: 0, animation: "run".into(), duration_ms: 300.0 } });
+    // Track 0 crossfades through the component.
+    player.transition_ms = 300.0;
+    player.animation = "run".into();
+}
+
+fn react(mut tracks: MessageWriter<SsTrackCommand>, character: Single<Entity, With<SsPlayer>>) {
+    let entity = *character;
+    for command in [
+        TrackCommand::SetAnimation { track: 1, animation: "hit_react".into() },
+        TrackCommand::SetLoopCount { track: 1, count: 1 },   // once, then hold the last frame
+    ] {
+        tracks.write(SsTrackCommand { entity, command });
+    }
 }
 ```
 
-**Changing `SsPlayer::animation` resets the stack** to track 0 alone, as `set_animation` does;
-send the overlays and track settings again after it. See
+**Changing `SsPlayer::animation` with `transition_ms` at 0 resets the stack** to track 0 alone, as
+`set_animation` does; send the overlays and track settings again after it. With `transition_ms`
+set the stack stays, as `crossfade` leaves it. See
 [Motion blending](../guide/motion-blending.md).
 
 ```rust
