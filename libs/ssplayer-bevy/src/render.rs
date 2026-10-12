@@ -384,6 +384,11 @@ fn apply_track_command(slot: &mut PlayerSlot, command: TrackCommand) {
         TrackCommand::SetSync { track, sync } => player.set_track_sync(*track, *sync),
         TrackCommand::SetFrame { track, frame } => player.set_track_frame(*track, *frame),
         TrackCommand::SetSpeed { track, speed } => player.set_track_speed(*track, *speed),
+        TrackCommand::SetFrameRate { track, fps } => player.set_track_frame_rate(*track, *fps),
+        TrackCommand::SetFrameSkipEnabled { track, enabled } => player.set_track_frame_skip_enabled(*track, *enabled),
+        TrackCommand::SetPlaybackDirection { track, direction, style } => player.set_track_playback_direction(*track, *direction, *style),
+        TrackCommand::SetLoopCount { track, count } => player.set_track_loop_count(*track, *count),
+        TrackCommand::SetOutgoingEventThreshold { track, threshold } => player.set_track_outgoing_event_threshold(*track, *threshold),
         TrackCommand::AddSource { track, animation, weight } => player.add_track_source(*track, animation, *weight).map(|source| {
             // A handle the runtime hands out again names the new source, not the
             // one it was released from.
@@ -412,6 +417,15 @@ fn track_feedback(slot: &mut PlayerSlot) -> (Vec<SsTrackInfo>, Vec<SsSourceInfo>
             sync: player.track_sync(track).unwrap_or(ssplayer_wgpu::TrackSync::Free),
             frame: player.track_frame(track),
             fade_progress: player.track_fade_progress(track),
+            speed: player.track_speed(track).unwrap_or(0.0),
+            frame_rate: player.track_frame_rate(track).unwrap_or(0),
+            frame_skip_enabled: player.track_frame_skip_enabled(track).unwrap_or(true),
+            direction: player.track_playback_direction(track).unwrap_or(ssplayer_wgpu::PlaybackDirection::Forward),
+            style: player.track_playback_style(track).unwrap_or(ssplayer_wgpu::PlaybackStyle::Normal),
+            loop_count: player.track_loop_count(track),
+            finished: player.is_track_finished(track),
+            just_looped: player.track_just_looped(track),
+            outgoing_event_threshold: player.track_outgoing_event_threshold(track).unwrap_or(f32::INFINITY),
         })
         .collect();
     slot.added_sources.retain(|(source, _, _)| player.source_weight(*source).is_some());

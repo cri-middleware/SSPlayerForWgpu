@@ -25,7 +25,7 @@ use bevy::render::render_resource::{Extent3d, TextureDimension, TextureFormat, T
 use bevy::render::view::Msaa;
 use bevy::sprite::Sprite;
 use bevy::window::WindowPlugin;
-use ssplayer_bevy::{PlaybackDirection, SsPlay, SsPlayback, SsPlaybackState, SsPlayer, SsPlayerPlugin, SsSeek, SsStop, SsTrackCommand, SsTrackState, SsTransform, TrackCommand, TrackSync};
+use ssplayer_bevy::{PlaybackDirection, PlaybackStyle, SsPlay, SsPlayback, SsPlaybackState, SsPlayer, SsPlayerPlugin, SsSeek, SsStop, SsTrackCommand, SsTrackState, SsTransform, TrackCommand, TrackSync};
 use std::path::Path;
 use std::sync::{Arc, Mutex};
 
@@ -465,6 +465,47 @@ fn track_commands_reach_the_stack_and_it_crosses_back() {
     }
     let stack = app.world().entity(player).get::<SsTrackState>().unwrap();
     assert_eq!(stack.sources[0].weight, 0.25, "the weight sent by handle did not land");
+}
+
+/// A track's playback settings reach the track they name and come back through
+/// `SsTrackState`, the loop count after the animation it is for.
+#[test]
+fn track_playback_settings_reach_the_track_and_cross_back() {
+    if !fixtures_present() {
+        eprintln!("assets not generated, skipping");
+        return;
+    }
+    let Some((mut app, handle, _captured)) = headless_app() else {
+        eprintln!("no GPU adapter available, skipping");
+        return;
+    };
+
+    app.world_mut().spawn((Camera2d, Camera { clear_color: ClearColorConfig::Custom(Color::BLACK), ..default() }, RenderTarget::Image(handle.into()), Msaa::Off));
+    let character = masked_character(app.world());
+    let player = app.world_mut().spawn(character).id();
+    for command in [
+        TrackCommand::SetAnimation { track: 1, animation: MASK_ANIM.into() },
+        TrackCommand::SetSpeed { track: 1, speed: 0.5 },
+        TrackCommand::SetFrameRate { track: 1, fps: 24 },
+        TrackCommand::SetFrameSkipEnabled { track: 1, enabled: false },
+        TrackCommand::SetPlaybackDirection { track: 1, direction: PlaybackDirection::Backward, style: PlaybackStyle::PingPong },
+        TrackCommand::SetLoopCount { track: 1, count: 2 },
+        TrackCommand::SetOutgoingEventThreshold { track: 1, threshold: 0.5 },
+    ] {
+        app.world_mut().write_message(SsTrackCommand { entity: player, command });
+    }
+
+    app.finish();
+    app.cleanup();
+    pump(&mut app);
+
+    let stack = app.world().entity(player).get::<SsTrackState>().expect("SsTrackState is a required component of SsPlayer and must be present").clone();
+    let track = stack.tracks.get(1).unwrap_or_else(|| panic!("SetAnimation did not open track 1: {stack:?}"));
+    assert_eq!((track.speed, track.frame_rate, track.frame_skip_enabled), (0.5, 24, false));
+    assert_eq!((track.direction, track.style), (PlaybackDirection::Backward, PlaybackStyle::PingPong));
+    assert_eq!(track.loop_count, Some(2));
+    assert_eq!(track.outgoing_event_threshold, 0.5);
+    assert_eq!(stack.tracks[0].outgoing_event_threshold, f32::INFINITY, "track 0 is untouched");
 }
 
 /// `SsPlay` with a start frame lands there, like `play_from`, even when sent

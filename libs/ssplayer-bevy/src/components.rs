@@ -190,6 +190,11 @@ pub struct SsTrackCommand {
 
 /// What an [`SsTrackCommand`] does. Each variant is the
 /// [`ssplayer_wgpu::SSPlayer`] call of the same name.
+///
+/// A track's playback settings (`SetSpeed` to `SetPlaybackDirection`) are the
+/// track's: they reach every animation on it, and every one laid on it later.
+/// Track 0's come from [`SsPlayback`], which is applied every frame, so set
+/// them there rather than with a command on track 0.
 #[derive(Clone, Debug, PartialEq)]
 pub enum TrackCommand {
     /// Lay `animation` on `track`, replacing what it played.
@@ -213,6 +218,20 @@ pub enum TrackCommand {
     SetFrame { track: u32, frame: f32 },
     /// `track`'s own speed; `0` parks it.
     SetSpeed { track: u32, speed: f32 },
+    /// The frame rate `track` plays at instead of the authored one; `0` clears it.
+    SetFrameRate { track: u32, fps: i32 },
+    /// Whether `track` drops frames to keep to the wall clock.
+    SetFrameSkipEnabled { track: u32, enabled: bool },
+    /// Which way `track` plays, and what it does at the far end.
+    SetPlaybackDirection { track: u32, direction: PlaybackDirection, style: PlaybackStyle },
+    /// How many times `track`'s animation plays before it holds its last
+    /// frame; `-1` (or `0`) loops forever. It belongs to the animation: send it
+    /// after the one it is for, since each is laid looping forever.
+    SetLoopCount { track: u32, count: i32 },
+    /// How far into a crossfade on `track` the outgoing animation keeps firing
+    /// events: while its share of the track, `1 - progress`, is at least this.
+    /// `f32::INFINITY` (the default) silences it from the start of the fade.
+    SetOutgoingEventThreshold { track: u32, threshold: f32 },
     /// Lay `animation` on `track` beside what it carries, mixed by `weight`. Its
     /// handle comes back in [`SsTrackState::sources`].
     AddSource { track: u32, animation: String, weight: f32 },
@@ -252,6 +271,22 @@ pub struct SsTrackInfo {
     pub frame: Option<f32>,
     /// How far a fade on the track has got, `0..=1`; `None` when not fading.
     pub fade_progress: Option<f32>,
+    /// The track's speed, frame rate (the override or the authored rate),
+    /// frame skip and heading — what [`TrackCommand::SetSpeed`] and the
+    /// commands after it set.
+    pub speed: f32,
+    pub frame_rate: i32,
+    pub frame_skip_enabled: bool,
+    pub direction: PlaybackDirection,
+    pub style: PlaybackStyle,
+    /// `-1` for a track that loops forever; `None` on an empty track.
+    pub loop_count: Option<i32>,
+    /// The track's animation has played its loop count out and holds its last
+    /// frame.
+    pub finished: bool,
+    /// The last advance wrapped the track's animation back to its start.
+    pub just_looped: bool,
+    pub outgoing_event_threshold: f32,
 }
 
 /// A source added with [`TrackCommand::AddSource`], as it stands.
