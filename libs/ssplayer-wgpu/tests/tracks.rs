@@ -178,6 +178,54 @@ fn fades_report_progress_and_are_rejected_when_malformed() {
     assert!(player.fade_track(9, 0.0, 100.0).is_err());
 }
 
+/// A crossfade on track 0 hands the player over to the incoming animation from
+/// the call on, so the animation it left behind can be selected again. Recorded
+/// only when the fade completed, `set_animation` took the outgoing animation
+/// for the one still selected and did nothing.
+#[test]
+fn a_crossfade_on_track_zero_selects_the_incoming_animation_at_once() {
+    let Some((mut player, names)) = ringo() else { return };
+    player.crossfade(0, &names[1], 400.0).unwrap();
+    assert_eq!(player.current_animation(), Some(names[1].as_str()));
+
+    player.set_animation(&names[1]).unwrap();
+    assert!(player.track_fade_progress(0).is_some(), "the animation already selected: the fade goes on");
+
+    player.set_animation(&names[0]).unwrap();
+    assert_eq!(player.current_animation(), Some(names[0].as_str()));
+    assert!(player.track_fade_progress(0).is_none(), "selecting the outgoing animation again rebuilt the stack");
+}
+
+/// Only track 0 decides the current animation, whichever call lays one on it.
+#[test]
+fn only_track_zero_s_animation_is_the_current_one() {
+    let Some((mut player, names)) = ringo() else { return };
+    player.crossfade(1, &names[1], 400.0).unwrap();
+    player.set_track_animation(1, &names[2]).unwrap();
+    assert_eq!(player.current_animation(), Some(names[0].as_str()));
+
+    player.set_track_animation(0, &names[2]).unwrap();
+    assert_eq!(player.current_animation(), Some(names[2].as_str()));
+}
+
+/// The host's transport holds across a switch of track 0's animation by any
+/// call, as it does across `set_animation`: the loop count, which the runtime
+/// restates per animation, is put back by the player.
+#[test]
+fn track_zero_s_transport_holds_across_a_crossfade() {
+    let Some((mut player, names)) = ringo() else { return };
+    player.set_speed_scale(2.0);
+    player.set_loop_count(3);
+
+    player.crossfade(0, &names[1], 400.0).unwrap();
+    assert_eq!(player.speed_scale(), 2.0);
+    assert_eq!(player.loop_count(), 3);
+
+    player.set_track_animation(0, &names[2]).unwrap();
+    assert_eq!(player.speed_scale(), 2.0);
+    assert_eq!(player.loop_count(), 3);
+}
+
 /// Every track call needs an animation first — there is no stack to address
 /// before `set_animation` has built one.
 #[test]
