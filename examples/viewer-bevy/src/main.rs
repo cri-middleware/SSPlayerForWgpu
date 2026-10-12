@@ -26,12 +26,17 @@
 //! Tracks — the same keys as the native viewer, sent as `SsTrackCommand` and read
 //! back from `SsTrackState`, so what the HUD shows is a frame behind:
 //!
-//! C       crossfade track 0 to the next animation (400ms)
+//! C       crossfade track 0 to the next animation (400ms), by changing
+//!         `SsPlayer::animation` with `transition_ms` set — the one way track 0
+//!         changes hands; Up/Down switch it with `transition_ms` at 0
 //! S       cycle which animation sits on track 1, or take it off
 //! 1 / 2   track 1 alpha down / up      A   track 1 mix / additive
 //! 0       fade track 0 to the rest pose and back
 //! , / .   scrub track 1's frame
 //! Y       track sync free / start, for the whole cast
+//! 3       track 0 speed 1x / 2x / 0.5x      T   track 0 loops once / forever
+//! 4       track 1 loops once / forever      E   outgoing side of a track 0
+//!         crossfade fires events: never / through the first half
 //!
 //! The pack / animation / V / `[` `]` and track keys act on the **focused** member;
 //! focus starts at "all", so they drive the whole cast until you press Tab.
@@ -128,16 +133,23 @@ struct Slot {
     overlay_additive: bool,
     /// Whether `0` has faded track 0 out to the rest pose.
     at_rest: bool,
+    /// Whether `4` asked track 1 to play once. The count belongs to the
+    /// animation on the track, so it is sent again with every overlay laid.
+    overlay_once: bool,
+    /// Whether `E` lets the outgoing side of a track 0 crossfade fire through
+    /// the first half of the fade. Track 0 keeps it across a new animation.
+    outgoing_half: bool,
 }
 
 impl Slot {
     fn new(pack_idx: usize, anim_idx: usize) -> Self {
-        Self { pack_idx, anim_idx, overlay_idx: None, overlay_frame: None, overlay_alpha: 0.5, overlay_additive: false, at_rest: false }
+        Self { pack_idx, anim_idx, overlay_idx: None, overlay_frame: None, overlay_alpha: 0.5, overlay_additive: false, at_rest: false, overlay_once: false, outgoing_half: false }
     }
 
-    /// A new animation or pack collapses the stack to track 0 alone.
+    /// A new animation or pack collapses the stack to track 0 alone. Track 0's
+    /// outgoing event threshold stays: the runtime keeps it across a setup.
     fn clear_tracks(&mut self) {
-        *self = Self::new(self.pack_idx, self.anim_idx);
+        *self = Self { outgoing_half: self.outgoing_half, ..Self::new(self.pack_idx, self.anim_idx) };
     }
 }
 
@@ -291,6 +303,8 @@ fn handle_input(
                 if !info.anims.is_empty() {
                     let m = info.anims.len() as i32;
                     slot.anim_idx = ((slot.anim_idx as i32 + anim_step) % m + m) as usize % info.anims.len();
+                    // A switch, rebuilding the tree; C is the crossfade.
+                    player.transition_ms = 0.0;
                     player.animation = info.anims[slot.anim_idx].clone();
                     slot.clear_tracks();
                 }
@@ -358,7 +372,7 @@ fn handle_input(
 /// The track keys, the native viewer's. Each sends an `SsTrackCommand`; what the
 /// stack then holds comes back in `SsTrackState` a frame later, so the keys act on
 /// what `Slot` remembers they last did rather than on that.
-fn handle_track_input(keys: Res<ButtonInput<KeyCode>>, mut state: ResMut<ViewerState>, catalogue: Res<Catalogue>, mut slots: Query<&mut Slot>, mut tracks: MessageWriter<SsTrackCommand>) {
+fn handle_track_input(keys: Res<ButtonInput<KeyCode>>, mut state: ResMut<ViewerState>, catalogue: Res<Catalogue>, mut slots: Query<(&mut Slot, &mut SsPlayer, &mut SsPlayback)>, mut tracks: MessageWriter<SsTrackCommand>) {
     if catalogue.packs.is_empty() {
         return;
     }
@@ -371,7 +385,7 @@ fn handle_track_input(keys: Res<ButtonInput<KeyCode>>, mut state: ResMut<ViewerS
     }
 
     for entity in targets(&state) {
-        let Ok(mut slot) = slots.get_mut(entity) else { continue };
+        let Ok((mut slot, mut player, mut playback)) = slots.get_mut(entity) else { continue };
         let anims = &catalogue.packs[slot.pack_idx].anims;
         if anims.is_empty() {
             continue;
@@ -381,10 +395,33 @@ fn handle_track_input(keys: Res<ButtonInput<KeyCode>>, mut state: ResMut<ViewerS
         };
 
         // C: crossfade track 0 to the next animation, without rebuilding the
-        // tree. `Slot` follows so the HUD names it and Up/Down carry on from it.
+        // tree. Track 0 changes hands through `animation` alone; `transition_ms`
+        // makes the change a crossfade. `Slot` follows so the HUD names it and
+        // Up/Down carry on from it.
         if keys.just_pressed(KeyCode::KeyC) {
             slot.anim_idx = (slot.anim_idx + 1) % anims.len();
-            send(TrackCommand::Crossfade { track: 0, animation: anims[slot.anim_idx].clone(), duration_ms: 400.0 });
+            player.transition_ms = 400.0;
+            player.animation = anims[slot.anim_idx].clone();
+        }
+        // 3: track 0's speed, which `SsPlayback` owns.
+        if keys.just_pressed(KeyCode::Digit3) {
+            playback.speed_scale = if playback.speed_scale == 1.0 {
+                2.0
+            } else if playback.speed_scale == 2.0 {
+                0.5
+            } else {
+                1.0
+            };
+        }
+        // T: track 0's loop count, which `SsPlayback` owns too.
+        if keys.just_pressed(KeyCode::KeyT) {
+            playback.loop_count = if playback.loop_count == 1 { -1 } else { 1 };
+        }
+        // E: whether the outgoing side of a track 0 crossfade fires events.
+        if keys.just_pressed(KeyCode::KeyE) {
+            slot.outgoing_half = !slot.outgoing_half;
+            let threshold = if slot.outgoing_half { 0.5 } else { f32::INFINITY };
+            send(TrackCommand::SetOutgoingEventThreshold { track: 0, threshold });
         }
         // S: walk track 1 through the pack's animations, then back to empty.
         if keys.just_pressed(KeyCode::KeyS) {
@@ -400,6 +437,9 @@ fn handle_track_input(keys: Res<ButtonInput<KeyCode>>, mut state: ResMut<ViewerS
                     send(TrackCommand::SetAlpha { track: 1, alpha: slot.overlay_alpha });
                     let blend = if slot.overlay_additive { TrackBlend::Additive } else { TrackBlend::Mix };
                     send(TrackCommand::SetBlend { track: 1, blend });
+                    if slot.overlay_once {
+                        send(TrackCommand::SetLoopCount { track: 1, count: 1 });
+                    }
                     slot.overlay_frame = None;
                 }
                 None => send(TrackCommand::Clear { track: 1 }),
@@ -414,6 +454,11 @@ fn handle_track_input(keys: Res<ButtonInput<KeyCode>>, mut state: ResMut<ViewerS
         if alpha_step != 0 {
             slot.overlay_alpha = (slot.overlay_alpha + alpha_step as f32 * 0.1).max(0.0);
             send(TrackCommand::SetAlpha { track: 1, alpha: slot.overlay_alpha });
+        }
+        // 4: track 1 plays once and holds its last frame, or loops forever.
+        if keys.just_pressed(KeyCode::Digit4) {
+            slot.overlay_once = !slot.overlay_once;
+            send(TrackCommand::SetLoopCount { track: 1, count: if slot.overlay_once { 1 } else { -1 } });
         }
         // A: track 1 mix / additive.
         if keys.just_pressed(KeyCode::KeyA) {
@@ -435,7 +480,7 @@ fn handle_track_input(keys: Res<ButtonInput<KeyCode>>, mut state: ResMut<ViewerS
     // needs no overlay.
     if keys.just_pressed(KeyCode::Digit0) {
         for entity in targets(&state) {
-            let Ok(mut slot) = slots.get_mut(entity) else { continue };
+            let Ok((mut slot, _, _)) = slots.get_mut(entity) else { continue };
             slot.at_rest = !slot.at_rest;
             let target = if slot.at_rest { 0.0 } else { 1.0 };
             tracks.write(SsTrackCommand { entity, command: TrackCommand::FadeTrack { track: 0, target, duration_ms: 500.0 } });
@@ -542,6 +587,9 @@ fn playback_events(
             SsEvent::UserData(data) => state.last_event = format!("user data on part {}", data.part_index),
             SsEvent::Signal(signal) => state.last_event = format!("signal {:?}", signal.command_id),
         }
+        // Which source fired it: on a track 0 crossfade, the main source is the
+        // incoming side and any other the outgoing one.
+        state.last_event.push_str(&format!(" from source {}", message.event.source()));
     }
     for _ in finished.read() {
         state.last_event = "finished".into();
@@ -615,9 +663,14 @@ fn refresh_hud(state: Res<ViewerState>, catalogue: Res<Catalogue>, members: Quer
         // The stack as the render world last left it, a frame behind.
         if let Some(track0) = stack.tracks.first() {
             let fading = track0.fade_progress.map(|p| format!(", fading {:.0}%", p * 100.0)).unwrap_or_default();
-            if track0.alpha < 0.999 || !fading.is_empty() {
-                out.push_str(&format!("      track 0 alpha {:.2}{fading}\n", track0.alpha));
-            }
+            let main = track0.main_source.map(|h| h.to_string()).unwrap_or_else(|| "-".into());
+            let loops = match track0.loop_count {
+                Some(n) if n > 0 => format!("{n}x"),
+                _ => "forever".into(),
+            };
+            let finished = if playstate.finished { ", finished" } else { "" };
+            let outgoing = if track0.outgoing_event_threshold.is_finite() { format!("{:.1}", track0.outgoing_event_threshold) } else { "never".into() };
+            out.push_str(&format!("      track 0 source {main} alpha {:.2}{fading}, speed {:.1}x, loops {loops}{finished}, outgoing fires {outgoing}\n", track0.alpha, track0.speed));
         }
         if let (Some(oi), Some(track1)) = (slot.overlay_idx, stack.tracks.get(1)) {
             let name = catalogue.packs.get(slot.pack_idx).and_then(|p| p.anims.get(oi)).map(String::as_str).unwrap_or("?");
@@ -626,12 +679,17 @@ fn refresh_hud(state: Res<ViewerState>, catalogue: Res<Catalogue>, members: Quer
                 Some(f) => format!(", scrubbed to frame {f:.0}"),
                 None => track1.frame.map(|f| format!(", frame {f:.0}")).unwrap_or_default(),
             };
-            out.push_str(&format!("      track 1 {name} alpha {:.2} {blend}{at}\n", track1.alpha));
+            let loops = match track1.loop_count {
+                Some(n) if n > 0 => format!(", loops {n}x"),
+                _ => String::new(),
+            };
+            let finished = if track1.finished { ", finished" } else { "" };
+            out.push_str(&format!("      track 1 {name} alpha {:.2} {blend}{at}{loops}{finished}\n", track1.alpha));
         }
     }
 
     out.push_str(&format!("last event: {}\n", state.last_event));
-    out.push_str("Space pause  Left/Right pack  Up/Down anim  R restart  +/- cast  Tab focus\nL layout  O order  V hide  [ ] alpha  F flip-Y  Esc quit  (drop a .ssab to play it)\nC crossfade  S track 1  1/2 track 1 alpha  A mix/additive  0 rest pose  , . scrub  Y sync");
+    out.push_str("Space pause  Left/Right pack  Up/Down anim  R restart  +/- cast  Tab focus\nL layout  O order  V hide  [ ] alpha  F flip-Y  Esc quit  (drop a .ssab to play it)\nC crossfade  S track 1  1/2 track 1 alpha  A mix/additive  0 rest pose  , . scrub  Y sync\n3 speed  T track 0 loops  4 track 1 loops  E outgoing events");
     **text = out;
 }
 

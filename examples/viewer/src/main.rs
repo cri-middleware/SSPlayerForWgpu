@@ -34,11 +34,23 @@
 // , / .       scrub track 1's frame — how a tracking-driven axis is driven
 // Y           track sync free / start — whether what C and S lay on starts at
 //             track 0's phase, so a run laid over a walk keeps its stride
+// 3           track 0 speed 1x / 2x / 0.5x — a crossfade's incoming animation
+//             plays at it, and keeps it once the fade is over
+// T           track 0 loop count once / forever — whether the animation a
+//             crossfade hands track 0 to ends, and the one it left does not
+// 4           track 1 loop count once / forever — an overlay that ends holds
+//             its last frame and says so
+// E           the outgoing side of a track 0 crossfade fires events: never /
+//             through the first half of the fade
+//
+// The status block shows track 0's current animation as the player reports
+// it, which changes when a crossfade begins, and the events of the last
+// updates with the source that fired them.
 //
 // The pack, animation, visibility, culling and alpha keys act on the **focused** member;
 // focus starts at "all", so they drive the whole cast until you press Tab.
 
-use ssplayer_wgpu::{MaskBackend, Placement, SSPack, SSPlayer, SSRenderer, SSScene, SceneConfig, TrackBlend, TrackSync};
+use ssplayer_wgpu::{MaskBackend, Placement, SSPack, SSPlayer, SSRenderer, SSScene, SceneConfig, SsEvent, TrackBlend, TrackSync};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
@@ -94,7 +106,14 @@ struct Member {
     /// Where the overlay's playhead is parked when it is being scrubbed rather
     /// than played — the shape a tracking-driven axis has.
     overlay_frame: Option<f32>,
+    /// The last events this member fired, newest last, with the source that
+    /// fired them: which side of a crossfade a footstep came from is the thing
+    /// to watch.
+    event_log: std::collections::VecDeque<String>,
 }
+
+/// How many events a member's log keeps.
+const EVENT_LOG_LEN: usize = 6;
 
 /// (Re)create the depth/stencil render target at the given size.
 fn create_stencil_view(device: &Device, width: u32, height: u32) -> wgpu::TextureView {
@@ -198,6 +217,22 @@ impl AppState {
         let started = Instant::now();
         self.scene.update(&mut self.renderer, &self.device, &self.queue, delta, &mut players);
         self.last_update_ms = started.elapsed().as_secs_f64() * 1.0e3;
+
+        for member in &mut self.cast {
+            let main = member.player.track_main_source(0);
+            for event in member.player.events() {
+                let kind = match event {
+                    SsEvent::UserData(_) => "user data",
+                    SsEvent::Signal(_) => "signal",
+                    SsEvent::Audio(_) => "audio",
+                };
+                let side = if Some(event.source()) == main { "track 0".to_string() } else { format!("source {}", event.source()) };
+                if member.event_log.len() == EVENT_LOG_LEN {
+                    member.event_log.pop_front();
+                }
+                member.event_log.push_back(format!("{kind} on {} at frame {}, from {side}", event.part_name(), event.frame_no()));
+            }
+        }
     }
 
     /// Switch the cast between laying animations on from their head and laying
@@ -299,7 +334,7 @@ impl AppState {
     /// loads what it plays, and that call brings the pack's atlases and the packs
     /// its instance parts reference with it.
     fn spawn_member(&mut self, pack_idx: usize, anim_idx: usize) {
-        self.cast.push(Member { player: SSPlayer::new(), pack_idx, anim_idx, overlay_idx: None, overlay_frame: None });
+        self.cast.push(Member { player: SSPlayer::new(), pack_idx, anim_idx, overlay_idx: None, overlay_frame: None, event_log: Default::default() });
 
         let idx = self.cast.len() - 1;
         self.apply_pack(idx, pack_idx);
@@ -544,6 +579,42 @@ impl AppState {
         member.anim_idx = next;
     }
 
+    /// Cycle track 0's speed through 1x, 2x and 0.5x.
+    fn cycle_speed(&mut self, idx: usize) {
+        let player = &mut self.cast[idx].player;
+        let speed = player.speed_scale();
+        let next = if speed == 1.0 {
+            2.0
+        } else if speed == 2.0 {
+            0.5
+        } else {
+            1.0
+        };
+        player.set_speed_scale(next);
+    }
+
+    /// Play track 0 once, or loop it forever.
+    fn toggle_loop_count(&mut self, idx: usize) {
+        let player = &mut self.cast[idx].player;
+        let next = if player.loop_count() == 1 { -1 } else { 1 };
+        player.set_loop_count(next);
+    }
+
+    /// Play the overlay once, or loop it forever.
+    fn toggle_overlay_loop_count(&mut self, idx: usize) {
+        let player = &mut self.cast[idx].player;
+        let next = if player.track_loop_count(1) == Some(1) { -1 } else { 1 };
+        let _ = player.set_track_loop_count(1, next);
+    }
+
+    /// Let the outgoing side of a track 0 crossfade fire through the first half
+    /// of the fade, or not at all.
+    fn toggle_outgoing_events(&mut self, idx: usize) {
+        let player = &mut self.cast[idx].player;
+        let next = if player.track_outgoing_event_threshold(0) == Some(0.5) { f32::INFINITY } else { 0.5 };
+        let _ = player.set_track_outgoing_event_threshold(0, next);
+    }
+
     /// Place the cast and stack it front to back.
     ///
     /// Placement is per player — the projection belongs to the
@@ -630,12 +701,23 @@ impl AppState {
             };
             println!(" {marker} #{} {pack} / {anim} order {} alpha {:.2} nodes {}{hidden}", i + 1, member.player.order(), member.player.alpha(), member.player.instance_node_count());
 
-            // The track stack, when there is one to show.
-            let track0 = member.player.track_alpha(0).unwrap_or(1.0);
-            let fading = member.player.track_fade_progress(0).map(|p| format!(", fading {:.0}%", p * 100.0)).unwrap_or_default();
-            if track0 < 0.999 || !fading.is_empty() {
-                println!("      track 0 alpha {track0:.2}{fading}");
-            }
+            // The track stack. Track 0's animation is the player's own answer,
+            // which a crossfade changes when it begins.
+            let player = &member.player;
+            let track0 = player.track_alpha(0).unwrap_or(1.0);
+            let fading = player.track_fade_progress(0).map(|p| format!(", fading {:.0}%", p * 100.0)).unwrap_or_default();
+            let main = player.track_main_source(0).map(|h| h.to_string()).unwrap_or_else(|| "-".into());
+            let loops = match player.loop_count() {
+                n if n > 0 => format!("{n}x"),
+                _ => "forever".into(),
+            };
+            let finished = if player.is_finished() { ", finished" } else { "" };
+            let outgoing = match player.track_outgoing_event_threshold(0) {
+                Some(t) if t.is_finite() => format!("{t:.1}"),
+                _ => "never".into(),
+            };
+            println!("      track 0 {} (source {main}) alpha {track0:.2}{fading}", player.current_animation().unwrap_or("none"));
+            println!("        speed {:.1}x, loops {loops}{finished}, outgoing fires {outgoing}", player.speed_scale());
             if let Some(oi) = member.overlay_idx {
                 let name = self.pack_anims.get(member.pack_idx).and_then(|n| n.get(oi)).map(String::as_str).unwrap_or("?");
                 let a = member.player.track_alpha(1).unwrap_or(0.0);
@@ -644,7 +726,15 @@ impl AppState {
                     _ => "mix",
                 };
                 let scrub = member.overlay_frame.map(|f| format!(", scrubbed to frame {f:.0}")).unwrap_or_default();
-                println!("      track 1 {name} alpha {a:.2} {blend}{scrub}");
+                let loops = match member.player.track_loop_count(1) {
+                    Some(n) if n > 0 => format!(", loops {n}x"),
+                    _ => String::new(),
+                };
+                let finished = if member.player.is_track_finished(1) { ", finished" } else { "" };
+                println!("      track 1 {name} alpha {a:.2} {blend}{scrub}{loops}{finished}");
+            }
+            for line in &member.event_log {
+                println!("      event: {line}");
             }
         }
 
@@ -678,7 +768,9 @@ impl AppState {
         println!(" C  - Crossfade to next anim S     - Cycle track 1 overlay");
         println!(" 1/2 - Track 1 alpha down / up A     - Track 1 mix / additive");
         println!(" 0  - Fade track 0 to rest pose , /. - Scrub track 1 frame");
-        println!(" Y  - Track sync free / start");
+        println!(" Y  - Track sync free / start 3     - Track 0 speed 1x / 2x / 0.5x");
+        println!(" T  - Track 0 loops once / forever 4     - Track 1 loops once / forever");
+        println!(" E  - Outgoing side of a track 0 crossfade fires: never / first half");
         println!(" Drop a .ssab or a folder on the window to play it");
         println!("====================================================");
     }
@@ -978,6 +1070,30 @@ impl ApplicationHandler for App {
                     let delta = if c == "." { 1.0 } else { -1.0 };
                     for idx in state.targets() {
                         state.scrub_overlay(idx, delta);
+                    }
+                    state.refresh_status();
+                }
+                winit::keyboard::Key::Character(ref c) if c == "3" => {
+                    for idx in state.targets() {
+                        state.cycle_speed(idx);
+                    }
+                    state.refresh_status();
+                }
+                winit::keyboard::Key::Character(ref c) if c.eq_ignore_ascii_case("t") => {
+                    for idx in state.targets() {
+                        state.toggle_loop_count(idx);
+                    }
+                    state.refresh_status();
+                }
+                winit::keyboard::Key::Character(ref c) if c == "4" => {
+                    for idx in state.targets() {
+                        state.toggle_overlay_loop_count(idx);
+                    }
+                    state.refresh_status();
+                }
+                winit::keyboard::Key::Character(ref c) if c.eq_ignore_ascii_case("e") => {
+                    for idx in state.targets() {
+                        state.toggle_outgoing_events(idx);
                     }
                     state.refresh_status();
                 }
