@@ -201,7 +201,7 @@ fn setup(mut commands: Commands, asset_server: Res<AssetServer>) {
     let start = catalogue.initial;
     if let Some(info) = catalogue.packs.get(start) {
         for i in 0..INITIAL_CAST {
-            let entity = commands.spawn((SsPlayer { pack: asset_server.load(&info.path), animation: info.anims.first().cloned().unwrap_or_default() }, Slot::new(start, 0), SsPlayback { order: i as i32, ..default() })).id();
+            let entity = commands.spawn((SsPlayer { pack: asset_server.load(&info.path), animation: info.anims.first().cloned().unwrap_or_default(), ..default() }, Slot::new(start, 0), SsPlayback { order: i as i32, ..default() })).id();
             cast.push(entity);
         }
     }
@@ -313,7 +313,9 @@ fn handle_input(
         // Start the newcomer on whatever the last one plays.
         let (pack_idx, anim_idx) = state.cast.last().and_then(|&e| players.get(e).ok().map(|(_, _, slot)| (slot.pack_idx, slot.anim_idx))).unwrap_or((catalogue.initial, 0));
         if let Some(info) = catalogue.packs.get(pack_idx) {
-            let entity = commands.spawn((SsPlayer { pack: asset_server.load(&info.path), animation: info.anims.get(anim_idx).cloned().unwrap_or_default() }, Slot::new(pack_idx, anim_idx), SsPlayback { order: state.cast.len() as i32, ..default() })).id();
+            let entity = commands
+                .spawn((SsPlayer { pack: asset_server.load(&info.path), animation: info.anims.get(anim_idx).cloned().unwrap_or_default(), ..default() }, Slot::new(pack_idx, anim_idx), SsPlayback { order: state.cast.len() as i32, ..default() }))
+                .id();
             state.cast.push(entity);
         }
     }

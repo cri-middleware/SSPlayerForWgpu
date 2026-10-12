@@ -87,7 +87,7 @@ fn setup(mut commands: Commands, asset_server: Res<AssetServer>) {
     commands.spawn(Sprite { color: Color::srgb(0.10, 0.11, 0.15), custom_size: Some(Vec2::splat(100_000.0)), ..default() });
 
     let (_, pack, anim) = SCENES[0];
-    let character = commands.spawn((SsPlayer { pack: asset_server.load(pack), animation: anim.into() }, SsTransform { scale_x: 0.7, scale_y: 0.7, ..default() }, SsPlayback::default())).id();
+    let character = commands.spawn((SsPlayer { pack: asset_server.load(pack), animation: anim.into(), ..default() }, SsTransform { scale_x: 0.7, scale_y: 0.7, ..default() }, SsPlayback::default())).id();
 
     commands.spawn((Text::new(""), TextFont { font_size: bevy::text::FontSize::Px(15.0), ..default() }, TextColor(Color::WHITE), Node { position_type: PositionType::Absolute, top: Val::Px(8.0), left: Val::Px(10.0), ..default() }, Hud));
 

@@ -41,7 +41,7 @@ fn setup(mut commands: Commands, asset_server: Res<AssetServer>) {
     commands.spawn((Camera2d, Msaa::Off, CompositingSpace::Srgb));
 
     commands.spawn((
-        SsPlayer { pack: asset_server.load("Ringo/Ringo.ssab"), animation: "wait1".into() },
+        SsPlayer { pack: asset_server.load("Ringo/Ringo.ssab"), animation: "wait1".into(), ..default() },
         SsTransform { scale_x: 0.6, scale_y: 0.6, ..default() },
         SsPlayback { order: 1, ..default() },
     ));

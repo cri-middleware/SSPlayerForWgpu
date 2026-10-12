@@ -16,7 +16,8 @@ use crate::asset::SsPack;
 /// Changing `pack` or `animation` rebuilds the playback tree on the next frame,
 /// and so does the pack's file changing under a hot-reloading app; everything
 /// else is allocation-free transport, which is why placement and playback sit in
-/// their own components.
+/// their own components. The one exception is a change of `animation` with a
+/// `transition_ms` above zero: that crossfades instead, on the tree in place.
 #[derive(Component, Clone, Debug, Default)]
 #[require(SsTransform, SsPlayback, SsPlaybackState, SsTrackState)]
 pub struct SsPlayer {
@@ -24,7 +25,18 @@ pub struct SsPlayer {
     /// The character appears once the pack and its atlases have loaded.
     pub pack: Handle<SsPack>,
     /// Animation to select. Empty means "do not select one yet".
+    ///
+    /// This is the one way to change track 0's animation: [`TrackCommand`]s
+    /// that would lay one on track 0 are refused, so what this names and what
+    /// track 0 plays never part. Only a change of value acts, so a system may
+    /// write it every frame.
     pub animation: String,
+    /// How a change of `animation` is made: `0` (the default) switches at once,
+    /// rebuilding the tree; above zero crossfades to the new animation over that
+    /// many milliseconds, as [`TrackCommand::Crossfade`] does on other tracks.
+    /// The first animation a character selects, and the first after a change of
+    /// `pack`, is always switched to at once: there is nothing to fade from.
+    pub transition_ms: f32,
 }
 
 /// Where the character sits, in the same terms
@@ -172,7 +184,10 @@ pub struct SsStop {
 /// [`ssplayer_wgpu::SSPlayer`]'s track API performs it.
 ///
 /// Tracks fold onto the setup pose in ascending order; track 0 is what
-/// [`SsPlayer::animation`] sets up. A message rather than a component because
+/// [`SsPlayer::animation`] sets up, and only it: `SetAnimation` and `Crossfade`
+/// on track 0 are refused with a warning.
+/// Crossfade track 0 by changing `animation` with [`SsPlayer::transition_ms`]
+/// set. A message rather than a component because
 /// these are operations, a crossfade above all, rather than a state: write
 /// them with a `MessageWriter<SsTrackCommand>`. Several in one frame apply in
 /// the order they were written. Ones sent before the character's pack has
@@ -197,9 +212,11 @@ pub struct SsTrackCommand {
 /// them there rather than with a command on track 0.
 #[derive(Clone, Debug, PartialEq)]
 pub enum TrackCommand {
-    /// Lay `animation` on `track`, replacing what it played.
+    /// Lay `animation` on `track`, replacing what it played. Not on track 0,
+    /// which [`SsPlayer::animation`] sets.
     SetAnimation { track: u32, animation: String },
-    /// Fade `track` over to `animation` in `duration_ms`.
+    /// Fade `track` over to `animation` in `duration_ms`. Not on track 0: change
+    /// [`SsPlayer::animation`] with [`SsPlayer::transition_ms`] set.
     Crossfade { track: u32, animation: String, duration_ms: f32 },
     /// Drive `track`'s alpha to `target` in `duration_ms`.
     FadeTrack { track: u32, target: f32, duration_ms: f32 },
