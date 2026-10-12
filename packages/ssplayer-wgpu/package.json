@@ -55,6 +55,7 @@
   "files": [
     "dist",
     "wasm",
+    "docs",
     "README.md",
     "README.ja.md",
     "LICENSE.md",

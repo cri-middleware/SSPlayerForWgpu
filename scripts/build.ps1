@@ -18,6 +18,7 @@
 #   packages/ssplayer-wgpu/wasm/                (wasm-pack --target web, and VERSION)
 #   packages/ssplayer-wgpu/dist/                (tsdown; the npm package is published
 #                                                from that directory as it stands)
+#   packages/ssplayer-wgpu/docs/                (the documentation, as Markdown)
 #   examples/web/ssplayer-wgpu/                 (deploy=yes)
 #
 # Playback data is not this script's business at all: converting the SDK's test
@@ -275,6 +276,11 @@ Write-SdkVersion $wasmDir
 # and the prepack check refuses to publish without it.
 Copy-Item -Force (Join-Path $ROOT_DIR "THIRD_PARTY_NOTICES.md") $PKG_DIR
 
+# The documentation of this build, read offline beside it (scripts/copy-docs.mjs),
+# with docs/README.md as the folder's front door. `files` lists docs too.
+Invoke-Checked "copy-docs" { & node (Join-Path $ROOT_DIR "scripts/copy-docs.mjs") (Join-Path $PKG_DIR "docs") }
+Copy-Item -Force (Join-Path $ROOT_DIR "scripts/release-docs/npm-README.md") (Join-Path $PKG_DIR "docs/README.md")
+
 Write-Host ">> pnpm install + build (tsdown) -> packages/ssplayer-wgpu/dist"
 Push-Location $PKG_DIR
 try {
@@ -297,7 +303,7 @@ if ($opts.deploy -eq "yes") {
 }
 
 Write-Host ""
-Write-Host "${APP}: done -> packages/ssplayer-wgpu/ (wasm/ + dist/)"
+Write-Host "${APP}: done -> packages/ssplayer-wgpu/ (wasm/ + dist/ + docs/)"
 Write-Host "${APP}:      publish it with: (cd packages/ssplayer-wgpu; pnpm publish)"
 if ($opts.deploy -eq "yes") {
     Write-Host "${APP}:      -> examples/web/ssplayer-wgpu/"

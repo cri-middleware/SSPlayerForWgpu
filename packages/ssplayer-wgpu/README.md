@@ -147,6 +147,8 @@ export carries them inside it. Both work here through the same `load()` call.
 
 ## Links
 
+- [Documentation](https://cri-middleware.github.io/SSPlayerForWgpu/) — and the same pages for this
+  version, as Markdown, in this package's `docs/` (start at `docs/README.md`), readable offline.
 - [Repository](https://github.com/cri-middleware/SSPlayerForWgpu) — the Rust library, plus native
   C/C++ viewers for Metal, DX12 and Vulkan built on the same core.
 - [Issues](https://github.com/cri-middleware/SSPlayerForWgpu/issues)

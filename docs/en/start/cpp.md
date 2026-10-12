@@ -27,6 +27,7 @@ functions a frame; it renders through **DirectX 12 on Windows, Metal on macOS an
 | `LICENSE.md` | BSD-3-Clause |
 | `LICENSE.ja.md` | a reference translation of it |
 | `THIRD_PARTY_NOTICES.md` | the licences of the Rust crates compiled into the library — what to carry into your acknowledgements |
+| `README.md`, `docs/` | this documentation as Markdown, for the release the zip came from, readable offline |
 
 ## Install
 
@@ -34,7 +35,7 @@ functions a frame; it renders through **DirectX 12 on Windows, Metal on macOS an
 
     Each [`ssplayer-wgpu` Release](https://github.com/cri-middleware/SSPlayerForWgpu/releases?q=ssplayer-wgpu&expanded=true)
     carries one zip per platform under **Assets**, each holding `include/`, `lib/`, `LICENSE.md`,
-    `LICENSE.ja.md` and `THIRD_PARTY_NOTICES.md`:
+    `LICENSE.ja.md`, `THIRD_PARTY_NOTICES.md`, `README.md` and `docs/`:
 
     | Zip | For |
     |---|---|
