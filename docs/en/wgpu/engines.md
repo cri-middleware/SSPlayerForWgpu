@@ -25,7 +25,7 @@ types with no glue between them. So the pin is not a preference, it is the compa
 | Constraint | |
 |---|---|
 | `bevy_render` 0.20 | requires `wgpu ^30` |
-| Slint's `unstable-wgpu-NN` | requires an **exact** wgpu major, and a Vtuber application composes a Slint UI and this player on one device |
+| Slint's `unstable-wgpu-NN` | requires an **exact** wgpu major to compose a Slint UI and this player on one device |
 
 Check Slint's supported major before bumping. A mismatch is a compile error rather than a runtime
 surprise, which is the one good thing about it.

@@ -21,7 +21,7 @@ Cargo の workspace はちょうど 1 つの `wgpu` に解決し、wgpu のメ�
 | 制約 | |
 |---|---|
 | `bevy_render` 0.20 | `wgpu ^30` を要求 |
-| Slint の `unstable-wgpu-NN` | wgpu メジャーの**厳密一致**を要求。そして Vtuber アプリは Slint UI とこの Player を 1 デバイス上で合成します |
+| Slint の `unstable-wgpu-NN` | Slint UI とこの Player を 1 デバイス上で合成するには、wgpu メジャーの**厳密一致**が要る |
 
 上げる前に Slint の対応メジャーを確認してください。不一致が実行時の驚きではなくコンパイルエラーになるのは、この状況で唯一ありがたい点です。
 

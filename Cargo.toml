@@ -61,9 +61,9 @@ ssplayer-wgpu = { path = "libs/ssplayer-wgpu" }
 # stated here and in the adapter's README.
 bevy = { version = "0.20", default-features = false }
 # Versions centralized here so core, the viewer, and the wasm build never drift.
-# Pinned to the 30 line to stay compatible with Slint's `unstable-wgpu-30`: the
-# Vtuber app composes Slint UI and this player on one device, and Slint requires
-# an exact wgpu major. Do not bump without checking Slint's supported major.
+# Pinned to the 30 line to stay compatible with Slint's `unstable-wgpu-30`: a
+# host that composes a Slint UI and this player on one device needs the exact
+# wgpu major Slint names. Do not bump without checking Slint's supported major.
 wgpu = "30.0.1"
 wasm-bindgen = { version = "0.2.129", default-features = false }
 wasm-bindgen-futures = "0.4.79"
