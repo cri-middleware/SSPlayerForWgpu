@@ -8,6 +8,10 @@ is the seam between it and Bevy's two worlds. It lives in its own crate so the
 player never depends on an engine, and so this one can follow Bevy's release
 line without dragging the player along.
 
+The documentation is at <https://cri-middleware.github.io/SSPlayerForWgpu/>. The same pages for this
+version are in this crate's `docs/` as Markdown, readable offline: start at `docs/index.md`; the Bevy
+pages are `docs/start/bevy.md` and `docs/reference/bevy.md`.
+
 ## Supported Bevy
 
 **0.20.x, and no other line.**
