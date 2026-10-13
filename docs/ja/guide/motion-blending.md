@@ -131,7 +131,7 @@ player.set_track_frame_skip_enabled(1, false)?;
 player.set_track_playback_direction(1, PlaybackDirection::Forward, PlaybackStyle::PingPong)?;
 ```
 
-トラック 0 の設定は、再生制御の呼び出しそのものです（`set_speed_scale` がトラック 0 の `set_track_speed`、ほかも同様）。**ループ回数**だけはトラックではなくアニメーションの設定です。アニメーションを載せると無限ループに戻るので、載せた後で指定し、トラックが終わるのを見張ります：
+トラック 0 の設定は、再生制御の呼び出しそのものです（`set_speed_scale` がトラック 0 の `set_track_speed`、ほかも同様）。**ループ回数**だけはトラックではなくアニメーションの設定です。アニメーションを載せると無限ループに戻るので、載せた後で指定し、トラックが終わるのを見張ります。トラック 0 のループ回数は `set_loop_count` で、`set_track_loop_count(0, ...)` も同じ値を書きます。プレーヤは、トラック 0 が切り替わるたびにその値をかけ直します：
 
 ```rust
 player.set_track_animation(2, "hit_react")?;

@@ -1707,12 +1707,18 @@ impl SSPlayer {
 
     /// How many times the track's animation plays before it holds its last
     /// frame; `-1` (or `0`) loops forever. Set it after laying the animation:
-    /// an animation is laid looping forever. Track 0's is
-    /// [`SSPlayer::set_loop_count`], which the player also puts back on every
-    /// animation laid there.
+    /// an animation is laid looping forever. On track 0 this is
+    /// [`SSPlayer::set_loop_count`]: the player keeps the count and puts it
+    /// back on every animation laid there.
     pub fn set_track_loop_count(&mut self, track: u32, count: i32) -> Result<(), SSRuntimeError> {
         let root = self.root.as_mut().ok_or(SSRuntimeError::NotLoaded)?;
-        root.context.set_track_loop_count(track, count)
+        root.context.set_track_loop_count(track, count)?;
+        if track == 0 {
+            // Written past the kept count, the next switch of track 0 would put
+            // the old one back.
+            self.loop_count = Some(count);
+        }
+        Ok(())
     }
 
     /// `-1` for a track that loops forever; `None` for one with no animation.

@@ -387,6 +387,14 @@ fn apply_track_command(slot: &mut PlayerSlot, command: TrackCommand) {
         warn!("ssplayer-bevy: {command:?} refused: track 0's animation is SsPlayer::animation; set transition_ms to crossfade it");
         return;
     }
+    // Likewise its playback settings and loop count are SsPlayback's, which
+    // would undo a command on the next frame, or at the next switch.
+    if let TrackCommand::SetSpeed { track: 0, .. } | TrackCommand::SetFrameRate { track: 0, .. } | TrackCommand::SetFrameSkipEnabled { track: 0, .. } | TrackCommand::SetPlaybackDirection { track: 0, .. } | TrackCommand::SetLoopCount { track: 0, .. } =
+        command
+    {
+        warn!("ssplayer-bevy: {command:?} refused: track 0's playback settings and loop count are SsPlayback's");
+        return;
+    }
     let player = &mut slot.player;
     let result = match &command {
         TrackCommand::SetAnimation { track, animation } => player.set_track_animation(*track, animation),

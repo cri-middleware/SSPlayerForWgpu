@@ -123,7 +123,7 @@ spawn すれば 5 つとも既定値で付きます。
 
 ### モーションブレンディング { #motion-blending }
 
-`SsTrackCommand { entity, command }` は、キャラクターのトラックスタックに対する操作を 1 つ行います。`command` は `TrackCommand` で、各値は `SSPlayer` の同名の呼び出しに対応します（`SetAnimation`・`Crossfade`・`FadeTrack`・`CancelFade`・`Clear`・`SetAlpha`・`SetBlend`・`SetSync`・`SetFrame`・`SetSpeed`・`SetFrameRate`・`SetFrameSkipEnabled`・`SetPlaybackDirection`・`SetLoopCount`・`SetOutgoingEventThreshold`・`AddSource`・`SetSourceWeight`・`SetSourceFrame`・`SetSourceEventThreshold`）。`SetAnimation` と `Crossfade` は、トラック 0 では拒否されます（トラック 0 は `SsPlayer::animation` が設定します）。トラック 0 の再生設定は `SsPlayback` で設定してください。コマンドより `SsPlayback` が優先されます。上の 3 つと違い、**送ったものはすべて、送った順に反映されます**。パックの読み込み前に送ったものは、アニメーションの準備ができてから反映されます。拒否された操作はログに出ます。結果は [`SsTrackState`](#sstrackstate) に戻り、`AddSource` で載せたソースのハンドルもそこで分かります。
+`SsTrackCommand { entity, command }` は、キャラクターのトラックスタックに対する操作を 1 つ行います。`command` は `TrackCommand` で、各値は `SSPlayer` の同名の呼び出しに対応します（`SetAnimation`・`Crossfade`・`FadeTrack`・`CancelFade`・`Clear`・`SetAlpha`・`SetBlend`・`SetSync`・`SetFrame`・`SetSpeed`・`SetFrameRate`・`SetFrameSkipEnabled`・`SetPlaybackDirection`・`SetLoopCount`・`SetOutgoingEventThreshold`・`AddSource`・`SetSourceWeight`・`SetSourceFrame`・`SetSourceEventThreshold`）。`SetAnimation` と `Crossfade` は、トラック 0 では拒否されます（トラック 0 は `SsPlayer::animation` が設定します）。`SetSpeed`・`SetFrameRate`・`SetFrameSkipEnabled`・`SetPlaybackDirection`・`SetLoopCount` も、トラック 0 では拒否されます（トラック 0 の再生設定とループ回数は `SsPlayback` で設定します）。上の 3 つと違い、**送ったものはすべて、送った順に反映されます**。パックの読み込み前に送ったものは、アニメーションの準備ができてから反映されます。拒否された操作はログに出ます。結果は [`SsTrackState`](#sstrackstate) に戻り、`AddSource` で載せたソースのハンドルもそこで分かります。
 
 ```rust
 fn run(mut tracks: MessageWriter<SsTrackCommand>, character: Single<(Entity, &mut SsPlayer)>) {

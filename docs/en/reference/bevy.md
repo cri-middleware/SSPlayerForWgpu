@@ -145,8 +145,9 @@ Sent together in one frame they apply as play, stop, seek.
 `SetSpeed`, `SetFrameRate`, `SetFrameSkipEnabled`, `SetPlaybackDirection`, `SetLoopCount`,
 `SetOutgoingEventThreshold`, `AddSource`, `SetSourceWeight`, `SetSourceFrame`,
 `SetSourceEventThreshold`. `SetAnimation` and `Crossfade` are refused on track 0, which
-`SsPlayer::animation` sets; set track 0's playback settings on `SsPlayback`, which applies them over
-any command. Unlike the
+`SsPlayer::animation` sets, and so are `SetSpeed`, `SetFrameRate`, `SetFrameSkipEnabled`,
+`SetPlaybackDirection` and `SetLoopCount`: track 0's playback settings and loop count are
+`SsPlayback`'s. Unlike the
 three above, **every one applies, in the order written**, and ones sent before the pack has loaded
 wait for the animation. A refused one is logged. The result comes back in
 [`SsTrackState`](#sstrackstate), where an `AddSource` finds its handle.
