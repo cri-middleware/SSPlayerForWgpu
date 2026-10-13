@@ -118,11 +118,6 @@ jobs:
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          # SpriteStudio-SDK is a private submodule in a different repository, so
-          # the job-scoped GITHUB_TOKEN cannot fetch it. Supply a fine-grained PAT
-          # (or GitHub App token) with read access to it as SDK_SUBMODULE_TOKEN.
-          # Once the SDK is public, drop this line and the secret.
-          token: ${{ secrets.SDK_SUBMODULE_TOKEN || github.token }}
           submodules: recursive
 
       # build.sh names the SDK release the library links by the submodule's tag
