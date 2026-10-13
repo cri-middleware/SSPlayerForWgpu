@@ -31,12 +31,6 @@ jobs:
           # /api/ and the WebGPU demo at /demo/, and the demo's animation data is
           # converted by ssconverter-cli out of the SDK. So this job needs the
           # submodule, exactly like ci.yml and release.yml.
-          #
-          # SpriteStudio-SDK is a private submodule in a different repository, so
-          # the job-scoped GITHUB_TOKEN cannot fetch it. Supply a fine-grained PAT
-          # (or GitHub App token) with read access to it as SDK_SUBMODULE_TOKEN.
-          # Once the SDK is public, drop this line and the secret.
-          token: ${{ secrets.SDK_SUBMODULE_TOKEN || github.token }}
           submodules: recursive
 
       # --- the documentation half -----------------------------------------
