@@ -11,6 +11,10 @@ Vulkan, DX12 and Metal.
 For the repository as a whole — examples, build scripts, asset generation — see
 the [top-level README](../../README.md).
 
+The documentation is at <https://cri-middleware.github.io/SSPlayerForWgpu/>. The same pages for this
+version are in this crate's `docs/` as Markdown, readable offline: start at `docs/index.md`; the Rust
+pages are `docs/start/rust.md` and `docs/reference/rust.md`.
+
 ## The borrow model
 
 The player does not own the wgpu `Device` / `Queue` / `Surface`, nor the
