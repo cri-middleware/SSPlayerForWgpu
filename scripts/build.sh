@@ -17,6 +17,7 @@
 #   packages/ssplayer-wgpu/wasm/                (wasm-pack --target web, and VERSION)
 #   packages/ssplayer-wgpu/dist/                (tsdown; the npm package is published
 #                                                from that directory as it stands)
+#   packages/ssplayer-wgpu/docs/                (the documentation, as Markdown)
 #   examples/web/ssplayer-wgpu/                 (deploy=yes)
 #
 # Playback data is not this script's business at all: converting the SDK's test
@@ -347,6 +348,11 @@ printf '%s\n' "$SDK_VERSION" > "$PKG_DIR/wasm/VERSION"
 # and the prepack check refuses to publish without it.
 cp "$ROOT_DIR/THIRD_PARTY_NOTICES.md" "$PKG_DIR/"
 
+# The documentation of this build, read offline beside it (scripts/copy-docs.mjs),
+# with docs/README.md as the folder's front door. `files` lists docs too.
+node "$ROOT_DIR/scripts/copy-docs.mjs" "$PKG_DIR/docs"
+cp "$ROOT_DIR/scripts/release-docs/npm-README.md" "$PKG_DIR/docs/README.md"
+
 echo ">> pnpm install + build (tsdown) -> packages/ssplayer-wgpu/dist"
 ( cd "$PKG_DIR" && pnpm install --frozen-lockfile && pnpm run build )
 
@@ -363,7 +369,7 @@ if [ "$DEPLOY" = "yes" ]; then
 fi
 
 echo ""
-echo "$APP: done -> packages/ssplayer-wgpu/ (wasm/ + dist/)"
+echo "$APP: done -> packages/ssplayer-wgpu/ (wasm/ + dist/ + docs/)"
 echo "$APP:      publish it with: (cd packages/ssplayer-wgpu && pnpm publish)"
 if [ "$DEPLOY" = "yes" ]; then
   echo "$APP:      -> examples/web/ssplayer-wgpu/"

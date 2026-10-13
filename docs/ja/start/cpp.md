@@ -23,12 +23,13 @@ title: C / C++ ではじめる
 | `LICENSE.md` | BSD-3-Clause |
 | `LICENSE.ja.md` | その参考訳 |
 | `THIRD_PARTY_NOTICES.md` | ライブラリに組み込まれた Rust クレートのライセンス。謝辞に載せるべきもの |
+| `README.md`、`docs/` | このドキュメントの Markdown（英語）。zip と同じリリースのもので、オフラインで読める |
 
 ## 導入 { #install }
 
 === "リリース版"
 
-    各 [`ssplayer-wgpu` の Release](https://github.com/cri-middleware/SSPlayerForWgpu/releases?q=ssplayer-wgpu&expanded=true) の **Assets** に、プラットフォームごとの zip（`include/` `lib/` `LICENSE.md` `LICENSE.ja.md` `THIRD_PARTY_NOTICES.md`）が付いています：
+    各 [`ssplayer-wgpu` の Release](https://github.com/cri-middleware/SSPlayerForWgpu/releases?q=ssplayer-wgpu&expanded=true) の **Assets** に、プラットフォームごとの zip（`include/` `lib/` `LICENSE.md` `LICENSE.ja.md` `THIRD_PARTY_NOTICES.md` `README.md` `docs/`）が付いています：
 
     | zip | 対象 |
     |---|---|

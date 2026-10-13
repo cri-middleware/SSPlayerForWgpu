@@ -78,7 +78,8 @@ echo "  -h | --help             Show this help"
   echo ""
   echo "Output, in <out>:"
   echo "  ssplayer-wgpu-<platform>-<arch>.zip   include/, lib/ (the library and VERSION),"
-  echo "                                        LICENSE.md, LICENSE.ja.md, THIRD_PARTY_NOTICES.md"
+  echo "                                        LICENSE.md, LICENSE.ja.md, THIRD_PARTY_NOTICES.md,"
+  echo "                                        README.md and docs/ (the documentation)"
   echo "  spritestudio-ssplayer-wgpu-<version>.tgz"
   echo "                                        the npm package, packed by 'npm pack'"
   echo "  SHA256SUMS                            covers every archive above"
@@ -193,6 +194,21 @@ FAILED=""
 fail () { FAILED="${FAILED}
   $1"; }
 
+# Every page a front door links to, looked up in the archive's own listing, so
+# renaming or dropping a page fails the release instead of shipping a link that
+# goes nowhere. <base> is where the links resolve inside the archive.
+#   check_front_door <archive> <front door's text> <listing> <base>
+check_front_door () {
+  links="$(printf '%s\n' "$2" | grep -oE ']\([^):#]+\.md' | sed 's/^](//')"
+  if [ -z "$links" ]; then
+    fail "$1: no page links parsed out of its front door -- the check proved nothing"
+    return
+  fi
+  for link in $links; do
+    printf '%s\n' "$3" | grep -qxF "$4$link" || fail "$1: the front door links to $link, which is not in it"
+  done
+}
+
 # --- check the input ------------------------------------------------------
 # Everything at once. Finding out about the fourth missing platform on the
 # fourth run of a script that takes a matrix build to feed is not a debugging
@@ -228,6 +244,7 @@ else
   [ -f "$IN/$WEB/package.json" ] || fail "$WEB/package.json is missing"
   [ -f "$IN/$WEB/wasm/VERSION" ] || fail "$WEB/wasm/VERSION is missing (the SDK release the wasm links)"
   [ -f "$IN/$WEB/THIRD_PARTY_NOTICES.md" ] || fail "$WEB/THIRD_PARTY_NOTICES.md is missing (the package's files list it)"
+  [ -f "$IN/$WEB/docs/README.md" ] || fail "$WEB/docs/README.md is missing (the documentation build.sh platform=web copies)"
 fi
 
 if [ -n "$FAILED" ]; then
@@ -314,6 +331,11 @@ for p in $NATIVE; do
   cp "$IN/$p/libs/$os/$arch/$lib" "$IN/$p/libs/$os/$arch/VERSION" "$stage/lib/"
   cp "$IN/$p/LICENSE.md" "$IN/$p/LICENSE.ja.md" "$stage/"
   cp "$ROOT_DIR/THIRD_PARTY_NOTICES.md" "$stage/"
+  # The documentation, read offline beside the library it describes
+  # (scripts/copy-docs.mjs). README.md is the zip's front door; verify checks
+  # every page it links to.
+  cp "$ROOT_DIR/scripts/release-docs/zip-README.md" "$stage/README.md"
+  node "$ROOT_DIR/scripts/copy-docs.mjs" "$stage/docs" > /dev/null
 
   zipname="ssplayer-wgpu-$p.zip"
   ( cd "$stage" && zip -qry "$OUT/$zipname" . )
@@ -355,9 +377,10 @@ if [ "$VERIFY" = "yes" ]; then
     lib="$(lib_for "$p")"
     zipname="ssplayer-wgpu-$p.zip"
     names="$(unzip -Z1 "$OUT/$zipname")"
-    for want in "include/ssplayer_wgpu.h" "lib/$lib" "lib/VERSION" "LICENSE.md" "LICENSE.ja.md" "THIRD_PARTY_NOTICES.md"; do
+    for want in "include/ssplayer_wgpu.h" "lib/$lib" "lib/VERSION" "LICENSE.md" "LICENSE.ja.md" "THIRD_PARTY_NOTICES.md" "README.md"; do
       printf '%s\n' "$names" | grep -qx "$want" || fail "$zipname does not contain $want"
     done
+    check_front_door "$zipname" "$(unzip -p "$OUT/$zipname" README.md)" "$names" ""
     # A static library that is a few kilobytes is a link that produced nothing.
     bytes="$(unzip -l "$OUT/$zipname" "lib/$lib" | awk 'NR==4 {print $1}')"
     [ "${bytes:-0}" -gt 262144 ] || fail "$zipname's lib/$lib is only ${bytes:-0} bytes"
@@ -367,9 +390,11 @@ if [ "$VERIFY" = "yes" ]; then
   # is read back rather than the directory it was packed from.
   names="$(tar -tzf "$OUT/$TGZ")"
   for want in "wasm/ssplayer_wgpu_bg.wasm" "wasm/ssplayer_wgpu.js" "wasm/ssplayer_wgpu.d.ts" "wasm/VERSION" \
-              "dist/index.js" "dist/index.d.ts" "dist/element.js" "package.json" "LICENSE.md" "THIRD_PARTY_NOTICES.md"; do
+              "dist/index.js" "dist/index.d.ts" "dist/element.js" "package.json" "LICENSE.md" "THIRD_PARTY_NOTICES.md" \
+              "docs/README.md"; do
     printf '%s\n' "$names" | grep -qx "package/$want" || fail "$TGZ does not contain $want"
   done
+  check_front_door "$TGZ" "$(tar -xzOf "$OUT/$TGZ" package/docs/README.md)" "$names" "package/docs/"
 
   ( cd "$OUT" && sha256 -c SHA256SUMS > /dev/null 2>&1 ) || fail "SHA256SUMS does not match the archives it covers"
 
