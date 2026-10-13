@@ -208,8 +208,8 @@ pub struct SsTrackCommand {
 ///
 /// A track's playback settings (`SetSpeed` to `SetPlaybackDirection`) are the
 /// track's: they reach every animation on it, and every one laid on it later.
-/// Track 0's come from [`SsPlayback`], which is applied every frame, so set
-/// them there rather than with a command on track 0.
+/// Track 0's come from [`SsPlayback`], as its loop count does, so these
+/// commands are refused on track 0.
 #[derive(Clone, Debug, PartialEq)]
 pub enum TrackCommand {
     /// Lay `animation` on `track`, replacing what it played. Not on track 0,
@@ -243,7 +243,8 @@ pub enum TrackCommand {
     SetPlaybackDirection { track: u32, direction: PlaybackDirection, style: PlaybackStyle },
     /// How many times `track`'s animation plays before it holds its last
     /// frame; `-1` (or `0`) loops forever. It belongs to the animation: send it
-    /// after the one it is for, since each is laid looping forever.
+    /// after the one it is for, since each is laid looping forever. Not on
+    /// track 0, whose count is [`SsPlayback::loop_count`].
     SetLoopCount { track: u32, count: i32 },
     /// How far into a crossfade on `track` the outgoing animation keeps firing
     /// events: while its share of the track, `1 - progress`, is at least this.

@@ -2017,7 +2017,8 @@ impl SsPlayerWeb {
 
     /// How many times `track`'s animation plays before it holds its last
     /// frame; `-1` (or `0`) loops forever. Set it after laying the animation:
-    /// one is laid looping forever. Track 0's is `setLoopCount`.
+    /// one is laid looping forever. On track 0 this is `setLoopCount`, and the
+    /// player keeps the count for every animation laid there.
     #[wasm_bindgen(js_name = setTrackLoopCount)]
     pub fn set_track_loop_count(&self, track: u32, count: i32) -> Result<(), JsValue> {
         with_player!(self, |p| p.set_track_loop_count(track, count).map_err(js_err)?)

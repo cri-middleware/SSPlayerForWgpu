@@ -1596,7 +1596,8 @@ int32_t ss_player_track_playback_style(ss_player_t *handle, uint32_t track);
 /*
  How many times `track`'s animation plays before it holds its last frame;
  `-1` (or `0`) loops forever. Set it after laying the animation: one is laid
- looping forever. Track 0's is `ss_player_set_loop_count`.
+ looping forever. On track 0 this is `ss_player_set_loop_count`, and the
+ player keeps the count for every animation laid there.
 
  # Safety
  `handle` must be a live handle or null.

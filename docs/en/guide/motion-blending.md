@@ -174,7 +174,9 @@ player.set_track_playback_direction(1, PlaybackDirection::Forward, PlaybackStyle
 
 Track 0's are the transport calls: `set_speed_scale` is track 0's `set_track_speed`, and so on. The
 **loop count** is the animation's, not the track's — laying an animation starts it looping forever —
-so state it after laying, and watch the track end:
+so state it after laying, and watch the track end. Track 0's is `set_loop_count`, which
+`set_track_loop_count(0, ...)` writes too; the player puts it back on every animation track 0
+switches to:
 
 ```rust
 player.set_track_animation(2, "hit_react")?;

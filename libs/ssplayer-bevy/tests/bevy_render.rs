@@ -779,6 +779,12 @@ fn track_zero_crossfades_by_its_animation_and_refuses_commands() {
     settle(&mut app);
     assert_eq!(track_zero(&app).main_source, walk.main_source, "a command laid an animation on track 0");
 
+    // Track 0's loop count is SsPlayback's: a command would outlast the frame
+    // it was sent in, where a playback setting is written back the next one.
+    app.world_mut().write_message(SsTrackCommand { entity: player, command: TrackCommand::SetLoopCount { track: 0, count: 1 } });
+    settle(&mut app);
+    assert_eq!(track_zero(&app).loop_count, Some(-1), "a command set track 0's loop count");
+
     app.world_mut().entity_mut(player).get_mut::<SsPlayer>().unwrap().animation = "wait1".into();
     settle(&mut app);
     let back = track_zero(&app);

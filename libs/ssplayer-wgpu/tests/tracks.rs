@@ -228,6 +228,23 @@ fn track_zero_s_transport_holds_across_a_crossfade() {
     assert_eq!(player.loop_count(), 3);
 }
 
+/// On track 0 `set_track_loop_count` is `set_loop_count`: the count it writes
+/// is the one put back on the next animation, not the one set before it.
+#[test]
+fn track_zero_s_loop_count_by_either_call_holds_across_a_switch() {
+    let Some((mut player, names)) = ringo() else { return };
+    player.set_track_loop_count(0, 2).unwrap();
+    player.crossfade(0, &names[1], 400.0).unwrap();
+    assert_eq!(player.track_loop_count(0), Some(2), "a count never set with set_loop_count");
+
+    player.set_loop_count(3);
+    player.set_track_loop_count(0, 1).unwrap();
+    player.set_track_animation(0, &names[2]).unwrap();
+    assert_eq!(player.loop_count(), 1, "the count set before it came back");
+    player.set_animation(&names[0]).unwrap();
+    assert_eq!(player.loop_count(), 1);
+}
+
 /// Every track call needs an animation first — there is no stack to address
 /// before `set_animation` has built one.
 #[test]
