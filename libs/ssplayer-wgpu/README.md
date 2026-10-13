@@ -104,9 +104,9 @@ a Rust dependency, a browser and a native shared library.
 
 ## wgpu version
 
-wgpu is pinned to the **30** line, because the Vtuber application composes a
-Slint UI and this player on one device and Slint's `unstable-wgpu-NN` feature
-requires an exact wgpu major. A workspace resolves exactly one wgpu, so this is a
+wgpu is pinned to the **30** line so that a Slint UI and this player can be
+composed on one device: Slint's `unstable-wgpu-NN` feature requires an exact wgpu
+major. A workspace resolves exactly one wgpu, so this is a
 repository-wide constraint: check Slint's supported major before bumping it.
 
 ## Using it in your own project

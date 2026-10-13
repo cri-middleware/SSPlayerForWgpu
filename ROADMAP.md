@@ -148,7 +148,7 @@ player, where every host and the C ABI reach it, and the host half belongs in an
   Shape. Measured against a 256-player frame and not worth their complexity;
   bindless is additionally unavailable on WebGPU.
 - **One player drawn into several views** — a minimap, a split screen, a portal, a
-  Vtuber tool's preview beside its output. `SSScene::update` fuses the timeline
+  tool's preview beside its output. `SSScene::update` fuses the timeline
   advance with the geometry build, so handing one player to two scenes plays it at
   double speed, and splitting the two here would build half of the SDK's
   [Animation Instancing](https://github.com/cri-middleware/SpriteStudio-SDK/blob/HEAD/ROADMAP.md#phase-3-feature-expansion-post-release)
