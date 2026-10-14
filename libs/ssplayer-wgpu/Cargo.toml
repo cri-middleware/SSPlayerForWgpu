@@ -56,3 +56,6 @@ pollster = { version = "1.0.1", optional = true }
 [dev-dependencies]
 pollster = "1.0.1"
 image = { version = "0.25.10", default-features = false, features = ["png"] }
+# Builds the synthetic FrameData the scene's unit tests draw; the runtime's own
+# pin, so it adds no crate to the lockfile.
+flatbuffers = { version = "25.12.19", default-features = false }
