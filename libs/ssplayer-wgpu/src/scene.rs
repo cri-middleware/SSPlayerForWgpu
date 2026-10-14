@@ -10,7 +10,7 @@
 use crate::frame::FrameView;
 use crate::mask::{MaskOp, MaskWriter, ScopedWriter, StencilTest};
 use crate::metrics::{GpuTimer, SceneStats};
-use crate::renderer::{COVERAGE_FORMAT, GeomClass, MESH_DRAW_PRIMS, MESH_PRIM_SHIFT, PipelineKey, PipelineKind, SHADER_PARAM_STRIDE, SHADER_PARAM_STRIDE_F32, SHAPE_FAN_VERTS, SSRenderer, blend_index, ss_shader_entry};
+use crate::renderer::{COVERAGE_FORMAT, GeomClass, MESH_DRAW_PRIMS, MESH_PRIM_SHIFT, PipelineKey, PipelineKind, QUAD_FAN_VERTS, SHADER_PARAM_STRIDE, SHADER_PARAM_STRIDE_F32, SHAPE_FAN_VERTS, SSRenderer, blend_index, ss_shader_entry};
 
 use ssruntime::runtime::effect_draw_plan::ss::runtime::root_as_effect_draw_plan_unchecked;
 use ssruntime::runtime::framedata::ss::runtime::{BlendType, DrawBatchKind, PartAttributeShader, root_as_frame_data_unchecked};
@@ -138,7 +138,7 @@ struct BatchDrawCall {
     key: PipelineKey,
     texture_hash: u32,
     /// The `vertex_index` range to issue. Which primitives that covers is the
-    /// class's own arithmetic — 6 per quad or particle, 30 per shape,
+    /// class's own arithmetic — 12 per quad, 6 per particle, 30 per shape,
     /// one stream entry per mesh vertex.
     vertices: std::ops::Range<u32>,
     /// The `instance_index` range to issue: always one instance, the draw's
@@ -1059,7 +1059,8 @@ impl FrameChunk {
             return;
         }
         let stride = match class {
-            GeomClass::Quad | GeomClass::Effect => 6,
+            GeomClass::Quad => QUAD_FAN_VERTS,
+            GeomClass::Effect => 6,
             GeomClass::Shape => SHAPE_FAN_VERTS,
             // Mesh draws are driven by the stream, not by primitive arithmetic.
             GeomClass::Mesh => return,
@@ -1357,7 +1358,8 @@ impl FrameChunk {
             return;
         }
         let stride = match class {
-            GeomClass::Quad | GeomClass::Effect => 6,
+            GeomClass::Quad => QUAD_FAN_VERTS,
+            GeomClass::Effect => 6,
             GeomClass::Shape => SHAPE_FAN_VERTS,
             // Mesh draws are driven by the stream, not by primitive arithmetic.
             GeomClass::Mesh => return,
@@ -1368,7 +1370,7 @@ impl FrameChunk {
 
     /// Record one sprite quad for `part_idx`: copy the part's world matrix, local
     /// vertices and local UVs into the arena, point `prim` at them and append it.
-    /// The corners themselves are expanded by `vs_quad`.
+    /// `vs_quad` expands the four corners and the centre into a fan.
     fn push_quad_prim(&mut self, frame: &FrameView, node: &NodeSlot, part_idx: usize, prim: Prim) {
         // A part the runtime has no geometry for must not produce a primitive at
         // all: the vertex stage reads whatever its offsets point at.
@@ -1497,8 +1499,8 @@ impl FrameChunk {
             self.arena.extend(f32s(&uvs[vert_first * 8..vert_last * 8]));
 
             // One primitive per particle. The runtime emits every particle as a
-            // quad with the same corner order this player uses (see
-            // `quad_corner`), so no index list has to travel with them.
+            // quad in the corner order `quad_corner` expands, so no index list
+            // has to travel with them.
             let first_prim = self.prims.len() as u32;
             for q in 0..quad_count {
                 let vi = vert_first + q * 4;
@@ -1521,5 +1523,189 @@ impl FrameChunk {
             }
             self.push_draw(key, GeomClass::Effect, texture_hash, first_prim, None);
         }
+    }
+}
+
+/// A Normal part draws as a fan of four triangles around its centre vertex.
+///
+/// Each test draws one synthetic part over a 64 px square and reads back the
+/// pixels whose values tell the fan apart from the two-triangle split and from a
+/// bilinear fill. The square is placed so pixel centres land on whole quarters of
+/// it: pixel `31 + 64 s` is the point `s` of the way across. Every test skips
+/// cleanly when no GPU adapter is available.
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::renderer::Retention;
+    use ssruntime::runtime::framedata::ss::runtime::{DrawBatch, FrameData, FrameDataArgs, PartAttributePartColor, PartState, SsAttributePartColorKeyValueColor, U8Color};
+
+    const SIZE: u32 = 128;
+    /// The square's corners `lt, rt, lb, rb` and its centre, in target pixels
+    /// about the target's middle.
+    const SQUARE: [f32; 10] = [-32.5, -32.5, 31.5, -32.5, -32.5, 31.5, 31.5, 31.5, -0.5, -0.5];
+    /// Local UVs that sample nothing in particular: the white fallback is 1x1.
+    const NO_UVS: [f32; 10] = [0.0; 10];
+    /// The pixel `s` of the way across the square.
+    fn px(s: f32) -> u32 {
+        (31.0 + 64.0 * s) as u32
+    }
+
+    fn gpu() -> Option<(wgpu::Device, wgpu::Queue)> {
+        let instance = wgpu::Instance::new(wgpu::InstanceDescriptor::new_without_display_handle());
+        let adapter = pollster::block_on(instance.request_adapter(&wgpu::RequestAdapterOptions { power_preference: wgpu::PowerPreference::default(), compatible_surface: None, force_fallback_adapter: false, apply_limit_buckets: false })).ok()?;
+        pollster::block_on(adapter.request_device(&wgpu::DeviceDescriptor::default())).ok()
+    }
+
+    /// One part, Mix-blended by `corners` (`lt, rt, lb, rb`, each a grey level
+    /// and a rate), or carrying no PartsColor at all when `corners` is `None`.
+    fn frame_data(corners: Option<[(u8, f32); 4]>) -> Vec<u8> {
+        let mut fbb = flatbuffers::FlatBufferBuilder::new();
+        let mut part = PartState::default();
+        part.set_alpha(1.0);
+        part.set_part_color(if corners.is_some() { 0 } else { -1 });
+        part.set_shader(-1);
+        let parts = fbb.create_vector(&[part]);
+        let parts_color = corners.map(|c| {
+            let corner = |(grey, rate): (u8, f32)| SsAttributePartColorKeyValueColor::new(&U8Color::new(255, grey, grey, grey), rate);
+            fbb.create_vector(&[PartAttributePartColor::new(BlendType::Mix, &corner(c[0]), &corner(c[1]), &corner(c[2]), &corner(c[3]))])
+        });
+        let draw_order = fbb.create_vector(&[0u16]);
+        let draw_batches = fbb.create_vector::<DrawBatch>(&[]);
+        let mask_indices = fbb.create_vector::<u16>(&[]);
+        let root = FrameData::create(&mut fbb, &FrameDataArgs { parts: Some(parts), parts_color, draw_order: Some(draw_order), draw_batches: Some(draw_batches), mask_indices: Some(mask_indices), ..Default::default() });
+        fbb.finish(root, None);
+        fbb.finished_data().to_vec()
+    }
+
+    /// Draw the one part of `frame_data` with `vertices` / `uvs` over opaque
+    /// black, and read the target back as RGBA8.
+    fn draw(device: &wgpu::Device, queue: &wgpu::Queue, renderer: &mut SSRenderer, texture_hash: u32, frame_data: &[u8], vertices: &[f32; 10], uvs: &[f32; 10]) -> Vec<u8> {
+        let format = wgpu::TextureFormat::Rgba8Unorm;
+        let mut scene = SSScene::new(device, &SceneConfig { color_format: format, stencil_format: None, mask: MaskBackend::None });
+        scene.set_viewport(queue, SIZE as f32, SIZE as f32, false);
+        let frame = FrameView { frame_data, world_matrices: &IDENTITY_TRANSFORM, local_vertices: vertices, local_uvs: uvs, ..Default::default() };
+        scene.begin_frame();
+        let node = scene.frame.push_transform(&IDENTITY_TRANSFORM);
+        let batch = BatchInfo { start_rank: 0, count: 1, texture_hash, blend_type: BlendType::Mix, kind: DrawBatchKind::Normal, stencil: StencilTest::None, mask_seq: 0, alpha: 1.0, tint: NO_TINT };
+        scene.frame.append_batch(renderer, &frame, &node, &batch);
+        scene.end_frame(renderer, device, queue);
+
+        let extent = wgpu::Extent3d { width: SIZE, height: SIZE, depth_or_array_layers: 1 };
+        let target = device.create_texture(&wgpu::TextureDescriptor {
+            label: None,
+            size: extent,
+            mip_level_count: 1,
+            sample_count: 1,
+            dimension: wgpu::TextureDimension::D2,
+            format,
+            usage: wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::COPY_SRC,
+            view_formats: &[],
+        });
+        let view = target.create_view(&wgpu::TextureViewDescriptor::default());
+        let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor { label: None });
+        {
+            let mut rpass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+                label: None,
+                color_attachments: &[Some(wgpu::RenderPassColorAttachment { view: &view, resolve_target: None, ops: wgpu::Operations { load: wgpu::LoadOp::Clear(wgpu::Color::BLACK), store: wgpu::StoreOp::Store }, depth_slice: None })],
+                depth_stencil_attachment: None,
+                timestamp_writes: None,
+                occlusion_query_set: None,
+                multiview_mask: None,
+            });
+            assert_eq!(scene.draw(renderer, &mut rpass), 1, "the part was not drawn");
+        }
+        let buffer = device.create_buffer(&wgpu::BufferDescriptor { label: None, size: (SIZE * SIZE * 4) as u64, usage: wgpu::BufferUsages::MAP_READ | wgpu::BufferUsages::COPY_DST, mapped_at_creation: false });
+        encoder.copy_texture_to_buffer(
+            wgpu::TexelCopyTextureInfo { texture: &target, mip_level: 0, origin: wgpu::Origin3d::ZERO, aspect: wgpu::TextureAspect::All },
+            wgpu::TexelCopyBufferInfo { buffer: &buffer, layout: wgpu::TexelCopyBufferLayout { offset: 0, bytes_per_row: Some(SIZE * 4), rows_per_image: Some(SIZE) } },
+            extent,
+        );
+        queue.submit(std::iter::once(encoder.finish()));
+        buffer.slice(..).map_async(wgpu::MapMode::Read, |r| r.unwrap());
+        device.poll(wgpu::PollType::Wait { submission_index: None, timeout: None }).unwrap();
+        let data = buffer.slice(..).get_mapped_range().unwrap().to_vec();
+        buffer.unmap();
+        data
+    }
+
+    /// Assert the red channel at `(x, y)` is `expected` (0..1), give or take the
+    /// rounding of an 8-bit target.
+    fn assert_level(rgba: &[u8], (x, y): (u32, u32), expected: f32, what: &str) {
+        let got = rgba[((y * SIZE + x) * 4) as usize];
+        let want = expected * 255.0;
+        assert!((got as f32 - want).abs() <= 2.0, "{what}: pixel ({x}, {y}) is {got}, expected {want:.1}");
+    }
+
+    /// lt = rb = white and rt = lb = black: the centre takes the mean, grey, and
+    /// a quarter of the way along a diagonal reads 0.75 towards a white corner
+    /// and 0.25 towards a black one. Two triangles would put the centre on the
+    /// black diagonal (0) and the quarter point at 0.5; a bilinear fill would
+    /// read 0.625 there.
+    #[test]
+    fn a_four_corner_colour_shades_as_a_fan() {
+        let Some((device, queue)) = gpu() else {
+            eprintln!("no GPU adapter available, skipping headless render test");
+            return;
+        };
+        let mut renderer = SSRenderer::new(&device);
+        let data = frame_data(Some([(255, 1.0), (0, 1.0), (0, 1.0), (255, 1.0)]));
+        let rgba = draw(&device, &queue, &mut renderer, 0, &data, &SQUARE, &NO_UVS);
+        assert_level(&rgba, (px(0.5), px(0.5)), 0.5, "centre");
+        assert_level(&rgba, (px(0.25), px(0.25)), 0.75, "towards lt");
+        assert_level(&rgba, (px(0.75), px(0.75)), 0.75, "towards rb");
+        assert_level(&rgba, (px(0.75), px(0.25)), 0.25, "towards rt");
+        assert_level(&rgba, (px(0.25), px(0.75)), 0.25, "towards lb");
+    }
+
+    /// The rate is averaged at the centre like the colour. Black blended over the
+    /// white fallback reads `1 - rate`, so lt = rb = 1 and rt = lb = 0 put the
+    /// centre at 0.5 — two triangles would leave it white.
+    #[test]
+    fn a_four_corner_rate_is_averaged_at_the_centre() {
+        let Some((device, queue)) = gpu() else {
+            eprintln!("no GPU adapter available, skipping headless render test");
+            return;
+        };
+        let mut renderer = SSRenderer::new(&device);
+        let data = frame_data(Some([(0, 1.0), (0, 0.0), (0, 0.0), (0, 1.0)]));
+        let rgba = draw(&device, &queue, &mut renderer, 0, &data, &SQUARE, &NO_UVS);
+        assert_level(&rgba, (px(0.5), px(0.5)), 0.5, "centre");
+        assert_level(&rgba, (px(0.25), px(0.25)), 0.25, "towards lt");
+        assert_level(&rgba, (px(0.75), px(0.25)), 0.75, "towards rt");
+    }
+
+    /// The centre is the runtime's fifth local vertex, not the corners' mean
+    /// recomputed here: moved to `(0.375, 0.375)`, the grey of the centre moves
+    /// with it. Centred on the mean, that point would read 0.625.
+    #[test]
+    fn the_centre_is_the_fifth_local_vertex() {
+        let Some((device, queue)) = gpu() else {
+            eprintln!("no GPU adapter available, skipping headless render test");
+            return;
+        };
+        let mut renderer = SSRenderer::new(&device);
+        let data = frame_data(Some([(255, 1.0), (0, 1.0), (0, 1.0), (255, 1.0)]));
+        let mut vertices = SQUARE;
+        [vertices[8], vertices[9]] = [-8.5, -8.5];
+        let rgba = draw(&device, &queue, &mut renderer, 0, &data, &vertices, &NO_UVS);
+        assert_level(&rgba, (px(0.375), px(0.375)), 0.5, "moved centre");
+    }
+
+    /// The centre samples the runtime's fifth local UV. A horizontal ramp, texel
+    /// `i` at level `i`, drawn with the centre's U moved from the middle to a
+    /// quarter: the middle pixel reads a quarter of the ramp, not half of it.
+    #[test]
+    fn the_centre_samples_the_fifth_local_uv() {
+        let Some((device, queue)) = gpu() else {
+            eprintln!("no GPU adapter available, skipping headless render test");
+            return;
+        };
+        let mut renderer = SSRenderer::new(&device);
+        let ramp: Vec<u8> = (0..=255u8).flat_map(|i| [i, i, i, 255]).collect();
+        let hash = 1;
+        renderer.upload_texture(&device, &queue, hash, &ramp, (256, 1), Retention::Retain);
+        let uvs = [0.0, 0.0, 256.0, 0.0, 0.0, 1.0, 256.0, 1.0, 64.0, 0.5];
+        let rgba = draw(&device, &queue, &mut renderer, hash, &frame_data(None), &SQUARE, &uvs);
+        assert_level(&rgba, (px(0.5), px(0.5)), 63.5 / 255.0, "centre");
     }
 }

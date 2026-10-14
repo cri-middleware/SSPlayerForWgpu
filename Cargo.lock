@@ -4927,6 +4927,7 @@ version = "7.0.0-beta.1"
 dependencies = [
  "bytemuck",
  "console_error_panic_hook",
+ "flatbuffers",
  "image",
  "js-sys",
  "pollster",

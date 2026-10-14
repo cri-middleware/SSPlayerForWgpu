@@ -73,8 +73,10 @@ type KeyMap<K, V> = HashMap<K, V, BuildHasherDefault<KeyHasher>>;
 /// that primitive's position / UV / colour come from.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub(crate) enum GeomClass {
-    /// Sprite quad: 6 vertices per primitive, indexless. `vertex_index / 6` is the
-    /// primitive, `% 6` picks a corner through the fixed triangle pattern.
+    /// Sprite quad: [`QUAD_FAN_VERTS`] vertices per primitive, indexless — a fan
+    /// of four triangles around the part's centre vertex. `vertex_index /
+    /// QUAD_FAN_VERTS` is the primitive, the remainder picks a corner or the
+    /// centre through the fixed fan pattern.
     Quad,
     /// Skinned mesh: irregular, so a per-vertex stream drives it — the one class
     /// that cannot be addressed by arithmetic alone. Each entry names its
@@ -122,7 +124,8 @@ impl GeomClass {
 /// other behind.
 fn wgsl_consts() -> String {
     format!(
-        "const SHAPE_FAN_VERTS: u32 = {SHAPE_FAN_VERTS}u;\n\
+        "const QUAD_FAN_VERTS: u32 = {QUAD_FAN_VERTS}u;\n\
+         const SHAPE_FAN_VERTS: u32 = {SHAPE_FAN_VERTS}u;\n\
          const MESH_PRIM_SHIFT: u32 = {MESH_PRIM_SHIFT}u;\n\
          const COVERAGE_HEADER: u32 = {}u;\n\
          const COVERAGE_STRIDE: u32 = {}u;\n\
@@ -139,6 +142,14 @@ fn wgsl_consts() -> String {
 /// writers, and matches what the reference implementation
 /// rasterises, so the two players encode coverage identically.
 pub(crate) const COVERAGE_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Rgba8Unorm;
+
+/// Vertices a sprite-quad primitive occupies: four triangles fanned around the
+/// part's centre vertex.
+///
+/// Two triangles would cut the part along one diagonal, so a deformed part would
+/// fold along it and a four-corner PartsColor would shade along it — neither is
+/// how the Editor draws.
+pub(crate) const QUAD_FAN_VERTS: u32 = 12;
 
 /// Vertices a Shape primitive always occupies, whatever its live vertex count.
 ///
@@ -623,10 +634,17 @@ fn bit_color(info: u32) -> vec4<f32> {
 
 // --- vertex stages --------------------------------------------------------
 
-// Corner order of the two triangles making a quad, matching the index pattern
-// the CPU path emitted (and the one the runtime emits for effect particles).
+// Corner order of the two triangles making an effect particle's quad, the index
+// pattern the runtime emits for them.
 fn quad_corner(j: u32) -> u32 {
     var order = array<u32, 6>(0u, 1u, 2u, 2u, 1u, 3u);
+    return order[j];
+}
+
+// Which of a sprite's five vertices — lt, rt, lb, rb, then the centre (4) —
+// each fan vertex is: `{c,lt,rt, c,rt,rb, c,rb,lb, c,lb,lt}`.
+fn quad_fan_vertex(j: u32) -> u32 {
+    var order = array<u32, 12>(4u, 0u, 1u, 4u, 1u, 3u, 4u, 3u, 2u, 4u, 2u, 0u);
     return order[j];
 }
 
@@ -674,6 +692,26 @@ fn corner_rgba(pi: u32, k: u32) -> vec4<f32> {
     return vec4<f32>(unpack4x8unorm(prims[pi].colors[k]).rgb, prims[pi].alphas[k] * prims[pi].alpha);
 }
 
+// A sprite vertex's colour: a corner's own, or for the centre (4) the mean of
+// the four. Summed in pairs so that four equal corners give that value back
+// exactly — a part without PartsColor must not shade its centre.
+fn quad_rgba(pi: u32, k: u32) -> vec4<f32> {
+    if (k < 4u) {
+        return corner_rgba(pi, k);
+    }
+    return ((corner_rgba(pi, 0u) + corner_rgba(pi, 1u)) + (corner_rgba(pi, 2u) + corner_rgba(pi, 3u))) * 0.25;
+}
+
+// A sprite vertex's rate, averaged at the centre like `quad_rgba`. For a mask
+// writer this is the cutout threshold, which the pairwise sum keeps exact.
+fn quad_rate(pi: u32, k: u32) -> f32 {
+    let r = &prims[pi].rates;
+    if (k < 4u) {
+        return (*r)[k];
+    }
+    return (((*r)[0] + (*r)[1]) + ((*r)[2] + (*r)[3])) * 0.25;
+}
+
 // `varg` = [rate, isMix, isMul, isAddSub]. Only four PartsColor
 // formulas exist, so the mode is two bits on the primitive rather than three
 // floats on every vertex.
@@ -686,10 +724,12 @@ fn varg_of(mode: u32, rate: f32) -> vec4<f32> {
     }
 }
 
+// A sprite as a fan around its centre: the runtime's fifth local vertex and UV,
+// with the mean of the corners' colour and rate.
 @vertex
 fn vs_quad(@builtin(vertex_index) vi: u32) -> VertexOutput {
-    let pi = vi / 6u;
-    let k = quad_corner(vi % 6u);
+    let pi = vi / QUAD_FAN_VERTS;
+    let k = quad_fan_vertex(vi % QUAD_FAN_VERTS);
     let p = &prims[pi];
     let lx = f_arena[(*p).pos_base + k * 2u];
     let ly = f_arena[(*p).pos_base + k * 2u + 1u];
@@ -697,8 +737,8 @@ fn vs_quad(@builtin(vertex_index) vi: u32) -> VertexOutput {
     var out: VertexOutput;
     out.clip_position = to_clip(world_point((*p).aux_base, (*p).node_base, lx, ly));
     out.uv = normalize_uv((*p).uv_base, k);
-    out.color = corner_rgba(pi, k);
-    out.varg = varg_of((*p).mode, (*p).rates[k]);
+    out.color = quad_rgba(pi, k);
+    out.varg = varg_of((*p).mode, quad_rate(pi, k));
     out.cov_uv = cov_uv_of(pi, local_xy((*p).aux_base, lx, ly));
     out.mask_info = prims[pi].mask_info;
     out.cov_base = prims[pi].cov_base;
@@ -803,10 +843,11 @@ fn vs_effect(@builtin(vertex_index) vi: u32) -> VertexOutput {
 const COVERAGE_WGSL: &str = r#"
 // --- bake: rasterise one writer's shape into its bit ----------------------
 
+// The same fan as `vs_quad`, so a writer's bit covers exactly what its part draws.
 @vertex
 fn vs_cov_quad(@builtin(vertex_index) vi: u32) -> VertexOutput {
-    let pi = vi / 6u;
-    let k = quad_corner(vi % 6u);
+    let pi = vi / QUAD_FAN_VERTS;
+    let k = quad_fan_vertex(vi % QUAD_FAN_VERTS);
     let p = &prims[pi];
     let lx = f_arena[(*p).pos_base + k * 2u];
     let ly = f_arena[(*p).pos_base + k * 2u + 1u];
@@ -819,7 +860,7 @@ fn vs_cov_quad(@builtin(vertex_index) vi: u32) -> VertexOutput {
     out.clip_position = cov_clip(out.cov_uv);
     out.uv = normalize_uv((*p).uv_base, k);
     out.color = bit_color((*p).mask_info);
-    out.varg = vec4<f32>((*p).rates[k], 0.0, 0.0, 0.0);
+    out.varg = vec4<f32>(quad_rate(pi, k), 0.0, 0.0, 0.0);
     return out;
 }
 
