@@ -6,6 +6,7 @@
 
 use bevy::asset::RecursiveDependencyLoadState;
 use bevy::ecs::message::MessageCursor;
+use bevy::platform::collections::HashMap;
 use bevy::prelude::*;
 use bevy::render::Extract;
 use bevy::render::sync_world::MainEntity;
@@ -32,7 +33,14 @@ pub(crate) struct ExtractedPlayer {
     pub overrides: Vec<(String, Handle<Image>)>,
 }
 
-/// This frame's hand-off, rebuilt from scratch each extract.
+/// A slot for `extract_players` to fill: what a cast that grew is padded with.
+impl Default for ExtractedPlayer {
+    fn default() -> Self {
+        Self { entity: MainEntity::from(Entity::PLACEHOLDER), pack: AssetId::default(), settled: false, animation: String::new(), transition_ms: 0.0, transform: SsTransform::default(), playback: SsPlayback::default(), overrides: Vec::new() }
+    }
+}
+
+/// This frame's hand-off, written over last frame's each extract.
 ///
 /// The order of `players` is the order the render world keeps them in, which is
 /// what breaks ties between equal `SsPlayback::order` values — so it must not
@@ -82,15 +90,34 @@ pub(crate) fn extract_players(
     stop_list.extend(stop_cursor.read(&stops).map(|stop| MainEntity::from(stop.entity)));
     track_list.clear();
     track_list.extend(track_cursor.read(&track_commands).map(|command| (MainEntity::from(command.entity), command.command.clone())));
-    extracted.players.clear();
-    extracted.players.extend(query.iter().map(|(entity, player, transform, playback, textures)| ExtractedPlayer {
-        entity: MainEntity::from(entity),
-        pack: player.pack.id(),
-        settled: matches!(asset_server.get_recursive_dependency_load_state(&player.pack), Some(RecursiveDependencyLoadState::Loaded | RecursiveDependencyLoadState::Failed(_))),
-        animation: player.animation.clone(),
-        transition_ms: player.transition_ms,
-        transform: *transform,
-        playback: *playback,
-        overrides: textures.map(|t| t.overrides.iter().map(|(name, handle)| (name.clone(), handle.clone())).collect()).unwrap_or_default(),
-    }));
+    // Written over last frame's players rather than rebuilt: each keeps its
+    // strings, so a cast that holds steady allocates nothing here.
+    let count = query.iter().len();
+    extracted.players.truncate(count);
+    extracted.players.resize_with(count, ExtractedPlayer::default);
+    for ((entity, player, transform, playback, textures), out) in query.iter().zip(&mut extracted.players) {
+        out.entity = MainEntity::from(entity);
+        out.pack = player.pack.id();
+        out.settled = matches!(asset_server.get_recursive_dependency_load_state(&player.pack), Some(RecursiveDependencyLoadState::Loaded | RecursiveDependencyLoadState::Failed(_)));
+        out.animation.clone_from(&player.animation);
+        out.transition_ms = player.transition_ms;
+        out.transform = *transform;
+        out.playback = *playback;
+        copy_overrides(&mut out.overrides, textures.map(|t| &t.overrides));
+    }
+}
+
+/// Make `into` a copy of `from`, reusing the names `into` already holds.
+fn copy_overrides(into: &mut Vec<(String, Handle<Image>)>, from: Option<&HashMap<String, Handle<Image>>>) {
+    let Some(from) = from else {
+        into.clear();
+        return;
+    };
+    into.truncate(from.len());
+    let mut from = from.iter();
+    for ((name, handle), (from_name, from_handle)) in into.iter_mut().zip(&mut from) {
+        name.clone_from(from_name);
+        handle.clone_from(from_handle);
+    }
+    into.extend(from.map(|(name, handle)| (name.clone(), handle.clone())));
 }

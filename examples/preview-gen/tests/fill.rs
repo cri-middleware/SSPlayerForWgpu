@@ -3,9 +3,9 @@
 //! The substitution is trivial and the gathering is not, so these run over real
 //! `.ssab` files: a reference pack that needs its atlases beside it, a pack
 //! whose instance parts play from a sibling, and an embedded pack that needs
-//! nothing at all. A fake shell stands in for the built one — it is 1.3 MB of
-//! wasm that says nothing about whether the right files were found, and
-//! building it needs wasm-pack.
+//! nothing at all. A fake shell stands in for the built one — it is well over
+//! a megabyte of wasm that says nothing about whether the right files were
+//! found, and building it needs wasm-pack.
 
 use ssplayer_preview_gen::fill;
 use std::path::{Path, PathBuf};

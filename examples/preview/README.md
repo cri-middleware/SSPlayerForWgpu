@@ -3,7 +3,7 @@
 `shell.html` is the **source** of the one-file `.ssab` preview. Build the artifact with:
 
 ```sh
-./scripts/build-preview.sh            # -> bin/ssplayer-preview.html (~1.3 MB)
+./scripts/build-preview.sh            # -> bin/ssplayer-preview.html (~1.4 MB)
 
 # ... and to ship a pack inside one:
 cargo run -p ssplayer-preview-gen -- pack=assets/Ringo/Ringo.ssab open=yes

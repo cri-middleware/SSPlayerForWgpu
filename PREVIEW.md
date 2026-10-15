@@ -95,9 +95,9 @@ into `examples/preview/shell.html`.
 an ES module and therefore cannot load from `file://`. **The preview needs its own
 `no-modules` build**; it does not reuse the npm package's wasm.
 
-Release sizes, after `wasm-opt`: wasm 839,836 B, glue 159,529 B. Those are the fixed
-cost of every generated page. Whole-file sizes: 1,332,615 B for
-`examples/web/assets_emb/Basic.ssab`, 1,648,832 B for
+Release sizes, after `wasm-opt`: wasm 907,279 B and glue 222,380 B, which make a built
+shell of 1,452,953 B — the fixed cost of every generated page. Whole-file sizes: 1,502,640 B
+for `examples/web/assets_emb/Basic.ssab`, 1,789,384 B for
 `examples/web/assets_emb/Ringo/Ringo.ssab`.
 
 ## Distribution
@@ -107,7 +107,7 @@ carries it as `ssplayer-preview.html`, listed in `SHA256SUMS`, built by
 `scripts/build-preview.sh` in the release workflow's web job. It carries the SDK commit it
 was built from.
 
-It is not committed into the Players. It is generated content of about 1.1 MB, and a
+It is not committed into the Players. It is generated content of about 1.4 MB, and a
 copy in each Player is a copy that drifts; the native binaries are already built rather
 than committed, and the shell travels the same way — each plugin's packaging script
 fetches a pinned release:

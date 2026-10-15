@@ -38,7 +38,7 @@ use crate::fit::{Align, Fit, Placement, Rect};
 use crate::pack::SSPack;
 use crate::player::{AssetLoader, BlendOp, MissingKind, OverridePriority, PlaybackDirection, PlaybackStyle, SSPlayer};
 use crate::renderer::{AlphaMode, Retention, SSRenderer, texture_extent_error};
-use crate::roster::{Roster, SlotId};
+use crate::roster::{Roster, Slot, SlotId};
 use crate::scene::{MaskBackend, SSScene, SceneConfig};
 use crate::surface::{STENCIL_FORMAT, Swapchain};
 use std::cell::{Cell, RefCell};
@@ -734,8 +734,7 @@ impl SsSurfaceWeb {
         let WebContext { renderer, device, queue, surfaces, .. } = ctx;
         let entry = surfaces.get_mut(self.id).ok_or_else(|| gone("surface"))?;
 
-        let mut players: Vec<&mut SSPlayer> = entry.players.iter_mut().collect();
-        entry.scene.update(renderer, device, queue, dt, &mut players);
+        entry.scene.update_with(renderer, device, queue, dt, entry.players.slots_mut(), Slot::value_mut);
         // A lost surface (a tab restore, say) is configured again and the frame
         // skipped; the transparent clear is what lets the page show through.
         entry.swapchain.render(device, queue, renderer, &mut entry.scene, wgpu::Color::TRANSPARENT, "ss-web frame").map_err(JsValue::from_str)

@@ -36,27 +36,67 @@ pub(crate) struct PlaybackFeedback {
     pub sources: Vec<SsSourceInfo>,
 }
 
+/// An element for the render side to fill: what a batch for a cast that grew is
+/// padded with.
+impl Default for PlaybackFeedback {
+    fn default() -> Self {
+        Self { entity: Entity::PLACEHOLDER, frame_no: 0.0, is_finished: false, playing_forward: true, started_edge: false, finished_edge: false, looped: false, events: Vec::new(), tracks: Vec::new(), sources: Vec::new() }
+    }
+}
+
+/// The two batches in flight.
+#[derive(Default)]
+struct Batches {
+    /// What the last render frame produced, until the main world reads it.
+    ready: Vec<PlaybackFeedback>,
+    /// A batch already read, kept so the next render frame fills its elements,
+    /// and their vectors, instead of allocating new ones.
+    spare: Vec<PlaybackFeedback>,
+}
+
+impl Batches {
+    /// Keep `batch` for reuse, unless the one already kept has more room.
+    fn keep(&mut self, batch: Vec<PlaybackFeedback>) {
+        if batch.capacity() > self.spare.capacity() {
+            self.spare = batch;
+        }
+    }
+}
+
 /// The shared buffer, held by a clone in each world.
 ///
-/// The render world replaces its contents each frame; the main world takes them.
-/// An `Arc<Mutex<..>>` rather than a channel because it has to be a `Resource` in
-/// both worlds, and a channel endpoint is not `Sync`.
+/// The render world publishes a batch each frame; the main world reads it once
+/// and hands it back. An `Arc<Mutex<..>>` rather than a channel because it has
+/// to be a `Resource` in both worlds, and a channel endpoint is not `Sync`.
 #[derive(Resource, Clone, Default)]
-pub(crate) struct FeedbackChannel(Arc<Mutex<Vec<PlaybackFeedback>>>);
+pub(crate) struct FeedbackChannel(Arc<Mutex<Batches>>);
 
 impl FeedbackChannel {
+    /// Render side: a batch to fill, holding whatever it last held. It is
+    /// empty only until two frames have gone through.
+    pub(crate) fn spare(&self) -> Vec<PlaybackFeedback> {
+        self.0.lock().map(|mut batches| std::mem::take(&mut batches.spare)).unwrap_or_default()
+    }
+
     /// Render side: replace this frame's feedback wholesale. Replacing rather
     /// than appending keeps a main world that skipped a frame from replaying a
     /// stale batch.
-    pub(crate) fn store(&self, feedback: Vec<PlaybackFeedback>) {
-        if let Ok(mut buffer) = self.0.lock() {
-            *buffer = feedback;
+    pub(crate) fn publish(&self, batch: Vec<PlaybackFeedback>) {
+        if let Ok(mut batches) = self.0.lock() {
+            let unread = std::mem::replace(&mut batches.ready, batch);
+            batches.keep(unread);
         }
     }
 
-    /// Main side: take what the last render frame left.
-    pub(crate) fn take(&self) -> Vec<PlaybackFeedback> {
-        self.0.lock().map(|mut buffer| std::mem::take(&mut *buffer)).unwrap_or_default()
+    /// Main side: read what the last render frame left, if it has not been
+    /// read already, and hand the batch back for the render side to refill.
+    /// What `read` moves out of the elements is what it may keep.
+    pub(crate) fn read(&self, read: impl FnOnce(&mut [PlaybackFeedback])) {
+        let Ok(mut batch) = self.0.lock().map(|mut batches| std::mem::take(&mut batches.ready)) else { return };
+        read(&mut batch);
+        if let Ok(mut batches) = self.0.lock() {
+            batches.keep(batch);
+        }
     }
 }
 
@@ -107,25 +147,29 @@ pub(crate) fn dispatch_feedback(
     mut finished: MessageWriter<SsFinished>,
     mut looped: MessageWriter<SsLooped>,
 ) {
-    for feedback in channel.take() {
-        if let Ok((mut state, mut stack)) = states.get_mut(feedback.entity) {
-            state.frame_no = feedback.frame_no;
-            state.finished = feedback.is_finished;
-            state.playing_forward = feedback.playing_forward;
-            stack.tracks = feedback.tracks;
-            stack.sources = feedback.sources;
+    channel.read(|batch| {
+        for feedback in batch {
+            if let Ok((mut state, mut stack)) = states.get_mut(feedback.entity) {
+                state.frame_no = feedback.frame_no;
+                state.finished = feedback.is_finished;
+                state.playing_forward = feedback.playing_forward;
+                // Swapped rather than copied: the batch goes back with the
+                // component's previous vectors, which the render side refills.
+                std::mem::swap(&mut stack.tracks, &mut feedback.tracks);
+                std::mem::swap(&mut stack.sources, &mut feedback.sources);
+            }
+            if feedback.started_edge {
+                started.write(SsStarted { entity: feedback.entity });
+            }
+            for event in feedback.events.drain(..) {
+                events.write(SsEventMessage { entity: feedback.entity, event });
+            }
+            if feedback.finished_edge {
+                finished.write(SsFinished { entity: feedback.entity });
+            }
+            if feedback.looped {
+                looped.write(SsLooped { entity: feedback.entity });
+            }
         }
-        if feedback.started_edge {
-            started.write(SsStarted { entity: feedback.entity });
-        }
-        for event in feedback.events {
-            events.write(SsEventMessage { entity: feedback.entity, event });
-        }
-        if feedback.finished_edge {
-            finished.write(SsFinished { entity: feedback.entity });
-        }
-        if feedback.looped {
-            looped.write(SsLooped { entity: feedback.entity });
-        }
-    }
+    });
 }

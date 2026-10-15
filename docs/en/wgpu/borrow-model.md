@@ -89,6 +89,16 @@ Step 2 is the subtle one: passes within a single `CommandEncoder` run in order, 
 and the transform that samples it are both this frame's. Splitting them across encoders, systems or
 frames reintroduces the one-frame mask lag this player does not have.
 
+Step 1 takes `&mut [&mut SSPlayer]`. A host that keeps its characters in a collection of its own — a
+`Vec<SSPlayer>`, an engine's slots — hands that collection to `update_with` instead, with a closure
+that reaches each element's player, and so builds no `Vec<&mut SSPlayer>` every frame: one cannot
+outlive the borrow it holds. Either way the characters draw in ascending `order`, ties in the order
+passed, and neither call reorders what it was passed.
+
+```rust
+scene.update_with(&mut renderer, &device, &queue, dt, &mut slots, |slot| Some(&mut slot.player));
+```
+
 If other systems draw into the same target, the ordering between their encoder and yours must be an
 **explicit edge**, not a shared set — two systems that each take a render context get their own
 encoder, and which buffer reaches the queue first is otherwise a race. (The Bevy adapter's draw

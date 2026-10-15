@@ -82,8 +82,9 @@ STAMP="ssplayer-wgpu $VERSION · SDK $SDK"
 BUILT="$(date -u +%Y-%m-%d)"
 
 # --- substitute -----------------------------------------------------------
-# python3 rather than sed: the glue is 160 KB and the base64 is over a megabyte,
-# and both carry every character sed would treat as a replacement escape.
+# python3 rather than sed: the glue is over 200 KB and the base64 is over a
+# megabyte, and both carry every character sed would treat as a replacement
+# escape.
 mkdir -p "$(dirname "$OUT")"
 python3 - "$SHELL_SRC" "$GLUE" "$WASM" "$OUT" "$STAMP" "$BUILT" <<'PY'
 import base64, pathlib, re, sys

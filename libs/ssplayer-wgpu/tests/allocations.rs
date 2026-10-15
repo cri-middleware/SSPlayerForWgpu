@@ -1,11 +1,12 @@
 //! The playback hot path allocates nothing of its own.
 //!
-//! A frame is `SSScene::update`, `encode_mask_coverage` and `draw`, and once
-//! every buffer has grown to what the animations need, none of them may
+//! A frame is `SSScene::update_with` (what `update` calls, and what a host that
+//! keeps its players hands them to), `encode_mask_coverage` and `draw`, and
+//! once every buffer has grown to what the animations need, none of them may
 //! allocate: `FrameChunk::reset` keeps capacity, GPU buffers only grow, and a
-//! per-frame buffer lives on the chunk or the player's walk. Nothing else
-//! checks that, and an allocation in the walk costs nothing a test of pixels
-//! can see.
+//! per-frame buffer lives on the chunk, the scene or the player's walk.
+//! Nothing else checks that, and an allocation in the walk costs nothing a
+//! test of pixels can see.
 //!
 //! wgpu itself allocates on every frame — a `write_buffer` stages through a
 //! fresh buffer, and a render pass records into vectors — so a count alone
@@ -123,6 +124,10 @@ fn gpu() -> Option<(wgpu::Device, wgpu::Queue)> {
 /// effect particles, masks, meshes, and a character with all of it at once.
 const PACKS: [&str; 6] = ["overall/Basic.ssab", "overall/Instance.ssab", "overall/Effect.ssab", "overall/Mask.ssab", "overall/Mesh.ssab", "Ringo/Ringo.ssab"];
 
+/// Players with nothing loaded, in descending `order`, so the scene has a
+/// cast to sort past the size a stable sort does without a buffer of its own.
+const CROWD: usize = 1024;
+
 const SIZE: u32 = 256;
 const STENCIL: wgpu::TextureFormat = wgpu::TextureFormat::Depth24PlusStencil8;
 /// Long enough for every pack's animation to have looped at least once, so each
@@ -164,23 +169,26 @@ fn play(device: &wgpu::Device, queue: &wgpu::Queue, mask: MaskBackend) {
             player
         })
         .collect();
+    players.extend((0..CROWD).map(|i| {
+        let mut player = SSPlayer::new();
+        player.set_order(-(i as i32));
+        player
+    }));
     let color = target(device, wgpu::TextureFormat::Rgba8Unorm);
     let depth = stencil.then(|| target(device, STENCIL));
 
     for frame in 0..WARM_UP + MEASURED {
         let measured = frame >= WARM_UP;
-        let mut cast: Vec<&mut SSPlayer> = players.iter_mut().collect();
         let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor::default());
-        let run = |scene: &mut SSScene, renderer: &mut SSRenderer, cast: &mut [&mut SSPlayer], encoder: &mut wgpu::CommandEncoder| {
-            scene.update(renderer, device, queue, 1.0 / 60.0, cast);
+        let run = |scene: &mut SSScene, renderer: &mut SSRenderer, players: &mut [SSPlayer], encoder: &mut wgpu::CommandEncoder| {
+            scene.update_with(renderer, device, queue, 1.0 / 60.0, players, |player| Some(player));
             scene.encode_mask_coverage(renderer, device, encoder);
         };
         if measured {
-            armed(|| run(&mut scene, &mut renderer, &mut cast, &mut encoder));
+            armed(|| run(&mut scene, &mut renderer, &mut players, &mut encoder));
         } else {
-            run(&mut scene, &mut renderer, &mut cast, &mut encoder);
+            run(&mut scene, &mut renderer, &mut players, &mut encoder);
         }
-        drop(cast);
         {
             let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
                 label: None,

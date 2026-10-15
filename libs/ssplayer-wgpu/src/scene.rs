@@ -370,6 +370,11 @@ pub struct SSScene {
     /// This frame's geometry, every player's in `order`. This is what reaches
     /// the GPU.
     frame: FrameChunk,
+    /// The order the players are walked in, as `(order, index)` into the slice
+    /// `update_with` was handed. Kept across frames so that ordering a cast
+    /// allocates nothing; sorting the slice itself would, since the stable sort
+    /// takes a buffer of its own once a cast passes a few hundred.
+    draw_order: Vec<(i32, u32)>,
 
     // --- Integration shaders (`ss-*`). Only touched when a frame has
     // shader parts; shader-free animations never build any of this. ---
@@ -454,6 +459,7 @@ impl SSScene {
             frame_capacity: [0; 3],
             frame_offsets: [0; 2],
             frame: FrameChunk::new(*config),
+            draw_order: Vec::new(),
             ss_params_buffer: None,
             ss_params_bind_group: None,
             stats: SceneStats::default(),
@@ -648,24 +654,47 @@ impl SSScene {
     /// vertex buffer and their draws can be recorded back to back.
     ///
     /// Players are drawn in ascending [`crate::SSPlayer::order`], ties keeping the
-    /// order the caller passed them in (the sort is stable). The scene borrows
-    /// them rather than owning them, so they can live wherever the
-    /// host keeps them — a `Vec`, an ECS, an engine's scene graph. Each player
-    /// appends its geometry straight to the frame, in that order.
+    /// order the caller passed them in; `players` itself is left as it was. The
+    /// scene borrows them rather than owning them, so they can live wherever the
+    /// host keeps them — a `Vec`, an ECS, an engine's scene graph — and a host
+    /// that keeps them in a collection of its own hands that over through
+    /// [`SSScene::update_with`] instead. Each player appends its geometry straight
+    /// to the frame, in that order.
     pub fn update(&mut self, renderer: &mut SSRenderer, device: &wgpu::Device, queue: &wgpu::Queue, delta_secs: f32, players: &mut [&mut crate::SSPlayer]) {
+        self.update_with(renderer, device, queue, delta_secs, players, |player| Some(&mut **player));
+    }
+
+    /// [`SSScene::update`] over a collection of the host's own, each element's
+    /// player reached through `player`, which answers `None` for an element that
+    /// holds none — a free slot, say.
+    ///
+    /// For a host that keeps its cast from frame to frame: a `Vec<&mut SSPlayer>`
+    /// collected out of it cannot outlive the borrow it holds, so `update` would
+    /// cost a fresh one every frame. Ties in `order` keep the order of `players`.
+    pub fn update_with<P>(&mut self, renderer: &mut SSRenderer, device: &wgpu::Device, queue: &wgpu::Queue, delta_secs: f32, players: &mut [P], player: impl Fn(&mut P) -> Option<&mut crate::SSPlayer>) {
         self.begin_frame();
-        players.sort_by_key(|p| p.order());
+        self.draw_order.clear();
+        self.draw_order.extend(players.iter_mut().enumerate().filter_map(|(index, slot)| player(slot).map(|p| (p.order(), index as u32))));
+        // The index makes every key distinct, so the unstable sort, which needs
+        // no buffer, leaves ties in slice order just as a stable one would.
+        self.draw_order.sort_unstable();
 
         // Before the walk: this is the one step that needs `&mut SSRenderer`. It
         // does nothing at all except on the frames right after a pack is loaded.
-        for player in players.iter_mut() {
-            player.flush_textures(renderer, device, queue);
+        for &(_, index) in &self.draw_order {
+            if let Some(p) = player(&mut players[index as usize]) {
+                p.flush_textures(renderer, device, queue);
+            }
         }
 
-        for player in players.iter_mut() {
-            player.build_frame(&mut self.frame, renderer, delta_secs);
+        let mut drawing = 0;
+        for &(_, index) in &self.draw_order {
+            if let Some(p) = player(&mut players[index as usize]) {
+                p.build_frame(&mut self.frame, renderer, delta_secs);
+                drawing += u32::from(p.draws());
+            }
         }
-        self.stats.players = players.iter().filter(|p| p.draws()).count() as u32;
+        self.stats.players = drawing;
         self.end_frame(renderer, device, queue);
     }
 
