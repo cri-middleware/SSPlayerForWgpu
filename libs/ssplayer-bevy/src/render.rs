@@ -707,3 +707,16 @@ pub(crate) fn draw_players(
     }
     scene.draw(renderer, pass.wgpu_pass());
 }
+
+#[cfg(test)]
+mod tests {
+    /// The coverage backend `draw_players` selects, and the comments that say why,
+    /// rest on Bevy's 2d depth texture carrying no stencil. When a Bevy bump changes
+    /// the format this fails, and the change has to be looked at: a format with a
+    /// stencil is what lets the adapter lend one and fold onto a single mask
+    /// backend, and any other format leaves the comments naming the wrong one.
+    #[test]
+    fn bevys_2d_depth_texture_is_still_depth32float() {
+        assert_eq!(bevy::core_pipeline::core_2d::CORE_2D_DEPTH_FORMAT, bevy::render::render_resource::TextureFormat::Depth32Float, "Bevy's 2d depth format changed; revisit the mask backend this adapter selects");
+    }
+}

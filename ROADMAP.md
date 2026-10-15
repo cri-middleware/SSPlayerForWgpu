@@ -45,9 +45,10 @@ player, where every host and the C ABI reach it, and the host half belongs in an
       would charge every stencil host an extra pass and a coverage array per
       masking player, so the fold waits for that constant to gain a stencil, and
       goes the other way: dropping coverage takes the extra pass with it, while
-      `SceneConfig::stencil_format` and `TreeMask::finish` stay. Check the constant on
-      each Bevy bump. Until then every mask feature lands in both. Blocked on: Bevy's 2d
-      pass carrying a stencil.
+      `SceneConfig::stencil_format` and `TreeMask::finish` stay. A unit test in
+      `ssplayer-bevy/src/render.rs` fails when the constant changes, so a Bevy bump
+      cannot move it unnoticed. Until then every mask feature lands in both. Blocked
+      on: Bevy's 2d pass carrying a stencil.
 - [ ] **Exact masks, past what the stencil can express** — mixed INCR / INVERT
       overlaps are approximated and nesting is limited by 8 bits. The coverage
       backend already lifts the nesting limit — its accumulators are shader
