@@ -16,8 +16,7 @@
 | `ssconverter-cli`（SDK 同梱） | ビルドパイプライン、CI、watch ループ |
 
 !!! tip "手元に `.sspj` がまだ無いときは"
-    [SpriteStudio 公式のサンプルデータ](https://www.webtech.co.jp/help/ja/spritestudio7/download/sample/)がそのまま使えます。キャラクターなら [Ringo](https://www.webtech.co.jp/help/ja/spritestudio7/download/sample/#ringo)、エフェクトを含むものなら
-    [パーティクル](https://www.webtech.co.jp/help/ja/spritestudio7/download/sample/#Perticle_sample) が手頃です。ダウンロードした `.sspj` は、上のどちらのツールにもそのまま渡せます。
+    [SpriteStudio 公式のサンプルデータ](https://www.webtech.co.jp/help/ja/spritestudio7/download/sample/)がそのまま使えます。キャラクターなら [Ringo](https://www.webtech.co.jp/help/ja/spritestudio7/download/sample/#ringo)、エフェクトを含むものなら[パーティクル](https://www.webtech.co.jp/help/ja/spritestudio7/download/sample/#Perticle_sample) が手頃です。ダウンロードした `.sspj` は、上のどちらのツールにもそのまま渡せます。
 
 選び方とパイプラインへの組み込みはポータル側が本家です：[アセットの変換](https://cri-middleware.github.io/SpriteStudio-Docs/ja/overview/conversion/)、[スタンドアロンツールでの変換](https://cri-middleware.github.io/SpriteStudio-Docs/ja/overview/convert-with-a-standalone-tool/)。ここでは繰り返しません。
 

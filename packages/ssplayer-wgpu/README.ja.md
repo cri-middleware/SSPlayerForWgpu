@@ -32,7 +32,7 @@ defineSsPlayerWebGPUElement(); // <ss-player-webgpu> を登録
 ```
 
 ```html
-<ss-player-webgpu src="/assets/Basic.ssab" style="width:360px;height:360px"></ss-player-webgpu>
+<ss-player-webgpu src="/assets/Basic.ssab" autoplay style="width:360px;height:360px"></ss-player-webgpu>
 ```
 
 | 属性 | 意味 |

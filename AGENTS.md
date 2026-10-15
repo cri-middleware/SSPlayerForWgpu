@@ -46,7 +46,7 @@ faces as thin wrappers.
     held across frames.
 *   **No per-frame allocations in the playback hot path.** `FrameChunk::reset` empties every buffer and
     keeps its capacity, and GPU buffers only grow; a new per-frame buffer goes on the chunk, or on the
-    player's `Walk` when only that player's walk uses it.
+    player's `Walk` when only that player's walk uses it. `tests/allocations.rs` pins it.
 *   **Textures are borrowed**: `set_texture` takes a supplier-owned `TextureView`, and `SSPack` holds CPU
     data only. Per-texture facts that vary (`AlphaMode`, texel size) go in the group(1) `TexInfo` uniform,
     never the pipeline key. Every texture list reads `external_textures()` as well as `cellmaps()` — a
@@ -56,7 +56,7 @@ faces as thin wrappers.
     separate calls; `play()` rewinds to the section start and re-arms the loop count, and `resume()`
     continues in place.
 *   **Slots step from the part list, never the draw order**: the runtime drops hidden parts from
-    `draw_order`. They re-arm on `Context::is_looped()`.
+    `draw_order`. They re-arm on `Context::just_looped()`.
 *   **A pack outlives every tree built from it**: `build_node` binds each `Context` to its pack by raw
     pointer, so re-registering a name never changes what is already playing.
 *   **A tick that did not run reports nothing.** `set_culled(true)` skips the advance, and `build_frame`

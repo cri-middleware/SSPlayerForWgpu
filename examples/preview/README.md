@@ -28,6 +28,11 @@ runs. So there is no `src`, no `import`, no `fetch` and no `XMLHttpRequest` in t
 source, and the build fails if one appears. A slip would work perfectly over `http://`
 and fail only on the machine that opened the artifact.
 
+The build also fails when the page calls a method on `ctx`, `surface` or `player` that the
+glue it inlines does not define. Those are the js face's names, and a rename in the Rust
+otherwise surfaces only as a `TypeError` in a browser. CI's wasm job builds the shell on
+every pull request, so that is where it fails.
+
 The wasm is its own build (`wasm-pack --target no-modules`), not the npm package's
 (`--target web`), because an ES module cannot load from `file://`.
 

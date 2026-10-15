@@ -59,6 +59,10 @@ whichever character took its slot.
 Textures register on the **scene**, because the texture map is device-scoped: every player in the
 window sees it, and a pack shown five times is uploaded once.
 
+A texture the device cannot hold — wider or taller than its `max_texture_dimension_2d`, which is 8192
+on the device this library creates — is refused with `SS_ERROR_INVALID_ARGUMENT` and uploads
+nothing. `ss_player_set_cellmap_texture` refuses one the same way.
+
 ## Selecting and describing an animation
 
 | | |
@@ -120,10 +124,18 @@ parameter's `value_type` is one of `SS_SIGNAL_VALUE_NONE` / `_BOOL` / `_INDEX` /
 | | |
 |---|---|
 | `ss_player_set_transform(player, x, y, sx, sy, rotation)` | Position, scale, rotation |
+| `ss_player_reset_transform(player)` | Back to the identity: centred, unscaled, unrotated |
+| `ss_player_fit_into(player, width, height, &placement, &placed)` | Fit the animation into a box and write the transform; `placed` may be null |
+| `ss_placement_default(&placement)` | Fill an `SsPlacement` before changing it — **a zeroed one has scale 0** |
+| `ss_player_canvas_rect(player, &rect)` | The box `ss_player_fit_into` fits when `has_frame` is false |
 | `ss_player_set_order(player, order)` / `ss_player_order(player)` | Draw order within the scene, ascending |
 | `ss_player_set_visible(player, visible)` / `ss_player_is_visible(player)` | Hidden characters draw nothing but keep playing and reporting events |
 | `ss_player_set_culled(player, culled)` / `ss_player_is_culled(player)` | Culled characters **do not advance** and report no events |
 | `ss_player_set_alpha(player, a)` / `ss_player_set_tint(player, rgb)` | Whole-character alpha and tint. Read back with `ss_player_alpha` / `ss_player_tint` |
+
+`fit` is one of `SS_FIT_CONTAIN` / `_COVER` / `_NONE` (0–2) and `align` one of `SS_ALIGN_CENTER`,
+`_TOP`, `_BOTTOM`, `_LEFT`, `_RIGHT`, `_TOP_LEFT`, `_TOP_RIGHT`, `_BOTTOM_LEFT`, `_BOTTOM_RIGHT`
+(0–8). See [Fitting into a box](../guide/placement.md).
 
 ## Parts and overrides
 

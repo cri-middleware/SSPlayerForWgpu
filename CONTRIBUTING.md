@@ -34,7 +34,8 @@ rather than the invariant. The five that catch newcomers most often:
 - **No per-frame allocations in the playback hot path.** `FrameChunk::reset`
   empties every buffer and keeps its capacity, and GPU buffers only grow; a new
   per-frame buffer goes on the chunk, or on the player's `Walk` when only that
-  player's walk uses it.
+  player's walk uses it. `tests/allocations.rs` fails on an allocation of the
+  player's own in a steady frame.
 - **SDK separation.** The animation logic lives in the `SpriteStudio-SDK`
   submodule (`ssruntime`, `ssab`). Algorithm and core-logic changes are a pull
   request *there* followed by a submodule bump here; this repository is the
@@ -109,13 +110,15 @@ cargo fmt --all -- --check
 cargo clippy --workspace --all-targets -- -D warnings
 cargo test --workspace                    # needs deploy-examples.sh first
 cargo build -p ssplayer-wgpu --target wasm32-unknown-unknown --no-default-features --features web
+cargo clippy -p ssplayer-wgpu --target wasm32-unknown-unknown --no-default-features --features web -- -D warnings
 cargo clippy -p ssplayer-wgpu --features ffi --all-targets -- -D warnings
 cargo build -p ssplayer-wgpu-ffi          # regenerates the C header
 cargo test -p ssplayer-wgpu --features ffi --lib
 ```
 
 No default command compiles `src/ffi.rs` or `src/host.rs`, which is why the C
-face takes three lines of its own. **`ssplayer-wgpu-ffi` is the crate that
+face takes three lines of its own; `src/web.rs` needs the `web` feature on wasm32,
+which is why the web face takes two. **`ssplayer-wgpu-ffi` is the crate that
 regenerates the header** — its `build.rs` runs cbindgen; building
 `-p ssplayer-wgpu --features ffi` compiles the module but regenerates nothing.
 `libs/ssplayer-wgpu-ffi/include/ssplayer_wgpu.h` is committed output, so if it
@@ -145,10 +148,14 @@ The rest of the matrix:
 | Third-party notices current | `./scripts/generate-licenses.sh`, then `git diff --exit-code THIRD_PARTY_NOTICES.md` |
 
 **Before and after anything that changes how geometry reaches the GPU, take a golden dump.**
-`tests/golden.rs::golden_corpus` is `#[ignore]`d and renders all 134 fixture/animation/frame/stencil
-combinations: `SS_GOLDEN_DIR=/tmp/before cargo test --test golden -- --ignored`, then re-run with
-`SS_GOLDEN_COMPARE=/tmp/before`. The reference is GPU-specific, so it must come from the same
-machine — it is a before/after tool, not a checked-in golden set.
+`tests/golden.rs::golden_corpus` is `#[ignore]`d and renders every fixture/animation/frame/stencil
+combination: `SS_GOLDEN_DIR=/tmp/before cargo test --test golden -- --ignored`, then re-run with
+`SS_GOLDEN_DIR=/tmp/after SS_GOLDEN_COMPARE=/tmp/before`. The reference is GPU-specific, so it must
+come from the same machine — it is a before/after tool, not a checked-in golden set. The comparison
+writes `/tmp/after/summary.md`, and for each image that moved a before/after/difference triptych in
+`/tmp/after/diff/`. CI's golden job does the same on every pull request, on lavapipe against the
+base's rendering, and fails on any difference — one you meant included. When you did mean it, say
+in the description why the triptychs it uploads (`golden-diff`) are right.
 
 **Measure before and after any performance change, and drive a real frame loop while doing it.**
 `SSScene::stats()` reports primitives, draw calls, bytes uploaded, how much of the draw list is
@@ -234,7 +241,7 @@ SSPlayerForWgpu にご関心をお寄せいただき、ありがとうござい�
 
 - **プレイヤーは wgpu の状態を所有しません。** `Device` / `Queue` / `Surface` / `SSRenderer` はホストのもので、フレームごとに貸し出されます。これらの所有権を取る API は誤りで、**`SSPlayer` に wgpu 型のフィールドを持たせてはいけません**。「1 canvas = 1 player」に戻らないのはこの規則のおかげです。
 - **頂点バッファはありません。** ランタイムの SoA 配列をシーンのアリーナへ memcpy し、頂点ステージが `@builtin(vertex_index)` から展開します。CPU が書くのはパーツごとに `Prim` 1 つだけで、頂点ごとには何も書きません。機能を足すときは `Prim` に載せてください。頂点ごとの CPU 処理を復活させないこと。
-- **再生中は毎フレームのヒープ確保をしません。** `FrameChunk::reset` はバッファを空にしても容量を残し、GPU バッファは伸びるだけです。毎フレーム使うバッファを足すときは chunk に置いてください。1 体のプレイヤーのウォークだけが使うものは、そのプレイヤーの `Walk` に置きます。
+- **再生中は毎フレームのヒープ確保をしません。** `FrameChunk::reset` はバッファを空にしても容量を残し、GPU バッファは伸びるだけです。毎フレーム使うバッファを足すときは chunk に置いてください。1 体のプレイヤーのウォークだけが使うものは、そのプレイヤーの `Walk` に置きます。定常フレームでプレイヤー自身がヒープ確保をすると `tests/allocations.rs` が失敗します。
 - **SDK との分離。** アニメーションのロジックは `SpriteStudio-SDK` submodule (`ssruntime`・`ssab`) にあります。アルゴリズムやコアロジックの変更は**あちらへの**プルリクエストと、こちらでの submodule 更新の組で行います。このリポジトリはレンダラーと、ホストに面した 3 つのフェイスです。
 - **3 つのフェイスは歩調を揃えます。** API の本体は Rust で、C (`cbindgen`) と JavaScript (`wasm-bindgen`) はその薄いラッパーです。`ffi.rs` にロジックは置きません（引数検証・型変換・エラーコード対応のみ）。必要なものは `host.rs` か `player.rs` に置き、Rust API 側にも行き渡らせてください。
 
@@ -285,12 +292,13 @@ cargo fmt --all -- --check
 cargo clippy --workspace --all-targets -- -D warnings
 cargo test --workspace                    # needs deploy-examples.sh first
 cargo build -p ssplayer-wgpu --target wasm32-unknown-unknown --no-default-features --features web
+cargo clippy -p ssplayer-wgpu --target wasm32-unknown-unknown --no-default-features --features web -- -D warnings
 cargo clippy -p ssplayer-wgpu --features ffi --all-targets -- -D warnings
 cargo build -p ssplayer-wgpu-ffi          # regenerates the C header
 cargo test -p ssplayer-wgpu --features ffi --lib
 ```
 
-既定のコマンドでは `src/ffi.rs` も `src/host.rs` もコンパイルされないため、C フェイスだけ 3 行を要します。**ヘッダを再生成するのは `ssplayer-wgpu-ffi` クレート**で、その `build.rs` が cbindgen を実行します。`-p ssplayer-wgpu --features ffi` のビルドはモジュールをコンパイルしますが、再生成は行いません。`libs/ssplayer-wgpu-ffi/include/ssplayer_wgpu.h` はコミットされる生成物なので、変更が出たらコミットしてください。CI は `git diff --exit-code` で確認しています。
+既定のコマンドでは `src/ffi.rs` も `src/host.rs` もコンパイルされないため、C フェイスは 3 行を要します。`src/web.rs` は wasm32 向けに `web` feature を付けたときだけコンパイルされるため、web フェイスは 2 行を要します。**ヘッダを再生成するのは `ssplayer-wgpu-ffi` クレート**で、その `build.rs` が cbindgen を実行します。`-p ssplayer-wgpu --features ffi` のビルドはモジュールをコンパイルしますが、再生成は行いません。`libs/ssplayer-wgpu-ffi/include/ssplayer_wgpu.h` はコミットされる生成物なので、変更が出たらコミットしてください。CI は `git diff --exit-code` で確認しています。
 
 `clippy --fix` を使うときは、先に自分の編集を `git add` してから `--allow-staged` を付けてください。`--allow-dirty` は使いません。clippy の修正が unstaged に残るので、自分の編集と分けてレビューできます。
 

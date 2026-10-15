@@ -15,7 +15,7 @@
 //!   `FrameData` and are re-read every frame here.
 
 use crate::frame::{FrameView, SHAPE_VERTICES_STRIDE};
-use ssruntime::runtime::framedata::ss::runtime::{DrawBatchKind, root_as_frame_data_unchecked};
+use ssruntime::runtime::framedata::ss::runtime::{DrawBatchKind, FrameData, root_as_frame_data, root_as_frame_data_unchecked};
 
 /// Writers one coverage layer tells apart: a bit apiece in R, G and B.
 pub const COVERAGE_LAYER_BITS: usize = 24;
@@ -305,10 +305,16 @@ pub fn writer_bounds(frame: &FrameView, writers: &[MaskWriter]) -> Option<[f32; 
 ///
 /// `op_invert` is the part's own `mask_influence`; inside an instance the caller
 /// ANDs it with the instance part's before the writer is drawn.
+///
+/// `frame.frame_data` is verified first, and bytes that are not a `FrameData`
+/// plan no writers.
 pub fn plan_writers(frame: &FrameView, mask_flags: &[PartMaskFlags]) -> MaskWriters {
-    let mut planned = Vec::new();
-    plan_writers_into(frame, mask_flags, &mut planned);
     let mut writers = MaskWriters::default();
+    // Verified, unlike the walk's parse: this view is whatever the caller built,
+    // and read unchecked, bytes that are not a FrameData are read out of bounds.
+    let Ok(fd) = root_as_frame_data(frame.frame_data) else { return writers };
+    let mut planned = Vec::new();
+    plan(fd, mask_flags, &mut planned);
     for writer in planned {
         writers.push(writer);
     }
@@ -322,10 +328,14 @@ pub(crate) fn plan_writers_into(frame: &FrameView, mask_flags: &[PartMaskFlags],
     if frame.frame_data.is_empty() {
         return;
     }
-    let start = out.len();
     // SAFETY: `frame_data` is a valid FlatBuffers `FrameData` produced by the
     // runtime for this frame (same contract as the render loop).
-    let fd = unsafe { root_as_frame_data_unchecked(frame.frame_data) };
+    plan(unsafe { root_as_frame_data_unchecked(frame.frame_data) }, mask_flags, out);
+}
+
+/// The planning both forms share, over a frame already parsed.
+fn plan(fd: FrameData, mask_flags: &[PartMaskFlags], out: &mut Vec<MaskWriter>) {
+    let start = out.len();
     let draw_order = fd.draw_order();
     let parts = fd.parts();
 

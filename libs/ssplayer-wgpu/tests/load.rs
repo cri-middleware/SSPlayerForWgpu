@@ -23,6 +23,11 @@ fn asset_root() -> &'static str {
     concat!(env!("CARGO_MANIFEST_DIR"), "/../../assets")
 }
 
+/// A fixture that does not load fails the test rather than skipping it, which
+/// would report `ok` having checked nothing. `fixtures.rs` says the same once for
+/// the whole suite.
+const FIXTURE: &str = "the fixture did not load; run scripts/deploy-examples.sh";
+
 /// Run one frame, which is what moves a load's atlases onto the GPU.
 fn flush(renderer: &mut SSRenderer, device: &wgpu::Device, queue: &wgpu::Queue, players: &mut [&mut SSPlayer]) {
     let mut scene = SSScene::new(device, &SceneConfig { color_format: wgpu::TextureFormat::Rgba8Unorm, stencil_format: None, mask: MaskBackend::None });
@@ -62,10 +67,7 @@ fn one_call_loads_the_pack_its_atlases_and_the_packs_it_plays_from() {
     };
     let mut renderer = SSRenderer::new(&device);
     let mut player = SSPlayer::new();
-    if player.load(format!("{}/overall/Instance.ssab", asset_root())).is_err() {
-        eprintln!("fixture missing; run scripts/deploy-examples.sh. skipping.");
-        return;
-    }
+    player.load(format!("{}/overall/Instance.ssab", asset_root())).expect(FIXTURE);
     flush(&mut renderer, &device, &queue, &mut [&mut player]);
 
     // The name came out of the `.ssab`, not from the file stem the caller passed —
@@ -99,10 +101,7 @@ fn an_embedded_pack_needs_no_sibling_files() {
 
     let mut renderer = SSRenderer::new(&device);
     let mut player = SSPlayer::new();
-    if player.load(format!("{}/overall_emb/Instance.ssab", asset_root())).is_err() {
-        eprintln!("fixture missing; run scripts/deploy-examples.sh. skipping.");
-        return;
-    }
+    player.load(format!("{}/overall_emb/Instance.ssab", asset_root())).expect(FIXTURE);
     flush(&mut renderer, &device, &queue, &mut [&mut player]);
     assert!(player.has_pack("Instance_SourceAnime"));
     assert_ready(&player, &renderer, &["Instance", "Instance_SourceAnime"]);
@@ -119,10 +118,7 @@ fn one_call_covers_both_texture_tables() {
     };
     let mut renderer = SSRenderer::new(&device);
     let mut player = SSPlayer::new();
-    if player.load(format!("{}/overall/TextureChange.ssab", asset_root())).is_err() {
-        eprintln!("fixture missing; run scripts/deploy-examples.sh. skipping.");
-        return;
-    }
+    player.load(format!("{}/overall/TextureChange.ssab", asset_root())).expect(FIXTURE);
     flush(&mut renderer, &device, &queue, &mut [&mut player]);
     assert_ready(&player, &renderer, &["TextureChange"]);
 
@@ -151,10 +147,7 @@ fn a_second_player_of_one_pack_loads_nothing() {
     let mut renderer = SSRenderer::new(&device);
 
     let mut first = SSPlayer::new();
-    if first.load(format!("{}/overall/Instance.ssab", asset_root())).is_err() {
-        eprintln!("fixture missing; run scripts/deploy-examples.sh. skipping.");
-        return;
-    }
+    first.load(format!("{}/overall/Instance.ssab", asset_root())).expect(FIXTURE);
     flush(&mut renderer, &device, &queue, &mut [&mut first]);
     let after_first = renderer.texture_upload_count();
     assert!(after_first > 0);
@@ -184,10 +177,7 @@ fn two_packs_that_name_one_atlas_alike_still_get_their_own() {
     // One pack, staged twice under two directories, each beside a *different*
     // image with the same file name — which is exactly the shape two Animate
     // projects arrive in.
-    let Ok(ssab) = std::fs::read(format!("{}/overall/Basic.ssab", asset_root())) else {
-        eprintln!("fixture missing; run scripts/deploy-examples.sh. skipping.");
-        return;
-    };
+    let ssab = std::fs::read(format!("{}/overall/Basic.ssab", asset_root())).expect(FIXTURE);
     let root = std::env::temp_dir().join(format!("ssplayer-wgpu-atlas-clash-{}", std::process::id()));
     let _ = std::fs::remove_dir_all(&root);
     let mut staged = Vec::new();
@@ -234,10 +224,7 @@ fn re_loading_a_pack_whose_atlas_changed_picks_up_the_new_one() {
         eprintln!("no GPU adapter available, skipping");
         return;
     };
-    let Ok(ssab) = std::fs::read(format!("{}/overall/Basic.ssab", asset_root())) else {
-        eprintln!("fixture missing; run scripts/deploy-examples.sh. skipping.");
-        return;
-    };
+    let ssab = std::fs::read(format!("{}/overall/Basic.ssab", asset_root())).expect(FIXTURE);
     let dir = std::env::temp_dir().join(format!("ssplayer-wgpu-atlas-reload-{}", std::process::id()));
     let _ = std::fs::remove_dir_all(&dir);
     std::fs::create_dir_all(&dir).unwrap();
@@ -304,10 +291,7 @@ fn keys_learned_after_the_tree_was_built_reach_the_tree() {
         return;
     };
     let dir = std::path::Path::new(asset_root()).join("overall");
-    let Ok(bytes) = std::fs::read(dir.join("Basic.ssab")) else {
-        eprintln!("fixture missing; run scripts/deploy-examples.sh. skipping.");
-        return;
-    };
+    let bytes = std::fs::read(dir.join("Basic.ssab")).expect(FIXTURE);
 
     let shoot = |late: bool| {
         let mut renderer = SSRenderer::new(&device);

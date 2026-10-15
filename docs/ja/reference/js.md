@@ -35,6 +35,8 @@ import { defineSsPlayerWebGPUElement } from '@spritestudio/ssplayer-wgpu/element
 | `surfaceCount()` | 診断用 |
 | `version` / `sdkVersion` | この Player のバージョンと、リンクしている SpriteStudio-SDK のリリースのタグ（リリースでない SDK なら `local`）。読み取り専用。カスタム要素からは `element.ctx` で届く |
 
+`addTexture`・`addTextureFromBitmap`・`setCellmapTexture` は、デバイスが保持できないテクスチャに対して何も変えずに例外を投げます。幅か高さが `max_texture_dimension_2d` を超える場合、閉じた `ImageBitmap` の場合、`addTexture` で `rgba` が `width * height * 4` バイトでない場合です。`FromBytes` 版も同じ理由で reject します。
+
 ## `SsSurfaceWeb` — キャンバス 1 枚
 
 | | |
@@ -85,6 +87,8 @@ import { defineSsPlayerWebGPUElement } from '@spritestudio/ssplayer-wgpu/element
 | | |
 |---|---|
 | `setTransform(x, y, scaleX, scaleY, rotation)` / `resetTransform()` | |
+| `fitInto(width, height, options?)` | アニメーションを箱に収め、そのトランスフォームを書き込みます。戻り値は `{ x, y, scaleX, scaleY }`。未知の `fit` / `align` は例外になります。[ボックスへのフィット](../guide/placement.md)を参照 |
+| `canvasRect()` | `frame` を渡さないときに `fitInto` が収める箱。`{ x, y, width, height }`、`setAnimation` 前は `undefined` |
 | `setOrder(n)` / `order()` | キャンバス内の描画順（昇順） |
 | `setVisible(v)` / `isVisible()` | 非表示のキャラクターは描画されませんが、再生は続きイベントも出します |
 | `setCulled(c)` / `isCulled()` | カリング中のキャラクターは**進みません**。イベントも出しません |
@@ -102,6 +106,7 @@ import { defineSsPlayerWebGPUElement } from '@spritestudio/ssplayer-wgpu/element
 | `clearAllPartOverrides()` | |
 | `partTransform(part)` / `partTransformByIndex(i)` | `[m00, m01, m10, m11, tx, ty]` |
 | `isPartHidden(part)` / `isPartSkinnedMesh(part)` / `partCount()` | `isPartHidden` と `isPartSkinnedMesh` は `true`/`false`、不明なパーツなら `undefined` |
+| `isPartHiddenByIndex(i)` / `isPartSkinnedMeshByIndex(i)` | 同じことをパーツインデックス（イベントの `partIndex`、`partNames()` の位置）で。範囲外なら `undefined` |
 | `events()` | `kind` で分類されたプレーンオブジェクト：`'userData'` / `'signal'` / `'audio'`。どれも `frameNo`・`partName` と、発火したソースのハンドル `source` を持つ |
 
 **テクスチャ差し替え** — セルマップがバインドするテクスチャ丸ごとを差し替えます（衣装・パレット変更）。`pack` に null でメインパック。[テクスチャ差し替え](../guide/texture-replacement.md)を参照。

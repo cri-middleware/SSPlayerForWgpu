@@ -1,11 +1,12 @@
 name: CI
 
 # Two tiers, as in SpriteStudio-SDK. Every pull request lints and tests the
-# crates on Linux, builds the C face with the Vulkan viewer there and the DX12
-# viewer on Windows, and builds the wasm face with the npm package. The weekly
-# run and a dispatch also build for macOS the way release.yml does (universal),
-# with the Metal viewer, and build the documentation site. There is no release PR
-# here: a release is dispatched from main.
+# crates on Linux, compares its rendering with its base's there, builds the C
+# face with the Vulkan viewer there and the DX12 viewer on Windows, and builds
+# the wasm face with the npm package and the preview shell. The weekly run and
+# a dispatch also build for macOS the way release.yml does (universal), with the
+# Metal viewer, and build the documentation site. There is no release PR here: a
+# release is dispatched from main.
 on:
   pull_request:
     paths-ignore:
@@ -66,6 +67,40 @@ jobs:
       - name: Format check
         run: cargo fmt --all -- --check
 
+      # The PowerShell half of each script runs on no pull request -- release.yml
+      # takes build.ps1 only when a release is cut -- so a syntax error, or an
+      # option the .sh learned and the .ps1 did not, reached main unseen. Parse
+      # every .ps1, and hold each one and its .sh twin to the same answers:
+      # --help exits 0 and an unknown option exits 2.
+      - name: Check the PowerShell scripts against their .sh twins
+        shell: pwsh
+        run: |
+          $failed = $false
+          function Report([string] $Name, [string] $Message) {
+            Write-Host "::error file=scripts/${Name}::$Message"
+            $script:failed = $true
+          }
+          foreach ($ps1 in Get-ChildItem scripts -Filter *.ps1) {
+            $errors = $null
+            [void][System.Management.Automation.Language.Parser]::ParseFile($ps1.FullName, [ref]$null, [ref]$errors)
+            if ($errors) {
+              foreach ($e in $errors) { Report $ps1.Name "line $($e.Extent.StartLineNumber): $($e.Message)" }
+              continue
+            }
+            $sh = [System.IO.Path]::ChangeExtension($ps1.FullName, ".sh")
+            foreach ($case in @(@{ Arg = "--help"; Want = 0 }, @{ Arg = "no-such-option=1"; Want = 2 })) {
+              pwsh -NoProfile -File $ps1.FullName $case.Arg *> $null
+              if ($LASTEXITCODE -ne $case.Want) { Report $ps1.Name "$($case.Arg) exited $LASTEXITCODE, not $($case.Want)" }
+              if (Test-Path $sh) {
+                bash $sh $case.Arg *> $null
+                if ($LASTEXITCODE -ne $case.Want) { Report (Split-Path $sh -Leaf) "$($case.Arg) exited $LASTEXITCODE, not $($case.Want)" }
+              }
+            }
+          }
+          # Explicit, because the runner otherwise exits with the last native
+          # command's code -- which is the 2 an unknown option is meant to give.
+          if ($failed) { exit 1 } else { exit 0 }
+
       - name: Generate demo assets
         # Also proves the SDK submodule still builds against this checkout. A
         # debug converter converts the samples just as well, and compiles in a
@@ -104,9 +139,8 @@ jobs:
           VK_DRIVER_FILES: /usr/share/vulkan/icd.d/lvp_icd.x86_64.json
           VK_ICD_FILENAMES: /usr/share/vulkan/icd.d/lvp_icd.x86_64.json
         # `golden_corpus` stays out of this: it byte-compares against a dump from
-        # the same machine, so it is `#[ignore]`d and remains a local before/after
-        # tool. What CI now covers is everything that asserts on an
-        # invariant rather than on a reference image.
+        # the same machine, so it is `#[ignore]`d, and the golden job runs it
+        # against the base's rendering instead.
         run: cargo test --workspace
 
       - name: Build the ffi face
@@ -136,6 +170,104 @@ jobs:
           sudo apt-get install -y libx11-dev libwayland-dev wayland-protocols
           cmake -S examples/viewer-vulkan-cpp -B examples/viewer-vulkan-cpp/build -DCMAKE_BUILD_TYPE=Debug
           cmake --build examples/viewer-vulkan-cpp/build
+
+  # The suite's other rendering tests assert on invariants and pixel counts,
+  # which a part moved by a pixel or a colour that drifted passes. This renders
+  # the golden corpus twice on the same software GPU -- the pull request's base,
+  # then its head -- and fails when any image differs, so the reference is never
+  # checked in and lavapipe never has to agree with a real GPU. A change that is
+  # meant to move pixels fails here too: the triptychs it uploads are what the
+  # review looks at.
+  golden:
+    name: 🖼️ Golden images (Linux)
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          submodules: recursive
+
+      - name: Checkout the base
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.event.pull_request.base.sha }}
+          path: golden-base
+          submodules: recursive
+
+      - name: Setup Rust toolchain
+        uses: dtolnay/rust-toolchain@7e38f4b43b4db5c8dd498af069a4f6196df1d067 # master
+        with:
+          # Pinned by SHA, so the channel must be named explicitly here.
+          toolchain: stable
+
+      - name: Setup Rust cache
+        uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+        with:
+          # The check job's key, since main writes that one and builds the same
+          # workspaces in the same profile; this job runs on pull requests only,
+          # so it never saves and cannot evict it.
+          shared-key: check
+          save-if: false
+          workspaces: |
+            . -> target
+            SpriteStudio-SDK -> target
+
+      - name: Install a software GPU (Mesa lavapipe)
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y mesa-vulkan-drivers vulkan-tools
+
+      - name: Show the adapter the images come from
+        env:
+          VK_DRIVER_FILES: /usr/share/vulkan/icd.d/lvp_icd.x86_64.json
+          VK_ICD_FILENAMES: /usr/share/vulkan/icd.d/lvp_icd.x86_64.json
+        run: vulkaninfo --summary
+
+      - name: Render the base
+        working-directory: golden-base
+        env:
+          VK_DRIVER_FILES: /usr/share/vulkan/icd.d/lvp_icd.x86_64.json
+          VK_ICD_FILENAMES: /usr/share/vulkan/icd.d/lvp_icd.x86_64.json
+          SS_GOLDEN_DIR: ${{ runner.temp }}/golden/base
+        # Each checkout converts its own fixtures, so an SDK bump is compared
+        # too, and builds into its own target dir, so the base compiles its
+        # dependencies afresh. Never point the two at one: they lay their crates
+        # out at the same relative paths, so cargo would take the head's sources,
+        # checked out before the base was built, for fresh and run the base's
+        # binary twice -- a comparison that cannot fail.
+        run: |
+          ./scripts/deploy-examples.sh build=debug
+          cargo test -p ssplayer-wgpu --test golden -- --ignored
+
+      - name: Render the head and compare
+        env:
+          VK_DRIVER_FILES: /usr/share/vulkan/icd.d/lvp_icd.x86_64.json
+          VK_ICD_FILENAMES: /usr/share/vulkan/icd.d/lvp_icd.x86_64.json
+          SS_GOLDEN_DIR: ${{ runner.temp }}/golden/head
+          SS_GOLDEN_COMPARE: ${{ runner.temp }}/golden/base
+        run: |
+          ./scripts/deploy-examples.sh build=debug
+          cargo test -p ssplayer-wgpu --test golden -- --ignored
+
+      - name: Summarize the comparison
+        if: always()
+        run: |
+          summary="$RUNNER_TEMP/golden/head/summary.md"
+          if [ -f "$summary" ]; then cat "$summary" >> "$GITHUB_STEP_SUMMARY"; fi
+
+      - name: Upload the triptychs
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: golden-diff
+          path: |
+            ${{ runner.temp }}/golden/head/summary.md
+            ${{ runner.temp }}/golden/head/diff/
+          if-no-files-found: ignore
 
   windows:
     name: 🪟 DX12 viewer (Windows)
@@ -194,6 +326,7 @@ jobs:
         with:
           # Pinned by SHA, so the channel must be named explicitly here.
           toolchain: stable
+          components: clippy
 
       - name: Setup Rust cache
         uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
@@ -205,6 +338,11 @@ jobs:
 
       - name: Build the js face
         run: cargo build -p ssplayer-wgpu --target wasm32-unknown-unknown --no-default-features --features web
+
+      # The Linux job's clippy builds default features, which leave src/web.rs
+      # out, so until this step the js face was compiled but never linted.
+      - name: Clippy (js face)
+        run: cargo clippy -p ssplayer-wgpu --target wasm32-unknown-unknown --no-default-features --features web -- -D warnings
 
       # The TypeScript layer of @spritestudio/ssplayer-wgpu types itself against
       # wasm-pack's generated .d.ts, so a change to the js face's Rust signatures
@@ -234,6 +372,17 @@ jobs:
       - name: Typecheck the js layer
         working-directory: packages/ssplayer-wgpu
         run: pnpm run typecheck
+
+      # The preview shell (examples/preview/shell.html) is the js face's other
+      # consumer, and nothing else builds it: examples/preview-gen's tests fill
+      # a fake one. build-preview.sh refuses a page that loads anything from
+      # outside itself or calls a method the glue does not define, so building it
+      # is the check. Debug, as the package above: the no-modules target differs
+      # only in what wasm-bindgen writes, so cargo reuses that build and this
+      # costs a few seconds, and the cache the weekly run writes stays the one
+      # PRs restore. release.yml builds the release one.
+      - name: Build the preview shell
+        run: ./scripts/build-preview.sh build=debug out="$RUNNER_TEMP/ssplayer-preview.html"
 
   # The weekly tier. main takes every pull request and a release is dispatched
   # from it, so there is no release PR to run this on.

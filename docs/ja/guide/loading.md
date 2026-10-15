@@ -145,31 +145,31 @@
 === "Rust"
 
     ```rust
-    // `texture.hash` はスロットの名前。レンダラのキーはこちら。
-    let key = player.texture_key(pack, texture.hash);
+    // `texture.slot` はパック内のスロットの名前。レンダラのキーはこちら。
+    let key = player.texture_key(pack, texture.slot);
 
     // あなたが所有する view。Player が GPU テクスチャを所有することはありません。
     renderer.set_texture(&device, key, &view, (width, height), AlphaMode::Straight);
 
     // ストレートアルファの RGBA8 からアップロードさせることもできます。
-    renderer.upload_texture(&device, &queue, key, &rgba, (width, height), Retention::Keep);
+    renderer.upload_texture(&device, &queue, key, &rgba, (width, height), Retention::Retain);
     ```
 
 === "C"
 
     ```c
-    /* `SsTextureRef::hash` は既にキーです（`ss_player_texture_at` が解決して返します） */
+    /* `SsTextureRef::key` は既にキーです（`ss_player_texture_at` が解決して返します） */
     /* 生の RGBA8、width * height * 4 バイト、ストレートアルファ */
-    ss_scene_add_texture(scene, ref.hash, rgba, width, height);
+    ss_scene_add_texture(scene, ref.key, rgba, width, height);
 
     /* あるいはエンコード済み PNG を渡してデコードさせる */
-    ss_scene_add_texture_png(scene, ref.hash, png_bytes, png_len);
+    ss_scene_add_texture_png(scene, ref.key, png_bytes, png_len);
     ```
 
 === "JavaScript"
 
     ```js
-    // textureRefs / embeddedTextures の各エントリは `hash` の隣に `key` を持ちます。
+    // textureRefs / embeddedTextures の各エントリは、供給に使う `key` を持ちます。
     ctx.addTexture(key, rgba, width, height);          // 生の RGBA8
     await ctx.addTextureFromBytes(key, encodedBytes);  // PNG/WebP。ブラウザがデコード
     ctx.addTextureFromBitmap(key, imageBitmap);        // 既にある ImageBitmap

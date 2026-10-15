@@ -54,9 +54,9 @@ ssplayer-bevy = { git = "https://github.com/cri-middleware/SSPlayerForWgpu" }
 
 ### C と C++
 
-C フェイスは cdylib / staticlib と、生成されたヘッダです。各 [`ssplayer-wgpu` の Release](https://github.com/cri-middleware/SSPlayerForWgpu/releases?q=ssplayer-wgpu&expanded=true) の **Assets** に、静的ライブラリがプラットフォームごとの zip で付いています。`ssplayer-wgpu-windows-x86_64.zip`（MSVC、`/MD` ランタイム）と `ssplayer-wgpu-macos-universal.zip`（arm64 + x86_64）で、どちらも `include/`・`lib/`・`LICENSE.md`・`LICENSE.ja.md`・`THIRD_PARTY_NOTICES.md` と、ドキュメントの Markdown（`README.md`・`docs/`）を含み、`SHA256SUMS` が添えてあります。リンクの方法と、静的ランタイム（`/MT`）向けのビルドは [C / C++ ではじめる](./docs/ja/start/cpp.md) にあります。
+C フェイスは cdylib / staticlib と、生成されたヘッダです。各 [`ssplayer-wgpu` の Release](https://github.com/cri-middleware/SSPlayerForWgpu/releases?q=ssplayer-wgpu&expanded=true) の **Assets** に、静的ライブラリがプラットフォームごとの zip で付いています。`ssplayer-wgpu-windows-x86_64.zip`（MSVC、`/MD` ランタイム）と `ssplayer-wgpu-macos-universal.zip`（arm64 + x86_64。静的ライブラリの横に、署名・公証済みの共有ライブラリも入っています）で、どちらも `include/`・`lib/`・`LICENSE.md`・`LICENSE.ja.md`・`THIRD_PARTY_NOTICES.md` と、ドキュメントの Markdown（`README.md`・`docs/`）を含み、`SHA256SUMS` が添えてあります。リンクの方法と、静的ランタイム（`/MT`）向けのビルドは [C / C++ ではじめる](./docs/ja/start/cpp.md) にあります。
 
-Linux の場合や共有ライブラリが必要な場合は、チェックアウトからビルドします:
+Linux の場合や Windows の DLL が必要な場合は、チェックアウトからビルドします:
 
 ```bash
 git clone --recursive https://github.com/cri-middleware/SSPlayerForWgpu.git
@@ -134,9 +134,7 @@ C と JavaScript のフェイスは名前が違うだけで同じ形をしてお
 ### その `.ssab` はどこから来るのか
 
 アニメーションは SpriteStudio（**7.5 以上**）で制作し、事前に変換します。このプレイヤーは実行時には何も変換せず、コンバータも同梱しません。デスクトップの
-[SSConverterGUI](https://github.com/cri-middleware/SSConverterGUI) か、SDK の `ssconverter-cli` を使ってください。ツールの選び方とビルドパイプラインへの組み込み方は
-[単体ツールで変換する](https://cri-middleware.github.io/SpriteStudio-Docs/ja/overview/convert-with-a-standalone-tool/)
-にあります。まず試すだけなら自前の素材は要りません。以下のサンプルは SDK 自身のテストアニメーションで動きます。
+[SSConverterGUI](https://github.com/cri-middleware/SSConverterGUI) か、SDK の `ssconverter-cli` を使ってください。ツールの選び方とビルドパイプラインへの組み込み方は[単体ツールで変換する](https://cri-middleware.github.io/SpriteStudio-Docs/ja/overview/convert-with-a-standalone-tool/)にあります。まず試すだけなら自前の素材は要りません。以下のサンプルは SDK 自身のテストアニメーションで動きます。
 
 ## 🎬 サンプル
 

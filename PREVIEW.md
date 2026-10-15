@@ -102,15 +102,24 @@ cost of every generated page. Whole-file sizes: 1,332,615 B for
 
 ## Distribution
 
-The shell is a **release artifact of this repository**, produced by
-`scripts/build-preview.sh`, and it carries the SDK commit it was built from.
+The shell is a **release artifact of this repository**: every `ssplayer-wgpu` Release
+carries it as `ssplayer-preview.html`, listed in `SHA256SUMS`, built by
+`scripts/build-preview.sh` in the release workflow's web job. It carries the SDK commit it
+was built from.
 
 It is not committed into the Players. It is generated content of about 1.1 MB, and a
 copy in each Player is a copy that drifts; the native binaries are already built rather
 than committed, and the shell travels the same way — each plugin's packaging script
-fetches a pinned release. `MAINTAINING_PLAYERS.md` §4.1 is the constraint that decides
-this: nothing behind a Player's first door may need a clone, so the shell has to arrive
-with the plugin rather than from a sibling checkout.
+fetches a pinned release:
+
+```text
+https://github.com/cri-middleware/SSPlayerForWgpu/releases/download/ssplayer-wgpu-v<version>/ssplayer-preview.html
+```
+
+The tag is the pin, so the file name carries no version, like the zips'.
+`MAINTAINING_PLAYERS.md` §4.1 is the constraint that decides this: nothing behind a
+Player's first door may need a clone, so the shell has to arrive with the plugin rather
+than from a sibling checkout.
 
 **The version stamp is load-bearing.** The `.ssab` schema is still moving at version 1,
 so a stale shell does not fail — it quietly draws something else. The page shows the
@@ -269,12 +278,10 @@ Call it again when the element resizes and after the picker changes animation. S
 
 Both halves are built — the shell (`examples/preview/shell.html` +
 `scripts/build-preview.sh`) and the generator (`examples/preview-gen`, which a host in
-another language ports rather than links). What is left is packaging:
-
-1. **A release job**, so a plugin fetches a pinned shell rather than builds one. Until
-   then a host has to build it, which means a Rust toolchain and wasm-pack.
-2. **The buttons**, which live in the Player repositories rather than here: convert (or
-   find) the `.ssab`, run the gather, write to a temp directory, open it.
+another language ports rather than links) — and every Release carries the shell. What is
+left lives in the Player repositories rather than here: each plugin's packaging script
+fetching the shell from a pinned Release, and **the buttons** — convert (or find) the
+`.ssab`, run the gather, write to a temp directory, open it.
 
 ## Out of scope
 

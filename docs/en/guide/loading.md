@@ -167,31 +167,31 @@ The texture map is **device-scoped**, so a pack shown five times is uploaded onc
 === "Rust"
 
     ```rust
-    // `texture.hash` names the slot; this is what the renderer is keyed by.
-    let key = player.texture_key(pack, texture.hash);
+    // `texture.slot` names the slot in the pack; the key is what the renderer is keyed by.
+    let key = player.texture_key(pack, texture.slot);
 
     // A view you own. The player never takes ownership of a GPU texture.
     renderer.set_texture(&device, key, &view, (width, height), AlphaMode::Straight);
 
     // Or let it upload for you, from straight-alpha RGBA8.
-    renderer.upload_texture(&device, &queue, key, &rgba, (width, height), Retention::Keep);
+    renderer.upload_texture(&device, &queue, key, &rgba, (width, height), Retention::Retain);
     ```
 
 === "C"
 
     ```c
-    /* `SsTextureRef::hash` is already the key: `ss_player_texture_at` resolves it. */
+    /* `SsTextureRef::key` is already the key: `ss_player_texture_at` resolves it. */
     /* Raw RGBA8, width * height * 4 bytes, straight alpha. */
-    ss_scene_add_texture(scene, ref.hash, rgba, width, height);
+    ss_scene_add_texture(scene, ref.key, rgba, width, height);
 
     /* Or hand over encoded PNG bytes and let the library decode. */
-    ss_scene_add_texture_png(scene, ref.hash, png_bytes, png_len);
+    ss_scene_add_texture_png(scene, ref.key, png_bytes, png_len);
     ```
 
 === "JavaScript"
 
     ```js
-    // Every textureRefs / embeddedTextures entry carries `key` beside `hash`.
+    // Every textureRefs / embeddedTextures entry carries the `key` to supply it under.
     ctx.addTexture(key, rgba, width, height);          // raw RGBA8
     await ctx.addTextureFromBytes(key, encodedBytes);  // PNG/WebP, decoded by the browser
     ctx.addTextureFromBitmap(key, imageBitmap);        // an ImageBitmap you already have

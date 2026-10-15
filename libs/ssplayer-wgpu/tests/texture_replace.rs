@@ -263,3 +263,45 @@ fn the_override_reaches_the_drawn_pixels_and_a_restore_undoes_it() {
     let restored = render(&device, &queue, &mut renderer, &mut scene, &mut player);
     assert!(mean_abs_diff(&baseline, &restored) < 0.5, "restore did not return the drawn pixels to the original (diff {})", mean_abs_diff(&baseline, &restored));
 }
+
+/// A texture the device cannot hold is left out, not fatal.
+///
+/// wgpu reports a texture past `max_texture_dimension_2d`, or pixels that do not
+/// fill it, as a validation error, and its default handler panics. The C and
+/// JavaScript faces own their device, so an oversized atlas used to take the
+/// host process with it. The renderer now refuses such a texture where it would
+/// create it: the key keeps whatever it held, and the frame still draws.
+#[test]
+fn a_texture_the_device_cannot_hold_is_left_out_and_the_frame_still_draws() {
+    let Some((device, queue)) = gpu() else {
+        eprintln!("no GPU adapter; skipping the oversized-texture check.");
+        return;
+    };
+    let max = device.limits().max_texture_dimension_2d;
+    let mut renderer = SSRenderer::new(&device);
+    let mut scene = SSScene::new(&device, &SceneConfig { color_format: FORMAT, stencil_format: None, mask: MaskBackend::None });
+    scene.set_viewport(&queue, W as f32, H as f32, false);
+
+    // Straight through the renderer: one row past the limit, then pixels that
+    // fall short of the size they claim.
+    let key = fnv1a("too-large");
+    let row = [255u8; 4].repeat(max as usize + 1);
+    renderer.upload_texture(&device, &queue, key, &row, (max + 1, 1), ssplayer_wgpu::Retention::Retain);
+    assert_eq!(renderer.texture_size(key), None, "a texture past the device's limit was registered");
+    renderer.upload_texture(&device, &queue, key, &[255u8; 4], (2, 2), ssplayer_wgpu::Retention::Retain);
+    assert_eq!(renderer.texture_size(key), None, "4 bytes were registered as a 2x2 texture");
+
+    // A good texture, then a bad replacement for the same key: the good one stays.
+    renderer.upload_texture(&device, &queue, key, &[255u8; 16], (2, 2), ssplayer_wgpu::Retention::Retain);
+    renderer.upload_texture(&device, &queue, key, &row, (max + 1, 1), ssplayer_wgpu::Retention::Retain);
+    assert_eq!(renderer.texture_size(key), Some((2.0, 2.0)), "a refused replacement dropped the texture it would have replaced");
+
+    // Through a player: the override is queued by the call and uploaded by the
+    // update, which has no caller to refuse it to.
+    let mut player = loaded();
+    let name = a_cellmap(&player);
+    player.play();
+    player.set_cellmap_texture(None, &name, &row, max + 1, 1).unwrap();
+    let frame = render(&device, &queue, &mut renderer, &mut scene, &mut player);
+    assert!(drawn_pixels(&frame) > 0, "the frame after a refused override drew nothing");
+}

@@ -4,7 +4,7 @@ title: Bevy API リファレンス
 
 # Bevy API リファレンス
 
-公開されているのは、プラグイン 1 つ・コンポーネント 4 つ（うち 1 つは任意）・状態コンポーネント 1 つ・フィードバックのメッセージ 4 つと命令のメッセージ 3 つだけです。生成ドキュメント：
+公開されているのは、プラグイン 1 つ・アセット 1 つ・コンポーネント 4 つ（うち 1 つは任意）・状態コンポーネント 2 つ・フィードバックのメッセージ 4 つと命令のメッセージ 4 つだけです。生成ドキュメント：
 <a href="../../api/ssplayer_bevy/index.html" target="_blank" rel="noreferrer">**`ssplayer_bevy` の rustdoc**</a>。
 
 **Bevy 0.20.x のみ** — [Bevy ではじめる](../start/bevy.md#supported-bevy)を参照。
@@ -43,6 +43,7 @@ spawn すれば 5 つとも既定値で付きます。
 * 同じハンドルを使うキャラクター同士は、パックのパースを 1 回、アトラスごとの GPU テクスチャを 1 枚だけ共有します。テクスチャはコピーせず Player に貸します。
 * Bevy の `file_watcher` フィーチャーを有効にすると、`.ssab` や兄弟パックを変更したときはそれを再生しているキャラクターを組み直し、アトラスを変更したときはその場で貸し直します。
 * `SsPack::pack()` はパース済みのパックで、名前と `animation_names()` を取れます。
+* `SsPackLoader` はプラグインが `.ssab` 用に登録するローダーです。ロードに失敗しうるのは `.ssab` 自体だけで — 読めなければ `SsPackLoadError::Io`、有効なパックでなければ `::Parse` — Bevy はそれを `AssetLoadFailedEvent<SsPack>` として通知します。届かなかった兄弟パックはエラーではなく、それを再生するインスタンスパーツが表示されないだけです。
 
 ### `SsTransform` — どこに置くか
 
@@ -52,7 +53,7 @@ spawn すれば 5 つとも既定値で付きます。
 | `scale_x`, `scale_y` | `1.0` |
 | `rotation`（ラジアン） | `0.0` |
 
-毎フレーム変えても構いません。コストはゼロです。
+毎フレーム変えても構いません。
 
 ### `SsPlayback` — 再生と合成
 
@@ -62,6 +63,7 @@ spawn すれば 5 つとも既定値で付きます。
 | `speed_scale: f32` | `1.0` | 既定 fps の倍率。`0` と負値は停止 |
 | `order: i32` | `0` | 描画順。小さいほど先。同値なら extract 順 |
 | `alpha: f32` | `1.0` | キャラクター全体のフェード |
+| `tint: u32` | `0xFFFFFF` | キャラクター全体の tint（`0xRRGGBB`）。PartsColor の後に乗算します |
 | `visible: bool` | `true` | false は描画をスキップします。タイムラインは進みます |
 | `culled: bool` | `false` | true は描画だけでなく**タイムラインの前進もスキップ**します。画面外のキャラクター用 |
 | `restart: u32` | `0` | **値を進める**（値が変われば何でも可）と先頭から再生し、ループ回数を張り直します |
@@ -172,7 +174,7 @@ fn on_finish(mut finished: MessageReader<SsFinished>, mut commands: Commands) {
 | `Render` / `RenderSystems::Prepare` | 再生ツリーへ適用し、`pack` か `animation` が変わったキャラクターを組み直す |
 | `Core2d` / `Core2dSystems::MainPass` | 前進・構築・描画。**`main_transparent_pass_2d` の後**に順序付け |
 
-最後の順序は、同じ set に入れた偶然ではなく明示的なエッジです。レンダーコンテキストを取る 2 つのシステムはそれぞれ自分のコマンドエンコーダを持ち、どちらのバッファが先にキューへ届くかは明示しなければ決まりません。これが無いと、キャラクターが Bevy のスプライトの上に出るか下に出るかが競合になります。
+最後の順序は、同じ set に入れた偶然ではなく明示的なエッジです。`RenderContext` を取る 2 つのシステムはそれぞれ自分のコマンドエンコーダを持ち、どちらのバッファが先にキューへ届くかは明示しなければ決まりません。これが無いと、キャラクターが Bevy のスプライトの上に出るか下に出るかが競合になります。
 
 ## このアダプタがまだやらないこと
 
@@ -184,7 +186,7 @@ fn on_finish(mut finished: MessageReader<SsFinished>, mut commands: Commands) {
 
 ## マスクとデバイスロスト
 
-マスクは自動的に**カバレッジ**バックエンドになります。Bevy の 2D 深度テクスチャがステンシルを持たないためです。コストはマスクを使うキャラクター 1 体につき 1 パス／フレーム（[マスク](../guide/masks.md)）。
+マスクは自動的に**カバレッジ**バックエンドになります。Bevy の 2D 深度テクスチャがステンシルを持たないためです。コストはマスクを使うキャラクター 1 体につき、1 フレームあたり追加のレンダーパス 1 つ（[マスク](../guide/masks.md)）。
 
 デバイスロストは Bevy 自身の復帰に乗りますが、**opt-in が必要**です。`RenderErrorPolicy::Recover` を返す
 `RenderErrorHandler` を入れてください（[デバイスロスト](../guide/device-loss.md)）。

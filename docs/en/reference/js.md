@@ -36,6 +36,11 @@ The element lives behind its own entry point, so a bundle that only wants the AP
 | `surfaceCount()` | Diagnostic |
 | `version` / `sdkVersion` | This player's version, and the SpriteStudio-SDK release it links: its tag, or `local` for an SDK that is not a release. Read-only; `element.ctx` reaches them from the custom element |
 
+`addTexture`, `addTextureFromBitmap` and `setCellmapTexture` throw, changing nothing, when the
+device cannot hold the texture: wider or taller than its `max_texture_dimension_2d`, a closed
+`ImageBitmap`, or — for `addTexture` — `rgba` that is not `width * height * 4` bytes. The `FromBytes`
+forms reject for the same reasons.
+
 ## `SsSurfaceWeb` — one canvas
 
 | | |
@@ -88,6 +93,8 @@ the calls.
 | | |
 |---|---|
 | `setTransform(x, y, scaleX, scaleY, rotation)` / `resetTransform()` | |
+| `fitInto(width, height, options?)` | Fit the animation into a box and write the transform. Returns `{ x, y, scaleX, scaleY }`; an unknown `fit` or `align` throws. See [Fitting into a box](../guide/placement.md) |
+| `canvasRect()` | The box `fitInto` fits when no `frame` is given: `{ x, y, width, height }`, or `undefined` before `setAnimation` |
 | `setOrder(n)` / `order()` | Draw order within the canvas, ascending |
 | `setVisible(v)` / `isVisible()` | Hidden characters draw nothing but keep playing and reporting events |
 | `setCulled(c)` / `isCulled()` | Culled characters **do not advance** and report no events |
@@ -105,6 +112,7 @@ the calls.
 | `clearAllPartOverrides()` | |
 | `partTransform(part)` / `partTransformByIndex(i)` | `[m00, m01, m10, m11, tx, ty]` |
 | `isPartHidden(part)` / `isPartSkinnedMesh(part)` / `partCount()` | `isPartHidden` and `isPartSkinnedMesh` → `true`/`false`, or `undefined` for an unknown part |
+| `isPartHiddenByIndex(i)` / `isPartSkinnedMeshByIndex(i)` | The same by part index — an event's `partIndex`, a slot of `partNames()` — `undefined` out of range |
 | `events()` | Plain objects tagged by `kind`: `'userData'` / `'signal'` / `'audio'`. Each carries `frameNo`, `partName` and `source`, the handle of the source that fired it |
 
 **Texture replacement** — swap the whole texture a cell map binds (a costume or palette change).

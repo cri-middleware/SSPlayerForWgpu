@@ -45,9 +45,10 @@ player, where every host and the C ABI reach it, and the host half belongs in an
       would charge every stencil host an extra pass and a coverage array per
       masking player, so the fold waits for that constant to gain a stencil, and
       goes the other way: dropping coverage takes the extra pass with it, while
-      `SceneConfig::stencil_format` and `TreeMask::finish` stay. Check the constant on
-      each Bevy bump. Until then every mask feature lands in both. Blocked on: Bevy's 2d
-      pass carrying a stencil.
+      `SceneConfig::stencil_format` and `TreeMask::finish` stay. A unit test in
+      `ssplayer-bevy/src/render.rs` fails when the constant changes, so a Bevy bump
+      cannot move it unnoticed. Until then every mask feature lands in both. Blocked
+      on: Bevy's 2d pass carrying a stencil.
 - [ ] **Exact masks, past what the stencil can express** — mixed INCR / INVERT
       overlaps are approximated and nesting is limited by 8 bits. The coverage
       backend already lifts the nesting limit — its accumulators are shader
@@ -81,9 +82,10 @@ player, where every host and the C ABI reach it, and the host half belongs in an
 
 ## Hosts & platforms
 
-- [ ] **Vulkan C++ viewer (Linux)** — `examples/viewer-vulkan-cpp`. Written, and
-      never built or run: it was written on macOS, where neither the X11 nor the
-      Wayland code compiles. It carries both window paths in one binary because
+- [ ] **Vulkan C++ viewer (Linux)** — `examples/viewer-vulkan-cpp`. Written on
+      macOS, where neither the X11 nor the Wayland code compiles, and built by CI on
+      Linux for every pull request — but never run, because the runner has no
+      display. It carries both window paths in one binary because
       Xwayland means an X11 window never reaches the `SS_WINDOW_WAYLAND` arm, so
       closing this needs one run per path on a Linux desktop. Until then the Xlib
       and Wayland arms of `surface_target` stay unverified.
@@ -100,12 +102,20 @@ player, where every host and the C ABI reach it, and the host half belongs in an
       freezes), and moving the feedback store off the per-view path —
       `FeedbackChannel::store` replaces the batch wholesale, so today the last view
       to run would be the only one the main world hears about.
+- [ ] **An offscreen target on the C face** — a scene renders only to the window or
+      layer it was created on, so a C/C++ engine cannot composite a character with its
+      own drawing; the route the docs give for it — render into a texture and bring it
+      in through the engine's interop — has no call behind it. Needs: a scene created
+      on a texture rather than a window, and a way for that texture to leave.
+      **Undecided**: whether that is a native shared handle per backend (a DXGI shared
+      handle, an `IOSurface`, Vulkan external memory — none of which wgpu creates by
+      default), a CPU readback as the portable floor, or both.
 - [ ] **Self-contained HTML preview** — a Preview button per pack in each host writes one
       fully inlined HTML file and opens it in the browser, so every host shows the same
-      preview without an in-editor renderer. Missing: a release job that publishes a
-      pinned shell (`examples/preview/shell.html`, built by `scripts/build-preview.sh`),
-      so a plugin fetches it rather than builds it, and the buttons themselves, which
-      live in the Player repositories. Design and measurements: [`PREVIEW.md`](./PREVIEW.md).
+      preview without an in-editor renderer. Every Release carries the shell, for a
+      plugin to fetch by its tag rather than build. Missing: the buttons themselves,
+      which live in the Player repositories. Design and measurements:
+      [`PREVIEW.md`](./PREVIEW.md).
 
 ## Resource management
 
@@ -121,17 +131,9 @@ player, where every host and the C ABI reach it, and the host half belongs in an
 
 ## Distribution & verification
 
-- [ ] **macOS signing and notarization** — for the cdylib. Portable from the sibling
-      players, using the existing organisation secrets.
-- [x] **Version stamping** — versions are hand-written and the SDK is a submodule rather
-      than a release zip, so the release zips, the C library and the npm package need to
-      record the SDK commit they were built from. Only the preview shell does.
 - [ ] **crates.io** — `ssruntime` and `ssab` are path dependencies into the
       submodule; cargo will not publish a crate that depends on paths only.
       Blocked on: the SDK crates `ssab` and `ssruntime` being published first.
-- [ ] **Browser-side measurement** — `surface.stats()` is wired through to
-      `examples/web` but has never been read in a browser, where one command is
-      one JS call and the ratios differ from native.
 
 ## Needs SDK
 
@@ -146,7 +148,13 @@ player, where every host and the C ABI reach it, and the host half belongs in an
 - **Throughput optimisation** — draw-call merging, bindless textures, texture
   bind-group dedup, render bundles, threading the player walk, indirect draws for
   Shape. Measured against a 256-player frame and not worth their complexity;
-  bindless is additionally unavailable on WebGPU.
+  bindless is additionally unavailable on WebGPU. The browser does not change that.
+  `tests/scale.rs`'s cast in Chrome 155 (release wasm, Apple M4 Max, macOS 26.7) draws
+  the same list as native — at 256 players 2496 draws, 704 mergeable, 1983 rebinds —
+  and pays more per call for it: 1.86 ms per `surface.frame()` against 0.87 ms native,
+  and 0.52 ms of GPU pass against 0.10 ms. The browser's figure also covers acquiring
+  the canvas texture and the submit, about 0.16 ms of it fixed. Merging every
+  mergeable draw would remove 28% of the calls, a fraction of a millisecond.
 - **One player drawn into several views** — a minimap, a split screen, a portal, a
   tool's preview beside its output. `SSScene::update` fuses the timeline
   advance with the geometry build, so handing one player to two scenes plays it at
@@ -165,15 +173,18 @@ player, where every host and the C ABI reach it, and the host half belongs in an
   WebGL player, which does the same.
 - **Sharing an engine's device through the C ABI.** wgpu types do not cross a C
   boundary; engine embedding is a Rust-only capability, delivered as adapter
-  crates. From C the route is offscreen rendering plus a shared texture.
+  crates. From C the route would be offscreen rendering plus a shared texture, which
+  waits on *An offscreen target on the C face* above.
 - **The GL backend.** The renderer pulls its vertices from storage buffers bound
   to the vertex stage, which GL exposes only from 4.3 / GLES 3.1 and WebGL not at
   all. No GL adapter is selected or verified anywhere: the instance takes
   `Backends::PRIMARY` (Vulkan / Metal / DX12 / WebGPU), and the C API's backend
   selector offers DX12, Metal and Vulkan.
 - **An egui or iced adapter.** Both are immediate-mode-shaped hosts whose
-  integration point is a texture, so the route is the one already documented for C:
-  render offscreen and hand over the texture. A first-class adapter crate waits on a
-  concrete request; Bevy UI above is the Rust UI target that is actually asked for.
+  integration point is a texture, so the route needs no crate: draw through the Rust
+  API into a texture you own — the host opens the render pass, so its target can be
+  any texture — and hand that texture to the toolkit. A first-class adapter crate
+  waits on a concrete request; Bevy UI above is the Rust UI target that is actually
+  asked for.
 - **A WebGL fallback.** `ssplayer-webgl` is maintained and is the answer for
   environments without WebGPU.

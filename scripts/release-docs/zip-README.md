@@ -2,7 +2,7 @@
 
 Plays SpriteStudio animations from a C or C++ host. The player owns its own graphics device, built on the window you name.
 
-This zip holds the header in `include/`, the static library and its `VERSION` in `lib/`, the licences, and the documentation in `docs/`.
+This zip holds the header in `include/`, the static library and its `VERSION` in `lib/` (in the macOS zip, the shared library `libssplayer_wgpu.dylib` as well, signed and notarized), the licences, and the documentation in `docs/`.
 
 `docs/` is the documentation of the release this zip came from, so it describes the API the library in `lib/` actually provides. The online documentation is built from the latest release and can be ahead of this copy.
 

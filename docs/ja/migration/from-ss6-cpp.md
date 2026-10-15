@@ -15,7 +15,7 @@
 | 粒度 | 1 プロジェクト＝1 ファイル（大きい） | **アニメーションパックごとに 1 ファイル** |
 | テクスチャ | 常に外部 PNG | **外部参照（reference）** または **埋め込み（embedded）** |
 | コンバータ | SS6Converter | **`ssconverter-cli`**（SDK 同梱）または [SSConverterGUI](https://github.com/cri-middleware/SSConverterGUI) |
-| 名前引き | 文字列比較 | **uint32 ハッシュ** |
+| 名前引き | 文字列比較 | **`uint32` ハッシュ** |
 
 !!! danger "`.ssfb2` は読み込めません"
     元の `.sspj` から再コンバートしてください（[アセットの準備](../start/assets.md)）。

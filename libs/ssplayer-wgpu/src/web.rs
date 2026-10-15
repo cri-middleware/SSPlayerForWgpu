@@ -37,19 +37,16 @@ use crate::events::{SignalValue, SsEvent};
 use crate::fit::{Align, Fit, Placement, Rect};
 use crate::pack::SSPack;
 use crate::player::{AssetLoader, BlendOp, MissingKind, OverridePriority, PlaybackDirection, PlaybackStyle, SSPlayer};
-use crate::renderer::{AlphaMode, Retention, SSRenderer};
+use crate::renderer::{AlphaMode, Retention, SSRenderer, texture_extent_error};
 use crate::roster::{Roster, SlotId};
 use crate::scene::{MaskBackend, SSScene, SceneConfig};
+use crate::surface::{STENCIL_FORMAT, Swapchain};
 use std::cell::{Cell, RefCell};
 use std::collections::HashMap;
 use std::rc::Rc;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use wasm_bindgen::prelude::*;
-
-/// Depth/stencil format for masking (matches the native viewer). Masks and the
-/// per-part shader gating rely on a stencil buffer being present.
-const STENCIL_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Depth24PlusStencil8;
 
 /// Map any error into a JS exception value.
 fn js_err<E: core::fmt::Debug>(e: E) -> JsValue {
@@ -76,20 +73,6 @@ fn gone(what: &str) -> JsValue {
 /// canvas context's `alphaMode: "premultiplied"`. Picking the first reported mode
 /// is what made every element an opaque black box.
 const PAGE_ALPHA_MODE: wgpu::CompositeAlphaMode = wgpu::CompositeAlphaMode::PreMultiplied;
-
-fn create_stencil_view(device: &wgpu::Device, width: u32, height: u32) -> wgpu::TextureView {
-    let texture = device.create_texture(&wgpu::TextureDescriptor {
-        label: Some("SpriteStudio Stencil"),
-        size: wgpu::Extent3d { width: width.max(1), height: height.max(1), depth_or_array_layers: 1 },
-        mip_level_count: 1,
-        sample_count: 1,
-        dimension: wgpu::TextureDimension::D2,
-        format: STENCIL_FORMAT,
-        usage: wgpu::TextureUsages::RENDER_ATTACHMENT,
-        view_formats: &[],
-    });
-    texture.create_view(&wgpu::TextureViewDescriptor::default())
-}
 
 /// Decode encoded image bytes (PNG) with **the browser's** decoder.
 ///
@@ -372,9 +355,9 @@ async fn request_adapter(instance: &wgpu::Instance) -> Result<wgpu::Adapter, JsV
 
 /// One canvas: its swapchain and the scene drawn into it.
 struct SurfaceEntry {
-    surface: wgpu::Surface<'static>,
-    config: wgpu::SurfaceConfiguration,
-    stencil_view: wgpu::TextureView,
+    /// Always with a stencil buffer: masks and the per-part shader gating rely
+    /// on one being present.
+    swapchain: Swapchain,
     scene: SSScene,
     /// The players drawn into this canvas. The scene borrows them per frame
     /// rather than owning them, so the owner is the host — here.
@@ -413,34 +396,17 @@ struct WebContext {
 impl WebContext {
     /// Build a surface + scene for `canvas`.
     fn add_surface(&mut self, canvas: web_sys::HtmlCanvasElement) -> Result<SlotId, JsValue> {
-        let width = canvas.width().max(1);
-        let height = canvas.height().max(1);
+        let size = (canvas.width(), canvas.height());
         let surface = self.instance.create_surface(wgpu::SurfaceTarget::Canvas(canvas)).map_err(js_err)?;
-
-        let caps = surface.get_capabilities(&self.adapter);
-        let &first = caps.formats.first().ok_or_else(|| JsValue::from_str("the adapter cannot present to this canvas"))?;
-        // Prefer a non-sRGB format so the premultiplied pipeline composites as authored.
-        let format = caps.formats.iter().copied().find(|f| !f.is_srgb()).unwrap_or(first);
-        let config = wgpu::SurfaceConfiguration {
-            usage: wgpu::TextureUsages::RENDER_ATTACHMENT,
-            format,
-            color_space: wgpu::SurfaceColorSpace::Auto,
-            width,
-            height,
-            present_mode: wgpu::PresentMode::Fifo,
-            alpha_mode: PAGE_ALPHA_MODE,
-            view_formats: vec![],
-            desired_maximum_frame_latency: 2,
-        };
-        surface.configure(&self.device, &config);
+        let swapchain = Swapchain::new(&self.device, &self.adapter, surface, size, Some(PAGE_ALPHA_MODE), true).ok_or_else(|| JsValue::from_str("the adapter cannot present to this canvas"))?;
 
         // The scene is format-specific; the renderer is not, which is
         // what lets canvases with different formats share one of it.
-        let mut scene = SSScene::new(&self.device, &SceneConfig { color_format: format, stencil_format: Some(STENCIL_FORMAT), mask: MaskBackend::Stencil });
+        let mut scene = SSScene::new(&self.device, &SceneConfig { color_format: swapchain.format(), stencil_format: Some(STENCIL_FORMAT), mask: MaskBackend::Stencil });
+        let (width, height) = swapchain.size();
         scene.set_viewport(&self.queue, width as f32, height as f32, false);
-        let stencil_view = create_stencil_view(&self.device, width, height);
 
-        Ok(self.surfaces.insert(SurfaceEntry { surface, config, stencil_view, scene, players: Roster::default() }))
+        Ok(self.surfaces.insert(SurfaceEntry { swapchain, scene, players: Roster::default() }))
     }
 
     /// Upload a decoded `bitmap` and register it under `hash`.
@@ -448,12 +414,21 @@ impl WebContext {
     /// Goes through [`SSRenderer::set_texture`] rather than `upload_texture`
     /// because the pixels never pass through Rust: `copyExternalImageToTexture`
     /// moves them from the browser's decoded image straight into the texture,
-    /// with none of the CPU premultiply pass (and none of its 16 MB temporary,
-    ///) that `upload_texture` needs. The renderer only borrows the view
+    /// with none of the CPU premultiply pass (and none of its 16 MB temporary)
+    /// that `upload_texture` needs. The renderer only borrows the view
     /// — and since wgpu handles are refcounted, dropping our `Texture` here is
     /// fine: the view it hands over keeps it alive.
-    fn set_texture_from_bitmap(&mut self, hash: u32, bitmap: &web_sys::ImageBitmap) {
+    ///
+    /// Refuses a bitmap the device cannot hold — past its
+    /// `max_texture_dimension_2d`, or empty, which is also what a closed one
+    /// reports — before anything changes. wgpu would raise it as a validation
+    /// error, and with its default handler that aborted the wasm instance and
+    /// took every player on the page with it.
+    fn set_texture_from_bitmap(&mut self, hash: u32, bitmap: &web_sys::ImageBitmap) -> Result<(), JsValue> {
         let (width, height) = (bitmap.width(), bitmap.height());
+        if let Some(why) = texture_extent_error(&self.device, (width, height)) {
+            return Err(JsValue::from_str(&format!("{why} (a closed ImageBitmap reports 0x0)")));
+        }
         let size = wgpu::Extent3d { width, height, depth_or_array_layers: 1 };
         let texture = self.device.create_texture(&wgpu::TextureDescriptor {
             label: Some("SpriteStudio Atlas (ImageBitmap)"),
@@ -485,6 +460,7 @@ impl WebContext {
 
         let view = texture.create_view(&wgpu::TextureViewDescriptor::default());
         self.renderer.set_texture(&self.device, hash, &view, (width, height), AlphaMode::Premultiplied);
+        Ok(())
     }
 }
 
@@ -541,14 +517,25 @@ impl SsContextWeb {
     /// encoded image: this path premultiplies on the CPU and keeps the pixels for
     /// device-loss recovery, so a 2048² atlas costs two 16 MB passes through wasm
     /// memory that `createImageBitmap` does not.
+    ///
+    /// Throws, uploading nothing, when `rgba` is not `width * height * 4` bytes or
+    /// the device cannot hold the texture (past its `max_texture_dimension_2d`).
     #[wasm_bindgen(js_name = addTexture)]
-    pub fn add_texture(&self, hash: u32, rgba: &[u8], width: u32, height: u32) {
+    pub fn add_texture(&self, hash: u32, rgba: &[u8], width: u32, height: u32) -> Result<(), JsValue> {
         let ctx = &mut *self.inner.borrow_mut();
         let WebContext { renderer, device, queue, encoded_textures, .. } = ctx;
+        if let Some(why) = texture_extent_error(device, (width, height)) {
+            return Err(JsValue::from_str(&why));
+        }
+        // Inside the device's limit, so the product cannot overflow.
+        if rgba.len() != (width as usize) * (height as usize) * 4 {
+            return Err(JsValue::from_str(&format!("{} bytes do not fill a {width}x{height} RGBA8 texture", rgba.len())));
+        }
         // One hash, one supplier: whichever path registered it last owns the
         // recovery too, so the other's retained source must go.
         encoded_textures.remove(&hash);
         renderer.upload_texture(device, queue, hash, rgba, (width, height), Retention::Retain);
+        Ok(())
     }
 
     /// Supply a texture by hash from **encoded image bytes** (PNG) — the main
@@ -581,11 +568,15 @@ impl SsContextWeb {
     /// Rust one: nothing is retained here, so the page registers it again after
     /// [`SsContextWeb::restore_device`]. Use
     /// [`SsContextWeb::add_texture_from_bytes`] to be spared that.
+    ///
+    /// Throws, registering nothing, for a bitmap the device cannot hold — past
+    /// its `max_texture_dimension_2d`, or closed.
     #[wasm_bindgen(js_name = addTextureFromBitmap)]
-    pub fn add_texture_from_bitmap(&self, hash: u32, bitmap: &web_sys::ImageBitmap) {
+    pub fn add_texture_from_bitmap(&self, hash: u32, bitmap: &web_sys::ImageBitmap) -> Result<(), JsValue> {
         let ctx = &mut *self.inner.borrow_mut();
+        ctx.set_texture_from_bitmap(hash, bitmap)?;
         ctx.encoded_textures.remove(&hash);
-        ctx.set_texture_from_bitmap(hash, bitmap);
+        Ok(())
     }
 
     /// Whether an atlas is already registered for `hash`.
@@ -593,8 +584,8 @@ impl SsContextWeb {
     /// The texture map is device-scoped, so this answers for the
     /// whole page: it is how a caller keeps "N players of one pack decode its
     /// atlas once between them" true now that the decode happens in JS. The
-    /// player-side flush gets that for free (it filters before the decode,
-    ///); a page supplying textures itself has to ask.
+    /// player-side flush gets that for free (it filters before the decode); a
+    /// page supplying textures itself has to ask.
     #[wasm_bindgen(js_name = hasTexture)]
     pub fn has_texture(&self, hash: u32) -> bool {
         self.inner.borrow().renderer.texture_size(hash).is_some()
@@ -644,21 +635,19 @@ impl SsContextWeb {
             // Device-scoped first, then each target, then each player's atlases.
             ctx.renderer.restore_device(&device, &queue);
             for surface in ctx.surfaces.iter_mut() {
-                let caps = surface.surface.get_capabilities(&adapter);
-                if !caps.formats.contains(&surface.config.format) {
+                if !surface.swapchain.presents_on(&adapter) {
                     return Err(JsValue::from_str("the restored adapter cannot present a canvas's original surface format; rebuild the context"));
                 }
-                surface.config.alpha_mode = PAGE_ALPHA_MODE;
-                surface.surface.configure(&device, &surface.config);
-                surface.stencil_view = create_stencil_view(&device, surface.config.width, surface.config.height);
+                surface.swapchain.restore(&device, &adapter);
                 surface.scene.restore_device(&device, &queue);
                 for player in surface.players.iter_mut() {
                     player.restore_textures(&mut ctx.renderer, &device, &queue);
                 }
                 // `restore_device` re-applies the viewport the scene last saw, which is
                 // stale if the canvas was resized while the device was gone (`resize`
-                // only records the size then). `config` is authoritative — re-apply from it.
-                surface.scene.set_viewport(&queue, surface.config.width as f32, surface.config.height as f32, false);
+                // only records the size then). The swapchain's is authoritative — re-apply it.
+                let (width, height) = surface.swapchain.size();
+                surface.scene.set_viewport(&queue, width as f32, height as f32, false);
             }
 
             ctx.adapter = adapter;
@@ -697,14 +686,17 @@ impl SsContextWeb {
 /// would still be held when JS re-enters through a rAF callback.
 async fn upload_encoded(ctx: &Rc<RefCell<WebContext>>, hash: u32, bytes: Rc<[u8]>) -> Result<(), JsValue> {
     let bitmap = decode_image(&bytes).await?;
-    {
+    let supplied = {
         let ctx = &mut *ctx.borrow_mut();
-        ctx.set_texture_from_bitmap(hash, &bitmap);
-        ctx.encoded_textures.insert(hash, bytes);
-    }
+        let supplied = ctx.set_texture_from_bitmap(hash, &bitmap);
+        if supplied.is_ok() {
+            ctx.encoded_textures.insert(hash, bytes);
+        }
+        supplied
+    };
     // Ours to decode, ours to release: the copy captured the pixels already.
     bitmap.close();
-    Ok(())
+    supplied
 }
 
 /// One canvas and the scene drawn into it. Holds **any number of
@@ -744,37 +736,9 @@ impl SsSurfaceWeb {
 
         let mut players: Vec<&mut SSPlayer> = entry.players.iter_mut().collect();
         entry.scene.update(renderer, device, queue, dt, &mut players);
-
-        use wgpu::CurrentSurfaceTexture;
-        let frame = match entry.surface.get_current_texture() {
-            CurrentSurfaceTexture::Success(f) | CurrentSurfaceTexture::Suboptimal(f) => f,
-            // Lost/outdated/timeout (e.g. tab restore): reconfigure and skip this frame.
-            _ => {
-                entry.surface.configure(device, &entry.config);
-                return Ok(());
-            }
-        };
-        let view = frame.texture.create_view(&wgpu::TextureViewDescriptor::default());
-        let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor { label: None });
-        {
-            let mut rpass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
-                label: Some("ss-web frame"),
-                color_attachments: &[Some(wgpu::RenderPassColorAttachment { view: &view, resolve_target: None, ops: wgpu::Operations { load: wgpu::LoadOp::Clear(wgpu::Color::TRANSPARENT), store: wgpu::StoreOp::Store }, depth_slice: None })],
-                depth_stencil_attachment: Some(wgpu::RenderPassDepthStencilAttachment {
-                    view: &entry.stencil_view,
-                    depth_ops: Some(wgpu::Operations { load: wgpu::LoadOp::Clear(1.0), store: wgpu::StoreOp::Store }),
-                    stencil_ops: Some(wgpu::Operations { load: wgpu::LoadOp::Clear(0), store: wgpu::StoreOp::Store }),
-                }),
-                timestamp_writes: entry.scene.timestamp_writes(),
-                occlusion_query_set: None,
-                multiview_mask: None,
-            });
-            entry.scene.draw(renderer, &mut rpass);
-        }
-        entry.scene.resolve_timestamps(&mut encoder);
-        queue.submit(std::iter::once(encoder.finish()));
-        queue.present(frame);
-        Ok(())
+        // A lost surface (a tab restore, say) is configured again and the frame
+        // skipped; the transparent clear is what lets the page show through.
+        entry.swapchain.render(device, queue, renderer, &mut entry.scene, wgpu::Color::TRANSPARENT, "ss-web frame").map_err(JsValue::from_str)
     }
 
     /// Resize the swapchain, the stencil buffer and the projection to the
@@ -784,16 +748,16 @@ impl SsSurfaceWeb {
         let lost = ctx.device_lost.load(Ordering::Relaxed);
         let WebContext { device, queue, surfaces, .. } = ctx;
         let Some(entry) = surfaces.get_mut(self.id) else { return };
-        entry.config.width = width.max(1);
-        entry.config.height = height.max(1);
+        // Zero draws at 1 x 1 rather than being ignored, as the native host
+        // ignores it: configuring sets the canvas's own size, so a canvas the page
+        // set to zero is put back in step with its swapchain and stencil buffer.
         // While the device is gone the new size is only recorded; `restoreDevice`
-        // configures the surface and the stencil from `config` on the way back.
-        if lost {
-            return;
+        // configures the surface and the stencil from it on the way back.
+        entry.swapchain.resize(device, width, height, lost);
+        if !lost {
+            let (width, height) = entry.swapchain.size();
+            entry.scene.set_viewport(queue, width as f32, height as f32, false);
         }
-        entry.surface.configure(device, &entry.config);
-        entry.stencil_view = create_stencil_view(device, entry.config.width, entry.config.height);
-        entry.scene.set_viewport(queue, entry.config.width as f32, entry.config.height as f32, false);
     }
 
     /// What the last frame cost, as a plain JS object.
@@ -853,10 +817,6 @@ pub struct SsPlayerWeb {
     loading: Cell<bool>,
 }
 
-/// Run `body` on the player this handle names.
-///
-/// A macro rather than a helper method because the closure would have to borrow
-/// the `RefCell` for the caller, and every one of these is a one-liner.
 /// Read one field off an options object. A missing object and a missing field
 /// are the same thing here: the default.
 fn field(options: Option<&js_sys::Object>, key: &str) -> JsValue {
@@ -922,6 +882,10 @@ fn read_placement(options: Option<&js_sys::Object>) -> Result<Placement, JsValue
     })
 }
 
+/// Run `body` on the player this handle names.
+///
+/// A macro rather than a helper method because the closure would have to borrow
+/// the `RefCell` for the caller, and every one of these is a one-liner.
 macro_rules! with_player {
     ($self:ident, |$player:ident| $body:expr) => {{
         let ctx = &mut *$self.ctx.borrow_mut();
@@ -1016,7 +980,7 @@ impl AssetLoader for WebAssetLoader {
 
     async fn supply_texture(&mut self, key: u32, encoded: &[u8]) {
         if let Err(e) = upload_encoded(&self.ctx, key, Rc::from(encoded)).await {
-            self.warn(&format!("an image for {key:#010x} could not be decoded: {e:?}"));
+            self.warn(&format!("the image for {key:#010x} is not uploaded: {e:?}"));
         }
     }
 
@@ -1126,17 +1090,17 @@ impl SsPlayerWeb {
     /// `createImageBitmap` are asynchronous where Godot's `ResourceLoader::load`
     /// is not. **That is the one place the asynchrony appears.**
     ///
-    /// * `pack` names the pack for external instance references (`ref_anime_pack`,
-    ///). Pass `null`/`undefined` — the usual case — to use the name
-    /// the exporter wrote into the `.ssab`, which is the name those references
+    /// * `pack` names the pack for external instance references (`ref_anime_pack`).
+    /// Pass `null`/`undefined` — the usual case — to use the name the exporter
+    /// wrote into the `.ssab`, which is the name those references
     /// are resolved against. A name of your own overrides it, and then any
     /// external instance reference to this pack stops resolving.
     /// * `baseUrl` is where the `.ssab` came from; reference-mode atlas paths are
     /// relative to it. Defaults to the document's URL. Embedded packs ignore it.
     /// * `read` answers in place of `fetch`, as it does for [`SsPlayerWeb::load`].
     ///
-    /// An atlas the renderer already has is left alone ("registered wins",
-    ///), so N players of one pack load it once between them. An atlas
+    /// An atlas the renderer already has is left alone ("registered wins"), so
+    /// N players of one pack load it once between them. An atlas
     /// that cannot be fetched or decoded is reported on the console and skipped,
     /// as in `_load_external_ssabs`' `ERR_PRINT` and `PackResolver`'s
     /// `console.warn`: one missing image should not cost you the character.
@@ -1259,7 +1223,7 @@ impl SsPlayerWeb {
         with_player!(self, |p| p.current_animation().map(str::to_owned))
     }
 
-    /// The atlases a registered pack asks for, as `{ hash, path, embedded }[]`
+    /// The atlases a registered pack asks for, as `{ key, path, embedded }[]`
     /// in pack order. `pack` undefined selects the main pack.
     ///
     /// The counterpart of [`SsContextWeb::add_texture`], and the same shape the
@@ -1269,11 +1233,11 @@ impl SsPlayerWeb {
     /// entry whose `embedded` is false and registers the pixels by **`key`**.
     /// Embedded entries need no fetch — they arrive with the pack.
     ///
-    /// `hash` names the slot inside this pack; `key` is what the renderer is
-    /// keyed by. They differ whenever two packs could name one atlas alike, which
-    /// Adobe Animate's `spritemap1.png` does for every project it exports —
-    /// registering by `hash` is how a page ends up drawing another project's
-    /// atlas.
+    /// `key` is what the renderer is keyed by, not the slot the pack names the
+    /// atlas by. The two differ whenever two packs could name one atlas alike,
+    /// which Adobe Animate's `spritemap1.png` does for every project it exports —
+    /// registering by the slot is how a page ends up drawing another project's
+    /// atlas, which is why the slot is not handed out here.
     #[wasm_bindgen(js_name = textureRefs)]
     pub fn texture_refs(&self, pack: Option<String>) -> Result<js_sys::Array, JsValue> {
         with_player!(self, |p| {
@@ -1292,7 +1256,7 @@ impl SsPlayerWeb {
         })
     }
 
-    /// The atlases a registered pack **carries**, as `{ hash, bytes }[]` — the
+    /// The atlases a registered pack **carries**, as `{ key, bytes }[]` — the
     /// encoded images, not pixels. Empty for a reference-mode pack.
     /// `pack` undefined selects the main pack.
     ///
@@ -1321,7 +1285,7 @@ impl SsPlayerWeb {
         })
     }
 
-    /// What the last load could not get, as `{ kind, name, hash }[]`.
+    /// What the last load could not get, as `{ kind, name, slot }[]`.
     /// Empty means everything the packs asked for arrived.
     ///
     /// `load` rejects only when the `.ssab` itself is unreadable — one missing
@@ -1380,7 +1344,9 @@ impl SsPlayerWeb {
     /// `pack` null selects the main pack. `name` is one of
     /// [`SsPlayerWeb::replaceable_cellmap_names`]. The replacement should match the
     /// original atlas's size and cell layout — the runtime's UVs stay in the
-    /// original cellmap's pixel space. Rejects only when the player is unbound.
+    /// original cellmap's pixel space. Rejects when the player is unbound, and for
+    /// a bitmap the device cannot hold — past its `max_texture_dimension_2d`, or
+    /// closed — leaving the cellmap as it was.
     #[wasm_bindgen(js_name = setCellmapTexture)]
     pub fn set_cellmap_texture(&self, pack: Option<String>, name: &str, bitmap: &web_sys::ImageBitmap) -> Result<(), JsValue> {
         let ctx = &mut *self.ctx.borrow_mut();
@@ -1389,8 +1355,7 @@ impl SsPlayerWeb {
             let player = entry.players.get_mut(self.id).ok_or_else(|| gone("player"))?;
             player.override_cellmap_texture_key(pack.as_deref(), name).ok_or_else(|| JsValue::from_str("no pack is loaded"))?
         };
-        ctx.set_texture_from_bitmap(key, bitmap);
-        Ok(())
+        ctx.set_texture_from_bitmap(key, bitmap)
     }
 
     /// [`SsPlayerWeb::set_cellmap_texture`] from **encoded image bytes** (PNG); the
@@ -1407,8 +1372,9 @@ impl SsPlayerWeb {
             let player = entry.players.get_mut(self.id).ok_or_else(|| gone("player"))?;
             player.override_cellmap_texture_key(pack.as_deref(), &name).ok_or_else(|| JsValue::from_str("no pack is loaded"))?
         };
-        ctx.set_texture_from_bitmap(key, &bitmap);
-        Ok(())
+        let supplied = ctx.set_texture_from_bitmap(key, &bitmap);
+        bitmap.close();
+        supplied
     }
 
     /// Undo a runtime override: point the cellmap back at its original atlas and
@@ -1443,14 +1409,14 @@ impl SsPlayerWeb {
 
     /// Start from the head of the section, re-arming the loop count. Not a
     /// resume: it rewinds. Use [`SsPlayerWeb::resume`] to lift a hold.
+    pub fn play(&self) -> Result<(), JsValue> {
+        with_player!(self, |p| p.play())
+    }
+
     /// `play()` from `startFrame` rather than the head of the section.
     #[wasm_bindgen(js_name = playFrom)]
     pub fn play_from(&self, start_frame: f32) -> Result<(), JsValue> {
         with_player!(self, |p| p.play_from(start_frame))
-    }
-
-    pub fn play(&self) -> Result<(), JsValue> {
-        with_player!(self, |p| p.play())
     }
 
     /// Hold the current frame. Idempotent, and ignored while nothing is playing.
@@ -1793,6 +1759,19 @@ impl SsPlayerWeb {
     #[wasm_bindgen(js_name = isPartSkinnedMesh)]
     pub fn is_part_skinned_mesh(&self, part: &str) -> Result<Option<bool>, JsValue> {
         with_player!(self, |p| p.is_part_skinned_mesh(part))
+    }
+
+    /// Index form of `isPartHidden`, for the `partIndex` an event carries or a
+    /// slot in `partNames`; `undefined` when `part` is out of range.
+    #[wasm_bindgen(js_name = isPartHiddenByIndex)]
+    pub fn is_part_hidden_by_index(&self, part: u32) -> Result<Option<bool>, JsValue> {
+        with_player!(self, |p| p.is_part_hidden_by_index(part))
+    }
+
+    /// Index form of `isPartSkinnedMesh`; `undefined` when `part` is out of range.
+    #[wasm_bindgen(js_name = isPartSkinnedMeshByIndex)]
+    pub fn is_part_skinned_mesh_by_index(&self, part: u32) -> Result<Option<bool>, JsValue> {
+        with_player!(self, |p| p.is_part_skinned_mesh_by_index(part))
     }
 
     /// Every part name, in part-index order — what turns the `partIndex` an event

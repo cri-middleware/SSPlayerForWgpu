@@ -1070,8 +1070,8 @@ pub(crate) const SHADER_PARAM_STRIDE: usize = 256;
 pub(crate) const SHADER_PARAM_STRIDE_F32: usize = SHADER_PARAM_STRIDE / 4;
 
 /// id_hash (SDK `PartAttributeShader.id_hash()`, `fnv1a_hash_str("ss-*")`) ->
-/// WGSL fragment entry point. The 13 SpriteStudio integration shaders (,
-/// ports of the WebGL `SSShaderLib.ts`). Hashes are the SDK's precomputed values.
+/// WGSL fragment entry point. The 13 SpriteStudio integration shaders,
+/// ports of the WebGL `SSShaderLib.ts`. Hashes are the SDK's precomputed values.
 const SS_SHADER_ENTRIES: [(u32, &str); 13] = [
     (0x36629dfc, "fs_ss_sepia"),
     (0x8a5c3037, "fs_ss_hsb"),
@@ -1748,6 +1748,12 @@ impl SSRenderer {
     /// buffer. A caller that can give the buffer up — anything that just decoded it
     /// — wants [`SSRenderer::upload_texture_owned`] instead, which premultiplies in
     /// place and copies nothing.
+    ///
+    /// A texture the device cannot hold — empty, wider or taller than its
+    /// `max_texture_dimension_2d`, or with `rgba` not `width * height * 4` bytes —
+    /// is not uploaded, and whatever `hash` held before stays: it is reported on
+    /// stderr instead of becoming a wgpu validation error, whose default handler
+    /// panics.
     pub fn upload_texture(&mut self, device: &wgpu::Device, queue: &wgpu::Queue, hash: u32, rgba: &[u8], (width, height): (u32, u32), retention: Retention) {
         self.upload_texture_owned(device, queue, hash, rgba.to_vec(), (width, height), retention);
     }
@@ -1769,7 +1775,9 @@ impl SSRenderer {
     /// already — what the loading path hands over, having premultiplied off the
     /// host's thread while it was decoding.
     pub(crate) fn register_premultiplied(&mut self, device: &wgpu::Device, queue: &wgpu::Queue, hash: u32, premul: Vec<u8>, (width, height): (u32, u32), how: Provenance) {
-        self.write_and_register(device, queue, hash, &premul, (width, height));
+        if !self.write_and_register(device, queue, hash, &premul, (width, height)) {
+            return;
+        }
         match how.digest {
             Some(digest) => self.texture_digests.insert(hash, digest),
             None => self.texture_digests.remove(&hash),
@@ -1789,11 +1797,24 @@ impl SSRenderer {
     }
 
     /// Create the texture, write `premul` into it and register the bind group.
+    /// Returns whether it did.
     ///
     /// Everything that varies between the upload paths (premultiplying, retaining)
     /// has happened by the time this runs, so this is the only part that needs the
     /// device and the queue — and the only part a device-loss restore has to repeat.
-    fn write_and_register(&mut self, device: &wgpu::Device, queue: &wgpu::Queue, hash: u32, premul: &[u8], (width, height): (u32, u32)) {
+    fn write_and_register(&mut self, device: &wgpu::Device, queue: &wgpu::Queue, hash: u32, premul: &[u8], (width, height): (u32, u32)) -> bool {
+        // Every texture this renderer creates comes through here, so this is where
+        // one the device cannot hold stops. wgpu would report it as a validation
+        // error, whose default handler panics — and the C and JavaScript faces own
+        // their device, so that took the host process, or every player on the page,
+        // down with it. The faces refuse such a texture where the host hands it
+        // over; what reaches this point came out of a pack, or a device restored
+        // with smaller limits than the one it replaced.
+        let why = texture_extent_error(device, (width, height)).or_else(|| (premul.len() != (width as usize) * (height as usize) * 4).then(|| format!("{} bytes do not fill a {width}x{height} RGBA8 texture", premul.len())));
+        if let Some(why) = why {
+            eprintln!("[ssplayer-wgpu] the texture for {hash:#010x} is not uploaded: {why}");
+            return false;
+        }
         self.texture_uploads += 1;
         let size = wgpu::Extent3d { width, height, depth_or_array_layers: 1 };
 
@@ -1820,6 +1841,7 @@ impl SSRenderer {
         let info = tex_info_buffer(device, TexInfo::new(size, AlphaMode::Premultiplied));
         let bind_group = self.create_texture_bind_group(device, &view, &info);
         self.textures.insert(hash, TextureEntry { bind_group, size, _info_buffer: info, alpha: AlphaMode::Premultiplied });
+        true
     }
     fn create_texture_bind_group(&self, device: &wgpu::Device, view: &wgpu::TextureView, info: &wgpu::Buffer) -> wgpu::BindGroup {
         device.create_bind_group(&wgpu::BindGroupDescriptor {
@@ -1905,9 +1927,26 @@ impl SSRenderer {
             // Straight back out to the new device: these were retained *after*
             // premultiplying, so putting them through it again would darken every
             // partially transparent texel a second time.
-            self.write_and_register(device, queue, *hash, premul, (*w, *h));
+            // One the new device cannot hold is left out, and drawn as missing.
+            let _ = self.write_and_register(device, queue, *hash, premul, (*w, *h));
         }
         self.texture_sources = sources;
+    }
+}
+
+/// Why `device` cannot hold a `width` x `height` texture, or `None` when it can.
+///
+/// The one check behind every face: the renderer runs it on each texture it
+/// creates, and the C and JavaScript faces run it on what a host hands over, so
+/// they can refuse it with an error the host sees rather than one on stderr.
+pub(crate) fn texture_extent_error(device: &wgpu::Device, (width, height): (u32, u32)) -> Option<String> {
+    let max = device.limits().max_texture_dimension_2d;
+    if width == 0 || height == 0 {
+        Some(format!("a {width}x{height} texture is empty"))
+    } else if width > max || height > max {
+        Some(format!("a {width}x{height} texture is past this device's {max}-pixel limit"))
+    } else {
+        None
     }
 }
 

@@ -11,7 +11,7 @@ title: C / C++ ではじめる
     wgpu は「1 つのライブラリで 3 つのグラフィックス API を賄う」ための手段であり、ここでの関わりはそれだけです。**wgpu の型はこの ABI を一切越えず**、ヘッダにも登場しません。渡すのはプラットフォームのウィンドウハンドルで、返ってくるのは `SS_OK` かエラーコードです。
 
     1 点だけ：この Face は**自分でグラフィックスデバイスを持ちます**。あなたの
-    `ID3D12CommandList` や `MTLCommandBuffer` に描き込むわけではありません。エンジンのデバイスを C ABI 経由で共有することは[意図的に対象外](../limitations.md#no-device-sharing-across-the-c-abi)です。C から合成したい場合の経路はオフスクリーン描画＋テクスチャ共有になります。
+    `ID3D12CommandList` や `MTLCommandBuffer` に描き込むわけではありません。エンジンのデバイスを C ABI 経由で共有することは[意図的に対象外](../limitations.md#no-device-sharing-across-the-c-abi)です。また今のところ、シーンが描くのは作成時に渡したウィンドウだけで、エンジン側で合成するためにテクスチャへ描画する機能はまだありません。
 
 ## 手に入るもの
 
@@ -19,6 +19,7 @@ title: C / C++ ではじめる
 |---|---|
 | `include/ssplayer_wgpu.h` | ヘッダ 1 枚。C99、依存なし。cbindgen が生成 |
 | `lib/libssplayer_wgpu.a`（MSVC では `ssplayer_wgpu.lib`） | 静的ライブラリ |
+| `lib/libssplayer_wgpu.dylib`（macOS のみ） | 共有ライブラリ。署名・公証済み。ライブラリをリンクせずに読み込むホスト向け |
 | `lib/VERSION` | ライブラリがリンクしている SpriteStudio-SDK のリリースのタグ。`ss_sdk_version()` が返すものと同じ |
 | `LICENSE.md` | BSD-3-Clause |
 | `LICENSE.ja.md` | その参考訳 |
@@ -36,7 +37,7 @@ title: C / C++ ではじめる
     | `ssplayer-wgpu-windows-x86_64.zip` | Windows / MSVC（DX12） |
     | `ssplayer-wgpu-macos-universal.zip` | macOS。arm64 + x86_64 が 1 本に（Metal） |
 
-    **静的ライブラリのみ**です。自分のバイナリにリンクする形になるので、横に置いて配布するランタイム依存はありません。共有ライブラリが必要な場合はソースからビルドしてください（`build.sh` が生成します）。Linux でもソースからビルドします。Linux 向けのライブラリはリリースの zip に含まれません。
+    **静的ライブラリをリンクします**。自分のバイナリに組み込まれるので、横に置いて配布するランタイム依存はありません。macOS の zip には `lib/libssplayer_wgpu.dylib` も入っています。Python・.NET・Dart の FFI のように、ライブラリをリンクせずに読み込むホスト向けです。Developer ID で署名・公証してあるので、ダウンロードしたものを macOS がそのまま読み込みます（初回は Gatekeeper がチケットをオンラインで確かめます）。install name は `@rpath/libssplayer_wgpu.dylib` です。Windows で DLL が必要な場合はソースからビルドしてください（`build.ps1` が生成します）。Linux でもソースからビルドします。Linux 向けのライブラリはリリースの zip に含まれません。
 
     Windows のライブラリは、C ランタイムを DLL 版（`/MD`）でリンクしています。CMake と Visual Studio の既定と同じです。静的ランタイム（`/MT`）でビルドするホストは、静的ランタイムを有効にしてソースからビルドしてください（「ソースから」を参照）。
 
@@ -157,7 +158,7 @@ ss_scene_destroy(scene);
 
 ## サンプルを動かす
 
-プラットフォームごとに 1 つずつ、いずれもこの API をそのまま叩いています：
+ホストは 3 つ、プラットフォームごとに 1 つずつで、いずれも単体で完結し、この API をそのまま叩いています：
 
 ```bash
 cd examples/viewer-metal-cpp   && cmake -B build && cmake --build build && ./build/ssviewer-metal
@@ -170,7 +171,7 @@ cd examples/viewer-vulkan-cpp  && cmake -B build && cmake --build build && ./bui
 
 !!! note "Linux サンプルはまだ実行されていません"
     ライブラリは Linux（x86_64 / aarch64）向けにソースからビルドできます。ただし
-    **Vulkan サンプルホスト**は macOS 上で書かれたまま一度もビルド・実行されておらず、X11 / Wayland
+    **Vulkan サンプルホスト**はプルリクエストごとに CI でコンパイルされていますが、ランナーにディスプレイが無いため一度もウィンドウを開いたことがなく、X11 / Wayland
     どちらの経路も未検証です（[ROADMAP](https://github.com/cri-middleware/SSPlayerForWgpu/blob/main/ROADMAP.md)）。
 
 ## 次に読む

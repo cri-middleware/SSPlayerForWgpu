@@ -43,6 +43,7 @@ SDK を上げたら、もう一度実行してください。`.ssab` の形式�
 | フォーマット | `cargo fmt --all -- --check` / `cargo fmt --all` |
 | テスト | `cargo test --workspace` |
 | **wasm / JS Face** | `cargo build -p ssplayer-wgpu --target wasm32-unknown-unknown --no-default-features --features web` |
+| Lint（wasm / JS Face） | `cargo clippy -p ssplayer-wgpu --target wasm32-unknown-unknown --no-default-features --features web -- -D warnings` |
 | **C Face**（＋ヘッダ再生成） | `cargo build -p ssplayer-wgpu-ffi` |
 | C ハンドルの寿命テスト | `cargo test -p ssplayer-wgpu --features ffi --lib` |
 | npm パッケージ（wasm ＋ TS 層） | `./scripts/build.sh platform=web` — `pnpm` と `wasm-pack` が必要 |
@@ -60,7 +61,7 @@ SDK を上げたら、もう一度実行してください。`.ssab` の形式�
 通常の `cargo build` / `clippy --all-targets` / `cargo test` は、以下を**まったくコンパイルしません**。どれも、誰かが意図してビルドするまで静かに腐ります：
 
 1. **`web.rs`** は `web` feature の裏にあり、ネイティブのどのコマンドでもコンパイルされません。触ったら
-   wasm ターゲットをビルドしてください。
+   wasm ターゲットをビルドし、Lint もかけてください。
 2. **TypeScript 層**は wasm-pack が生成した `.d.ts` に対して型付けされているので、`#[wasm_bindgen]`
    メソッドの改名は cargo が通ったまま TS 層を壊します。Web Face の公開面を変えたら型チェックを走らせてください。
 3. **`host.rs` / `ffi.rs`** は `ffi` feature の裏にあり、そのビルドが cbindgen で
@@ -106,7 +107,10 @@ cargo fmt --all -- --check
 cargo clippy --workspace --all-targets -- -D warnings
 cargo test --workspace                                    # 先に deploy-examples.sh が必要
 cargo build -p ssplayer-wgpu --target wasm32-unknown-unknown --no-default-features --features web
+cargo clippy -p ssplayer-wgpu --target wasm32-unknown-unknown --no-default-features --features web -- -D warnings
+cargo clippy -p ssplayer-wgpu --features ffi --all-targets -- -D warnings
 cargo build -p ssplayer-wgpu-ffi                          # C ヘッダも再生成されます
+cargo test -p ssplayer-wgpu --features ffi --lib
 ```
 
 テストについて 3 点：
@@ -118,10 +122,10 @@ cargo build -p ssplayer-wgpu-ffi                          # C ヘッダも再生
     ```bash
     SS_GOLDEN_DIR=/tmp/before cargo test --test golden -- --ignored
     # ... 変更する ...
-    SS_GOLDEN_COMPARE=/tmp/before cargo test --test golden -- --ignored
+    SS_GOLDEN_DIR=/tmp/after SS_GOLDEN_COMPARE=/tmp/before cargo test --test golden -- --ignored
     ```
 
-    基準は GPU 固有なので、これはチェックイン済みのゴールデンセットではなく、1 台のマシン上での前後比較ツールです。
+    基準は GPU 固有なので、これはチェックイン済みのゴールデンセットではなく、1 台のマシン上での前後比較ツールです。比較すると `/tmp/after/summary.md` を書き、変わった画像ごとに前・後・差分を並べた画像を `/tmp/after/diff/` に書きます。CI はプルリクエストごとに同じことを lavapipe 上でベースの描画に対して行い、意図した変化も含めて、差があれば失敗します。意図した変化なら、CI がアップロードする並べた画像（`golden-diff`）がなぜ正しいのかを説明に書いてください。
 
 ## リリース
 

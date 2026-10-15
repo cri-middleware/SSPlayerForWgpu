@@ -172,7 +172,8 @@ lookup at all, because they ride on the per-part primitive the player already wr
 === "Bevy"
 
     ```rust
-    playback.alpha = 0.5;   // tint is not exposed as a component
+    playback.alpha = 0.5;
+    playback.tint = 0x80c0ff;
     ```
 
 ## Reading a part's transform

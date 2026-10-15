@@ -55,6 +55,8 @@ title: C API リファレンス
 
 テクスチャは**シーン**に登録します。テクスチャマップがデバイススコープだからです。ウィンドウ内の全プレイヤーから見え、同じパックを 5 体で表示してもアップロードは 1 回です。
 
+デバイスが保持できないテクスチャ（幅か高さが `max_texture_dimension_2d` を超えるもの。このライブラリが作るデバイスでは 8192）は `SS_ERROR_INVALID_ARGUMENT` で拒否され、何もアップロードされません。`ss_player_set_cellmap_texture` も同じように拒否します。
+
 ## アニメーションの選択と情報
 
 | | |
@@ -114,10 +116,16 @@ title: C API リファレンス
 | | |
 |---|---|
 | `ss_player_set_transform(player, x, y, sx, sy, rotation)` | 位置・スケール・回転 |
+| `ss_player_reset_transform(player)` | 恒等の配置（中央、等倍、回転なし）に戻します |
+| `ss_player_fit_into(player, width, height, &placement, &placed)` | アニメーションを箱に収め、そのトランスフォームを書き込みます。`placed` は null でも構いません |
+| `ss_placement_default(&placement)` | `SsPlacement` を変更する前に既定値で埋めます — **ゼロ初期化ではスケールが 0 になります** |
+| `ss_player_canvas_rect(player, &rect)` | `has_frame` が false のときに `ss_player_fit_into` が収める箱 |
 | `ss_player_set_order(player, order)` / `ss_player_order(player)` | シーン内の描画順（昇順） |
 | `ss_player_set_visible(player, visible)` / `ss_player_is_visible(player)` | 非表示のキャラクターは描画されませんが、再生は続きイベントも出します |
 | `ss_player_set_culled(player, culled)` / `ss_player_is_culled(player)` | カリング中のキャラクターは**進まず**、イベントも出しません |
 | `ss_player_set_alpha(player, a)` / `ss_player_set_tint(player, rgb)` | キャラクター全体。`ss_player_alpha` / `ss_player_tint` で読み出せます |
+
+`fit` は `SS_FIT_CONTAIN` / `_COVER` / `_NONE`（0〜2）、`align` は `SS_ALIGN_CENTER`・`_TOP`・`_BOTTOM`・`_LEFT`・`_RIGHT`・`_TOP_LEFT`・`_TOP_RIGHT`・`_BOTTOM_LEFT`・`_BOTTOM_RIGHT`（0〜8）のいずれかです。[ボックスへのフィット](../guide/placement.md)を参照してください。
 
 ## パーツとオーバーライド
 

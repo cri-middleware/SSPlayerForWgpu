@@ -35,18 +35,18 @@ usage () {
   echo "  build=<release|debug>"
   echo "                      Cargo profile for the wasm (default: $BUILD). debug is"
   echo "                      several times larger and is only for reading a panic."
-  exit 1
+  echo "  -h | --help         Show this help"
 }
 
 for arg in "$@"; do
   case "$arg" in
     out=*)   OUT="${arg#out=}" ;;
     build=*) BUILD="${arg#build=}" ;;
-    -h|--help) usage ;;
-    *) echo "$APP: unknown option '$arg'" >&2; usage ;;
+    -h|--help) usage; exit 0 ;;
+    *) echo "$APP: unknown option '$arg' (see $APP --help)" >&2; exit 2 ;;
   esac
 done
-case "$BUILD" in release|debug) ;; *) echo "$APP: build must be release or debug" >&2; exit 1 ;; esac
+case "$BUILD" in release|debug) ;; *) echo "$APP: build must be release or debug (got '$BUILD')" >&2; exit 2 ;; esac
 
 command -v wasm-pack >/dev/null 2>&1 || { echo "$APP: wasm-pack not found -- cargo install wasm-pack" >&2; exit 1; }
 
@@ -69,7 +69,14 @@ WASM="$WORK/pkg/ssplayer_wgpu_bg.wasm"
 # The player's version, and the SDK commit it was built against: the submodule
 # is a commit rather than a release, so the commit is the only thing that
 # identifies what converted-data version this page agrees with.
-VERSION="$(sed -n 's/^version = "\(.*\)"/\1/p' "$ROOT_DIR/libs/ssplayer-wgpu/Cargo.toml" | head -1)"
+#
+# The version is the one cargo resolves, not a line read out of a manifest: the
+# crate inherits it from the workspace, and reading `version = "..."` from its
+# own Cargo.toml found nothing once it did, which stamped every page with no
+# version at all.
+VERSION="$(cargo metadata --no-deps --format-version 1 --manifest-path "$ROOT_DIR/Cargo.toml" |
+  python3 -c 'import json, sys; print(next(p["version"] for p in json.load(sys.stdin)["packages"] if p["name"] == "ssplayer-wgpu"))')"
+[ -n "$VERSION" ] || { echo "$APP: cargo metadata reported no version for ssplayer-wgpu" >&2; exit 1; }
 SDK="$(git -C "$ROOT_DIR/SpriteStudio-SDK" rev-parse --short HEAD 2>/dev/null || echo unknown)"
 STAMP="ssplayer-wgpu $VERSION · SDK $SDK"
 BUILT="$(date -u +%Y-%m-%d)"
@@ -79,7 +86,7 @@ BUILT="$(date -u +%Y-%m-%d)"
 # and both carry every character sed would treat as a replacement escape.
 mkdir -p "$(dirname "$OUT")"
 python3 - "$SHELL_SRC" "$GLUE" "$WASM" "$OUT" "$STAMP" "$BUILT" <<'PY'
-import base64, pathlib, sys
+import base64, pathlib, re, sys
 
 shell, glue, wasm, out, stamp, built = sys.argv[1:7]
 page = pathlib.Path(shell).read_text(encoding="utf-8")
@@ -108,6 +115,23 @@ for forbidden in ("fetch(", "import(", "XMLHttpRequest"):
         raise SystemExit(f"{shell} contains {forbidden!r}, which cannot work at file://")
 if "<script" in page and " src=" in page.split("<script", 1)[1][:200]:
     raise SystemExit("the assembled page loads a script by src, which cannot work at file://")
+
+# Every method the page calls on the player's objects must be one the glue it
+# ships with defines. Those names are the js face's, so renaming one in the Rust
+# compiles, builds this page, and leaves it throwing a TypeError in a browser --
+# the one place no check of ours opens it. Getters do not count: the page calls
+# what it names.
+source = pathlib.Path(glue).read_text(encoding="utf-8")
+classes = set(re.findall(r"^\s*class (\w+)", source, re.M))
+methods = set(re.findall(r"^\s+(?:static\s+)?(?:async\s+)?(\w+)\s*\([^)]*\)\s*\{", source, re.M))
+calls = set(re.findall(r"\b(?:ctx|surface|player)\??\.(\w+)\(", own))
+statics = set(re.findall(r"\bwasm_bindgen\.(\w+)\.(\w+)\(", own))
+if not calls or not statics:
+    raise SystemExit(f"no call on wasm_bindgen, ctx, surface or player found in {shell}; the check below would prove nothing")
+unknown = sorted({m for m in calls if m not in methods} |
+                 {f"{c}.{m}" for c, m in statics if c not in classes or m not in methods})
+if unknown:
+    raise SystemExit(f"{shell} calls {', '.join(unknown)}, which the js face's glue does not define")
 
 pathlib.Path(out).write_text(page, encoding="utf-8")
 PY

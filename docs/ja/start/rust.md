@@ -78,7 +78,7 @@ player.play();
 scene.update(&mut renderer, &device, &queue, delta_secs, &mut [&mut player]);
 
 // 2. カバレッジマスクを焼く（このシーンがそのバックエンドの場合）。`Stencil` では no-op。
-//    下のパスと**同じ encoder** に積む必要があります。
+//    下のパスと「同じ encoder」に積む必要があります。
 scene.encode_mask_coverage(&mut renderer, &device, &mut encoder);
 
 // 3. 自分で開いたパスに描画を記録する。

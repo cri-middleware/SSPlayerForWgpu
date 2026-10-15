@@ -33,9 +33,9 @@ across the SpriteStudio Player family.
 | `fit` | `contain` (default) fits the whole box in; `cover` fills the box and spills; `none` skips the fit |
 | `align` | Which point of the content lands on the matching point of the view: `center` (default), `top`, `bottom`, `left`, `right`, `top-left`, `top-right`, `bottom-left`, `bottom-right` |
 | `frame` | The box to fit, in player-local units. **Supply it and nothing is read from the pack** |
-| `offset` | Pixels from the aligned position, applied **after** the fit, so it is not scaled by it |
+| `offset` | Pixels from the aligned position, applied **after** the fit, so it is not scaled by it. A pair in Rust; `offset_x` / `offset_y` in C, `offsetX` / `offsetY` in JavaScript |
 | `scale` | A multiplier **on top of** the fit's scale, not a replacement for it |
-| `flipX`, `flipY` | Mirrors. The alignment follows them — a left-aligned mirrored character still sits against the left edge |
+| `flipX`, `flipY` | Mirrors. The alignment follows them — a left-aligned mirrored character still sits against the left edge. `flip_x` / `flip_y` in Rust and C |
 | `rotation` | Passed straight through. Rotation has no part in the fit itself |
 
 === "Rust"

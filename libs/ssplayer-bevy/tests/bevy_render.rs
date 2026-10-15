@@ -185,6 +185,31 @@ fn a_masked_character_draws_inside_bevy() {
     assert!(drawn_pixels(&pixels) > 0, "nothing reached Bevy's render target");
 }
 
+/// `SsPlayback::tint` reaches the player: a blue-only tint leaves no red or
+/// green anywhere the character drew, over the black clear.
+#[test]
+fn a_tint_reaches_the_character() {
+    if !fixtures_present() {
+        eprintln!("assets not generated, skipping");
+        return;
+    }
+    let Some((app, handle, captured)) = headless_app() else {
+        eprintln!("no GPU adapter available, skipping");
+        return;
+    };
+
+    let pixels = run(app, handle, captured, |world| {
+        let (player, transform, playback) = masked_character(world);
+        world.spawn((player, transform, SsPlayback { tint: 0x0000FF, ..playback }));
+    });
+
+    dump("01-tinted-character-in-bevy", &pixels);
+    let blue = pixels.as_chunks::<4>().0.iter().filter(|p| p[2] > 8).count();
+    let red_or_green = pixels.as_chunks::<4>().0.iter().filter(|p| p[0] > 8 || p[1] > 8).count();
+    assert!(blue > 0, "the tinted character drew nothing");
+    assert_eq!(red_or_green, 0, "{red_or_green} pixels kept red or green under a blue-only tint");
+}
+
 /// The mask has to actually clip.
 ///
 /// Rendering the same character with masking available and with it turned off
