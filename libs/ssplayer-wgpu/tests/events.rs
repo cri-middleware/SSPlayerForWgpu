@@ -45,20 +45,25 @@ fn scene(device: &wgpu::Device, queue: &wgpu::Queue) -> SSScene {
     scene
 }
 
+/// A fixture that does not load fails the test rather than skipping it, which
+/// would report `ok` having checked nothing. `fixtures.rs` says the same once for
+/// the whole suite.
+const FIXTURE: &str = "the fixture did not load; run scripts/deploy-examples.sh";
+
 /// Load a pack and select its first animation, without starting it.
-fn player_for(pack: &str) -> Option<SSPlayer> {
+fn player_for(pack: &str) -> SSPlayer {
     let mut player = SSPlayer::new();
-    player.load(format!("{}/{}", asset_root(), pack)).ok()?;
-    let name = player.animation_names()?.first()?.clone();
-    player.set_animation(&name).ok()?;
-    Some(player)
+    player.load(format!("{}/{}", asset_root(), pack)).expect(FIXTURE);
+    let name = player.animation_names().and_then(|names| names.first().cloned()).expect("the fixture has no animation");
+    player.set_animation(&name).expect(FIXTURE);
+    player
 }
 
 /// Play `pack` to completion at `delta` seconds per tick, returning everything
-/// it reported. `None` when the pack is not on disk.
-fn play_through(renderer: &mut SSRenderer, device: &wgpu::Device, queue: &wgpu::Queue, pack: &str, delta: f32) -> Option<Vec<SsEvent>> {
+/// it reported.
+fn play_through(renderer: &mut SSRenderer, device: &wgpu::Device, queue: &wgpu::Queue, pack: &str, delta: f32) -> Vec<SsEvent> {
     let mut scene = scene(device, queue);
-    let mut player = player_for(pack)?;
+    let mut player = player_for(pack);
     player.set_loop_count(1);
     player.play();
 
@@ -70,7 +75,7 @@ fn play_through(renderer: &mut SSRenderer, device: &wgpu::Device, queue: &wgpu::
             break;
         }
     }
-    Some(seen)
+    seen
 }
 
 #[test]
@@ -84,12 +89,12 @@ fn a_player_with_no_animation_reports_nothing() {
 }
 
 /// Ringo, on its first animation, not started, plus the name of a second one.
-fn ringo() -> Option<(SSPlayer, String)> {
+fn ringo() -> (SSPlayer, String) {
     let mut player = SSPlayer::new();
-    player.load(format!("{}/Ringo/Ringo.ssab", asset_root())).ok()?;
-    let names = player.animation_names()?;
-    player.set_animation(names.first()?).ok()?;
-    Some((player, names.get(1)?.clone()))
+    player.load(format!("{}/Ringo/Ringo.ssab", asset_root())).expect(FIXTURE);
+    let names = player.animation_names().expect(FIXTURE);
+    player.set_animation(names.first().expect("Ringo has no animation")).expect(FIXTURE);
+    (player, names.get(1).expect("these tests need a second Ringo animation").clone())
 }
 
 #[test]
@@ -100,10 +105,7 @@ fn started_is_an_edge_raised_by_play_and_not_by_resume() {
     };
     let mut renderer = SSRenderer::new(&device);
     let mut scene = scene(&device, &queue);
-    let Some((mut player, _)) = ringo() else {
-        eprintln!("Ringo missing — skipping");
-        return;
-    };
+    let (mut player, _) = ringo();
     let mut tick = |player: &mut SSPlayer| scene.update(&mut renderer, &device, &queue, 1.0 / 60.0, &mut [player]);
 
     player.set_loop_count(-1);
@@ -137,10 +139,7 @@ fn a_start_is_reported_by_the_first_tick_that_runs() {
     };
     let mut renderer = SSRenderer::new(&device);
     let mut scene = scene(&device, &queue);
-    let Some((mut player, other)) = ringo() else {
-        eprintln!("Ringo missing — skipping");
-        return;
-    };
+    let (mut player, other) = ringo();
     let mut tick = |player: &mut SSPlayer| scene.update(&mut renderer, &device, &queue, 1.0 / 60.0, &mut [player]);
 
     // A culled player's ticks do not run, so they report nothing — and the
@@ -182,10 +181,7 @@ fn finished_is_an_edge_and_survives_a_replay() {
     };
     let mut renderer = SSRenderer::new(&device);
     let mut scene = scene(&device, &queue);
-    let Some(mut player) = player_for(EVENT_PACKS[0]) else {
-        eprintln!("{} missing — skipping", EVENT_PACKS[0]);
-        return;
-    };
+    let mut player = player_for(EVENT_PACKS[0]);
 
     player.set_loop_count(1);
     player.play();
@@ -233,10 +229,7 @@ fn an_infinite_loop_loops_and_never_finishes() {
     };
     let mut renderer = SSRenderer::new(&device);
     let mut scene = scene(&device, &queue);
-    let Some(mut player) = player_for(EVENT_PACKS[0]) else {
-        eprintln!("{} missing — skipping", EVENT_PACKS[0]);
-        return;
-    };
+    let mut player = player_for(EVENT_PACKS[0]);
 
     player.set_loop_count(-1);
     player.play();
@@ -264,14 +257,11 @@ fn frame_skipping_does_not_drop_events() {
     for pack in EVENT_PACKS {
         // A play-through at 60fps, then the same one in ticks long enough that
         // most frames are jumped over entirely.
-        let Some(per_frame) = play_through(&mut renderer, &device, &queue, pack, 1.0 / 60.0) else {
-            eprintln!("{pack} missing — skipping");
-            continue;
-        };
+        let per_frame = play_through(&mut renderer, &device, &queue, pack, 1.0 / 60.0);
         if per_frame.is_empty() {
             continue;
         }
-        let skipped = play_through(&mut renderer, &device, &queue, pack, 0.5).unwrap();
+        let skipped = play_through(&mut renderer, &device, &queue, pack, 0.5);
 
         assert_eq!(skipped, per_frame, "{pack}: frame skipping changed the events — {} at 60fps vs {} in long ticks", per_frame.len(), skipped.len());
         compared += 1;
@@ -292,10 +282,7 @@ fn every_event_kind_decodes() {
 
     let (mut user_data, mut signals, mut audios) = (0, 0, 0);
     for pack in EVENT_PACKS {
-        let Some(events) = play_through(&mut renderer, &device, &queue, pack, 1.0 / 60.0) else {
-            eprintln!("{pack} missing — skipping");
-            continue;
-        };
+        let events = play_through(&mut renderer, &device, &queue, pack, 1.0 / 60.0);
         for event in &events {
             match event {
                 SsEvent::UserData(u) => {
@@ -333,10 +320,7 @@ fn events_describe_only_the_tick_that_just_ran() {
     };
     let mut renderer = SSRenderer::new(&device);
     let mut scene = scene(&device, &queue);
-    let Some(mut player) = player_for(EVENT_PACKS[0]) else {
-        eprintln!("{} missing — skipping", EVENT_PACKS[0]);
-        return;
-    };
+    let mut player = player_for(EVENT_PACKS[0]);
 
     player.set_loop_count(-1);
     player.play();
@@ -374,10 +358,7 @@ fn a_culled_player_reports_no_events() {
     };
     let mut renderer = SSRenderer::new(&device);
     let mut scene = scene(&device, &queue);
-    let Some(mut player) = player_for(EVENT_PACKS[0]) else {
-        eprintln!("{} missing — skipping", EVENT_PACKS[0]);
-        return;
-    };
+    let mut player = player_for(EVENT_PACKS[0]);
 
     player.set_loop_count(-1);
     player.play();
@@ -428,10 +409,7 @@ fn a_hidden_player_keeps_reporting_events() {
     };
     let mut renderer = SSRenderer::new(&device);
     let mut scene = scene(&device, &queue);
-    let (Some(mut hidden), Some(mut shown)) = (player_for(EVENT_PACKS[0]), player_for(EVENT_PACKS[0])) else {
-        eprintln!("{} missing — skipping", EVENT_PACKS[0]);
-        return;
-    };
+    let (mut hidden, mut shown) = (player_for(EVENT_PACKS[0]), player_for(EVENT_PACKS[0]));
 
     for player in [&mut hidden, &mut shown] {
         player.set_loop_count(-1);
@@ -462,10 +440,7 @@ fn events_keep_coming_across_a_crossfade_and_name_their_source() {
     };
     let mut renderer = SSRenderer::new(&device);
     let mut scene = scene(&device, &queue);
-    let Some(mut player) = player_for(EVENT_PACKS[0]) else {
-        eprintln!("{} missing — skipping", EVENT_PACKS[0]);
-        return;
-    };
+    let mut player = player_for(EVENT_PACKS[0]);
     let name = player.current_animation().unwrap().to_owned();
     player.set_loop_count(-1);
     player.play();
