@@ -80,7 +80,7 @@
   <p id="stats">…</p>
 
   <p class="hint" data-i18n="serve">
-    WebGPU 対応ブラウザ（Chrome / Edge 113+ など）＋ <code>http://localhost</code> 配信が必要です。ビルド: <code>../../scripts/build.sh platform=web</code> → <code>python3 -m http.server</code> で本ディレクトリを配信。
+    WebGPU 対応ブラウザ（Chrome / Edge 113+、Safari 26+、Firefox 141+）＋ <code>http://localhost</code> 配信が必要です。ビルド: <code>../../scripts/build.sh platform=web</code> → <code>python3 -m http.server</code> で本ディレクトリを配信。
   </p>
 
   <script type="module">
@@ -142,7 +142,8 @@
         btnRemove: '− Remove one',
         hintOrder: '— composited in one pass, in ascending order',
         serve:
-          'Needs a WebGPU browser (Chrome / Edge 113+, etc.) served over <code>http://localhost</code>. ' +
+          'Needs a WebGPU browser (Chrome / Edge 113+, Safari 26+, Firefox 141+) served over ' +
+          '<code>http://localhost</code>. ' +
           'Build: <code>../../scripts/build.sh platform=web</code>, then serve this directory with ' +
           '<code>python3 -m http.server</code>.',
         samples: 'Samples',

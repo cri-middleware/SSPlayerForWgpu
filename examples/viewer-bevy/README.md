@@ -43,9 +43,10 @@ focus starts at "all", so they drive the whole cast until you press `Tab`.
 | F | flip Y (vertical mirror) | | Escape | quit |
 | drop | play a dropped `.ssab`, or every `.ssab` in a dropped folder | | | |
 
-The track keys are the native viewer's, sent as `SsTrackCommand` and read back
-from `SsTrackState`, so the HUD shows them a frame behind. What each one shows is
-in [Motion blending](../../docs/en/guide/motion-blending.md#see-it):
+The track keys are the native viewer's. Track 0's animation, speed and loops go
+through `SsPlayer` and `SsPlayback`; the rest are sent as `SsTrackCommand`. The
+HUD reads the stack back from `SsTrackState`, a frame behind. What each key shows
+is in [Motion blending](../../docs/en/guide/motion-blending.md#see-it):
 
 | Key | Action | | Key | Action |
 |---|---|---|---|---|
@@ -86,9 +87,9 @@ and the sound files — so the app points `AssetPlugin { file_path }` at the
 repository's shared, generated `assets/` tree (`CARGO_MANIFEST_DIR/../../assets`),
 the same tree `deploy-examples` fills and every viewer here reads. It is
 gitignored; never commit it. This viewer also parses the `.ssab` catalogue itself,
-in the main world, to list each pack's animation names (the render-world player
-that could answer is out of the input systems' reach) — exactly what the native
-viewer does.
+at startup and on a drop, so it has each pack's animation names before the asset
+has loaded and can spawn a character with one — exactly what the native viewer
+does.
 
 Bevy itself has no Unity/Godot-style project format and no default asset pack
 (`.pck` / `.pak`): a shipped Bevy game is **the executable plus an `assets/`

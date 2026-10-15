@@ -1,6 +1,6 @@
 // Metal (macOS) verification viewer for the ssplayer-wgpu C API.
 //
-// This is the "③ ffi" face end to end: Cocoa owns the window and its
+// This is the C face end to end: Cocoa owns the window and its
 // CAMetalLayer, hands the layer to `ss_scene_create`, and drives the scene with
 // `ss_scene_update` / `ss_scene_render` — no Rust in sight. The scene's own host
 // (host.rs) builds the wgpu stack behind the ABI, with backend=Metal forced so

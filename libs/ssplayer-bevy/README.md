@@ -117,11 +117,12 @@ cargo run -p ssplayer-bevy-viewer     # the interactive development viewer
   speed, `R` restart), with a HUD naming each feature. The one to read first.
 - [`examples/viewer-bevy`](../../examples/viewer-bevy) — a free-form viewer of a
   cast in one pass (pack / animation switching, add / remove characters, layout,
-  draw order, alpha, visibility, drop-to-play), the Bevy sibling of the native
-  `examples/viewer`.
+  draw order, alpha, visibility, track keys, drop-to-play), the Bevy sibling of
+  the native `examples/viewer`.
 
-Both are driven entirely through the three components above; the `Sound` scenes
-play audio, which the host does — the player only names the cue.
+Both are driven through the three components above, and viewer-bevy's track keys
+through the `SsTrackCommand` message as well; the `Sound` scenes play audio,
+which the host does — the player only names the cue.
 
 ## How it is wired
 
@@ -129,7 +130,7 @@ Bevy renders in two worlds, and the crate is split along that seam.
 
 | Where | What |
 |---|---|
-| Main world | The three components above. The whole authoring surface |
+| Main world | The three components above, `SsCrowd`, `SsSceneSettings`, and the `SsPlay` / `SsStop` / `SsSeek` / `SsTrackCommand` messages. The whole authoring surface |
 | `ExtractSchedule` | Copies them, plus the frame delta, into the render world |
 | `Render` / `RenderSystems::Prepare` | Applies them to the playback trees; takes up a changed or reloaded `pack` once it has loaded |
 | `Core2d` / `Core2dSystems::MainPass` | Advances, builds and draws, after `main_transparent_pass_2d` |
