@@ -114,3 +114,13 @@ fn probe_mask() {
         assert!(saw_shape_writer, "a Shape mask part was declared but produced no Shape-geometry writer");
     }
 }
+
+/// `plan_writers` takes any bytes: what is not a FrameData plans no writers,
+/// rather than being read as one.
+#[test]
+fn bytes_that_are_not_a_frame_plan_no_writers() {
+    for bytes in [&[][..], &[0xff; 64][..], &[4, 0, 0, 0, 0xff, 0xff, 0xff, 0x7f][..]] {
+        let frame = FrameView { frame_data: bytes, ..Default::default() };
+        assert!(plan_writers(&frame, &[]).is_empty(), "{bytes:?} planned writers");
+    }
+}
