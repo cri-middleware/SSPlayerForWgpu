@@ -13,7 +13,7 @@ pub struct SlotId {
 
 /// One slot. `generation` lives on the slot rather than the value so it keeps
 /// counting while the slot is empty.
-struct Slot<T> {
+pub struct Slot<T> {
     value: Option<T>,
     generation: u32,
 }
@@ -24,6 +24,13 @@ pub struct Roster<T> {
     slots: Vec<Slot<T>>,
     /// Indices of empty slots, so `insert` is O(1).
     free: Vec<u32>,
+}
+
+impl<T> Slot<T> {
+    /// The value this slot holds, or `None` while it is free.
+    pub fn value_mut(&mut self) -> Option<&mut T> {
+        self.value.as_mut()
+    }
 }
 
 // Derived `Default` would demand `T: Default`, which no value here has.
@@ -70,6 +77,12 @@ impl<T> Roster<T> {
     /// Every live value, in slot order. Holes left by removals are skipped.
     pub fn iter_mut(&mut self) -> impl Iterator<Item = &mut T> {
         self.slots.iter_mut().filter_map(|s| s.value.as_mut())
+    }
+
+    /// Every slot, free ones included, in slot order: what lets
+    /// `SSScene::update_with` walk the roster without collecting it first.
+    pub fn slots_mut(&mut self) -> &mut [Slot<T>] {
+        &mut self.slots
     }
 
     /// How many live values the roster holds.

@@ -14,7 +14,7 @@
 
 use crate::player::SSPlayer;
 use crate::renderer::{Retention, SSRenderer, texture_extent_error};
-use crate::roster::Roster;
+use crate::roster::{Roster, Slot};
 use crate::scene::{MaskBackend, SSScene, SceneConfig};
 use crate::surface::Swapchain;
 use std::sync::Arc;
@@ -186,8 +186,7 @@ impl NativeHost {
         if self.is_device_lost() {
             return;
         }
-        let mut players: Vec<&mut SSPlayer> = self.players.iter_mut().collect();
-        self.scene.update(&mut self.renderer, &self.device, &self.queue, delta_secs, &mut players);
+        self.scene.update_with(&mut self.renderer, &self.device, &self.queue, delta_secs, self.players.slots_mut(), Slot::value_mut);
     }
 
     /// Acquire the swapchain image, draw the prepared frame, and present.
