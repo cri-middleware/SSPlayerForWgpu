@@ -736,7 +736,8 @@ impl SSScene {
     /// Off by default, for what it costs: a render pass per faded player per
     /// frame, a layer the size of the target for each faded at once — about 8
     /// MiB at 1920x1080 — and one composite over the target apiece.
-    /// [`SceneStats::group_layers`] counts them. Turning it off frees them.
+    /// [`SceneStats::group_layers`] counts them. Turning it off frees them at the
+    /// next update; a frame already built with layers still draws them.
     ///
     /// The host calls [`SSScene::encode_offscreen`] every frame, which is what
     /// draws the layers. Each update reads whether it was called since the one
@@ -751,13 +752,7 @@ impl SSScene {
     /// within the player, as they always do. A crowd is one player, so it fades as
     /// one layer; its members' own alphas still apply part by part.
     pub fn set_group_alpha(&mut self, on: bool) {
-        if self.group_alpha == on {
-            return;
-        }
         self.group_alpha = on;
-        if !on {
-            self.layers = None;
-        }
     }
 
     /// Whether faded players are drawn as one layer each; see
@@ -910,6 +905,11 @@ impl SSScene {
         // Taken every update, so what it says is always about the last frame.
         let encoded = std::mem::take(&mut self.offscreen_seen);
         let grouping = self.group_alpha && encoded && self.viewport.is_some();
+        // Freed here rather than when group alpha is turned off, so a frame built
+        // with layers before then still has them to draw.
+        if !self.group_alpha {
+            self.layers = None;
+        }
         let max_layers = if grouping { device.limits().max_texture_array_layers } else { 0 };
         let mut drawing = 0;
         for &(_, index) in &self.draw_order {
@@ -2099,5 +2099,38 @@ mod tests {
         let uvs = [0.0, 0.0, 256.0, 0.0, 0.0, 1.0, 256.0, 1.0, 64.0, 0.5];
         let rgba = draw(&device, &queue, &mut renderer, hash, &frame_data(None), &SQUARE, &uvs);
         assert_level(&rgba, (px(0.5), px(0.5)), 63.5 / 255.0, "centre");
+    }
+
+    /// Group alpha turned off between an update and the offscreen pass — a C host
+    /// calling `ss_scene_set_group_alpha` between `ss_scene_update` and
+    /// `ss_scene_render` — still draws the layer that frame was built with, and
+    /// the next update frees it.
+    #[test]
+    fn group_alpha_turned_off_mid_frame_frees_the_layers_at_the_next_update() {
+        let Some((device, queue)) = gpu() else {
+            eprintln!("no GPU adapter available, skipping headless render test");
+            return;
+        };
+        let mut renderer = SSRenderer::new(&device);
+        let mut scene = SSScene::new(&device, &SceneConfig { color_format: wgpu::TextureFormat::Rgba8Unorm, stencil_format: None, mask: MaskBackend::None });
+        scene.set_viewport(&queue, SIZE as f32, SIZE as f32, false);
+        scene.set_group_alpha(true);
+        let data = frame_data(None);
+        let frame = FrameView { frame_data: &data, world_matrices: &IDENTITY_TRANSFORM, local_vertices: &SQUARE, local_uvs: &NO_UVS, ..Default::default() };
+        scene.begin_frame();
+        let node = scene.frame.push_transform(&IDENTITY_TRANSFORM);
+        let batch = BatchInfo { start_rank: 0, count: 1, texture_hash: 0, blend_type: BlendType::Mix, kind: DrawBatchKind::Normal, stencil: StencilTest::None, mask_seq: 0, alpha: 1.0, tint: NO_TINT };
+        scene.frame.append_batch(&renderer, &frame, &node, &batch);
+        scene.frame.push_group(0, 0.5);
+        scene.end_frame(&mut renderer, &device, &queue);
+
+        scene.set_group_alpha(false);
+        let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor { label: None });
+        scene.encode_offscreen(&mut renderer, &device, &mut encoder);
+        assert_eq!(scene.stats().group_layers, 1, "the frame built with a layer did not draw it");
+        assert!(scene.layers.is_some(), "the layer the frame composites is gone before its draw");
+
+        scene.update(&mut renderer, &device, &queue, 0.0, &mut []);
+        assert!(scene.layers.is_none(), "group alpha is off, and its layers outlived the next update");
     }
 }
