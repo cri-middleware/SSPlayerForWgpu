@@ -120,7 +120,8 @@ Both draw the same packs from one atlas upload. A regression test
 !!! note "One `update` per character per frame"
     `SSScene::update` fuses the timeline advance with the geometry build. Passing the same character
     to two scenes' `update` in one frame advances it **twice**. Drawing one cast into two views is
-    therefore not supported yet — the Bevy adapter skips later views and warns.
+    therefore not supported; create two players over the same `.ssab` instead. The Bevy adapter skips
+    later views and warns.
 
 ## Why there is no vertex buffer
 

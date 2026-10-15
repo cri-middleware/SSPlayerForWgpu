@@ -81,7 +81,7 @@ finds itself drawing into an sRGB target without it.
 
 | Component | What it carries | Cost of changing it |
 |---|---|---|
-| `SsPlayer` | `src`, `animation` | Rebuilds the playback tree — this is the allocating one |
+| `SsPlayer` | `pack` (a `Handle<SsPack>`), `animation`, `transition_ms` | Rebuilds the playback tree — this is the allocating one |
 | `SsTransform` | `x`, `y`, `scale_x`, `scale_y`, `rotation` | Free |
 | `SsPlayback` | `playing`, `speed_scale`, `order`, `alpha`, `visible`, `culled`, `restart`, `direction`, `style`, `loop_count`, `frame_rate`, `frame_skip_enabled`, `sub_frame_enabled`, `animation_section` | Free |
 
@@ -131,7 +131,7 @@ Bevy renders in two worlds, and the crate is split along that seam.
 |---|---|
 | Main world | The three components above. The whole authoring surface |
 | `ExtractSchedule` | Copies them, plus the frame delta, into the render world |
-| `Render` / `RenderSystems::Prepare` | Applies them to the playback trees; loads a pack whose `src` changed |
+| `Render` / `RenderSystems::Prepare` | Applies them to the playback trees; takes up a changed or reloaded `pack` once it has loaded |
 | `Core2d` / `Core2dSystems::MainPass` | Advances, builds and draws, after `main_transparent_pass_2d` |
 
 The playback trees, the device-scoped `SSRenderer` and the target-scoped

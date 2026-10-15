@@ -36,8 +36,8 @@ What follows from that shape:
 - Because the artifact is one ordinary file, it works offline and **attaches to a bug
   report**: "renders here, not in my engine" becomes a repro the reporter can send.
 
-A CLI that fills the hole from a command line is a convenience on top, worth adding once
-the npm package ships. Nothing else waits on it.
+A CLI that fills the hole from a command line would be a convenience on top of the npm
+package. Nothing else waits on it.
 
 ## Why the preview is not drawn in the inspector
 
@@ -117,7 +117,7 @@ https://github.com/cri-middleware/SSPlayerForWgpu/releases/download/ssplayer-wgp
 ```
 
 The tag is the pin, so the file name carries no version, like the zips'.
-`MAINTAINING_PLAYERS.md` §4.1 is the constraint that decides this: nothing behind a
+[`MAINTAINING_PLAYERS.md` §4.1](https://github.com/cri-middleware/SpriteStudio-SDK/blob/HEAD/MAINTAINING_PLAYERS.md#41-nothing-behind-the-first-door-may-need-a-clone) is the constraint that decides this: nothing behind a
 Player's first door may need a clone, so the shell has to arrive with the plugin rather
 than from a sibling checkout.
 

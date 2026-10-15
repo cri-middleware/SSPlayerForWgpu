@@ -106,7 +106,7 @@ The site is Markdown plus two grafts, and needs no cargo for the prose half:
 | [`CONTRIBUTING.md`](https://github.com/cri-middleware/SSPlayerForWgpu/blob/main/CONTRIBUTING.md) | The constraints a change must respect, and how to verify one. Read it before a non-trivial change |
 | [`ROADMAP.md`](https://github.com/cri-middleware/SSPlayerForWgpu/blob/main/ROADMAP.md) | What is planned, what is unverified, and what was deliberately declined |
 | [SDK Player Porting Guide](https://github.com/cri-middleware/SpriteStudio-SDK/tree/HEAD/libs/ssruntime/docs) | Playback semantics — the "Brain" — are canonically documented there, not here, and must not be duplicated into this repository |
-| These docs | The reader-facing guide. Package READMEs stay the front door for crates.io / npm / GitHub |
+| These docs | The reader-facing guide. Package READMEs stay the front door on npm and GitHub |
 
 ## Verifying a change
 

@@ -15,7 +15,7 @@ are the ones an `npm i` gets, not a second copy that can drift.
 - `rustup target add wasm32-unknown-unknown`
 - [`wasm-pack`](https://rustwasm.github.io/wasm-pack/)
 - `pnpm` (`corepack enable`) — the package's js layer is TypeScript, built by tsdown
-- A WebGPU-capable browser (Chrome / Edge 113+, or Safari Technology Preview)
+- A WebGPU-capable browser (Chrome / Edge 113+, Safari 26+, or Firefox 141+)
 
 ## Build & run
 
@@ -188,11 +188,10 @@ would draw the first one's atlas.
 
 **Ask for the context once.** A second `SsContextWeb.create()` builds a second
 `GPUDevice`, and nothing is shared across a device: the same character on two
-canvases would compile its pipelines twice and upload its atlas twice. That was
-the previous shape of this API and P7 removed it.
+canvases would compile its pipelines twice and upload its atlas twice.
 
-Selecting an animation and starting it are separate calls, matching the
-redesigned `ssplayer-webgl`; the old single `play(name)` is not carried over.
+Selecting an animation and starting it are separate calls, matching
+`ssplayer-webgl`: `setAnimation(name)`, then `play()`.
 
 ## Notes
 
@@ -212,8 +211,9 @@ redesigned `ssplayer-webgl`; the old single `play(name)` is not carried over.
 - **`surface.stats()`** returns the frame counters (players / prims / drawCalls /
   mergeableDraws / redundantTextureBinds / uploadedBytes, plus `gpuPassTimeNs`
   when the browser grants `timestamp-query`). The throughput trade-offs in
-  [`ROADMAP.md`](../../ROADMAP.md) were measured on native only — one WebGPU
-  command is one JS call, so this is how to take the same numbers in a browser.
+  [`ROADMAP.md`](../../ROADMAP.md) were measured on native and in Chrome — one
+  WebGPU command is one JS call, so this is how to take the same numbers in a
+  browser.
 - Measure size from a `build=release` build only, and with `wasm-opt` applied.
   The web face deliberately leaves out the bundled `image` crate and decodes
   through `createImageBitmap` instead, which is a large share of the payload.

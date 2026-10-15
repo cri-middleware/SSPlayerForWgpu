@@ -39,7 +39,7 @@ player, where every host and the C ABI reach it, and the host half belongs in an
 
 - [ ] **One mask backend, once Bevy's 2d pass carries a stencil** — both
       exist because each is the cheap answer somewhere: a host that lends a
-      stencil pays nothing extra for it, while coverage (mask doc §5) is the only
+      stencil pays nothing extra for it, while coverage ([mask doc §5](https://github.com/cri-middleware/SpriteStudio-SDK/blob/HEAD/libs/ssruntime/docs/40_parts/40_mask.md#5-implementing-on-engines-without-a-stencil-coverage-bitmap)) is the only
       answer for a pass with none to lend — and Bevy's is one, `bevy_core_pipeline`
       0.20 fixing `CORE_2D_DEPTH_FORMAT` at `Depth32Float`. Folding onto coverage
       would charge every stencil host an extra pass and a coverage array per
