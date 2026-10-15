@@ -122,10 +122,10 @@ cargo test -p ssplayer-wgpu --features ffi --lib
     ```bash
     SS_GOLDEN_DIR=/tmp/before cargo test --test golden -- --ignored
     # ... 変更する ...
-    SS_GOLDEN_COMPARE=/tmp/before cargo test --test golden -- --ignored
+    SS_GOLDEN_DIR=/tmp/after SS_GOLDEN_COMPARE=/tmp/before cargo test --test golden -- --ignored
     ```
 
-    基準は GPU 固有なので、これはチェックイン済みのゴールデンセットではなく、1 台のマシン上での前後比較ツールです。
+    基準は GPU 固有なので、これはチェックイン済みのゴールデンセットではなく、1 台のマシン上での前後比較ツールです。比較すると `/tmp/after/summary.md` を書き、変わった画像ごとに前・後・差分を並べた画像を `/tmp/after/diff/` に書きます。CI はプルリクエストごとに同じことを lavapipe 上でベースの描画に対して行い、意図した変化も含めて、差があれば失敗します。意図した変化なら、CI がアップロードする並べた画像（`golden-diff`）がなぜ正しいのかを説明に書いてください。
 
 ## リリース
 

@@ -9,7 +9,8 @@
 //!
 //! It is `#[ignore]`d and opt-in because the images are GPU- and driver-specific:
 //! the reference has to come from the same machine, so it is a before/after tool
-//! rather than a checked-in golden set.
+//! rather than a checked-in golden set. CI's `golden` job runs it that way on
+//! every pull request, against the base's rendering on the same runner.
 //!
 //! ```text
 //! # before the change
@@ -18,6 +19,10 @@
 //! SS_GOLDEN_DIR=/tmp/after SS_GOLDEN_COMPARE=/tmp/before \
 //!     cargo test --test golden -- --ignored
 //! ```
+//!
+//! A comparison also writes `summary.md` into the dump directory, and a
+//! `diff/<image>.png` for each image that moved: before, after, and where they
+//! differ, for a reviewer to look at rather than count.
 //!
 //! This is what verified the P7-6 SoA passthrough: moving vertex expansion from
 //! the CPU to the vertex stage left all 134 images bit-identical.
@@ -118,8 +123,11 @@ struct Golden {
     out: String,
     reference: Option<String>,
     written: usize,
-    /// `(name, differing pixels)` for every image that moved.
-    changed: Vec<(String, usize)>,
+    /// Every image this run recorded, to find the ones only the reference has.
+    names: std::collections::HashSet<String>,
+    /// `(name, differing pixels, largest channel difference)` for every image
+    /// that moved: a difference of 1 is a rounding drift, not a moved part.
+    changed: Vec<(String, usize, u8)>,
     /// References the current run produced but the reference dump does not have.
     unmatched: Vec<String>,
 }
@@ -128,17 +136,45 @@ impl Golden {
     fn record(&mut self, name: &str, rgba: &[u8]) {
         std::fs::write(format!("{}/{name}.raw", self.out), rgba).unwrap();
         self.written += 1;
+        self.names.insert(name.to_string());
         let Some(reference) = &self.reference else { return };
         match std::fs::read(format!("{reference}/{name}.raw")) {
             Ok(before) if before.len() == rgba.len() => {
-                let differing = before.as_chunks::<4>().0.iter().zip(rgba.as_chunks::<4>().0.iter()).filter(|(a, b)| a != b).count();
-                if differing > 0 {
-                    self.changed.push((name.to_string(), differing));
+                let moved: Vec<u8> = before.as_chunks::<4>().0.iter().zip(rgba.as_chunks::<4>().0.iter()).filter(|(a, b)| a != b).map(|(a, b)| a.iter().zip(b).map(|(x, y)| x.abs_diff(*y)).max().unwrap_or(0)).collect();
+                if let Some(&largest) = moved.iter().max() {
+                    self.changed.push((name.to_string(), moved.len(), largest));
+                    std::fs::create_dir_all(format!("{}/diff", self.out)).unwrap();
+                    triptych(&format!("{}/diff/{name}.png", self.out), &before, rgba);
                 }
             }
             _ => self.unmatched.push(name.to_string()),
         }
     }
+
+    /// The reference's images this run did not produce: the corpus shrank.
+    fn dropped(&self, reference: &str) -> Vec<String> {
+        let mut dropped: Vec<String> = std::fs::read_dir(reference).unwrap().flatten().filter_map(|entry| entry.path().file_name()?.to_str()?.strip_suffix(".raw").map(str::to_string)).filter(|name| !self.names.contains(name)).collect();
+        dropped.sort();
+        dropped
+    }
+}
+
+/// Before, after, and where they differ, side by side. The two renderings lose
+/// their alpha so a viewer shows what was drawn over the opaque clear; the
+/// third panel is the after image dimmed, with every differing pixel — alpha
+/// included — in magenta.
+fn triptych(path: &str, before: &[u8], after: &[u8]) {
+    const GAP: u32 = 4;
+    let mut image = image::RgbaImage::from_pixel(3 * W + 2 * GAP, H, image::Rgba([64, 64, 64, 255]));
+    let opaque = |p: &[u8]| image::Rgba([p[0], p[1], p[2], 255]);
+    for (i, (b, a)) in before.as_chunks::<4>().0.iter().zip(after.as_chunks::<4>().0.iter()).enumerate() {
+        let (x, y) = (i as u32 % W, i as u32 / W);
+        image.put_pixel(x, y, opaque(b));
+        image.put_pixel(W + GAP + x, y, opaque(a));
+        let diff = if a == b { image::Rgba([a[0] / 4, a[1] / 4, a[2] / 4, 255]) } else { image::Rgba([255, 0, 255, 255]) };
+        image.put_pixel(2 * (W + GAP) + x, y, diff);
+    }
+    image.save(path).unwrap();
 }
 
 #[test]
@@ -146,7 +182,10 @@ impl Golden {
 fn golden_corpus() {
     let out = std::env::var("SS_GOLDEN_DIR").expect("set SS_GOLDEN_DIR to the directory to dump into");
     std::fs::create_dir_all(&out).unwrap();
-    let mut golden = Golden { out, reference: std::env::var("SS_GOLDEN_COMPARE").ok(), written: 0, changed: Vec::new(), unmatched: Vec::new() };
+    // A reused dump directory must not keep the triptychs of an earlier run.
+    let _ = std::fs::remove_dir_all(format!("{out}/diff"));
+    let _ = std::fs::remove_file(format!("{out}/summary.md"));
+    let mut golden = Golden { out, reference: std::env::var("SS_GOLDEN_COMPARE").ok(), written: 0, names: Default::default(), changed: Vec::new(), unmatched: Vec::new() };
     let out = golden.out.clone();
 
     let instance = wgpu::Instance::new(wgpu::InstanceDescriptor::new_without_display_handle());
@@ -226,13 +265,27 @@ fn golden_corpus() {
     eprintln!("wrote {} images to {out}", golden.written);
     let Some(reference) = golden.reference.clone() else { return };
 
-    for (name, differing) in &golden.changed {
-        eprintln!("  CHANGED {differing:6} px  {name}");
+    let dropped = golden.dropped(&reference);
+    let mut summary = format!("## Golden images\n\n{} images against `{reference}`: {} changed, {} new, {} gone.\n", golden.written, golden.changed.len(), golden.unmatched.len(), dropped.len());
+    if !golden.changed.is_empty() {
+        summary += "\nEach changed image has a before | after | difference triptych in `diff/`.\n\n| Image | Pixels changed | Largest channel difference |\n|---|---:|---:|\n";
+        for (name, differing, largest) in &golden.changed {
+            eprintln!("  CHANGED {differing:6} px (largest difference {largest:3})  {name}");
+            summary += &format!("| `{name}` | {differing} | {largest} |\n");
+        }
     }
-    for name in &golden.unmatched {
-        eprintln!("  MISSING from the reference dump: {name}");
+    for (heading, names) in [("New, with no counterpart in the reference", &golden.unmatched), ("Gone, in the reference only", &dropped)] {
+        if names.is_empty() {
+            continue;
+        }
+        summary += &format!("\n{heading}:\n\n");
+        for name in names {
+            eprintln!("  {heading}: {name}");
+            summary += &format!("- `{name}`\n");
+        }
     }
-    assert!(golden.unmatched.is_empty(), "{} image(s) had no counterpart in {reference} — the two runs did not cover the same corpus", golden.unmatched.len());
-    assert!(golden.changed.is_empty(), "{} of {} images differ from {reference}", golden.changed.len(), golden.written);
+    std::fs::write(format!("{out}/summary.md"), summary).unwrap();
+    assert!(golden.unmatched.is_empty() && dropped.is_empty(), "{} image(s) are new and {} are gone against {reference} — the two runs did not cover the same corpus", golden.unmatched.len(), dropped.len());
+    assert!(golden.changed.is_empty(), "{} of {} images differ from {reference}; the triptychs are in {out}/diff", golden.changed.len(), golden.written);
     eprintln!("all {} images match {reference}", golden.written);
 }

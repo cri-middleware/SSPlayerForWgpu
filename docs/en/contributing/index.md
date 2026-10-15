@@ -141,10 +141,14 @@ Three testing notes:
     ```bash
     SS_GOLDEN_DIR=/tmp/before cargo test --test golden -- --ignored
     # ... make the change ...
-    SS_GOLDEN_COMPARE=/tmp/before cargo test --test golden -- --ignored
+    SS_GOLDEN_DIR=/tmp/after SS_GOLDEN_COMPARE=/tmp/before cargo test --test golden -- --ignored
     ```
 
     The reference is GPU-specific, so it is a before/after tool on one machine, not a checked-in set.
+    The comparison writes `/tmp/after/summary.md`, and for each image that moved a
+    before/after/difference triptych in `/tmp/after/diff/`. CI does the same on every pull request,
+    on lavapipe against the base's rendering, and fails on any difference, including one you meant;
+    then say in the description why the triptychs it uploads (`golden-diff`) are right.
 
 ## Releasing
 

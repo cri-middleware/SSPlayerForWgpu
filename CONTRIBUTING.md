@@ -147,10 +147,14 @@ The rest of the matrix:
 | Third-party notices current | `./scripts/generate-licenses.sh`, then `git diff --exit-code THIRD_PARTY_NOTICES.md` |
 
 **Before and after anything that changes how geometry reaches the GPU, take a golden dump.**
-`tests/golden.rs::golden_corpus` is `#[ignore]`d and renders all 134 fixture/animation/frame/stencil
-combinations: `SS_GOLDEN_DIR=/tmp/before cargo test --test golden -- --ignored`, then re-run with
-`SS_GOLDEN_COMPARE=/tmp/before`. The reference is GPU-specific, so it must come from the same
-machine — it is a before/after tool, not a checked-in golden set.
+`tests/golden.rs::golden_corpus` is `#[ignore]`d and renders every fixture/animation/frame/stencil
+combination: `SS_GOLDEN_DIR=/tmp/before cargo test --test golden -- --ignored`, then re-run with
+`SS_GOLDEN_DIR=/tmp/after SS_GOLDEN_COMPARE=/tmp/before`. The reference is GPU-specific, so it must
+come from the same machine — it is a before/after tool, not a checked-in golden set. The comparison
+writes `/tmp/after/summary.md`, and for each image that moved a before/after/difference triptych in
+`/tmp/after/diff/`. CI's golden job does the same on every pull request, on lavapipe against the
+base's rendering, and fails on any difference — one you meant included. When you did mean it, say
+in the description why the triptychs it uploads (`golden-diff`) are right.
 
 **Measure before and after any performance change, and drive a real frame loop while doing it.**
 `SSScene::stats()` reports primitives, draw calls, bytes uploaded, how much of the draw list is
