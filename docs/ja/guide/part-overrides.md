@@ -159,7 +159,8 @@ Player が元々書いているパーツ単位のプリミティブに相乗り�
 === "Bevy"
 
     ```rust
-    playback.alpha = 0.5;   // tint はコンポーネントとして公開されていません
+    playback.alpha = 0.5;
+    playback.tint = 0x80c0ff;
     ```
 
 ## パーツのトランスフォームを読む { #reading-a-parts-transform }

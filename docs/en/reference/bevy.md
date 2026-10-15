@@ -70,6 +70,7 @@ Free to change, every frame if you like.
 | `speed_scale: f32` | `1.0` | A multiple of the authored rate. `0` and negatives stop |
 | `order: i32` | `0` | Draw order; lower draws first. Ties keep extraction order |
 | `alpha: f32` | `1.0` | Whole-character fade |
+| `tint: u32` | `0xFFFFFF` | Whole-character tint, `0xRRGGBB`, multiplied in after PartsColor |
 | `visible: bool` | `true` | False skips the draw; the timeline keeps running |
 | `culled: bool` | `false` | True skips **the timeline advance** as well as the draw — for an off-screen character |
 | `restart: u32` | `0` | **Bump it** (any change of value) to replay from the head, re-arming the loop count |

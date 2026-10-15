@@ -2712,6 +2712,17 @@ pub unsafe extern "C" fn ss_player_set_transform(handle: *mut SsPlayer, x: f32, 
     }
 }
 
+/// Back to the identity placement: centred, unscaled, unrotated.
+///
+/// # Safety
+/// `handle` must be a live handle or null.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn ss_player_reset_transform(handle: *mut SsPlayer) {
+    if let Some(player) = unsafe { player(handle) } {
+        player.reset_transform();
+    }
+}
+
 /// Fill `out` with the default placement: contain, centred, unscaled,
 /// unflipped, unrotated, and the animation's own canvas as the box.
 ///

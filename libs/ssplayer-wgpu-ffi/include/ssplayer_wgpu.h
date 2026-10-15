@@ -1939,6 +1939,14 @@ void ss_player_set_transform(ss_player_t *handle,
                              float rotation);
 
 /*
+ Back to the identity placement: centred, unscaled, unrotated.
+
+ # Safety
+ `handle` must be a live handle or null.
+ */
+void ss_player_reset_transform(ss_player_t *handle);
+
+/*
  Fill `out` with the default placement: contain, centred, unscaled,
  unflipped, unrotated, and the animation's own canvas as the box.
 

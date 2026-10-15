@@ -1761,6 +1761,19 @@ impl SsPlayerWeb {
         with_player!(self, |p| p.is_part_skinned_mesh(part))
     }
 
+    /// Index form of `isPartHidden`, for the `partIndex` an event carries or a
+    /// slot in `partNames`; `undefined` when `part` is out of range.
+    #[wasm_bindgen(js_name = isPartHiddenByIndex)]
+    pub fn is_part_hidden_by_index(&self, part: u32) -> Result<Option<bool>, JsValue> {
+        with_player!(self, |p| p.is_part_hidden_by_index(part))
+    }
+
+    /// Index form of `isPartSkinnedMesh`; `undefined` when `part` is out of range.
+    #[wasm_bindgen(js_name = isPartSkinnedMeshByIndex)]
+    pub fn is_part_skinned_mesh_by_index(&self, part: u32) -> Result<Option<bool>, JsValue> {
+        with_player!(self, |p| p.is_part_skinned_mesh_by_index(part))
+    }
+
     /// Every part name, in part-index order — what turns the `partIndex` an event
     /// carries back into something a human reads, and what fills a part picker.
     ///

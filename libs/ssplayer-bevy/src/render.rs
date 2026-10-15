@@ -290,6 +290,7 @@ pub(crate) fn sync_players(mut state: Option<ResMut<SsRenderState>>, extracted: 
         }
         slot.player.set_order(playback.order);
         slot.player.set_alpha(playback.alpha);
+        slot.player.set_tint(playback.tint);
         slot.player.set_visible(playback.visible);
         slot.player.set_culled(playback.culled);
         // An explicit replay: `play()` rewinds but is otherwise only the initial

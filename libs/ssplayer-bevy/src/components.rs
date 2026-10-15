@@ -76,6 +76,10 @@ pub struct SsPlayback {
     pub order: i32,
     /// Player-level fade, folded into every vertex.
     pub alpha: f32,
+    /// Player-level tint, `0xRRGGBB`, multiplied into every part after its
+    /// PartsColor; white (the default) leaves colours as authored. Like `alpha`,
+    /// it leaves mask coverage alone.
+    pub tint: u32,
     /// False draws nothing while the timeline keeps running, so hiding a
     /// character for a moment does not slow it down.
     pub visible: bool,
@@ -122,6 +126,7 @@ impl Default for SsPlayback {
             speed_scale: 1.0,
             order: 0,
             alpha: 1.0,
+            tint: 0xFF_FFFF,
             visible: true,
             culled: false,
             restart: 0,
