@@ -19,57 +19,68 @@
     .hint { opacity: 0.7; font-size: 0.9em; }
     nav { float: right; font-size: 0.9em; }
     nav a { margin-left: 1em; }
+
+    /* Language switch: two buttons, the active one filled. */
+    .lang { display: inline-flex; gap: 0; border: 1px solid color-mix(in srgb, currentColor 30%, transparent); border-radius: 6px; overflow: hidden; }
+    .lang button { border: 0; background: transparent; cursor: pointer; padding: 0.2em 0.7em; }
+    .lang button[aria-pressed="true"] { background: color-mix(in srgb, currentColor 18%, transparent); font-weight: 600; }
+
     #stats { font-family: ui-monospace, monospace; font-size: 0.85em; white-space: pre-wrap; opacity: 0.85; }
     body.dragging::after { content: 'ここにドロップ'; position: fixed; inset: 0.75rem; display: grid; place-items: center;
       border: 3px dashed currentColor; border-radius: 12px; font-size: 1.4rem; font-weight: 600; pointer-events: none;
       background: color-mix(in srgb, Canvas 80%, transparent); }
+    :root[lang="en"] body.dragging::after { content: 'Drop here'; }
   </style>
 </head>
 <body>
-  <nav><a href="element.html">要素の使い方 →</a> <a href="multi.html">1 ページに複数 →</a> <a href="part-follow.html">パーツ追従 →</a></nav>
+  <nav>
+    <span class="lang" role="group" aria-label="Language">
+      <button type="button" data-lang="ja">日本語</button>
+      <button type="button" data-lang="en">English</button>
+    </span>
+    <a href="element.html" data-i18n="navElement">要素の使い方 →</a> <a href="multi.html" data-i18n="navMulti">1 ページに複数 →</a> <a href="part-follow.html" data-i18n="navFollow">パーツ追従 →</a>
+  </nav>
   <h1>ssplayer-wgpu — WebGPU demo</h1>
-  <p>SpriteStudio の <code>.ssab</code> を <strong>WebGPU</strong> で再生します。
-     reference（外部 PNG）／ embedded（埋め込み）どちらも <code>load()</code> 1コールで、
-     アトラスも参照先パックも揃います。デコードはブラウザ（<code>createImageBitmap</code>）が行うので、
+  <p data-i18n="intro">SpriteStudio の <code>.ssab</code> を <strong>WebGPU</strong> で再生します。
+     reference（外部 PNG）／ embedded（埋め込み）どちらも <code>load()</code> 1コールで、アトラスも参照先パックも揃います。デコードはブラウザ（<code>createImageBitmap</code>）が行うので、
      wasm に画像デコーダは入っていません。</p>
 
-  <h2>① <code>&lt;ss-player-webgpu&gt;</code>（1要素 = 1 canvas = 1 体）</h2>
-  <p class="hint">単体用途向けの便利ラッパ。下の②と <strong>device・パイプライン・アトラスを共有</strong>します。</p>
+  <h2 data-i18n="h2Element">① <code>&lt;ss-player-webgpu&gt;</code>（1要素 = 1 canvas = 1 体）</h2>
+  <p class="hint" data-i18n="hintElement">単体用途向けの便利ラッパ。下の②と <strong>device・パイプライン・アトラスを共有</strong>します。</p>
 
   <p>
-    <label for="pick">パック:</label>
+    <label for="pick" data-i18n="labelPack">パック:</label>
     <select id="pick"></select>
-    <label for="anim">アニメーション:</label>
+    <label for="anim" data-i18n="labelAnim">アニメーション:</label>
     <select id="anim"></select>
-    <label for="mode">形態:</label>
+    <label for="mode" data-i18n="labelMode">形態:</label>
     <select id="mode">
-      <option value="assets">reference（外部 PNG）</option>
-      <option value="assets_emb">embedded（アトラス埋め込み）</option>
+      <option value="assets" data-i18n="optReference">reference（外部 PNG）</option>
+      <option value="assets_emb" data-i18n="optEmbedded">embedded（アトラス埋め込み）</option>
     </select>
-    <span class="hint">— <code>load()</code> 1コールでアトラスも兄弟 ssab（<code>Instance</code>）も揃います</span>
+    <span class="hint" data-i18n="hintLoad">— <code>load()</code> 1コールでアトラスも兄弟 ssab（<code>Instance</code>）も揃います</span>
   </p>
-  <p class="hint">手元の <code>.ssab</code> は、それを含むフォルダをこのページにドロップすると「パック」に加わり、選ぶと再生できます。アトラスも参照先の <code>.ssab</code> も、ドロップしたフォルダから同じ <code>load()</code> 1コールで読みます。</p>
+  <p class="hint" data-i18n="hintDrop">手元の <code>.ssab</code> は、それを含むフォルダをこのページにドロップすると「パック」に加わり、選ぶと再生できます。アトラスも参照先の <code>.ssab</code> も、ドロップしたフォルダから同じ <code>load()</code> 1コールで読みます。</p>
   <p id="missing" class="hint" hidden></p>
 
   <!-- The custom element creates its own <canvas> and drives requestAnimationFrame. -->
   <ss-player-webgpu id="player" class="stage" src="assets/Basic.ssab" autoplay></ss-player-webgpu>
 
-  <h2>② 1 canvas に N 体（<code>SsContextWeb</code> を直接駆動）</h2>
-  <p class="hint">1枚の canvas ＝ 1 <code>SSScene</code> に何体でも載る形。
+  <h2 data-i18n="h2Scene">② 1 canvas に N 体（<code>SsContextWeb</code> を直接駆動）</h2>
+  <p class="hint" data-i18n="hintScene">1枚の canvas ＝ 1 <code>SSScene</code> に何体でも載る形。
      ①と同じ device・同じ <code>SSRenderer</code> を使うので、体を増やしてもアトラスのアップロードは増えません。</p>
 
   <p>
-    <button id="add" type="button">＋ 1体</button>
-    <button id="remove" type="button">− 1体</button>
-    <span class="hint">— order 昇順で1パスに合成</span>
+    <button id="add" type="button" data-i18n="btnAdd">＋ 1体</button>
+    <button id="remove" type="button" data-i18n="btnRemove">− 1体</button>
+    <span class="hint" data-i18n="hintOrder">— order 昇順で1パスに合成</span>
   </p>
 
   <canvas id="cast" class="stage wide"></canvas>
   <p id="stats">…</p>
 
-  <p class="hint">
-    WebGPU 対応ブラウザ（Chrome / Edge 113+ など）＋ <code>http://localhost</code> 配信が必要です。
-    ビルド: <code>../../scripts/build.sh platform=web</code> → <code>python3 -m http.server</code> で本ディレクトリを配信。
+  <p class="hint" data-i18n="serve">
+    WebGPU 対応ブラウザ（Chrome / Edge 113+ など）＋ <code>http://localhost</code> 配信が必要です。ビルド: <code>../../scripts/build.sh platform=web</code> → <code>python3 -m http.server</code> で本ディレクトリを配信。
   </p>
 
   <script type="module">
@@ -82,6 +93,86 @@
     // Registration is opt-in in the package (the element is its own entry point),
     // so a page that wants <ss-player-webgpu> asks for it once.
     defineSsPlayerWebGPUElement();
+
+    // --- i18n ------------------------------------------------------------------
+    // The page is written in Japanese; each [data-i18n] element's markup is read
+    // back as the ja text, and the switch swaps innerHTML. Values with markup are
+    // inserted as innerHTML — they are static, trusted text. The choice is shared
+    // by every demo page (LANG_KEY), so it carries over as you move between them.
+    const LANG_KEY = 'ssDemoLang';
+    const JA = {};
+    for (const el of document.querySelectorAll('[data-i18n]')) JA[el.dataset.i18n] = el.innerHTML;
+    const I18N = {
+      ja: {
+        ...JA,
+        samples: 'サンプル',
+        dropped: 'ドロップ',
+        noSsab: 'ドロップしたものに .ssab がありません',
+        pack: 'パック',
+        atlas: 'アトラス',
+        missing: (gaps) => `見つからなかったもの: ${gaps.join('、')}`,
+      },
+      en: {
+        navElement: 'Using the element →',
+        navMulti: 'Several on one page →',
+        navFollow: 'Part following →',
+        intro:
+          'Plays SpriteStudio <code>.ssab</code> files through <strong>WebGPU</strong>. Reference (external ' +
+          'PNGs) or embedded, one <code>load()</code> call brings in the atlases and the packs it refers to. ' +
+          'The browser does the decoding (<code>createImageBitmap</code>), so the wasm carries no image decoder.',
+        h2Element: '① <code>&lt;ss-player-webgpu&gt;</code> (one element = one canvas = one character)',
+        hintElement:
+          'A convenience wrapper for a single animation. It <strong>shares the device, pipelines and ' +
+          'atlases</strong> with ② below.',
+        labelPack: 'Pack:',
+        labelAnim: 'Animation:',
+        labelMode: 'Export mode:',
+        optReference: 'reference (external PNGs)',
+        optEmbedded: 'embedded (atlases inside)',
+        hintLoad: '— one <code>load()</code> call brings in the atlases and the sibling ssab (<code>Instance</code>)',
+        hintDrop:
+          'To play an <code>.ssab</code> of your own, drop the folder that holds it onto this page: it joins ' +
+          'the Pack list, and picking it plays it. Its atlases and the <code>.ssab</code> files it refers to ' +
+          'are read from the dropped folder by the same one <code>load()</code> call.',
+        h2Scene: '② N characters on one canvas (driving <code>SsContextWeb</code> directly)',
+        hintScene:
+          'One canvas = one <code>SSScene</code>, holding as many characters as you like. It uses the same ' +
+          'device and the same <code>SSRenderer</code> as ①, so adding characters adds no atlas uploads.',
+        btnAdd: '+ Add one',
+        btnRemove: '− Remove one',
+        hintOrder: '— composited in one pass, in ascending order',
+        serve:
+          'Needs a WebGPU browser (Chrome / Edge 113+, etc.) served over <code>http://localhost</code>. ' +
+          'Build: <code>../../scripts/build.sh platform=web</code>, then serve this directory with ' +
+          '<code>python3 -m http.server</code>.',
+        samples: 'Samples',
+        dropped: 'Dropped',
+        noSsab: 'The drop holds no .ssab',
+        pack: 'pack',
+        atlas: 'atlas',
+        missing: (gaps) => `Not found: ${gaps.join(', ')}`,
+      },
+    };
+
+    // Remembered choice wins; otherwise follow the browser's language, default ja.
+    let stored = null;
+    try { stored = localStorage.getItem(LANG_KEY); } catch { /* private mode */ }
+    let lang = (stored === 'ja' || stored === 'en')
+      ? stored
+      : ((navigator.language || 'ja').toLowerCase().startsWith('ja') ? 'ja' : 'en');
+
+    function applyLang(next) {
+      lang = next;
+      const t = I18N[lang];
+      document.documentElement.lang = lang;
+      for (const el of document.querySelectorAll('[data-i18n]')) el.innerHTML = t[el.dataset.i18n];
+      for (const b of document.querySelectorAll('.lang button')) b.setAttribute('aria-pressed', String(b.dataset.lang === lang));
+      try { localStorage.setItem(LANG_KEY, lang); } catch { /* private mode: not remembered */ }
+      samples.label = t.samples;
+      dropGroup.label = t.dropped;
+      renderMissing();
+    }
+    for (const b of document.querySelectorAll('.lang button')) b.addEventListener('click', () => applyLang(b.dataset.lang));
 
     // Standalone single-pack animations from tests/overall (no external instance refs).
     // TextureChange is here on purpose: its parts bind by texture *file name*
@@ -103,7 +194,6 @@
     const missing = document.getElementById('missing');
     const player = document.getElementById('player');
     const samples = document.createElement('optgroup');
-    samples.label = 'サンプル';
     samples.append(...PACKS.map((p) => new Option(p, p)));
     pick.append(samples);
 
@@ -120,7 +210,23 @@
     let dropped = new Map();   // URL -> File
     const read = (url) => dropped.get(url);
     const dropGroup = document.createElement('optgroup');
-    dropGroup.label = 'ドロップ';
+
+    // What the #missing line says, kept as data so a language switch can say it
+    // again: null, 'noSsab' (a drop with no .ssab in it), or what a load did not find.
+    let missingNote = null;
+    function renderMissing() {
+      const t = I18N[lang];
+      if (missingNote === 'noSsab') {
+        missing.hidden = false;
+        missing.textContent = t.noSsab;
+        return;
+      }
+      const gaps = (missingNote ?? []).map((m) => `${m.kind === 'pack' ? t.pack : t.atlas} ${m.name}`);
+      missing.hidden = !gaps.length;
+      missing.textContent = t.missing(gaps);
+    }
+
+    applyLang(lang);   // everything the switch touches exists from here on
 
     /** Every file under a dropped entry, with its path from the drop. */
     async function walk(entry) {
@@ -151,8 +257,8 @@
       const ssabs = files.map((f) => f.path).filter((path) => /\.ssab$/i.test(path))
         .sort((a, b) => depth(a) - depth(b) || a.localeCompare(b));
       if (!ssabs.length) {
-        missing.hidden = false;
-        missing.textContent = 'ドロップしたものに .ssab がありません';
+        missingNote = 'noSsab';
+        renderMissing();
         return;
       }
       const base = new URL(`dropped/${++drops}/`, location.href);
@@ -188,9 +294,8 @@
     player.addEventListener('load', () => {
       anim.replaceChildren(...player.player.animationNames().map((name) => new Option(name, name)));
       anim.value = player.player.currentAnimation() ?? '';
-      const gaps = player.player.missingAssets().map((m) => `${m.kind === 'pack' ? 'パック' : 'アトラス'} ${m.name}`);
-      missing.hidden = !gaps.length;
-      missing.textContent = `見つからなかったもの: ${gaps.join('、')}`;
+      missingNote = player.player.missingAssets().map(({ kind, name }) => ({ kind, name }));
+      renderMissing();
     });
     // With `autoplay` on the element, a new animation plays from its head.
     anim.addEventListener('change', () => player.setAttribute('animation', anim.value));
