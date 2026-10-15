@@ -125,9 +125,6 @@ player, where every host and the C ABI reach it, and the host half belongs in an
 - [ ] **crates.io** — `ssruntime` and `ssab` are path dependencies into the
       submodule; cargo will not publish a crate that depends on paths only.
       Blocked on: the SDK crates `ssab` and `ssruntime` being published first.
-- [ ] **Browser-side measurement** — `surface.stats()` is wired through to
-      `examples/web` but has never been read in a browser, where one command is
-      one JS call and the ratios differ from native.
 
 ## Needs SDK
 
@@ -142,7 +139,13 @@ player, where every host and the C ABI reach it, and the host half belongs in an
 - **Throughput optimisation** — draw-call merging, bindless textures, texture
   bind-group dedup, render bundles, threading the player walk, indirect draws for
   Shape. Measured against a 256-player frame and not worth their complexity;
-  bindless is additionally unavailable on WebGPU.
+  bindless is additionally unavailable on WebGPU. The browser does not change that.
+  `tests/scale.rs`'s cast in Chrome 155 (release wasm, Apple M4 Max, macOS 26.7) draws
+  the same list as native — at 256 players 2496 draws, 704 mergeable, 1983 rebinds —
+  and pays more per call for it: 1.86 ms per `surface.frame()` against 0.87 ms native,
+  and 0.52 ms of GPU pass against 0.10 ms. The browser's figure also covers acquiring
+  the canvas texture and the submit, about 0.16 ms of it fixed. Merging every
+  mergeable draw would remove 28% of the calls, a fraction of a millisecond.
 - **One player drawn into several views** — a minimap, a split screen, a portal, a
   tool's preview beside its output. `SSScene::update` fuses the timeline
   advance with the geometry build, so handing one player to two scenes plays it at

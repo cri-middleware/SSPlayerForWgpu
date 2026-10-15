@@ -260,9 +260,10 @@
       document.getElementById('remove').addEventListener('click', removePlayer);
       for (let i = 0; i < 4; i++) await addPlayer();
 
-      // The counters the native measurements were taken from,
-      // read in the browser — where the draw-call ratios may differ, because one
-      // wgpu command is one JS call here and a memcpy on native.
+      // The counters the native measurements were taken from, read in the
+      // browser. The draw list is the one native builds; what differs is the cost
+      // of each call, since one wgpu command is one JS call here and a memcpy on
+      // native.
       let last = performance.now();
       const loop = (now) => {
         const dt = Math.min((now - last) / 1000, 0.05);
