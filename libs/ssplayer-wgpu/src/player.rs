@@ -2771,15 +2771,19 @@ impl SSPlayer {
             // footstep on every update — a host that plays a sound per event fires
             // it for as long as the player stays culled — and kept a loop or finish
             // edge readable long after it was crossed.
-            self.events.clear();
-            self.looped = false;
-            self.ran = false;
-            self.finished_edge = false;
-            self.started_edge = false;
+            self.report_no_tick();
             return;
         }
 
-        let Some(root) = &mut self.root else { return };
+        // No tree is a tick that did not run either: before the first
+        // `set_animation`, and once `set_pack` — which `load` and `load_ssab` go
+        // through — has dropped the tree that was playing. Returning with the
+        // reports untouched made every update until the next `set_animation`
+        // answer with the old pack's last events and edges.
+        let Some(root) = &mut self.root else {
+            self.report_no_tick();
+            return;
+        };
         // The runtime works in milliseconds for the primary context.
         root.context.update(delta_secs * 1000.0);
         self.started_edge = std::mem::take(&mut self.start_pending);
@@ -2829,6 +2833,16 @@ impl SSPlayer {
         // still have to keep time: a hidden instance part's sub-animation, a child
         // its slot says is not showing.
         step_undrawn_effects(root);
+    }
+
+    /// Empty what a tick reports, for an update that did not run one. The reads
+    /// between two updates describe the last tick, and there is none to describe.
+    fn report_no_tick(&mut self) {
+        self.events.clear();
+        self.looped = false;
+        self.ran = false;
+        self.finished_edge = false;
+        self.started_edge = false;
     }
 
     /// What frame each instance child of the root is on, keyed by part index.

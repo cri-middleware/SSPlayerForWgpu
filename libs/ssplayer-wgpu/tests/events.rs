@@ -396,6 +396,47 @@ fn a_culled_player_reports_no_events() {
     assert!(reported_again, "events stopped coming after the player was unculled");
 }
 
+/// A player whose tree a `load` dropped reports nothing until an animation is
+/// selected again.
+///
+/// `load` goes through `set_pack`, which drops the tree that was playing and
+/// leaves no animation selected, so the updates that follow run no tick. They
+/// used to return with the last tick's reports still in place, and a character
+/// swapped mid-playback replayed the old pack's events and edges on every update
+/// until the host called `set_animation`.
+#[test]
+fn a_player_with_its_tree_dropped_reports_nothing() {
+    let Some((device, queue)) = gpu() else {
+        eprintln!("no adapter — skipping");
+        return;
+    };
+    let mut renderer = SSRenderer::new(&device);
+    let mut scene = scene(&device, &queue);
+    let mut player = player_for(EVENT_PACKS[0]);
+
+    player.set_loop_count(-1);
+    player.play();
+    let mut reported = 0;
+    for _ in 0..2000 {
+        scene.update(&mut renderer, &device, &queue, 1.0 / 60.0, &mut [&mut player]);
+        reported = player.events().len();
+        if reported > 0 {
+            break;
+        }
+    }
+    assert!(reported > 0, "no tick of {} raised an event — nothing to drop", EVENT_PACKS[0]);
+
+    player.load(format!("{}/{}", asset_root(), EVENT_PACKS[0])).expect("the pack loaded a moment ago");
+    assert_eq!(player.current_animation(), None, "a load leaves no animation selected");
+    for tick in 0..5 {
+        scene.update(&mut renderer, &device, &queue, 1.0 / 60.0, &mut [&mut player]);
+        assert!(player.events().is_empty(), "a player with no tree replayed the last tick's events (tick {tick})");
+        assert!(!player.just_started(), "a player with no tree reported a start (tick {tick})");
+        assert!(!player.just_looped(), "a player with no tree reported a loop (tick {tick})");
+        assert!(!player.just_finished(), "a player with no tree reported a completion (tick {tick})");
+    }
+}
+
 /// A hidden player keeps playing, so it keeps reporting.
 ///
 /// `set_visible(false)` only skips the draw. A host that blinks a character by

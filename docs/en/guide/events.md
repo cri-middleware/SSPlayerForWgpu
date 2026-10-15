@@ -118,6 +118,7 @@ JavaScript event object as `source`.
 | A culled player (`set_culled(true)`) | **empty** — the timeline did not advance, so the player reports nothing rather than repeating the last tick that ran |
 | A hidden player (`set_visible(false)`) | reported as usual — hiding skips the draw, not the timeline |
 | A paused player | empty, for the same reason |
+| A player with no animation selected — before the first `set_animation`, or after a `load` | **empty** — there is no tree to tick, so the old pack's last tick is not repeated either |
 
 A host that plays a sound per event therefore cannot hear it twice because a character was culled.
 
