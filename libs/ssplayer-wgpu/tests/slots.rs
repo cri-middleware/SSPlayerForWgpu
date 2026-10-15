@@ -11,16 +11,20 @@
 //! child hidden through the middle of the parent's timeline — for the check.
 //!
 //! The player's other loop-edge rule — read the pulse from `Context::just_looped`
-//! rather than inferring it from "the frame went backwards" — has **no test
-//! here yet**. Reverse and ping-pong playback are what tell the two apart: the
-//! frame runs backwards on every tick, so the inference would re-arm every
-//! synced child and effect on every tick. Seeing that takes a synced child's
-//! events or an effect's particles, which nothing in this file watches.
+//! rather than inferring it from "the frame went backwards" — is checked on the
+//! pulse itself, which the slots are stepped with and `just_looped()` reports in
+//! the same tick. Reverse and ping-pong playback are what tell the two apart:
+//! the frame runs backwards on every tick, so the inference pulses on every
+//! tick. What the slots then do is not visible today — a synced child or effect
+//! is recomputed from the parent's frame on every tick and an independent one
+//! ignores the parent's edge, so these fixtures draw the same frames whether
+//! the slots re-arm every tick or never — which is why the check is on the
+//! pulse.
 //!
 //! Skips cleanly when no GPU adapter is available: stepping happens inside
 //! `SSScene::update`, which borrows a device.
 
-use ssplayer_wgpu::{MaskBackend, Retention, SSPlayer, SSRenderer, SSScene, SceneConfig};
+use ssplayer_wgpu::{MaskBackend, PlaybackDirection, PlaybackStyle, Retention, SSPlayer, SSRenderer, SSScene, SceneConfig};
 
 const W: u32 = 256;
 const H: u32 = 256;
@@ -252,4 +256,60 @@ fn a_synced_child_follows_the_parent_on_its_transition_tick() {
     let parent = player.frame_no();
     assert!(parent.fract() != 0.0, "the first tick landed on a whole frame ({parent}) — the test would pass either way");
     assert!((frames[0] - parent).abs() < 1e-3, "on its transition tick the synced child is at {} while its parent is at {parent}", frames[0]);
+}
+
+/// The ticks on which `Instance.ssab` raised its loop pulse over `ticks` ticks
+/// of 1/60 s, with the playhead running `direction` and `style` and looping
+/// forever.
+fn loop_pulses(direction: PlaybackDirection, style: PlaybackStyle, ticks: usize) -> Option<Vec<usize>> {
+    let (device, queue) = gpu()?;
+    let mut renderer = SSRenderer::new(&device);
+    let mut scene = SSScene::new(&device, &SceneConfig { color_format: wgpu::TextureFormat::Rgba8Unorm, stencil_format: None, mask: MaskBackend::None });
+    scene.set_viewport(&queue, W as f32, H as f32, false);
+
+    let mut player = instance_player();
+    player.set_playback_direction(direction, style);
+    player.set_loop_count(-1);
+    // Again, so the playhead starts from the head of the section for this direction.
+    player.play();
+
+    let mut pulses = Vec::new();
+    for tick in 0..ticks {
+        scene.update(&mut renderer, &device, &queue, 1.0 / 60.0, &mut [&mut player]);
+        if player.just_looped() {
+            pulses.push(tick);
+        }
+    }
+    Some(pulses)
+}
+
+/// The loop edge the slots re-arm on comes once a cycle whichever way the
+/// playhead runs.
+///
+/// Inferring it from "the frame went backwards" agrees only on forward, normal
+/// playback: in reverse the frame goes backwards on every tick and forwards only
+/// at the wrap, and in ping-pong it goes backwards for the whole return leg, so
+/// the inference pulses on nearly every tick of those.
+#[test]
+fn the_loop_pulse_comes_once_a_cycle_whichever_way_the_playhead_runs() {
+    // Forward and normal is the case both rules agree on, so it is the
+    // yardstick: how many ticks one pass of the animation takes.
+    let Some(forward) = loop_pulses(PlaybackDirection::Forward, PlaybackStyle::Normal, 480) else {
+        eprintln!("no GPU adapter available, skipping");
+        return;
+    };
+    let [first, second, ..] = forward[..] else {
+        panic!("forward playback looped {} times in 480 ticks — the fixture changed. pulses={forward:?}", forward.len());
+    };
+    let pass = second - first;
+
+    // A ping-pong cycle is the round trip. It comes in a little under two
+    // passes, since the frames it turns on are not played twice.
+    for (direction, style, cycle) in [(PlaybackDirection::Backward, PlaybackStyle::Normal, pass), (PlaybackDirection::Forward, PlaybackStyle::PingPong, 2 * pass), (PlaybackDirection::Backward, PlaybackStyle::PingPong, 2 * pass)] {
+        let pulses = loop_pulses(direction, style, 3 * cycle).expect("the adapter went away");
+        assert!(pulses.len() >= 2, "{direction:?}/{style:?}: {} loop pulses in three cycles — the pulse did not come round. pulses={pulses:?}", pulses.len());
+        for gap in pulses.windows(2).map(|w| w[1] - w[0]) {
+            assert!(gap.abs_diff(cycle) <= cycle / 10, "{direction:?}/{style:?}: loop pulses {gap} ticks apart where a cycle is about {cycle} — the pulse is off the cycle's edge, as reading it from the frame going backwards puts it. pulses={pulses:?}");
+        }
+    }
 }
