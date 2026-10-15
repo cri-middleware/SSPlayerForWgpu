@@ -586,13 +586,6 @@ impl SSScene {
         self.offscreen_encoded = self.encode_layers(renderer, device, encoder);
     }
 
-    /// The name [`SSScene::encode_offscreen`] had when the coverage bitmaps were
-    /// all it drew. It draws everything now.
-    #[deprecated(note = "renamed to `encode_offscreen`, which also draws the group-alpha layers")]
-    pub fn encode_mask_coverage(&mut self, renderer: &mut SSRenderer, device: &wgpu::Device, encoder: &mut wgpu::CommandEncoder) {
-        self.encode_offscreen(renderer, device, encoder);
-    }
-
     /// Rasterise this frame's coverage bitmaps: a no-op under any backend but
     /// [`MaskBackend::Coverage`], and on frames where nothing masks.
     fn bake_coverage(&mut self, renderer: &mut SSRenderer, device: &wgpu::Device, encoder: &mut wgpu::CommandEncoder) {
