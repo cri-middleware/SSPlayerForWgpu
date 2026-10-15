@@ -93,6 +93,8 @@ the calls.
 | | |
 |---|---|
 | `setTransform(x, y, scaleX, scaleY, rotation)` / `resetTransform()` | |
+| `fitInto(width, height, options?)` | Fit the animation into a box and write the transform. Returns `{ x, y, scaleX, scaleY }`; an unknown `fit` or `align` throws. See [Fitting into a box](../guide/placement.md) |
+| `canvasRect()` | The box `fitInto` fits when no `frame` is given: `{ x, y, width, height }`, or `undefined` before `setAnimation` |
 | `setOrder(n)` / `order()` | Draw order within the canvas, ascending |
 | `setVisible(v)` / `isVisible()` | Hidden characters draw nothing but keep playing and reporting events |
 | `setCulled(c)` / `isCulled()` | Culled characters **do not advance** and report no events |

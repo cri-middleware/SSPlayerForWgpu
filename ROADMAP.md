@@ -82,9 +82,10 @@ player, where every host and the C ABI reach it, and the host half belongs in an
 
 ## Hosts & platforms
 
-- [ ] **Vulkan C++ viewer (Linux)** — `examples/viewer-vulkan-cpp`. Written, and
-      never built or run: it was written on macOS, where neither the X11 nor the
-      Wayland code compiles. It carries both window paths in one binary because
+- [ ] **Vulkan C++ viewer (Linux)** — `examples/viewer-vulkan-cpp`. Written on
+      macOS, where neither the X11 nor the Wayland code compiles, and built by CI on
+      Linux for every pull request — but never run, because the runner has no
+      display. It carries both window paths in one binary because
       Xwayland means an X11 window never reaches the `SS_WINDOW_WAYLAND` arm, so
       closing this needs one run per path on a Linux desktop. Until then the Xlib
       and Wayland arms of `surface_target` stay unverified.
@@ -101,6 +102,14 @@ player, where every host and the C ABI reach it, and the host half belongs in an
       freezes), and moving the feedback store off the per-view path —
       `FeedbackChannel::store` replaces the batch wholesale, so today the last view
       to run would be the only one the main world hears about.
+- [ ] **An offscreen target on the C face** — a scene renders only to the window or
+      layer it was created on, so a C/C++ engine cannot composite a character with its
+      own drawing; the route the docs give for it — render into a texture and bring it
+      in through the engine's interop — has no call behind it. Needs: a scene created
+      on a texture rather than a window, and a way for that texture to leave.
+      **Undecided**: whether that is a native shared handle per backend (a DXGI shared
+      handle, an `IOSurface`, Vulkan external memory — none of which wgpu creates by
+      default), a CPU readback as the portable floor, or both.
 - [ ] **Self-contained HTML preview** — a Preview button per pack in each host writes one
       fully inlined HTML file and opens it in the browser, so every host shows the same
       preview without an in-editor renderer. Every Release carries the shell, for a
@@ -164,15 +173,18 @@ player, where every host and the C ABI reach it, and the host half belongs in an
   WebGL player, which does the same.
 - **Sharing an engine's device through the C ABI.** wgpu types do not cross a C
   boundary; engine embedding is a Rust-only capability, delivered as adapter
-  crates. From C the route is offscreen rendering plus a shared texture.
+  crates. From C the route would be offscreen rendering plus a shared texture, which
+  waits on *An offscreen target on the C face* above.
 - **The GL backend.** The renderer pulls its vertices from storage buffers bound
   to the vertex stage, which GL exposes only from 4.3 / GLES 3.1 and WebGL not at
   all. No GL adapter is selected or verified anywhere: the instance takes
   `Backends::PRIMARY` (Vulkan / Metal / DX12 / WebGPU), and the C API's backend
   selector offers DX12, Metal and Vulkan.
 - **An egui or iced adapter.** Both are immediate-mode-shaped hosts whose
-  integration point is a texture, so the route is the one already documented for C:
-  render offscreen and hand over the texture. A first-class adapter crate waits on a
-  concrete request; Bevy UI above is the Rust UI target that is actually asked for.
+  integration point is a texture, so the route needs no crate: draw through the Rust
+  API into a texture you own — the host opens the render pass, so its target can be
+  any texture — and hand that texture to the toolkit. A first-class adapter crate
+  waits on a concrete request; Bevy UI above is the Rust UI target that is actually
+  asked for.
 - **A WebGL fallback.** `ssplayer-webgl` is maintained and is the answer for
   environments without WebGPU.

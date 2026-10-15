@@ -11,7 +11,7 @@ title: C / C++ ではじめる
     wgpu は「1 つのライブラリで 3 つのグラフィックス API を賄う」ための手段であり、ここでの関わりはそれだけです。**wgpu の型はこの ABI を一切越えず**、ヘッダにも登場しません。渡すのはプラットフォームのウィンドウハンドルで、返ってくるのは `SS_OK` かエラーコードです。
 
     1 点だけ：この Face は**自分でグラフィックスデバイスを持ちます**。あなたの
-    `ID3D12CommandList` や `MTLCommandBuffer` に描き込むわけではありません。エンジンのデバイスを C ABI 経由で共有することは[意図的に対象外](../limitations.md#no-device-sharing-across-the-c-abi)です。C から合成したい場合の経路はオフスクリーン描画＋テクスチャ共有になります。
+    `ID3D12CommandList` や `MTLCommandBuffer` に描き込むわけではありません。エンジンのデバイスを C ABI 経由で共有することは[意図的に対象外](../limitations.md#no-device-sharing-across-the-c-abi)です。また今のところ、シーンが描くのは作成時に渡したウィンドウだけで、エンジン側で合成するためにテクスチャへ描画する機能はまだありません。
 
 ## 手に入るもの
 
@@ -158,7 +158,7 @@ ss_scene_destroy(scene);
 
 ## サンプルを動かす
 
-プラットフォームごとに 1 つずつ、いずれもこの API をそのまま叩いています：
+ホストは 3 つ、プラットフォームごとに 1 つずつで、いずれも単体で完結し、この API をそのまま叩いています：
 
 ```bash
 cd examples/viewer-metal-cpp   && cmake -B build && cmake --build build && ./build/ssviewer-metal
@@ -171,7 +171,7 @@ cd examples/viewer-vulkan-cpp  && cmake -B build && cmake --build build && ./bui
 
 !!! note "Linux サンプルはまだ実行されていません"
     ライブラリは Linux（x86_64 / aarch64）向けにソースからビルドできます。ただし
-    **Vulkan サンプルホスト**は macOS 上で書かれたまま一度もビルド・実行されておらず、X11 / Wayland
+    **Vulkan サンプルホスト**はプルリクエストごとに CI でコンパイルされていますが、ランナーにディスプレイが無いため一度もウィンドウを開いたことがなく、X11 / Wayland
     どちらの経路も未検証です（[ROADMAP](https://github.com/cri-middleware/SSPlayerForWgpu/blob/main/ROADMAP.md)）。
 
 ## 次に読む

@@ -87,6 +87,8 @@ import { defineSsPlayerWebGPUElement } from '@spritestudio/ssplayer-wgpu/element
 | | |
 |---|---|
 | `setTransform(x, y, scaleX, scaleY, rotation)` / `resetTransform()` | |
+| `fitInto(width, height, options?)` | アニメーションを箱に収め、そのトランスフォームを書き込みます。戻り値は `{ x, y, scaleX, scaleY }`。未知の `fit` / `align` は例外になります。[ボックスへのフィット](../guide/placement.md)を参照 |
+| `canvasRect()` | `frame` を渡さないときに `fitInto` が収める箱。`{ x, y, width, height }`、`setAnimation` 前は `undefined` |
 | `setOrder(n)` / `order()` | キャンバス内の描画順（昇順） |
 | `setVisible(v)` / `isVisible()` | 非表示のキャラクターは描画されませんが、再生は続きイベントも出します |
 | `setCulled(c)` / `isCulled()` | カリング中のキャラクターは**進みません**。イベントも出しません |

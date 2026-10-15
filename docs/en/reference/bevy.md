@@ -4,8 +4,8 @@ title: Bevy API reference
 
 # Bevy API reference
 
-The whole authoring surface is one plugin, four components (one of them optional), one state
-component, four feedback messages and three command messages. Generated docs:
+The whole authoring surface is one plugin, one asset, four components (one of them optional), two
+state components, four feedback messages and four command messages. Generated docs:
 <a href="../api/ssplayer_bevy/index.html" target="_blank" rel="noreferrer">**rustdoc for `ssplayer_bevy`**</a>.
 
 **Bevy 0.20.x, and no other line** — see [Get started with Bevy](../start/bevy.md#supported-bevy).
@@ -51,6 +51,10 @@ atlas as a Bevy `Image` — non-sRGB, because the player takes atlas bytes as au
 * With Bevy's `file_watcher` feature, changing the `.ssab` or a sibling pack rebuilds the characters
   playing it; changing an atlas re-lends it in place.
 * `SsPack::pack()` is the parsed pack, for its name and `animation_names()`.
+* `SsPackLoader` is the loader the plugin registers for `.ssab`. Only the `.ssab` itself can fail
+  to load — `SsPackLoadError::Io` when it cannot be read, `::Parse` when it is not a valid pack —
+  and Bevy reports that as an `AssetLoadFailedEvent<SsPack>`. A sibling pack that does not arrive
+  is not an error: the instance parts playing it do not appear.
 
 ### `SsTransform` — where it sits
 

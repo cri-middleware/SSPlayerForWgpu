@@ -17,7 +17,7 @@ let (device, queue) = ...;
 
 // フレームごとに貸し出す。
 scene.update(&mut renderer, &device, &queue, dt, &mut players);
-scene.draw(&renderer, &mut rpass);   // *あなたが*所有する encoder 上の、*あなたが*開いたパス
+scene.draw(&renderer, &mut rpass);   // 「あなたが」所有する encoder 上の、「あなたが」開いたパス
 ```
 
 Player は呼び出しの間だけ借りて返します。フレームを跨いで保持するものはありません。

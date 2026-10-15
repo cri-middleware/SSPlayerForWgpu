@@ -175,14 +175,14 @@ Events tell you what the timeline said. Three other signals tell you what playba
 | Crossed a loop boundary | `just_looped()` | `ss_player_just_looped` | `justLooped()` | `SsLooped` message |
 
 All three are **edges**, true for exactly the tick that did it, and the next `update()` moves them
-on — so a completed one-shot cannot fire twice, including after the character is hidden and shown
-again. Reading an edge does not consume it; the tick does.
+on — so a completed one-shot cannot fire twice, including after the character is culled and brought
+back. Reading an edge does not consume it; the tick does.
 
 The start edge is raised by the first tick after `play` or `play_from`, and **not by `resume`**,
 which carries on rather than starting. After a `play` of your own you already know; it earns its
 place when something else started playback — the Bevy adapter plays whatever animation you hand
-`SsPlayer`. A `play` on a hidden character is reported by the first tick that runs once it is
-shown, and one that `stop` or `set_animation` overtook before any tick ran is not reported.
+`SsPlayer`. A `play` on a culled character is reported by the first tick that runs once it is
+unculled, and one that `stop` or `set_animation` overtook before any tick ran is not reported.
 
 ## Next
 

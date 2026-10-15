@@ -1,10 +1,11 @@
 # viewer-vulkan-cpp — Vulkan verification viewer (C API)
 
-> **Status: written, never run.** It was written on macOS, where neither the X11
-> nor the Wayland code can be compiled, let alone executed. The first run on a
-> Linux machine is the check this viewer exists for, and it has not happened yet
-> — so treat everything below as intent, and annotate *What to check on a run*
-> as you work through it.
+> **Status: compiled, never run.** It was written on macOS, where neither the X11
+> nor the Wayland code can be compiled. CI now builds it on Linux for every pull
+> request, but the runner has no display, so it has never opened a window. The
+> first run on a Linux desktop is the check this viewer exists for, and it has
+> not happened yet — so treat everything below as intent, and annotate *What to
+> check on a run* as you work through it.
 
 A Linux host that drives `ssplayer-wgpu` through its **C API** with the Vulkan
 backend forced, so the "③ ffi" face is exercised end to end: this process owns
