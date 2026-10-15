@@ -53,5 +53,6 @@ target_include_directories(ssviewer-metal PRIVATE "${SS_INCLUDE_DIR}")
 # Lets the viewer run from any working directory; argv[1] still wins.
 target_compile_definitions(ssviewer-metal PRIVATE SS_DEFAULT_ASSET_DIR="${REPO_ROOT}/assets/overall")
 target_link_libraries(ssviewer-metal PRIVATE "${SS_LIB}" "-framework Cocoa" "-framework QuartzCore")
-# The cdylib's install name is @rpath-relative, so point at where cargo put it.
-set_target_properties(ssviewer-metal PROPERTIES BUILD_RPATH "${SS_LIB_DIR}")
+# No rpath: cargo leaves the cdylib's install name at its absolute path under
+# target/, which is what the viewer records and loads it from. (The release
+# zip's dylib is renamed to @rpath/libssplayer_wgpu.dylib; this one is not.)
