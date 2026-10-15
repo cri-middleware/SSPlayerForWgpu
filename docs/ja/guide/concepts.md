@@ -56,7 +56,7 @@ flowchart TD
 
     ```rust
     scene.update(&mut renderer, &device, &queue, delta_secs, &mut [&mut a, &mut b]);
-    scene.encode_mask_coverage(&mut renderer, &device, &mut encoder); // Stencil では no-op
+    scene.encode_offscreen(&mut renderer, &device, &mut encoder); // カバレッジマスクと group alpha のレイヤー
     let mut rpass = encoder.begin_render_pass(&descriptor);
     scene.draw(&renderer, &mut rpass);
     ```
@@ -98,6 +98,8 @@ flowchart TD
 | [パーツオーバーライド：表示・セル・カラー](./part-overrides.md) | ✅ | ✅ | ✅ | — |
 | [テクスチャ差し替え：セルマップ丸ごと](./texture-replacement.md) | ✅ | ✅ | ✅ | ✅ |
 | [パーツのトランスフォーム取得](./part-overrides.md#reading-a-parts-transform) | ✅ | ✅ | ✅ | — |
+| [group alpha：1 枚のレイヤーとしてフェード](./part-overrides.md#whole-character-tint-and-alpha) | ✅ | ✅ | ✅ | ✅ |
+| [群衆描画：1 体を多数の配置に](./crowds.md) | ✅ | ✅ | ✅ | ✅ |
 | [モーションブレンディング：トラック・クロスフェード・ソース](./motion-blending.md) | ✅ | ✅ | ✅ | ✅ |
 | [マスク — ステンシル](./masks.md) | ✅ | ✅ | ✅ | — |
 | [マスク — カバレッジビットマップ](./masks.md) | ✅ | — | — | ✅ |

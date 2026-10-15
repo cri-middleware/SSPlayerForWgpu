@@ -46,6 +46,7 @@ Three things hold whatever you draw:
 | `mergeable_draws` | how much of the draw list could merge | ✅ | — | ✅ |
 | `redundant_texture_binds` | draws that re-bound the texture already bound | ✅ | — | ✅ |
 | `coverage_layers` | mask coverage passes this frame | ✅ | — | — |
+| `group_layers` | characters faded as one layer this frame | ✅ | ✅ | ✅ |
 | `gpu_pass_time_ns` | GPU time for the last timed pass | ✅ | ✅ | ✅ |
 
 The fastest way to see these on your own content is to drop a `.ssab` on
@@ -62,7 +63,8 @@ the pipeline.
 |---|---|
 | **The coverage mask backend** | one extra render pass **per masking character per frame**, and one more per 24 mask writers past the first 24 — the largest per-character cost here, and why [coverage is not used where a stencil exists](./masks.md) |
 | **Many distinct atlases** | each one is a bind group change. `redundant_texture_binds` says whether draw order is working against you |
-| **Very many characters** | the per-character CPU walk is single-threaded |
+| **Group alpha** | with it on, one render pass and one composite over the target **per faded character per frame**, and a layer the size of the target for each one faded at once. `group_layers` counts them; a character at alpha 1 costs nothing. See [Whole-character tint and alpha](./part-overrides.md#whole-character-tint-and-alpha) |
+| **Very many characters** | the per-character CPU walk is single-threaded. Copies of one character playing in step are a [crowd](./crowds.md), which costs one character's walk |
 | **Off-screen characters** | `set_culled(true)` skips the timeline advance as well as the draw, so a culled character costs nothing. Use it for cast members that are off-screen. `set_visible(false)` is not a substitute: it skips only the draw, and the timeline keeps running |
 
 ## If the numbers look wrong

@@ -13,7 +13,7 @@
 //!
 //! Every test skips cleanly when no GPU adapter is available.
 
-use ssplayer_wgpu::{MaskBackend, Retention, SSPlayer, SSRenderer, SSScene, SceneConfig};
+use ssplayer_wgpu::{CrowdMember, MaskBackend, Retention, SSPlayer, SSRenderer, SSScene, SceneConfig};
 use std::path::Path;
 
 const W: u32 = 256;
@@ -577,4 +577,317 @@ fn set_alpha_fades_the_player() {
     // Clamped, so an out-of-range value cannot brighten the player.
     player.set_alpha(4.0);
     assert_eq!(player.alpha(), 1.0, "set_alpha did not clamp");
+}
+
+/// A scene for the W x H target that masks through coverage bitmaps, with no
+/// stencil to lend.
+fn make_coverage_scene(device: &wgpu::Device, queue: &wgpu::Queue) -> SSScene {
+    let mut scene = SSScene::new(device, &SceneConfig { color_format: COLOR_FORMAT, stencil_format: None, mask: MaskBackend::Coverage });
+    scene.set_viewport(queue, W as f32, H as f32, false);
+    scene
+}
+
+/// Like [`render_scenes`], with every scene's offscreen work encoded first on
+/// the same encoder, as a host must: the coverage bitmaps and the group-alpha
+/// layers. A stencil is attached only to a scene that draws with one.
+fn render_encoded(device: &wgpu::Device, queue: &wgpu::Queue, renderer: &mut SSRenderer, scenes: &mut [&mut SSScene]) -> Vec<u8> {
+    let (color, color_view, stencil_view) = offscreen_target(device);
+    let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor { label: None });
+    for scene in scenes.iter_mut() {
+        scene.encode_offscreen(renderer, device, &mut encoder);
+    }
+    for (i, scene) in scenes.iter().enumerate() {
+        let load = if i == 0 { wgpu::LoadOp::Clear(wgpu::Color { r: 0.0, g: 0.0, b: 0.0, a: 1.0 }) } else { wgpu::LoadOp::Load };
+        let mut rpass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+            label: Some("scene pass"),
+            color_attachments: &[Some(wgpu::RenderPassColorAttachment { view: &color_view, resolve_target: None, ops: wgpu::Operations { load, store: wgpu::StoreOp::Store }, depth_slice: None })],
+            depth_stencil_attachment: scene.stencil_enabled().then(|| depth_stencil_attachment(&stencil_view)),
+            timestamp_writes: None,
+            occlusion_query_set: None,
+            multiview_mask: None,
+        });
+        scene.draw(renderer, &mut rpass);
+    }
+    readback(device, queue, encoder, &color)
+}
+
+/// Save a render for eyeballing, only when asked — `SS_SCENE_DUMP=<dir>` — so a
+/// plain `cargo test` writes nothing.
+fn dump(name: &str, rgba: &[u8]) {
+    let Ok(dir) = std::env::var("SS_SCENE_DUMP") else { return };
+    let _ = std::fs::create_dir_all(&dir);
+    image::RgbaImage::from_raw(W, H, rgba.to_vec()).unwrap().save(format!("{dir}/{name}.png")).unwrap();
+}
+
+/// How many pixels differ, and by how much at worst on any channel.
+fn differing(a: &[u8], b: &[u8]) -> (usize, u8) {
+    a.as_chunks::<4>().0.iter().zip(b.as_chunks::<4>().0).fold((0, 0), |(count, worst), (x, y)| {
+        let delta = x.iter().zip(y).map(|(p, q)| p.abs_diff(*q)).max().unwrap_or(0);
+        (count + usize::from(delta > 0), worst.max(delta))
+    })
+}
+
+/// What a layer of `rgba` composited at `alpha` over the opaque black clear
+/// reads: every colour scaled, the clear's alpha kept.
+fn scaled(rgba: &[u8], alpha: f32) -> Vec<u8> {
+    rgba.as_chunks::<4>().0.iter().flat_map(|p| [p[0], p[1], p[2]].map(|c| (c as f32 * alpha).round() as u8).into_iter().chain([p[3]])).collect()
+}
+
+/// With group alpha on, a faded player is its opaque self composited once at its
+/// alpha. Over the opaque black clear that is the opaque render scaled by the
+/// alpha, to within the layer's rounding. Faded part by part, the same frame
+/// reads brighter wherever two parts overlap, which is what the layer is for —
+/// and what this checks the fixture has, since without an overlap the two
+/// would agree and prove nothing. `Mask.ssab` overlaps; `Basic.ssab` does not.
+///
+/// Its masks clip inside the layer, under both backends.
+#[test]
+fn group_alpha_fades_a_player_as_one_layer() {
+    let Some((device, queue)) = gpu() else {
+        eprintln!("no GPU adapter available, skipping headless render test");
+        return;
+    };
+    const ALPHA: f32 = 0.5;
+
+    for coverage in [false, true] {
+        let label = if coverage { "coverage" } else { "stencil" };
+        let mut renderer = SSRenderer::new(&device);
+        let mut scene = if coverage { make_coverage_scene(&device, &queue) } else { make_scene(&device, &queue, true) };
+        scene.set_group_alpha(true);
+        let mut player = make_player(&device, &queue, &mut renderer, "Mask");
+        advance(&mut scene, &mut renderer, &device, &queue, &mut [&mut player], 10);
+        let opaque = render_encoded(&device, &queue, &mut renderer, &mut [&mut scene]);
+        assert_eq!(scene.stats().group_layers, 0, "{label}: an unfaded player was drawn through a layer");
+        assert!(drawn_pixels(&opaque) > 0, "{label}: nothing drawn at full alpha — fixture problem");
+
+        player.set_alpha(ALPHA);
+        rebuild(&mut scene, &mut renderer, &device, &queue, &mut [&mut player]);
+        let grouped = render_encoded(&device, &queue, &mut renderer, &mut [&mut scene]);
+        assert_eq!(scene.stats().group_layers, 1, "{label}: the faded player was not drawn through a layer");
+
+        scene.set_group_alpha(false);
+        rebuild(&mut scene, &mut renderer, &device, &queue, &mut [&mut player]);
+        let per_part = render_encoded(&device, &queue, &mut renderer, &mut [&mut scene]);
+        assert_eq!(scene.stats().group_layers, 0, "{label}: group alpha off still drew a layer");
+
+        dump(&format!("group-{label}-opaque"), &opaque);
+        dump(&format!("group-{label}-grouped"), &grouped);
+        dump(&format!("group-{label}-per-part"), &per_part);
+
+        let (off, worst) = differing(&grouped, &scaled(&opaque, ALPHA));
+        // Brighter by more than the layer's rounding: a pixel two parts cover.
+        let overlap = per_part.as_chunks::<4>().0.iter().zip(grouped.as_chunks::<4>().0).filter(|(p, g)| (0..3).any(|c| p[c] > g[c].saturating_add(1))).count();
+        eprintln!("{label}: grouped is {off} px off the scaled opaque render (worst {worst}); per part is brighter in {overlap} px");
+        assert!(worst <= 1, "{label}: the grouped fade is {worst} levels off the opaque render scaled by {ALPHA} — the layer is not composited once at the player's alpha");
+        assert!(overlap > 0, "{label}: fading part by part matched the layer, so the fixture has no overlap and this proves nothing");
+    }
+}
+
+/// A crowd is one player, so it fades as one layer: members that overlap stop
+/// showing through each other, as a single player's parts do.
+#[test]
+fn a_faded_crowd_is_one_layer() {
+    let Some((device, queue)) = gpu() else {
+        eprintln!("no GPU adapter available, skipping headless render test");
+        return;
+    };
+    let mut renderer = SSRenderer::new(&device);
+    let mut scene = make_scene(&device, &queue, true);
+    scene.set_group_alpha(true);
+    let mut player = make_player(&device, &queue, &mut renderer, "Basic");
+    // Overlapping, which is what a layer changes.
+    player.set_crowd(&[-30.0, 0.0, 30.0].map(|x| CrowdMember { x, y: x, ..CrowdMember::default() }));
+    advance(&mut scene, &mut renderer, &device, &queue, &mut [&mut player], 10);
+    let opaque = render_encoded(&device, &queue, &mut renderer, &mut [&mut scene]);
+
+    player.set_alpha(0.5);
+    rebuild(&mut scene, &mut renderer, &device, &queue, &mut [&mut player]);
+    let grouped = render_encoded(&device, &queue, &mut renderer, &mut [&mut scene]);
+    assert_eq!(scene.stats().group_layers, 1, "a faded crowd took {} layers rather than one", scene.stats().group_layers);
+    dump("crowd-faded", &grouped);
+    let (off, worst) = differing(&grouped, &scaled(&opaque, 0.5));
+    assert!(worst <= 1, "the faded crowd is {worst} levels off its opaque self scaled by 0.5 in {off} px — its members were not faded as one");
+}
+
+/// Faded out altogether, a grouped player draws nothing and takes no layer —
+/// whatever its parts blend with.
+#[test]
+fn group_alpha_zero_draws_nothing() {
+    let Some((device, queue)) = gpu() else {
+        eprintln!("no GPU adapter available, skipping headless render test");
+        return;
+    };
+    let mut renderer = SSRenderer::new(&device);
+    let mut scene = make_scene(&device, &queue, true);
+    scene.set_group_alpha(true);
+    let mut player = make_player(&device, &queue, &mut renderer, "BlendMode");
+    advance(&mut scene, &mut renderer, &device, &queue, &mut [&mut player], 10);
+    assert!(drawn_pixels(&render_encoded(&device, &queue, &mut renderer, &mut [&mut scene])) > 0, "nothing drawn at full alpha — fixture problem");
+
+    player.set_alpha(0.0);
+    rebuild(&mut scene, &mut renderer, &device, &queue, &mut [&mut player]);
+    let clear = render_encoded(&device, &queue, &mut renderer, &mut [&mut scene]);
+    assert_eq!(drawn_pixels(&clear), 0, "a grouped player at alpha 0 still drew");
+    assert_eq!(scene.stats().group_layers, 0, "a player at alpha 0 took a layer");
+}
+
+/// A faded player's layer is folded back where the player stands in the order,
+/// not after everything else: a shared scene matches one scene per player
+/// drawn in that order, both ways round, with an opaque player overlapping.
+#[test]
+fn a_grouped_player_keeps_its_place_in_the_order() {
+    let Some((device, queue)) = gpu() else {
+        eprintln!("no GPU adapter available, skipping headless render test");
+        return;
+    };
+    let mut renderer = SSRenderer::new(&device);
+    for faded_first in [true, false] {
+        let mut shared = make_scene(&device, &queue, true);
+        shared.set_group_alpha(true);
+        let mut faded = make_player(&device, &queue, &mut renderer, "Mask");
+        let mut opaque = make_player(&device, &queue, &mut renderer, "Basic");
+        faded.set_order(if faded_first { 0 } else { 1 });
+        opaque.set_order(if faded_first { 1 } else { 0 });
+        faded.set_alpha(0.5);
+        advance(&mut shared, &mut renderer, &device, &queue, &mut [&mut faded, &mut opaque], 10);
+        // Encoded once, so the next update knows the host draws the layers.
+        render_encoded(&device, &queue, &mut renderer, &mut [&mut shared]);
+        rebuild(&mut shared, &mut renderer, &device, &queue, &mut [&mut faded, &mut opaque]);
+        let one_scene = render_encoded(&device, &queue, &mut renderer, &mut [&mut shared]);
+        assert_eq!(shared.stats().group_layers, 1, "the faded player was not drawn through a layer");
+
+        let mut faded_scene = make_scene(&device, &queue, true);
+        let mut opaque_scene = make_scene(&device, &queue, true);
+        faded_scene.set_group_alpha(true);
+        let mut faded2 = make_player(&device, &queue, &mut renderer, "Mask");
+        let mut opaque2 = make_player(&device, &queue, &mut renderer, "Basic");
+        faded2.set_alpha(0.5);
+        advance(&mut faded_scene, &mut renderer, &device, &queue, &mut [&mut faded2], 10);
+        advance(&mut opaque_scene, &mut renderer, &device, &queue, &mut [&mut opaque2], 10);
+        render_encoded(&device, &queue, &mut renderer, &mut [&mut faded_scene]);
+        rebuild(&mut faded_scene, &mut renderer, &device, &queue, &mut [&mut faded2]);
+        let split = if faded_first { render_encoded(&device, &queue, &mut renderer, &mut [&mut faded_scene, &mut opaque_scene]) } else { render_encoded(&device, &queue, &mut renderer, &mut [&mut opaque_scene, &mut faded_scene]) };
+
+        dump(&format!("order-faded-first-{faded_first}"), &one_scene);
+        let (off, worst) = differing(&one_scene, &split);
+        assert_eq!(off, 0, "faded first {faded_first}: {off} px differ (worst {worst}) from one scene per player — the layer was not composited in its place");
+    }
+}
+
+/// A host that never calls `encode_offscreen` gets what group alpha off draws:
+/// faded part by part. The update reads whether the last frame was encoded, so
+/// the first frame after the host starts is part by part too, and the layer
+/// takes over from the next.
+#[test]
+fn group_alpha_without_the_offscreen_pass_fades_part_by_part() {
+    let Some((device, queue)) = gpu() else {
+        eprintln!("no GPU adapter available, skipping headless render test");
+        return;
+    };
+    let mut renderer = SSRenderer::new(&device);
+    let mut scene = make_scene(&device, &queue, true);
+    let mut player = make_player(&device, &queue, &mut renderer, "Basic");
+    player.set_alpha(0.5);
+    advance(&mut scene, &mut renderer, &device, &queue, &mut [&mut player], 10);
+    let per_part = render(&device, &queue, &renderer, &scene);
+
+    scene.set_group_alpha(true);
+    rebuild(&mut scene, &mut renderer, &device, &queue, &mut [&mut player]);
+    assert_eq!(render(&device, &queue, &renderer, &scene), per_part, "with no offscreen pass the faded player was not drawn part by part");
+    rebuild(&mut scene, &mut renderer, &device, &queue, &mut [&mut player]);
+    let first = render_encoded(&device, &queue, &mut renderer, &mut [&mut scene]);
+    assert_eq!(scene.stats().group_layers, 0, "a layer was drawn on a frame whose update could not know the host would draw it");
+    assert_eq!(first, per_part, "the first encoded frame was not drawn part by part");
+
+    rebuild(&mut scene, &mut renderer, &device, &queue, &mut [&mut player]);
+    let grouped = render_encoded(&device, &queue, &mut renderer, &mut [&mut scene]);
+    assert_eq!(scene.stats().group_layers, 1, "the frame after an encoded one was not drawn through a layer");
+    assert_ne!(grouped, per_part, "the layer drew what part by part does");
+}
+
+/// One member placed, faded and tinted, in the player's own terms.
+const MEMBER: CrowdMember = CrowdMember { x: 18.0, y: -11.0, scale_x: 0.75, scale_y: 0.6, rotation: 0.3, alpha: 0.6, tint: 0xFF_A0_60 };
+
+/// A crowd of one is the player placed where the member stands, faded and
+/// tinted by it: the member's placement composes under the player's identity,
+/// its alpha and tint multiply into the player's, and nothing else differs —
+/// for every geometry class, and for masks under both backends.
+#[test]
+fn a_crowd_of_one_is_the_player_placed_there() {
+    let Some((device, queue)) = gpu() else {
+        eprintln!("no GPU adapter available, skipping headless render test");
+        return;
+    };
+    for (pack, coverage) in [("Basic", false), ("Mesh", false), ("Shape", false), ("Effect", false), ("Mask", false), ("Mask", true)] {
+        let label = format!("{pack} ({})", if coverage { "coverage" } else { "stencil" });
+        let mut renderer = SSRenderer::new(&device);
+        let mut scene = if coverage { make_coverage_scene(&device, &queue) } else { make_scene(&device, &queue, true) };
+        let mut player = make_player(&device, &queue, &mut renderer, pack);
+        player.set_crowd(&[MEMBER]);
+        advance(&mut scene, &mut renderer, &device, &queue, &mut [&mut player], 8);
+        let crowd = render_encoded(&device, &queue, &mut renderer, &mut [&mut scene]);
+        assert!(drawn_pixels(&crowd) > 0, "{label}: the crowd of one drew nothing");
+
+        player.set_crowd(&[]);
+        player.set_transform(MEMBER.x, MEMBER.y, MEMBER.scale_x, MEMBER.scale_y, MEMBER.rotation);
+        player.set_alpha(MEMBER.alpha);
+        player.set_tint(MEMBER.tint);
+        rebuild(&mut scene, &mut renderer, &device, &queue, &mut [&mut player]);
+        let placed = render_encoded(&device, &queue, &mut renderer, &mut [&mut scene]);
+
+        dump(&format!("crowd-of-one-{}", label.replace([' ', '(', ')'], "")), &crowd);
+        let (off, worst) = differing(&crowd, &placed);
+        assert_eq!(off, 0, "{label}: a crowd of one differs from the player placed there in {off} px (worst {worst})");
+    }
+}
+
+/// A crowd draws every member from one player's geometry and one player's draw
+/// calls. Members that do not overlap read exactly as that many players placed
+/// at the same spots, since interleaving their draws only matters where two
+/// cover the same pixel — and so do their masks, which under the stencil
+/// backend are written for every member at once.
+#[test]
+fn a_crowd_draws_each_member_with_one_players_draws() {
+    let Some((device, queue)) = gpu() else {
+        eprintln!("no GPU adapter available, skipping headless render test");
+        return;
+    };
+    const SPOTS: [(f32, f32); 3] = [(-80.0, -70.0), (75.0, -10.0), (-10.0, 80.0)];
+    let members = SPOTS.map(|(x, y)| CrowdMember { x, y, scale_x: 0.3, scale_y: 0.3, ..CrowdMember::default() });
+
+    for (pack, coverage) in [("Basic", false), ("Mesh", false), ("Shape", false), ("Effect", false), ("Mask", false), ("Mask", true)] {
+        let label = format!("{pack} ({})", if coverage { "coverage" } else { "stencil" });
+        let scene_for = || if coverage { make_coverage_scene(&device, &queue) } else { make_scene(&device, &queue, true) };
+        let mut renderer = SSRenderer::new(&device);
+        let mut scene = scene_for();
+        let mut player = make_player(&device, &queue, &mut renderer, pack);
+        advance(&mut scene, &mut renderer, &device, &queue, &mut [&mut player], 8);
+        let solo = scene.stats();
+
+        player.set_crowd(&members);
+        rebuild(&mut scene, &mut renderer, &device, &queue, &mut [&mut player]);
+        let crowd = render_encoded(&device, &queue, &mut renderer, &mut [&mut scene]);
+        let stats = scene.stats();
+        assert_eq!((stats.prims, stats.draw_calls), (solo.prims, solo.draw_calls), "{label}: a crowd cost more primitives or draws than its one player");
+
+        let mut copies: Vec<SSPlayer> = members
+            .iter()
+            .map(|member| {
+                let mut copy = make_player(&device, &queue, &mut renderer, pack);
+                copy.set_transform(member.x, member.y, member.scale_x, member.scale_y, member.rotation);
+                copy
+            })
+            .collect();
+        let mut refs: Vec<&mut SSPlayer> = copies.iter_mut().collect();
+        let mut separate = scene_for();
+        advance(&mut separate, &mut renderer, &device, &queue, &mut refs, 8);
+        let reference = render_encoded(&device, &queue, &mut renderer, &mut [&mut separate]);
+
+        let name = label.replace([' ', '(', ')'], "");
+        dump(&format!("crowd-{name}"), &crowd);
+        dump(&format!("crowd-{name}-separate"), &reference);
+        let (off, worst) = differing(&crowd, &reference);
+        assert!(drawn_pixels(&reference) > 0, "{label}: the separate players drew nothing — fixture problem");
+        assert_eq!(off, 0, "{label}: the crowd differs from its members drawn as separate players in {off} px (worst {worst})");
+    }
 }

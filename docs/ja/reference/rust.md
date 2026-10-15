@@ -44,8 +44,8 @@ pub const SDK_VERSION: &str;  // リンクしている SpriteStudio-SDK のリ�
 | 型 | スコープ | 主な呼び出し |
 |---|---|---|
 | `SSRenderer` | デバイス | `new`, `set_texture`, `upload_texture`, `texture_size`, `restore_device` |
-| `SSScene` | 描画ターゲット | `new`, `set_viewport`, `update`, `update_with`, `encode_mask_coverage`, `draw`, `stats`, `restore_device` |
-| `SSPlayer` | キャラクター | `load`, `set_animation`, 再生制御, オーバーライド, `set_cellmap_texture`, `events`, `set_transform`, `restore_textures` |
+| `SSScene` | 描画ターゲット | `new`, `set_viewport`, `update`, `update_with`, `encode_offscreen`, `set_group_alpha`, `draw`, `stats`, `restore_device` |
+| `SSPlayer` | キャラクター | `load`, `set_animation`, 再生制御, オーバーライド, `set_cellmap_texture`, `events`, `set_transform`, `set_crowd`, `restore_textures` |
 
 `SSPlayer` は **wgpu の型のフィールドを一切持ちません**。だから 1 つのシーンに何体でも載り、パックのアトラスのアップロードを共有します。[借用モデル](../wgpu/borrow-model.md)を参照。
 

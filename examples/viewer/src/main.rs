@@ -276,11 +276,12 @@ impl AppState {
         let size = self.window.inner_size();
         self.scene.set_viewport(&self.queue, size.width as f32, size.height as f32, self.y_down);
 
-        // Bake the mask bitmaps before the pass below opens, on this same
-        // encoder. A no-op under the stencil backend, which is the default here —
-        // this window has a stencil to lend, so the coverage path is only ever a
-        // deliberate comparison (press K).
-        self.scene.encode_mask_coverage(&mut self.renderer, &self.device, &mut encoder);
+        // Bake the mask bitmaps, and any faded player's layer, before the pass
+        // below opens, on this same encoder. Nothing under the stencil backend,
+        // which is the default here — this window has a stencil to lend, so the
+        // coverage path is only ever a deliberate comparison (press K) — while
+        // group alpha is off.
+        self.scene.encode_offscreen(&mut self.renderer, &self.device, &mut encoder);
 
         {
             // One pass for the whole cast. Clearing the stencil here would hide

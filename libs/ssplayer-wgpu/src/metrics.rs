@@ -29,6 +29,10 @@ pub struct SceneStats {
     /// render pass. Always zero under the stencil backend, which is the point
     /// of having the number: it is what the coverage backend costs.
     pub coverage_layers: u32,
+    /// Players drawn into a layer of their own this frame and folded back at
+    /// their alpha (see [`crate::SSScene::set_group_alpha`]) — each a render pass,
+    /// a target-sized layer, and a composite over the target.
+    pub group_layers: u32,
     /// GPU time for the last render pass whose timestamps came back, in
     /// nanoseconds. `None` until one has, or always without the feature.
     pub gpu_pass_time_ns: Option<u64>,

@@ -48,7 +48,8 @@ forms reject for the same reasons.
 | `createPlayer()` | Add a character |
 | `frame(dt)` | Update every player on this canvas and draw them in one pass. `dt` in **seconds** |
 | `resize(width, height)` | Drawable pixels |
-| `stats()` | `{ players, prims, drawCalls, uploadedBytes, mergeableDraws, redundantTextureBinds, gpuPassTimeNs? }` |
+| `setGroupAlpha(on)` / `groupAlpha()` | Fade each faded player as one layer. See [Whole-character tint and alpha](../guide/part-overrides.md#whole-character-tint-and-alpha) |
+| `stats()` | `{ players, prims, drawCalls, uploadedBytes, mergeableDraws, redundantTextureBinds, groupLayers, gpuPassTimeNs? }` |
 | `playerCount()` | Diagnostic |
 | `destroy()` | Explicit and idempotent — dropping the JS reference would leave a swapchain behind |
 
@@ -99,6 +100,7 @@ the calls.
 | `setVisible(v)` / `isVisible()` | Hidden characters draw nothing but keep playing and reporting events |
 | `setCulled(c)` / `isCulled()` | Culled characters **do not advance** and report no events |
 | `setAlpha(a)` / `setTint(rgb)` | Whole-character. Read back with `alpha()` / `tint()` |
+| `setCrowd(placements, tints?)` / `crowdCount()` | Draw the character at many placements: six numbers a member in a `Float32Array` (`x, y, scaleX, scaleY, rotation, alpha`), and optionally one `0xRRGGBB` a member in a `Uint32Array`. An empty array draws it once. See [Crowds](../guide/crowds.md) |
 | `destroy()` | Explicit and idempotent |
 
 **Parts, overrides and events** — every override has a `ByIndex` twin; resolve once with

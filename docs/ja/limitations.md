@@ -12,7 +12,8 @@
 | **WebGPU のみ**。OpenGL / WebGL バックエンドは無く、非対応ブラウザにはフォールバックが要ります | Web | [前提](./start/web.md#requirements) |
 | **`Div2` / `Overlay2` は `Mix` で描かれます**。対応する GPU のブレンドステートがありません | 全 Face | [下記](#div2-and-overlay2-draw-as-mix) |
 | **`Mulalpha` / `Mul2` は `Mul` で、`Screen2` は `Screen` で描かれます** | 全 Face | [下記](#div2-and-overlay2-draw-as-mix) |
-| **キャラクター全体のアルファはパーツごとに掛かります**。2 つのパーツが重なる箇所は、`set_alpha(0.5)` で 0.75 になります | 全 Face | [下記](#whole-character-alpha-applies-part-by-part) |
+| **キャラクター全体のアルファはパーツごとに掛かります**（group alpha がオフのとき）。2 つのパーツが重なる箇所は、`set_alpha(0.5)` で 0.75 になります | 全 Face | [下記](#whole-character-alpha-applies-part-by-part) |
+| **群衆のメンバーは同じフレームを再生し**、重なる箇所ではドローごとに交互に描かれます。ステンシルバックエンドでは、マスクが正しく切り抜けるのはメンバーどうしが重ならない場所だけです | 全 Face | [群衆描画](./guide/crowds.md#what-members-share) |
 | **統合シェーダはマスクの掛からない通常パーツにだけ描かれます**。追加のセル（`map0` / `map1`）はバインドされません | 全 Face | [下記](#integration-shaders) |
 | **オーディオイベントは合図**で、Player は音を鳴らしません | 全 Face | [イベントとユーザーデータ](./guide/events.md) |
 
@@ -37,9 +38,9 @@ C からエンジン自身の描画と合成するにはオフスクリーン描
 
 ## キャラクター全体のアルファはパーツごとに掛かります { #whole-character-alpha-applies-part-by-part }
 
-`set_alpha` はキャラクターをまとめてではなく、パーツを描くたびにそれぞれをフェードさせます。そのため 2 つのパーツが重なる箇所では、奥のパーツが手前のパーツ越しに透けて見えます。キャラクターの左右半分を 0.5 にすると重なりは 0.75 になり、フェード中のキャラクターには自分の継ぎ目が見えます。キャラクターを丸ごと描いてから 1 回で合成すれば直りますが、それには Player にまだ無いオフスクリーンの経路が要ります。[ROADMAP](https://github.com/cri-middleware/SSPlayerForWgpu/blob/main/ROADMAP.md) の項目です。
+既定では、`set_alpha` はキャラクターをまとめてではなく、パーツを描くたびにそれぞれをフェードさせます。そのため 2 つのパーツが重なる箇所では、奥のパーツが手前のパーツ越しに透けて見えます。キャラクターの左右半分を 0.5 にすると重なりは 0.75 になり、フェード中のキャラクターには自分の継ぎ目が見えます。
 
-それまでは、1 回で合成されるものをフェードさせてください。Web では canvas を CSS の `opacity` で、Rust Face では、キャラクターを描き込んだ自前のテクスチャを、です。
+group alpha は、フェード中のキャラクターを丸ごと専用のレイヤーに描いてから 1 回で合成することで、これを直します。Rust Face では `set_group_alpha`、C では `ss_scene_set_group_alpha`、JavaScript では `setGroupAlpha`、Bevy では `SsSceneSettings::group_alpha` です。コストがあるため既定ではオフです。フェード中のキャラクター 1 体につき 1 フレームあたりレンダーパスが 1 つ、同時にフェードしている 1 体ごとにターゲットと同じ大きさのレイヤーが 1 枚要ります。レイヤーの中では、Add・Mul・Screen のパーツはキャラクターの背後ではなく透明に対してブレンドされます。[キャラクター全体の tint とアルファ](./guide/part-overrides.md#whole-character-tint-and-alpha)を参照してください。
 
 ## 統合シェーダ { #integration-shaders }
 

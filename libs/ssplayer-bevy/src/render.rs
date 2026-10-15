@@ -269,6 +269,7 @@ pub(crate) fn sync_players(mut state: Option<ResMut<SsRenderState>>, extracted: 
         // player, whose setters allocate nothing.
         let transform = extracted_player.transform;
         slot.player.set_transform(transform.x, transform.y, transform.scale_x, transform.scale_y, transform.rotation);
+        slot.player.set_crowd(&extracted_player.crowd);
 
         let playback = extracted_player.playback;
         slot.player.set_speed_scale(playback.speed_scale);
@@ -668,6 +669,7 @@ pub(crate) fn draw_players(
     });
     // Y-up, matching Bevy's 2D world axes.
     scene.set_viewport(queue, size.x as f32, size.y as f32, false);
+    scene.set_group_alpha(extracted.group_alpha);
 
     scene.update_with(renderer, device, queue, extracted.delta_secs, slots.as_mut_slice(), |slot| Some(&mut slot.player));
 
@@ -683,12 +685,13 @@ pub(crate) fn draw_players(
     }
     channel.publish(batch);
 
-    // Bake the mask bitmaps into the same encoder the pass below is opened on.
-    // Passes in one encoder run in order, so this frame's coverage is what this
-    // frame's content reads — keeping the bake and the draw in one system is
-    // what guarantees that, because two systems would each get their own encoder
-    // and the order between them would be a race.
-    scene.encode_mask_coverage(renderer, device, ctx.command_encoder());
+    // Bake the mask bitmaps, and draw each faded character's layer, into the
+    // same encoder the pass below is opened on. Passes in one encoder run in
+    // order, so what this draws is what this frame's pass reads — keeping them
+    // and the draw in one system is what guarantees that, because two systems
+    // would each get their own encoder and the order between them would be a
+    // race.
+    scene.encode_offscreen(renderer, device, ctx.command_encoder());
 
     // `get_color_attachment` hands back a load op that is already `Load` here:
     // the attachment records that Bevy's own 2d passes cleared it this frame.

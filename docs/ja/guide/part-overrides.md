@@ -130,7 +130,7 @@ set_part_visibility_override(part, hide, cascade)
 
 衣装の選択なら `Permanent`、モーションと共に終わる状態なら `HoldUntilNextAnimation`、アニメーションが何か言った瞬間に譲るべき微調整なら `OverwriteOnNextKeyframe` を選びます。
 
-## キャラクター全体の tint とアルファ
+## キャラクター全体の tint とアルファ { #whole-character-tint-and-alpha }
 
 オーバーライドはパーツ単位です。キャラクター全体には、探索コストのかからない 2 つの制御があります。
 Player が元々書いているパーツ単位のプリミティブに相乗りするためです。
@@ -162,6 +162,38 @@ Player が元々書いているパーツ単位のプリミティブに相乗り�
     playback.alpha = 0.5;
     playback.tint = 0x80c0ff;
     ```
+
+どちらも、描かれる各パーツに乗算されます。アルファの場合、これは**パーツごと**に掛かるということです。2 つのパーツが重なる箇所では奥のパーツが手前のパーツ越しに透けて見え、キャラクターの左右半分を 0.5 にすると重なりは 0.75 になります。キャラクターを 1 枚の絵としてフェードさせるには、ターゲットの **group alpha** をオンにします：
+
+=== "Rust"
+
+    ```rust
+    scene.set_group_alpha(true);   // 加えて scene.encode_offscreen を毎フレーム呼ぶ
+    ```
+
+=== "C"
+
+    ```c
+    ss_scene_set_group_alpha(scene, true);
+    ```
+
+=== "JavaScript"
+
+    ```js
+    surface.setGroupAlpha(true);
+    ```
+
+=== "Bevy"
+
+    ```rust
+    app.insert_resource(SsSceneSettings { group_alpha: true });
+    ```
+
+するとアルファが 1 未満のキャラクターは、不透明のまま専用のレイヤーに描かれ、描画順の自分の位置で、自分のアルファで 1 回だけ合成されます。コストは、フェード中のキャラクター 1 体につき 1 フレームあたりレンダーパス 1 つとターゲット全面への合成 1 回、そして同時にフェードしている 1 体ごとにターゲットと同じ大きさのレイヤー 1 枚（1920×1080 で約 8 MiB）です。数は統計の `group_layers` で分かります。アルファ 1 のキャラクターにコストはかからず、group alpha をオフにするとレイヤーは解放されます。
+
+レイヤーの中では、パーツはキャラクターの背後ではなく透明に対してブレンドされます。そのため Add・Mul・Screen のパーツはキャラクター自身のパーツとだけ合成され、下にキャラクターの何も無い Mul のパーツは黒になります。マスクはこれまでどおりキャラクターの中で切り抜きます。
+
+Rust Face では、レイヤーを描くのは `encode_offscreen` です。これを呼ばないシーンは group alpha オフのときと同じくパーツごとにフェードし、ホストが呼び始めた最初のフレームも同様です。
 
 ## パーツのトランスフォームを読む { #reading-a-parts-transform }
 

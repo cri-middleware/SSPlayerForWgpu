@@ -7,7 +7,7 @@
 use bevy::platform::collections::HashMap;
 use bevy::prelude::*;
 
-use ssplayer_wgpu::{PlaybackDirection, PlaybackStyle, TrackBlend, TrackSync};
+use ssplayer_wgpu::{CrowdMember, PlaybackDirection, PlaybackStyle, TrackBlend, TrackSync};
 
 use crate::asset::SsPack;
 
@@ -74,7 +74,9 @@ pub struct SsPlayback {
     /// Draw order within the render target; lower draws first. Ties keep the
     /// order the entities were extracted in.
     pub order: i32,
-    /// Player-level fade, folded into every vertex.
+    /// Player-level fade, folded into every vertex — part by part, so
+    /// overlapping parts read more opaque than this, unless
+    /// [`SsSceneSettings::group_alpha`] fades each character as one layer.
     pub alpha: f32,
     /// Player-level tint, `0xRRGGBB`, multiplied into every part after its
     /// PartsColor; white (the default) leaves colours as authored. Like `alpha`,
@@ -346,6 +348,40 @@ pub struct SsSourceInfo {
 pub struct SsCellmapTextures {
     /// Cellmap (or TextureChange-target) name -> the image to bind for it.
     pub overrides: HashMap<String, Handle<Image>>,
+}
+
+/// Draw this character's one playhead once at each member's placement: a crowd
+/// that costs one character's evaluation and draw calls, however large, as
+/// [`ssplayer_wgpu::SSPlayer::set_crowd`] does.
+///
+/// Each member is placed in [`SsTransform`]'s terms, composed under the
+/// character's own `SsTransform`, and faded and tinted on top of its
+/// [`SsPlayback`]. Everything else is shared — the frame, the events (reported
+/// once), the masks and the effects. Members interleave draw by draw where they
+/// overlap. An empty list, or no component, draws the character once; members
+/// past [`ssplayer_wgpu::MAX_CROWD_MEMBERS`] are left out.
+///
+/// Optional — only characters drawn as crowds need spawn it. Copied into the
+/// render world every frame, into room it keeps, so moving the members
+/// allocates nothing.
+#[derive(Component, Clone, Debug, Default)]
+pub struct SsCrowd {
+    pub members: Vec<CrowdMember>,
+}
+
+/// How this crate's scene draws. A resource, present from the moment the plugin
+/// is added; change it whenever.
+#[derive(Resource, Clone, Copy, Debug, Default)]
+pub struct SsSceneSettings {
+    /// Fade each character whose [`SsPlayback::alpha`] is below 1 as one layer,
+    /// composited at its alpha, rather than part by part — so overlapping parts
+    /// of a half-faded character read half, not three quarters. Off by default.
+    ///
+    /// Each character faded at once costs a render pass per frame and a layer
+    /// the size of the view (about 8 MiB at 1920x1080). Inside a layer the parts
+    /// blend against transparency rather than the scene behind: Add, Mul and
+    /// Screen parts composite with the character's own parts alone.
+    pub group_alpha: bool,
 }
 
 /// Playback state read back from the render world, refreshed every frame.

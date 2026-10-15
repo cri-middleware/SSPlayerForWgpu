@@ -4,7 +4,7 @@ title: Bevy API リファレンス
 
 # Bevy API リファレンス
 
-公開されているのは、プラグイン 1 つ・アセット 1 つ・コンポーネント 4 つ（うち 1 つは任意）・状態コンポーネント 2 つ・フィードバックのメッセージ 4 つと命令のメッセージ 4 つだけです。生成ドキュメント：
+公開されているのは、プラグイン 1 つ・アセット 1 つ・コンポーネント 5 つ（うち 2 つは任意）・リソース 1 つ・状態コンポーネント 2 つ・フィードバックのメッセージ 4 つと命令のメッセージ 4 つだけです。生成ドキュメント：
 <a href="../../api/ssplayer_bevy/index.html" target="_blank" rel="noreferrer">**`ssplayer_bevy` の rustdoc**</a>。
 
 **Bevy 0.20.x のみ** — [Bevy ではじめる](../start/bevy.md#supported-bevy)を参照。
@@ -62,7 +62,7 @@ spawn すれば 5 つとも既定値で付きます。
 | `playing: bool` | `true` | **その場で**一時停止・再開。巻き戻さないので、終了したアニメーションは再生できません |
 | `speed_scale: f32` | `1.0` | 既定 fps の倍率。`0` と負値は停止 |
 | `order: i32` | `0` | 描画順。小さいほど先。同値なら extract 順 |
-| `alpha: f32` | `1.0` | キャラクター全体のフェード |
+| `alpha: f32` | `1.0` | キャラクター全体のフェード。[`SsSceneSettings::group_alpha`](#ssscenesettings) がオフならパーツごとに掛かります |
 | `tint: u32` | `0xFFFFFF` | キャラクター全体の tint（`0xRRGGBB`）。PartsColor の後に乗算します |
 | `visible: bool` | `true` | false は描画をスキップします。タイムラインは進みます |
 | `culled: bool` | `false` | true は描画だけでなく**タイムラインの前進もスキップ**します。画面外のキャラクター用 |
@@ -103,6 +103,24 @@ spawn すれば 5 つとも既定値で付きます。
 | `overrides: HashMap<String, Handle<Image>>` | セルマップ（または TextureChange の差し先）名 → バインドする画像 |
 
 エントリを挿入するとオーバーライド、削除（またはコンポーネントごと削除）すると復元します。まだロード中の画像は、準備できたフレームで適用されるので、リクエストしたばかりのハンドルでも問題ありません。差し替えはキャラクター単位で、**`is_srgb: false` で読んだ** straight-alpha の Bevy 画像を前提とします。sRGB の画像は暗く描かれ、アダプタが 1 度だけ警告します。テクスチャを差し替えるキャラクターだけが spawn すれば十分です。[テクスチャ差し替え](../guide/texture-replacement.md)を参照。
+
+### `SsCrowd` — 1 体を多数の配置に（任意）
+
+| フィールド | |
+|---|---|
+| `members: Vec<CrowdMember>` | 各コピーの立つ位置（`SsTransform` と同じ表し方で、キャラクター自身の配置の下に合成）と、`SsPlayback` に重ねる `alpha` と `tint`。空なら 1 体だけ描きます |
+
+メンバーが何体いても、再生ヘッドは 1 つ、評価は 1 回、ドローコールは 1 体分です。配置・アルファ・tint 以外は、イベントも含めてすべて共有されます。`CrowdMember` は Player クレートからの再エクスポートです。メンバーを毎フレーム動かしても、群衆が大きくならない限りアロケーションは起きません。群衆として描くキャラクターだけが spawn すれば十分です。[群衆描画](../guide/crowds.md)を参照。
+
+## リソース { #resource }
+
+### `SsSceneSettings` — シーンの描き方 { #ssscenesettings }
+
+| フィールド | 既定値 | |
+|---|---|---|
+| `group_alpha: bool` | `false` | `alpha` が 1 未満のキャラクターを、パーツごとではなく 1 枚のレイヤーとして 1 回で合成してフェードさせます |
+
+プラグインを追加した時点から存在し、いつ変えても構いません。同時にフェードしているキャラクター 1 体ごとに、1 フレームあたりレンダーパスが 1 つと、ビューと同じ大きさのレイヤーが 1 枚要ります。[キャラクター全体の tint とアルファ](../guide/part-overrides.md#whole-character-tint-and-alpha)を参照。
 
 ## メッセージ（リアクティブ）
 
@@ -169,7 +187,7 @@ fn on_finish(mut finished: MessageReader<SsFinished>, mut commands: Commands) {
 
 | スケジュール | 内容 |
 |---|---|
-| メインワールド | 上記コンポーネント — 公開されている全面 |
+| メインワールド | 上記のコンポーネントとリソース — 公開されている全面 |
 | `ExtractSchedule` | それらとフレームのデルタをレンダーワールドへコピー |
 | `Render` / `RenderSystems::Prepare` | 再生ツリーへ適用し、`pack` か `animation` が変わったキャラクターを組み直す |
 | `Core2d` / `Core2dSystems::MainPass` | 前進・構築・描画。**`main_transparent_pass_2d` の後**に順序付け |

@@ -78,8 +78,8 @@ one ordering rule:
 
 ```rust
 scene.update(&mut renderer, &device, &queue, dt, &mut players);
-scene.encode_mask_coverage(&mut renderer, &device, &mut encoder);  // <- same encoder
-let mut rpass = encoder.begin_render_pass(&descriptor);            // <- as this one
+scene.encode_offscreen(&mut renderer, &device, &mut encoder);  // <- same encoder
+let mut rpass = encoder.begin_render_pass(&descriptor);        // <- as this one
 scene.draw(&renderer, &mut rpass);
 ```
 
@@ -90,8 +90,9 @@ That ordering is the whole guarantee: split the bake into another encoder, anoth
 another frame and the mask a character is clipped by is the previous frame's — visible as the clip
 trailing fast movement by one frame.
 
-Under `MaskBackend::Stencil` the call is a harmless no-op, so it is safe to leave in a host that
-can switch backends at runtime.
+The same call draws the [group-alpha layers](./part-overrides.md#whole-character-tint-and-alpha)
+under any backend, and opens no pass on a frame with nothing to mask or fade. Call it every frame
+whatever the backend, and a host that switches backends at runtime has nothing to change.
 
 ## Stacking characters in one pass
 

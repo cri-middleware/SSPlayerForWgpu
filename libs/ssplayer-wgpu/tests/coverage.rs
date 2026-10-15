@@ -88,7 +88,7 @@ fn render(device: &wgpu::Device, queue: &wgpu::Queue, fixture: &str, frames: u32
     let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor { label: None });
     // Between `update` and `draw`, on the same encoder — which is what makes the
     // bitmap this frame's rather than the last one's.
-    scene.encode_mask_coverage(&mut renderer, device, &mut encoder);
+    scene.encode_offscreen(&mut renderer, device, &mut encoder);
     {
         let mut rpass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
             label: None,
@@ -236,7 +236,7 @@ fn a_frame_without_masks_rasterises_no_coverage() {
     scene.set_viewport(&queue, 512.0, 512.0, false);
     scene.update(&mut renderer, &device, &queue, 0.0, &mut [&mut player]);
     let mut encoder = device.create_command_encoder(&Default::default());
-    scene.encode_mask_coverage(&mut renderer, &device, &mut encoder);
+    scene.encode_offscreen(&mut renderer, &device, &mut encoder);
 
     assert_eq!(scene.stats().coverage_layers, 0, "an animation with no mask parts should rasterise no coverage");
 }

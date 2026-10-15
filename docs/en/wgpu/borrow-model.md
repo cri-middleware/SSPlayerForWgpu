@@ -76,18 +76,18 @@ The order within a frame is fixed, and only one part of it is subtle:
 // 1. CPU: advance every character of this target and build its geometry.
 scene.update(&mut renderer, &device, &queue, dt, &mut players);
 
-// 2. If this scene masks with the coverage backend, bake the bitmaps —
-//    on the SAME encoder as the content pass below.
-scene.encode_mask_coverage(&mut renderer, &device, &mut encoder);
+// 2. Draw what the scene draws offscreen — coverage-mask bitmaps and
+//    group-alpha layers — on the SAME encoder as the content pass below.
+scene.encode_offscreen(&mut renderer, &device, &mut encoder);
 
 // 3. Record draws into your pass, wherever it belongs in your graph.
 let mut rpass = encoder.begin_render_pass(&descriptor);
 scene.draw(&renderer, &mut rpass);
 ```
 
-Step 2 is the subtle one: passes within a single `CommandEncoder` run in order, so the mask bitmap
-and the transform that samples it are both this frame's. Splitting them across encoders, systems or
-frames reintroduces the one-frame mask lag this player does not have.
+Step 2 is the subtle one: passes within a single `CommandEncoder` run in order, so the mask bitmaps
+and layers it draws are this frame's when the content pass samples them. Splitting them across
+encoders, systems or frames reintroduces the one-frame lag this player does not have.
 
 Step 1 takes `&mut [&mut SSPlayer]`. A host that keeps its characters in a collection of its own — a
 `Vec<SSPlayer>`, an engine's slots — hands that collection to `update_with` instead, with a closure

@@ -27,7 +27,7 @@
 use crate::events::{SignalValue, SsEvent};
 use crate::fit::{Align, Fit, Placement, Rect};
 use crate::host::{NativeHost, NativeHostConfig, PlayerId};
-use crate::player::{BlendOp, MissingKind, OverridePriority, PlaybackDirection, PlaybackStyle, SSPlayer};
+use crate::player::{BlendOp, CrowdMember, MissingKind, OverridePriority, PlaybackDirection, PlaybackStyle, SSPlayer};
 use std::cell::RefCell;
 use std::ffi::{CStr, CString, c_char, c_void};
 use std::num::NonZeroIsize;
@@ -126,12 +126,36 @@ pub struct SsSceneStats {
     pub prims: u32,
     /// Draw calls recorded. The gap from `prims` is draw-call merging headroom.
     pub draw_calls: u32,
-    pub _reserved: u32,
+    /// Players faded as one layer this frame (`ss_scene_set_group_alpha`), each
+    /// a render pass and a window-sized layer of its own.
+    pub group_layers: u32,
     /// Bytes written to the frame's storage buffers.
     pub uploaded_bytes: u64,
     /// GPU time for the last timed render pass, in nanoseconds. 0 = no reading.
     pub gpu_pass_time_ns: u64,
 }
+
+/// One copy of a player in a crowd: where it stands, in `ss_player_set_transform`
+/// terms and composed under that, and its alpha (0..1) and tint (`0xRRGGBB`),
+/// each multiplied into the player's own. `{0, 0, 1, 1, 0, 1, 0xFFFFFF}` stands
+/// where the player does, unchanged.
+#[repr(C)]
+#[derive(Clone, Copy)]
+pub struct SsCrowdMember {
+    pub x: f32,
+    /// Measured downward, as `ss_player_set_transform`'s is.
+    pub y: f32,
+    pub scale_x: f32,
+    pub scale_y: f32,
+    /// Radians.
+    pub rotation: f32,
+    pub alpha: f32,
+    pub tint: u32,
+}
+
+/// The most members `ss_player_set_crowd` takes.
+pub const SS_MAX_CROWD_MEMBERS: u32 = 4096;
+const _: () = assert!(SS_MAX_CROWD_MEMBERS as usize == crate::MAX_CROWD_MEMBERS);
 
 /// One atlas a pack asks for, flattened for the ABI. What
 /// `ss_player_texture_at` fills in.
@@ -2921,6 +2945,9 @@ pub unsafe extern "C" fn ss_player_is_culled(handle: *mut SsPlayer) -> bool {
 /// Player-level fade, clamped to 0..1. Mask coverage is unaffected: a faded
 /// player clips exactly as it would at full opacity.
 ///
+/// Part by part, so overlapping parts read more opaque than `alpha`, unless the
+/// scene fades each player as one layer (`ss_scene_set_group_alpha`).
+///
 /// # Safety
 /// `handle` must be a live handle or null.
 #[unsafe(no_mangle)]
@@ -2928,6 +2955,47 @@ pub unsafe extern "C" fn ss_player_set_alpha(handle: *mut SsPlayer, alpha: f32) 
     if let Some(player) = unsafe { player(handle) } {
         player.set_alpha(alpha);
     }
+}
+
+/// Draw this one playhead `count` times, once at each member's placement: a crowd
+/// that costs one player's evaluation and draw calls, however large. `count` 0
+/// draws the player once again, where `ss_player_set_transform` put it. The
+/// members are copied; `members` may be null when `count` is 0.
+///
+/// Everything else is shared: the frame, the events (reported once), the masks
+/// and the effects. Each draw is issued for every member in turn, so where two
+/// members overlap their parts interleave, and this face's stencil masks clip
+/// correctly only where members do not overlap.
+///
+/// `SS_ERROR_INVALID_ARGUMENT` for a null or destroyed handle, a null `members`
+/// with a `count`, or a `count` past `SS_MAX_CROWD_MEMBERS`; the crowd is left
+/// as it was.
+///
+/// # Safety
+/// `members` must be null or point at `count` readable `ss_crowd_member_t`s.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn ss_player_set_crowd(handle: *mut SsPlayer, members: *const SsCrowdMember, count: u32) -> i32 {
+    let Some(player) = (unsafe { player(handle) }) else { return fail(SS_ERROR_INVALID_ARGUMENT, "player handle is null or destroyed") };
+    if count > SS_MAX_CROWD_MEMBERS {
+        return fail(SS_ERROR_INVALID_ARGUMENT, format!("a crowd of {count} is past SS_MAX_CROWD_MEMBERS ({SS_MAX_CROWD_MEMBERS})"));
+    }
+    let members = match (members.is_null(), count) {
+        (_, 0) => &[][..],
+        (true, _) => return fail(SS_ERROR_INVALID_ARGUMENT, "members is null"),
+        (false, _) => unsafe { std::slice::from_raw_parts(members, count as usize) },
+    };
+    player.set_crowd_from(members.iter().map(|m| CrowdMember { x: m.x, y: m.y, scale_x: m.scale_x, scale_y: m.scale_y, rotation: m.rotation, alpha: m.alpha, tint: m.tint }));
+    SS_OK
+}
+
+/// How many members `ss_player_set_crowd` last gave the player; 0 when it draws
+/// once, and for a null handle.
+///
+/// # Safety
+/// `handle` must be a live handle or null.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn ss_player_crowd_count(handle: *mut SsPlayer) -> u32 {
+    unsafe { player(handle) }.map(|p| p.crowd().len() as u32).unwrap_or(0)
 }
 
 /// The player-level fade in effect, after `ss_player_set_alpha` clamped it to
@@ -3021,8 +3089,37 @@ pub unsafe extern "C" fn ss_scene_stats(scene: *mut SsScene, out: *mut SsSceneSt
     let Some(scene) = (unsafe { scene.as_ref() }) else { return fail(SS_ERROR_INVALID_ARGUMENT, "scene is null") };
     let Some(out) = (unsafe { out.as_mut() }) else { return fail(SS_ERROR_INVALID_ARGUMENT, "out is null") };
     let stats = scene.host.stats();
-    *out = SsSceneStats { players: stats.players, prims: stats.prims, draw_calls: stats.draw_calls, _reserved: 0, uploaded_bytes: stats.uploaded_bytes, gpu_pass_time_ns: stats.gpu_pass_time_ns.unwrap_or(0) };
+    *out = SsSceneStats { players: stats.players, prims: stats.prims, draw_calls: stats.draw_calls, group_layers: stats.group_layers, uploaded_bytes: stats.uploaded_bytes, gpu_pass_time_ns: stats.gpu_pass_time_ns.unwrap_or(0) };
     SS_OK
+}
+
+/// Fade each player whose alpha is below 1 as one layer, composited at its
+/// alpha, rather than part by part — so overlapping parts of a half-faded
+/// character read half, not three quarters. Off by default.
+///
+/// Each player faded at once costs a render pass per frame and a layer the size
+/// of the window (about 8 MiB at 1920x1080), counted in
+/// `ss_scene_stats_t::group_layers`; turning it off frees them. Inside a layer
+/// the parts blend against transparency rather than the window: Add, Mul and
+/// Screen parts composite with the player's own parts alone. Kept across
+/// `ss_scene_restore_device`.
+///
+/// # Safety
+/// `scene` must be a live handle or null.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn ss_scene_set_group_alpha(scene: *mut SsScene, on: bool) {
+    if let Some(scene) = unsafe { scene.as_mut() } {
+        scene.host.set_group_alpha(on);
+    }
+}
+
+/// Whether `ss_scene_set_group_alpha` is on; `false` for a null scene.
+///
+/// # Safety
+/// `scene` must be a live handle or null.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn ss_scene_group_alpha(scene: *mut SsScene) -> bool {
+    unsafe { scene.as_ref() }.is_some_and(|s| s.host.group_alpha())
 }
 
 /// Resize the swapchain, the depth/stencil buffer and the projection to a new
@@ -3119,6 +3216,10 @@ mod tests {
             assert_eq!(ss_player_alpha(null), fresh.alpha());
             assert_eq!(ss_player_order(null), fresh.order());
             assert_eq!(ss_player_tint(null), fresh.tint());
+            assert_eq!(ss_player_crowd_count(null), fresh.crowd().len() as u32);
+            assert!(!ss_scene_group_alpha(std::ptr::null_mut()), "a fresh scene fades part by part");
+            // Setting one fails rather than doing nothing, as the track commands do.
+            assert_eq!(ss_player_set_crowd(null, std::ptr::null(), 0), SS_ERROR_INVALID_ARGUMENT);
         }
     }
 

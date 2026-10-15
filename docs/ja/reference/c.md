@@ -38,6 +38,7 @@ title: C API リファレンス
 | `ss_scene_update(scene, delta_seconds)` | 全プレイヤーを進め、このフレームのジオメトリを構築 |
 | `ss_scene_render(scene)` | キャスト全体を 1 レンダーパスで描画し、present |
 | `ss_scene_resize(scene, width, height)` | 描画ピクセル |
+| `ss_scene_set_group_alpha(scene, on)` / `ss_scene_group_alpha(scene)` | フェード中のプレイヤーをそれぞれ 1 枚のレイヤーとしてフェード。[キャラクター全体の tint とアルファ](../guide/part-overrides.md#whole-character-tint-and-alpha)を参照 |
 | `ss_scene_stats(scene, out)` | [パフォーマンス](../guide/performance.md)を参照 |
 | `ss_scene_is_device_lost(scene)` / `ss_scene_restore_device(scene)` | [デバイスロスト](../guide/device-loss.md)を参照 |
 
@@ -124,6 +125,7 @@ title: C API リファレンス
 | `ss_player_set_visible(player, visible)` / `ss_player_is_visible(player)` | 非表示のキャラクターは描画されませんが、再生は続きイベントも出します |
 | `ss_player_set_culled(player, culled)` / `ss_player_is_culled(player)` | カリング中のキャラクターは**進まず**、イベントも出しません |
 | `ss_player_set_alpha(player, a)` / `ss_player_set_tint(player, rgb)` | キャラクター全体。`ss_player_alpha` / `ss_player_tint` で読み出せます |
+| `ss_player_set_crowd(player, members, count)` / `ss_player_crowd_count(player)` | `ss_crowd_member_t` それぞれの配置にキャラクターを描きます。`count` が 0 なら 1 体だけ。[群衆描画](../guide/crowds.md)を参照 |
 
 `fit` は `SS_FIT_CONTAIN` / `_COVER` / `_NONE`（0〜2）、`align` は `SS_ALIGN_CENTER`・`_TOP`・`_BOTTOM`・`_LEFT`・`_RIGHT`・`_TOP_LEFT`・`_TOP_RIGHT`・`_BOTTOM_LEFT`・`_BOTTOM_RIGHT`（0〜8）のいずれかです。[ボックスへのフィット](../guide/placement.md)を参照してください。
 

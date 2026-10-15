@@ -67,8 +67,8 @@
 
 ```rust
 scene.update(&mut renderer, &device, &queue, dt, &mut players);
-scene.encode_mask_coverage(&mut renderer, &device, &mut encoder);  // <- この encoder と
-let mut rpass = encoder.begin_render_pass(&descriptor);            // <- こちらを同じに
+scene.encode_offscreen(&mut renderer, &device, &mut encoder);  // <- この encoder と
+let mut rpass = encoder.begin_render_pass(&descriptor);        // <- こちらを同じに
 scene.draw(&renderer, &mut rpass);
 ```
 
@@ -76,7 +76,7 @@ scene.draw(&renderer, &mut rpass);
 
 この順序がすべてです。焼き込みを別の encoder・別のシステム・別のフレームに分けると、キャラクターを切り抜くマスクが 1 フレーム前のものになります。速い動きでクリップが 1 フレーム遅れて追従する形で見えます。
 
-`MaskBackend::Stencil` のときこの呼び出しは無害な no-op なので、実行時にバックエンドを切り替えるホストでもそのまま置いておけます。
+同じ呼び出しが、どのバックエンドでも [group alpha のレイヤー](./part-overrides.md#whole-character-tint-and-alpha)を描きます。マスクもフェードも無いフレームではパスを 1 つも開きません。バックエンドにかかわらず毎フレーム呼んでください。実行時にバックエンドを切り替えるホストも、変えるところはありません。
 
 ## 1 パスにキャラクターを積む
 

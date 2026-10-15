@@ -176,6 +176,50 @@ lookup at all, because they ride on the per-part primitive the player already wr
     playback.tint = 0x80c0ff;
     ```
 
+Both multiply into every part as it draws. For alpha that means **part by part**: where two parts
+overlap, the one behind shows through the one in front, so two halves of a character at 0.5 leave
+the overlap at 0.75. Turn on **group alpha** for the target to fade each character as one picture
+instead:
+
+=== "Rust"
+
+    ```rust
+    scene.set_group_alpha(true);   // and call scene.encode_offscreen every frame
+    ```
+
+=== "C"
+
+    ```c
+    ss_scene_set_group_alpha(scene, true);
+    ```
+
+=== "JavaScript"
+
+    ```js
+    surface.setGroupAlpha(true);
+    ```
+
+=== "Bevy"
+
+    ```rust
+    app.insert_resource(SsSceneSettings { group_alpha: true });
+    ```
+
+A character whose alpha is below 1 is then drawn at full alpha into a layer of its own and
+composited once, at its alpha, in its place in the draw order. That costs a render pass and a
+composite over the target per faded character per frame, and a layer the size of the target for
+each one faded at once — about 8 MiB at 1920×1080 — counted by the `group_layers` statistic. A
+character at alpha 1 costs nothing, and turning group alpha off frees the layers.
+
+Inside a layer the parts blend against transparency rather than against what is behind the
+character, so an Add, Mul or Screen part composites with the character's own parts alone, and a Mul
+part with nothing of the character under it reads black. Masks clip within the character, as they
+always do.
+
+On the Rust face, `encode_offscreen` is what draws the layers. A scene it is not called on fades
+part by part, as with group alpha off, and so does the first frame after the host starts calling
+it.
+
 ## Reading a part's transform
 
 Where is the hand *right now* — to hang a weapon, a UI marker or a particle emitter off it?

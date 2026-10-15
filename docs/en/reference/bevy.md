@@ -4,8 +4,8 @@ title: Bevy API reference
 
 # Bevy API reference
 
-The whole authoring surface is one plugin, one asset, four components (one of them optional), two
-state components, four feedback messages and four command messages. Generated docs:
+The whole authoring surface is one plugin, one asset, five components (two of them optional), one
+resource, two state components, four feedback messages and four command messages. Generated docs:
 <a href="../api/ssplayer_bevy/index.html" target="_blank" rel="noreferrer">**rustdoc for `ssplayer_bevy`**</a>.
 
 **Bevy 0.20.x, and no other line** — see [Get started with Bevy](../start/bevy.md#supported-bevy).
@@ -73,7 +73,7 @@ Free to change, every frame if you like.
 | `playing: bool` | `true` | Pauses and resumes **in place**. Never rewinds, so it cannot replay a finished animation |
 | `speed_scale: f32` | `1.0` | A multiple of the authored rate. `0` and negatives stop |
 | `order: i32` | `0` | Draw order; lower draws first. Ties keep extraction order |
-| `alpha: f32` | `1.0` | Whole-character fade |
+| `alpha: f32` | `1.0` | Whole-character fade — part by part, unless [`SsSceneSettings::group_alpha`](#ssscenesettings) is on |
 | `tint: u32` | `0xFFFFFF` | Whole-character tint, `0xRRGGBB`, multiplied in after PartsColor |
 | `visible: bool` | `true` | False skips the draw; the timeline keeps running |
 | `culled: bool` | `false` | True skips **the timeline advance** as well as the draw — for an off-screen character |
@@ -119,6 +119,29 @@ is applied the frame it becomes ready, so a freshly-requested handle is fine. Th
 per-character, and assumes a straight-alpha Bevy image **loaded with `is_srgb: false`** — an sRGB one
 draws too dark, and the adapter warns once. Only characters that swap textures need spawn it. See
 [Texture replacement](../guide/texture-replacement.md).
+
+### `SsCrowd` — one character at many placements (optional)
+
+| Field | |
+|---|---|
+| `members: Vec<CrowdMember>` | where each copy stands, in `SsTransform`'s terms and composed under the character's own, and its `alpha` and `tint` on top of `SsPlayback`'s. Empty draws the character once |
+
+One playhead, one evaluation and one character's draw calls, however many members — everything but
+placement, alpha and tint is shared, events included. `CrowdMember` is re-exported from the player
+crate. Moving the members every frame allocates nothing unless the crowd grows. Only characters
+drawn as crowds need spawn it. See [Crowds](../guide/crowds.md).
+
+## Resource
+
+### `SsSceneSettings` — how the scene draws { #ssscenesettings }
+
+| Field | Default | |
+|---|---|---|
+| `group_alpha: bool` | `false` | Fade each character whose `alpha` is below 1 as one layer, composited once, rather than part by part |
+
+Present from the moment the plugin is added; change it whenever. Each character faded at once
+costs a render pass per frame and a layer the size of the view. See
+[Whole-character tint and alpha](../guide/part-overrides.md#whole-character-tint-and-alpha).
 
 ## Messages (reactive)
 
@@ -206,7 +229,7 @@ fn on_finish(mut finished: MessageReader<SsFinished>, mut commands: Commands) {
 
 | Schedule | What |
 |---|---|
-| Main world | the components above — the whole authoring surface |
+| Main world | the components and the resource above — the whole authoring surface |
 | `ExtractSchedule` | copies them, plus the frame delta, into the render world |
 | `Render` / `RenderSystems::Prepare` | applies them to the playback trees; rebuilds a character whose `pack` or `animation` changed |
 | `Core2d` / `Core2dSystems::MainPass` | advances, builds and draws — ordered **after** `main_transparent_pass_2d` |

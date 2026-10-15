@@ -85,6 +85,10 @@ finds itself drawing into an sRGB target without it.
 | `SsTransform` | `x`, `y`, `scale_x`, `scale_y`, `rotation` | Free |
 | `SsPlayback` | `playing`, `speed_scale`, `order`, `alpha`, `visible`, `culled`, `restart`, `direction`, `style`, `loop_count`, `frame_rate`, `frame_skip_enabled`, `sub_frame_enabled`, `animation_section` | Free |
 
+An optional `SsCrowd` component draws one character at many placements for one
+character's CPU cost, and the `SsSceneSettings` resource's `group_alpha` fades
+each faded character as one layer rather than part by part.
+
 Deliberately not Bevy's `Transform`: that is a 3D affine whose decomposition into
 the player's five scalars is lossy. An app that wants the two linked can write
 the one system that copies across, and keeps the choice of which is authoritative.

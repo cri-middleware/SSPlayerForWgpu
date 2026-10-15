@@ -56,29 +56,13 @@ player, where every host and the C ABI reach it, and the host half belongs in an
       across a player's instance tree, the limit the Godot Player shares; the
       coverage backend spends one more RGBA8 layer per 24 of them. Going past 96
       alone would fork that limit.
-- [ ] **An offscreen path, for group alpha first** — `set_alpha` composites each
-      part at that alpha in turn, so coverage accumulates where parts overlap —
-      two halves of a character at 0.5 leave the overlap at 0.75. Drawing the
-      player whole and compositing once fixes it, as `SSGroupAlpha.ts` does in the
-      WebGL player. **Settle the API first**: the host opens the render pass, so
-      inserting an offscreen changes what a host lends.
-- [ ] **Backdrop-reading blends (`Div2` / `Overlay2`)** — same offscreen path,
-      blocked on semantics rather than on wgpu. No reference defines the maths —
-      the sibling players fall back to `Mix` and the published docs call that
-      fallback intentional — and no fixture authors the modes. Blocked on: a formula
-      with a source, a fixture, and agreement across the other Players.
-- [ ] **Crowd rendering (one data set : N instances)** — undesigned. The vertex
-      path suits it: stack N placement matrices, select with
-      `@builtin(instance_index)`, and CPU cost stops scaling with body count.
-      Members cannot then differ in playback position or interleave front-to-back,
-      and masks and effects are shared. **Undecided**: the API shape
-      (`SSPlayer::set_instances` or a separate `SSCrowd`), which attributes vary
-      per member, and how the js and C faces expose it. Members at *different*
-      playback positions are not this design; they belong to the SDK's
-      [Animation Instancing](https://github.com/cri-middleware/SpriteStudio-SDK/blob/HEAD/ROADMAP.md#phase-3-feature-expansion-post-release),
-      one evaluation driving many instances. That item has two possible faces —
-      one playhead drawn at N placements (this) and N members at N phases (not
-      this) — and which of them it covers decides how much of this is local.
+- [ ] **Backdrop-reading blends (`Div2` / `Overlay2`)** — they read what is
+      behind the part, which `SSScene::encode_offscreen` could copy for them as it
+      draws the group-alpha layers, so this is blocked on semantics rather than on
+      wgpu. No reference defines the maths — the sibling players fall back to `Mix`
+      and the published docs call that fallback intentional — and no fixture
+      authors the modes. Blocked on: a formula with a source, a fixture, and
+      agreement across the other Players.
 
 ## Hosts & platforms
 
@@ -137,6 +121,12 @@ player, where every host and the C ABI reach it, and the host half belongs in an
 
 ## Needs SDK
 
+- [ ] **Crowd members at their own phase** — `SSPlayer::set_crowd` draws one
+      playhead at N placements, and that face stays here: it is GPU instancing of
+      one evaluation's geometry and needs nothing of the runtime. N members at N
+      points of one animation is the SDK's
+      [Animation Instancing](https://github.com/cri-middleware/SpriteStudio-SDK/blob/HEAD/ROADMAP.md#phase-3-feature-expansion-post-release),
+      one evaluation context driving many instances. Waits for: that item.
 - [ ] **GPU expansion of effect particles** — passing particle state and expanding
       in the vertex stage cuts the transfer to a quarter and removes the CPU
       trigonometry, but it changes the shape of `EffectDrawPlan`: an SDK pull

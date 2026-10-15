@@ -23,7 +23,7 @@ window is resized.
 | A non-sRGB surface format, and the stencil attachment `MaskBackend::Stencil` needs | `Hello::new`, `stencil_view` |
 | Loading a pack with its atlas in one call, selecting an animation, starting it | `Hello::new` |
 | `set_viewport` and `fit_into` on every resize | `Hello::place` |
-| `update` → `encode_mask_coverage` → `draw` into a pass the host opened | `Hello::frame` |
+| `update` → `encode_offscreen` → `draw` into a pass the host opened | `Hello::frame` |
 
 Everything else — several characters, pack switching, mask backends, motion
 blending, live stats — is in [`../viewer`](../viewer).
