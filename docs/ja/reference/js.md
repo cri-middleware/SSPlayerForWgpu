@@ -35,6 +35,8 @@ import { defineSsPlayerWebGPUElement } from '@spritestudio/ssplayer-wgpu/element
 | `surfaceCount()` | 診断用 |
 | `version` / `sdkVersion` | この Player のバージョンと、リンクしている SpriteStudio-SDK のリリースのタグ（リリースでない SDK なら `local`）。読み取り専用。カスタム要素からは `element.ctx` で届く |
 
+`addTexture`・`addTextureFromBitmap`・`setCellmapTexture` は、デバイスが保持できないテクスチャに対して何も変えずに例外を投げます。幅か高さが `max_texture_dimension_2d` を超える場合、閉じた `ImageBitmap` の場合、`addTexture` で `rgba` が `width * height * 4` バイトでない場合です。`FromBytes` 版も同じ理由で reject します。
+
 ## `SsSurfaceWeb` — キャンバス 1 枚
 
 | | |

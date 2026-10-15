@@ -36,6 +36,11 @@ The element lives behind its own entry point, so a bundle that only wants the AP
 | `surfaceCount()` | Diagnostic |
 | `version` / `sdkVersion` | This player's version, and the SpriteStudio-SDK release it links: its tag, or `local` for an SDK that is not a release. Read-only; `element.ctx` reaches them from the custom element |
 
+`addTexture`, `addTextureFromBitmap` and `setCellmapTexture` throw, changing nothing, when the
+device cannot hold the texture: wider or taller than its `max_texture_dimension_2d`, a closed
+`ImageBitmap`, or — for `addTexture` — `rgba` that is not `width * height * 4` bytes. The `FromBytes`
+forms reject for the same reasons.
+
 ## `SsSurfaceWeb` — one canvas
 
 | | |

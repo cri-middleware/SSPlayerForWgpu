@@ -693,6 +693,10 @@ int32_t ss_player_load_ssab(ss_player_t *handle, const char *pack_name, const ui
  Embedded-mode packs need no call — their atlases load with the
  pack.
 
+ Fails with `SS_ERROR_INVALID_ARGUMENT`, uploading nothing, when the device
+ cannot hold the texture: wider or taller than its `max_texture_dimension_2d`
+ (8192 on the device this library asks for), or empty.
+
  # Safety
  `rgba` must point at `width * height * 4` readable bytes. It is not retained.
  */
@@ -710,6 +714,9 @@ int32_t ss_scene_add_texture(ss_scene_t *scene,
  showing a reference-mode `.ssab` does not have to bring ImageIO / WIC /
  libpng along just to hand the pixels over. Reading the file is still the
  host's job — nothing here opens one.
+
+ Fails with `SS_ERROR_INVALID_ARGUMENT` when the bytes do not decode, or
+ decode to an image the device cannot hold (see `ss_scene_add_texture`).
 
  # Safety
  `data` must point at `len` readable bytes. It is not retained.
@@ -761,7 +768,9 @@ int32_t ss_player_texture_at(ss_player_t *handle,
 
  The replacement should match the original atlas's size and cell layout: the
  runtime's UVs stay in the original cellmap's pixel space, so a different
- resolution samples a different region.
+ resolution samples a different region. One the device cannot hold fails
+ with `SS_ERROR_INVALID_ARGUMENT` and leaves the cellmap as it was (see
+ `ss_scene_add_texture`).
 
  # Safety
  `pack_name` must be null or NUL-terminated UTF-8; `cellmap_name` must be

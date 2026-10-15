@@ -782,15 +782,23 @@ unsafe fn load_pack(handle: *mut SsPlayer, pack_name: *const c_char, data: *cons
 /// Embedded-mode packs need no call — their atlases load with the
 /// pack.
 ///
+/// Fails with `SS_ERROR_INVALID_ARGUMENT`, uploading nothing, when the device
+/// cannot hold the texture: wider or taller than its `max_texture_dimension_2d`
+/// (8192 on the device this library asks for), or empty.
+///
 /// # Safety
 /// `rgba` must point at `width * height * 4` readable bytes. It is not retained.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn ss_scene_add_texture(scene: *mut SsScene, hash: u32, rgba: *const u8, width: u32, height: u32) -> i32 {
     let Some(scene) = (unsafe { scene.as_mut() }) else { return fail(SS_ERROR_INVALID_ARGUMENT, "scene is null") };
-    let len = (width as usize) * (height as usize) * 4;
-    if rgba.is_null() || len == 0 {
+    if rgba.is_null() {
         return fail(SS_ERROR_INVALID_ARGUMENT, "texture is empty");
     }
+    if let Some(why) = scene.host.texture_extent_error(width, height) {
+        return fail(SS_ERROR_INVALID_ARGUMENT, why);
+    }
+    // Inside the device's limit, so the product cannot overflow.
+    let len = (width as usize) * (height as usize) * 4;
     scene.host.upload_texture(hash, unsafe { std::slice::from_raw_parts(rgba, len) }, width, height);
     SS_OK
 }
@@ -802,6 +810,9 @@ pub unsafe extern "C" fn ss_scene_add_texture(scene: *mut SsScene, hash: u32, rg
 /// showing a reference-mode `.ssab` does not have to bring ImageIO / WIC /
 /// libpng along just to hand the pixels over. Reading the file is still the
 /// host's job — nothing here opens one.
+///
+/// Fails with `SS_ERROR_INVALID_ARGUMENT` when the bytes do not decode, or
+/// decode to an image the device cannot hold (see `ss_scene_add_texture`).
 ///
 /// # Safety
 /// `data` must point at `len` readable bytes. It is not retained.
@@ -894,7 +905,9 @@ pub unsafe extern "C" fn ss_player_texture_at(handle: *mut SsPlayer, pack_name: 
 ///
 /// The replacement should match the original atlas's size and cell layout: the
 /// runtime's UVs stay in the original cellmap's pixel space, so a different
-/// resolution samples a different region.
+/// resolution samples a different region. One the device cannot hold fails
+/// with `SS_ERROR_INVALID_ARGUMENT` and leaves the cellmap as it was (see
+/// `ss_scene_add_texture`).
 ///
 /// # Safety
 /// `pack_name` must be null or NUL-terminated UTF-8; `cellmap_name` must be
@@ -902,7 +915,11 @@ pub unsafe extern "C" fn ss_player_texture_at(handle: *mut SsPlayer, pack_name: 
 /// `width * height * 4` readable bytes; it is not retained.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn ss_player_set_cellmap_texture(handle: *mut SsPlayer, pack_name: *const c_char, cellmap_name: *const c_char, rgba: *const u8, width: u32, height: u32) -> i32 {
-    let Some(player) = (unsafe { player(handle) }) else { return fail(SS_ERROR_INVALID_ARGUMENT, "player handle is null or destroyed") };
+    let Some((scene, id)) = (unsafe { scene_of(handle) }) else { return fail(SS_ERROR_INVALID_ARGUMENT, "player handle is null or destroyed") };
+    // Asked of the scene before the player is borrowed out of it: the pixels
+    // reach the device only on the next update, where a refusal has no caller.
+    let too_large = (!rgba.is_null()).then(|| scene.host.texture_extent_error(width, height)).flatten();
+    let Some(player) = scene.host.player_mut(id) else { return fail(SS_ERROR_INVALID_ARGUMENT, "player handle is null or destroyed") };
     let pack = match unsafe { optional_c_str(pack_name) } {
         Ok(pack) => pack,
         Err(msg) => return fail(SS_ERROR_INVALID_ARGUMENT, msg),
@@ -913,10 +930,11 @@ pub unsafe extern "C" fn ss_player_set_cellmap_texture(handle: *mut SsPlayer, pa
         player.restore_cellmap_texture(pack, name);
         return SS_OK;
     }
-    let len = (width as usize) * (height as usize) * 4;
-    if len == 0 {
-        return fail(SS_ERROR_INVALID_ARGUMENT, "texture is empty");
+    if let Some(why) = too_large {
+        return fail(SS_ERROR_INVALID_ARGUMENT, format!("{name}: {why}"));
     }
+    // Inside the device's limit, so the product cannot overflow.
+    let len = (width as usize) * (height as usize) * 4;
     match player.set_cellmap_texture(pack, name, unsafe { std::slice::from_raw_parts(rgba, len) }, width, height) {
         Ok(()) => SS_OK,
         Err(e) => fail(e.as_code(), format!("{name}: {e}")),

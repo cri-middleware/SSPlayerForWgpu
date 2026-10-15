@@ -37,7 +37,7 @@ use crate::events::{SignalValue, SsEvent};
 use crate::fit::{Align, Fit, Placement, Rect};
 use crate::pack::SSPack;
 use crate::player::{AssetLoader, BlendOp, MissingKind, OverridePriority, PlaybackDirection, PlaybackStyle, SSPlayer};
-use crate::renderer::{AlphaMode, Retention, SSRenderer};
+use crate::renderer::{AlphaMode, Retention, SSRenderer, texture_extent_error};
 use crate::roster::{Roster, SlotId};
 use crate::scene::{MaskBackend, SSScene, SceneConfig};
 use crate::surface::{STENCIL_FORMAT, Swapchain};
@@ -418,8 +418,17 @@ impl WebContext {
     /// that `upload_texture` needs. The renderer only borrows the view
     /// — and since wgpu handles are refcounted, dropping our `Texture` here is
     /// fine: the view it hands over keeps it alive.
-    fn set_texture_from_bitmap(&mut self, hash: u32, bitmap: &web_sys::ImageBitmap) {
+    ///
+    /// Refuses a bitmap the device cannot hold — past its
+    /// `max_texture_dimension_2d`, or empty, which is also what a closed one
+    /// reports — before anything changes. wgpu would raise it as a validation
+    /// error, and with its default handler that aborted the wasm instance and
+    /// took every player on the page with it.
+    fn set_texture_from_bitmap(&mut self, hash: u32, bitmap: &web_sys::ImageBitmap) -> Result<(), JsValue> {
         let (width, height) = (bitmap.width(), bitmap.height());
+        if let Some(why) = texture_extent_error(&self.device, (width, height)) {
+            return Err(JsValue::from_str(&format!("{why} (a closed ImageBitmap reports 0x0)")));
+        }
         let size = wgpu::Extent3d { width, height, depth_or_array_layers: 1 };
         let texture = self.device.create_texture(&wgpu::TextureDescriptor {
             label: Some("SpriteStudio Atlas (ImageBitmap)"),
@@ -451,6 +460,7 @@ impl WebContext {
 
         let view = texture.create_view(&wgpu::TextureViewDescriptor::default());
         self.renderer.set_texture(&self.device, hash, &view, (width, height), AlphaMode::Premultiplied);
+        Ok(())
     }
 }
 
@@ -507,14 +517,25 @@ impl SsContextWeb {
     /// encoded image: this path premultiplies on the CPU and keeps the pixels for
     /// device-loss recovery, so a 2048² atlas costs two 16 MB passes through wasm
     /// memory that `createImageBitmap` does not.
+    ///
+    /// Throws, uploading nothing, when `rgba` is not `width * height * 4` bytes or
+    /// the device cannot hold the texture (past its `max_texture_dimension_2d`).
     #[wasm_bindgen(js_name = addTexture)]
-    pub fn add_texture(&self, hash: u32, rgba: &[u8], width: u32, height: u32) {
+    pub fn add_texture(&self, hash: u32, rgba: &[u8], width: u32, height: u32) -> Result<(), JsValue> {
         let ctx = &mut *self.inner.borrow_mut();
         let WebContext { renderer, device, queue, encoded_textures, .. } = ctx;
+        if let Some(why) = texture_extent_error(device, (width, height)) {
+            return Err(JsValue::from_str(&why));
+        }
+        // Inside the device's limit, so the product cannot overflow.
+        if rgba.len() != (width as usize) * (height as usize) * 4 {
+            return Err(JsValue::from_str(&format!("{} bytes do not fill a {width}x{height} RGBA8 texture", rgba.len())));
+        }
         // One hash, one supplier: whichever path registered it last owns the
         // recovery too, so the other's retained source must go.
         encoded_textures.remove(&hash);
         renderer.upload_texture(device, queue, hash, rgba, (width, height), Retention::Retain);
+        Ok(())
     }
 
     /// Supply a texture by hash from **encoded image bytes** (PNG) — the main
@@ -547,11 +568,15 @@ impl SsContextWeb {
     /// Rust one: nothing is retained here, so the page registers it again after
     /// [`SsContextWeb::restore_device`]. Use
     /// [`SsContextWeb::add_texture_from_bytes`] to be spared that.
+    ///
+    /// Throws, registering nothing, for a bitmap the device cannot hold — past
+    /// its `max_texture_dimension_2d`, or closed.
     #[wasm_bindgen(js_name = addTextureFromBitmap)]
-    pub fn add_texture_from_bitmap(&self, hash: u32, bitmap: &web_sys::ImageBitmap) {
+    pub fn add_texture_from_bitmap(&self, hash: u32, bitmap: &web_sys::ImageBitmap) -> Result<(), JsValue> {
         let ctx = &mut *self.inner.borrow_mut();
+        ctx.set_texture_from_bitmap(hash, bitmap)?;
         ctx.encoded_textures.remove(&hash);
-        ctx.set_texture_from_bitmap(hash, bitmap);
+        Ok(())
     }
 
     /// Whether an atlas is already registered for `hash`.
@@ -661,14 +686,17 @@ impl SsContextWeb {
 /// would still be held when JS re-enters through a rAF callback.
 async fn upload_encoded(ctx: &Rc<RefCell<WebContext>>, hash: u32, bytes: Rc<[u8]>) -> Result<(), JsValue> {
     let bitmap = decode_image(&bytes).await?;
-    {
+    let supplied = {
         let ctx = &mut *ctx.borrow_mut();
-        ctx.set_texture_from_bitmap(hash, &bitmap);
-        ctx.encoded_textures.insert(hash, bytes);
-    }
+        let supplied = ctx.set_texture_from_bitmap(hash, &bitmap);
+        if supplied.is_ok() {
+            ctx.encoded_textures.insert(hash, bytes);
+        }
+        supplied
+    };
     // Ours to decode, ours to release: the copy captured the pixels already.
     bitmap.close();
-    Ok(())
+    supplied
 }
 
 /// One canvas and the scene drawn into it. Holds **any number of
@@ -952,7 +980,7 @@ impl AssetLoader for WebAssetLoader {
 
     async fn supply_texture(&mut self, key: u32, encoded: &[u8]) {
         if let Err(e) = upload_encoded(&self.ctx, key, Rc::from(encoded)).await {
-            self.warn(&format!("an image for {key:#010x} could not be decoded: {e:?}"));
+            self.warn(&format!("the image for {key:#010x} is not uploaded: {e:?}"));
         }
     }
 
@@ -1316,7 +1344,9 @@ impl SsPlayerWeb {
     /// `pack` null selects the main pack. `name` is one of
     /// [`SsPlayerWeb::replaceable_cellmap_names`]. The replacement should match the
     /// original atlas's size and cell layout — the runtime's UVs stay in the
-    /// original cellmap's pixel space. Rejects only when the player is unbound.
+    /// original cellmap's pixel space. Rejects when the player is unbound, and for
+    /// a bitmap the device cannot hold — past its `max_texture_dimension_2d`, or
+    /// closed — leaving the cellmap as it was.
     #[wasm_bindgen(js_name = setCellmapTexture)]
     pub fn set_cellmap_texture(&self, pack: Option<String>, name: &str, bitmap: &web_sys::ImageBitmap) -> Result<(), JsValue> {
         let ctx = &mut *self.ctx.borrow_mut();
@@ -1325,8 +1355,7 @@ impl SsPlayerWeb {
             let player = entry.players.get_mut(self.id).ok_or_else(|| gone("player"))?;
             player.override_cellmap_texture_key(pack.as_deref(), name).ok_or_else(|| JsValue::from_str("no pack is loaded"))?
         };
-        ctx.set_texture_from_bitmap(key, bitmap);
-        Ok(())
+        ctx.set_texture_from_bitmap(key, bitmap)
     }
 
     /// [`SsPlayerWeb::set_cellmap_texture`] from **encoded image bytes** (PNG); the
@@ -1343,8 +1372,9 @@ impl SsPlayerWeb {
             let player = entry.players.get_mut(self.id).ok_or_else(|| gone("player"))?;
             player.override_cellmap_texture_key(pack.as_deref(), &name).ok_or_else(|| JsValue::from_str("no pack is loaded"))?
         };
-        ctx.set_texture_from_bitmap(key, &bitmap);
-        Ok(())
+        let supplied = ctx.set_texture_from_bitmap(key, &bitmap);
+        bitmap.close();
+        supplied
     }
 
     /// Undo a runtime override: point the cellmap back at its original atlas and

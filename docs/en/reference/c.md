@@ -59,6 +59,10 @@ whichever character took its slot.
 Textures register on the **scene**, because the texture map is device-scoped: every player in the
 window sees it, and a pack shown five times is uploaded once.
 
+A texture the device cannot hold — wider or taller than its `max_texture_dimension_2d`, which is 8192
+on the device this library creates — is refused with `SS_ERROR_INVALID_ARGUMENT` and uploads
+nothing. `ss_player_set_cellmap_texture` refuses one the same way.
+
 ## Selecting and describing an animation
 
 | | |

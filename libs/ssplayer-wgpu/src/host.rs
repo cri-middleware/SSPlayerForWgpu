@@ -13,7 +13,7 @@
 //! `&mut SSPlayer` across calls. `roster.rs` does that bookkeeping.
 
 use crate::player::SSPlayer;
-use crate::renderer::{Retention, SSRenderer};
+use crate::renderer::{Retention, SSRenderer, texture_extent_error};
 use crate::roster::Roster;
 use crate::scene::{MaskBackend, SSScene, SceneConfig};
 use crate::surface::Swapchain;
@@ -143,8 +143,21 @@ impl NativeHost {
         self.scene.stats()
     }
 
+    /// Why this window's device cannot hold a `width` x `height` texture, or
+    /// `None` when it can: empty, or past its `max_texture_dimension_2d`.
+    ///
+    /// What the C face asks before it hands a host's pixels over, so a texture
+    /// too large for the device comes back as an error code instead of one
+    /// [`NativeHost::upload_texture`] can only report on stderr.
+    pub fn texture_extent_error(&self, width: u32, height: u32) -> Option<String> {
+        texture_extent_error(&self.device, (width, height))
+    }
+
     /// Register a texture for a reference-mode pack, lending the renderer this
     /// host's device+queue. Shared by every player in the window.
+    ///
+    /// One the device cannot hold is not uploaded; see
+    /// [`SSRenderer::upload_texture`].
     pub fn upload_texture(&mut self, hash: u32, rgba: &[u8], width: u32, height: u32) {
         self.renderer.upload_texture(&self.device, &self.queue, hash, rgba, (width, height), Retention::Retain);
     }
@@ -160,6 +173,9 @@ impl NativeHost {
         let image = image::load_from_memory(encoded).map_err(|e| format!("decode image: {e}"))?;
         let rgba = image.to_rgba8();
         let (width, height) = rgba.dimensions();
+        if let Some(why) = self.texture_extent_error(width, height) {
+            return Err(why);
+        }
         self.renderer.upload_texture(&self.device, &self.queue, hash, &rgba, (width, height), Retention::Retain);
         Ok(())
     }
