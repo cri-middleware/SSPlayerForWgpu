@@ -17,7 +17,7 @@ use bevy::render::view::ViewTarget;
 // `AlphaMode` is aliased: `bevy::prelude` has one of its own, and a Bevy image is
 // straight-alpha, which is the form the player must be told about.
 use ssplayer_wgpu::{AlphaMode as SsAlphaMode, MaskBackend, PlaybackDirection, PlaybackStyle, SSPlayer, SSRenderer, SSScene, SceneConfig};
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 
 use crate::asset::{Keys, RenderSsPack, SsPack};
 use crate::components::{SsSourceInfo, SsTrackInfo, TrackCommand};
@@ -436,37 +436,52 @@ fn apply_track_command(slot: &mut PlayerSlot, command: TrackCommand) {
     }
 }
 
-/// The track stack as it stands after the advance, for [`crate::SsTrackState`].
-/// Drops the added sources the runtime has released since, which is what keeps a
-/// handle the runtime later reuses from being reported under the old animation.
-fn track_feedback(slot: &mut PlayerSlot) -> (Vec<SsTrackInfo>, Vec<SsSourceInfo>) {
+/// One character's playback state after the advance, written over `out`; its
+/// track stack is the one [`crate::SsTrackState`] shows. Drops the added sources
+/// the runtime has released since, which is what keeps a handle the runtime
+/// later reuses from being reported under the old animation.
+fn fill_feedback(slot: &mut PlayerSlot, out: &mut PlaybackFeedback) {
     let player = &slot.player;
-    let tracks = (0..player.track_count())
-        .map(|track| SsTrackInfo {
-            main_source: player.track_main_source(track),
-            alpha: player.track_alpha(track).unwrap_or(0.0),
-            blend: player.track_blend(track).unwrap_or(ssplayer_wgpu::TrackBlend::Mix),
-            sync: player.track_sync(track).unwrap_or(ssplayer_wgpu::TrackSync::Free),
-            frame: player.track_frame(track),
-            fade_progress: player.track_fade_progress(track),
-            speed: player.track_speed(track).unwrap_or(0.0),
-            frame_rate: player.track_frame_rate(track).unwrap_or(0),
-            frame_skip_enabled: player.track_frame_skip_enabled(track).unwrap_or(true),
-            direction: player.track_playback_direction(track).unwrap_or(ssplayer_wgpu::PlaybackDirection::Forward),
-            style: player.track_playback_style(track).unwrap_or(ssplayer_wgpu::PlaybackStyle::Normal),
-            loop_count: player.track_loop_count(track),
-            finished: player.is_track_finished(track),
-            just_looped: player.track_just_looped(track),
-            outgoing_event_threshold: player.track_outgoing_event_threshold(track).unwrap_or(f32::INFINITY),
-        })
-        .collect();
+    out.entity = slot.entity.id();
+    out.frame_no = player.frame_no();
+    out.is_finished = player.is_finished();
+    out.playing_forward = player.is_playing_forward();
+    out.started_edge = player.just_started();
+    out.finished_edge = player.just_finished();
+    out.looped = player.just_looped();
+    out.events.clear();
+    out.events.extend_from_slice(player.events());
+    out.tracks.clear();
+    out.tracks.extend((0..player.track_count()).map(|track| SsTrackInfo {
+        main_source: player.track_main_source(track),
+        alpha: player.track_alpha(track).unwrap_or(0.0),
+        blend: player.track_blend(track).unwrap_or(ssplayer_wgpu::TrackBlend::Mix),
+        sync: player.track_sync(track).unwrap_or(ssplayer_wgpu::TrackSync::Free),
+        frame: player.track_frame(track),
+        fade_progress: player.track_fade_progress(track),
+        speed: player.track_speed(track).unwrap_or(0.0),
+        frame_rate: player.track_frame_rate(track).unwrap_or(0),
+        frame_skip_enabled: player.track_frame_skip_enabled(track).unwrap_or(true),
+        direction: player.track_playback_direction(track).unwrap_or(ssplayer_wgpu::PlaybackDirection::Forward),
+        style: player.track_playback_style(track).unwrap_or(ssplayer_wgpu::PlaybackStyle::Normal),
+        loop_count: player.track_loop_count(track),
+        finished: player.is_track_finished(track),
+        just_looped: player.track_just_looped(track),
+        outgoing_event_threshold: player.track_outgoing_event_threshold(track).unwrap_or(f32::INFINITY),
+    }));
     slot.added_sources.retain(|(source, _, _)| player.source_weight(*source).is_some());
-    let sources = slot
-        .added_sources
-        .iter()
-        .map(|(source, track, animation)| SsSourceInfo { source: *source, track: *track, animation: animation.clone(), weight: player.source_weight(*source).unwrap_or(0.0), frame: player.source_frame(*source).unwrap_or(0.0) })
-        .collect();
-    (tracks, sources)
+    // Element by element, so each name is copied into the string already there.
+    out.sources.truncate(slot.added_sources.len());
+    for (index, (source, track, animation)) in slot.added_sources.iter().enumerate() {
+        let (weight, frame) = (player.source_weight(*source).unwrap_or(0.0), player.source_frame(*source).unwrap_or(0.0));
+        match out.sources.get_mut(index) {
+            Some(info) => {
+                (info.source, info.track, info.weight, info.frame) = (*source, *track, weight, frame);
+                info.animation.clone_from(animation);
+            }
+            None => out.sources.push(SsSourceInfo { source: *source, track: *track, animation: animation.clone(), weight, frame }),
+        }
+    }
 }
 
 /// Lend the renderer every atlas the characters' packs draw with, as the texture
@@ -542,9 +557,10 @@ fn reconcile_overrides(slot: &mut PlayerSlot, renderer: &mut SSRenderer, device:
         slot.applied_overrides.insert(name.clone(), (id, gpu.texture.id(), key));
     }
 
-    // Restore any override the character dropped from its component.
-    let wanted_names: HashSet<&str> = wanted.iter().map(|(name, _)| name.as_str()).collect();
-    let stale: Vec<String> = slot.applied_overrides.keys().filter(|name| !wanted_names.contains(name.as_str())).cloned().collect();
+    // Restore any override the character dropped from its component. A search
+    // of `wanted` rather than a set of it, which would be built every frame for
+    // a character that keeps its overrides; a character has a handful.
+    let stale: Vec<String> = slot.applied_overrides.keys().filter(|name| !wanted.iter().any(|(wanted, _)| wanted == *name)).cloned().collect();
     for name in stale {
         if let Some((_, _, key)) = slot.applied_overrides.remove(&name) {
             slot.player.restore_cellmap_texture(None, &name);
@@ -575,7 +591,7 @@ pub(crate) fn draw_players(
     if state.slots.is_empty() {
         // Clear last frame's feedback so the main world stops answering for
         // characters that are all gone.
-        channel.store(Vec::new());
+        channel.publish(Vec::new());
         return;
     }
 
@@ -653,34 +669,19 @@ pub(crate) fn draw_players(
     // Y-up, matching Bevy's 2D world axes.
     scene.set_viewport(queue, size.x as f32, size.y as f32, false);
 
-    let mut players: Vec<&mut SSPlayer> = slots.iter_mut().map(|slot| &mut slot.player).collect();
-    scene.update(renderer, device, queue, extracted.delta_secs, &mut players);
+    scene.update_with(renderer, device, queue, extracted.delta_secs, slots.as_mut_slice(), |slot| Some(&mut slot.player));
 
     // Read back what the advance produced, before drawing, and hand it to the
     // main world. `update` cleared the events of any culled player, so a culled
-    // character reports nothing — reading every slot is still correct.
-    drop(players);
-    channel.store(
-        slots
-            .iter_mut()
-            .map(|slot| {
-                let (tracks, sources) = track_feedback(slot);
-                let player = &slot.player;
-                PlaybackFeedback {
-                    entity: slot.entity.id(),
-                    frame_no: player.frame_no(),
-                    is_finished: player.is_finished(),
-                    playing_forward: player.is_playing_forward(),
-                    started_edge: player.just_started(),
-                    finished_edge: player.just_finished(),
-                    looped: player.just_looped(),
-                    events: player.events().to_vec(),
-                    tracks,
-                    sources,
-                }
-            })
-            .collect(),
-    );
+    // character reports nothing — reading every slot is still correct. Filled
+    // over a batch the main world has read, whose vectors keep their room.
+    let mut batch = channel.spare();
+    batch.truncate(slots.len());
+    batch.resize_with(slots.len(), PlaybackFeedback::default);
+    for (slot, feedback) in slots.iter_mut().zip(&mut batch) {
+        fill_feedback(slot, feedback);
+    }
+    channel.publish(batch);
 
     // Bake the mask bitmaps into the same encoder the pass below is opened on.
     // Passes in one encoder run in order, so this frame's coverage is what this
