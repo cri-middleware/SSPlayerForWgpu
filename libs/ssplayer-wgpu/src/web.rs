@@ -448,8 +448,8 @@ impl WebContext {
     /// Goes through [`SSRenderer::set_texture`] rather than `upload_texture`
     /// because the pixels never pass through Rust: `copyExternalImageToTexture`
     /// moves them from the browser's decoded image straight into the texture,
-    /// with none of the CPU premultiply pass (and none of its 16 MB temporary,
-    ///) that `upload_texture` needs. The renderer only borrows the view
+    /// with none of the CPU premultiply pass (and none of its 16 MB temporary)
+    /// that `upload_texture` needs. The renderer only borrows the view
     /// — and since wgpu handles are refcounted, dropping our `Texture` here is
     /// fine: the view it hands over keeps it alive.
     fn set_texture_from_bitmap(&mut self, hash: u32, bitmap: &web_sys::ImageBitmap) {
@@ -593,8 +593,8 @@ impl SsContextWeb {
     /// The texture map is device-scoped, so this answers for the
     /// whole page: it is how a caller keeps "N players of one pack decode its
     /// atlas once between them" true now that the decode happens in JS. The
-    /// player-side flush gets that for free (it filters before the decode,
-    ///); a page supplying textures itself has to ask.
+    /// player-side flush gets that for free (it filters before the decode); a
+    /// page supplying textures itself has to ask.
     #[wasm_bindgen(js_name = hasTexture)]
     pub fn has_texture(&self, hash: u32) -> bool {
         self.inner.borrow().renderer.texture_size(hash).is_some()
@@ -853,10 +853,6 @@ pub struct SsPlayerWeb {
     loading: Cell<bool>,
 }
 
-/// Run `body` on the player this handle names.
-///
-/// A macro rather than a helper method because the closure would have to borrow
-/// the `RefCell` for the caller, and every one of these is a one-liner.
 /// Read one field off an options object. A missing object and a missing field
 /// are the same thing here: the default.
 fn field(options: Option<&js_sys::Object>, key: &str) -> JsValue {
@@ -922,6 +918,10 @@ fn read_placement(options: Option<&js_sys::Object>) -> Result<Placement, JsValue
     })
 }
 
+/// Run `body` on the player this handle names.
+///
+/// A macro rather than a helper method because the closure would have to borrow
+/// the `RefCell` for the caller, and every one of these is a one-liner.
 macro_rules! with_player {
     ($self:ident, |$player:ident| $body:expr) => {{
         let ctx = &mut *$self.ctx.borrow_mut();
@@ -1126,17 +1126,17 @@ impl SsPlayerWeb {
     /// `createImageBitmap` are asynchronous where Godot's `ResourceLoader::load`
     /// is not. **That is the one place the asynchrony appears.**
     ///
-    /// * `pack` names the pack for external instance references (`ref_anime_pack`,
-    ///). Pass `null`/`undefined` — the usual case — to use the name
-    /// the exporter wrote into the `.ssab`, which is the name those references
+    /// * `pack` names the pack for external instance references (`ref_anime_pack`).
+    /// Pass `null`/`undefined` — the usual case — to use the name the exporter
+    /// wrote into the `.ssab`, which is the name those references
     /// are resolved against. A name of your own overrides it, and then any
     /// external instance reference to this pack stops resolving.
     /// * `baseUrl` is where the `.ssab` came from; reference-mode atlas paths are
     /// relative to it. Defaults to the document's URL. Embedded packs ignore it.
     /// * `read` answers in place of `fetch`, as it does for [`SsPlayerWeb::load`].
     ///
-    /// An atlas the renderer already has is left alone ("registered wins",
-    ///), so N players of one pack load it once between them. An atlas
+    /// An atlas the renderer already has is left alone ("registered wins"), so
+    /// N players of one pack load it once between them. An atlas
     /// that cannot be fetched or decoded is reported on the console and skipped,
     /// as in `_load_external_ssabs`' `ERR_PRINT` and `PackResolver`'s
     /// `console.warn`: one missing image should not cost you the character.
@@ -1259,7 +1259,7 @@ impl SsPlayerWeb {
         with_player!(self, |p| p.current_animation().map(str::to_owned))
     }
 
-    /// The atlases a registered pack asks for, as `{ hash, path, embedded }[]`
+    /// The atlases a registered pack asks for, as `{ key, path, embedded }[]`
     /// in pack order. `pack` undefined selects the main pack.
     ///
     /// The counterpart of [`SsContextWeb::add_texture`], and the same shape the
@@ -1269,11 +1269,11 @@ impl SsPlayerWeb {
     /// entry whose `embedded` is false and registers the pixels by **`key`**.
     /// Embedded entries need no fetch — they arrive with the pack.
     ///
-    /// `hash` names the slot inside this pack; `key` is what the renderer is
-    /// keyed by. They differ whenever two packs could name one atlas alike, which
-    /// Adobe Animate's `spritemap1.png` does for every project it exports —
-    /// registering by `hash` is how a page ends up drawing another project's
-    /// atlas.
+    /// `key` is what the renderer is keyed by, not the slot the pack names the
+    /// atlas by. The two differ whenever two packs could name one atlas alike,
+    /// which Adobe Animate's `spritemap1.png` does for every project it exports —
+    /// registering by the slot is how a page ends up drawing another project's
+    /// atlas, which is why the slot is not handed out here.
     #[wasm_bindgen(js_name = textureRefs)]
     pub fn texture_refs(&self, pack: Option<String>) -> Result<js_sys::Array, JsValue> {
         with_player!(self, |p| {
@@ -1292,7 +1292,7 @@ impl SsPlayerWeb {
         })
     }
 
-    /// The atlases a registered pack **carries**, as `{ hash, bytes }[]` — the
+    /// The atlases a registered pack **carries**, as `{ key, bytes }[]` — the
     /// encoded images, not pixels. Empty for a reference-mode pack.
     /// `pack` undefined selects the main pack.
     ///
@@ -1321,7 +1321,7 @@ impl SsPlayerWeb {
         })
     }
 
-    /// What the last load could not get, as `{ kind, name, hash }[]`.
+    /// What the last load could not get, as `{ kind, name, slot }[]`.
     /// Empty means everything the packs asked for arrived.
     ///
     /// `load` rejects only when the `.ssab` itself is unreadable — one missing
@@ -1443,14 +1443,14 @@ impl SsPlayerWeb {
 
     /// Start from the head of the section, re-arming the loop count. Not a
     /// resume: it rewinds. Use [`SsPlayerWeb::resume`] to lift a hold.
+    pub fn play(&self) -> Result<(), JsValue> {
+        with_player!(self, |p| p.play())
+    }
+
     /// `play()` from `startFrame` rather than the head of the section.
     #[wasm_bindgen(js_name = playFrom)]
     pub fn play_from(&self, start_frame: f32) -> Result<(), JsValue> {
         with_player!(self, |p| p.play_from(start_frame))
-    }
-
-    pub fn play(&self) -> Result<(), JsValue> {
-        with_player!(self, |p| p.play())
     }
 
     /// Hold the current frame. Idempotent, and ignored while nothing is playing.

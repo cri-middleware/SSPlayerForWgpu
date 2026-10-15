@@ -6,19 +6,16 @@
 //! slots from the draw walk therefore stops stepping a slot the moment its part
 //! is hidden — and an independently-played child, which runs on its own elapsed
 //! time rather than the parent's frame, then freezes and resumes late by exactly
-//! the time it spent hidden. The doc calls this out as the mistake to avoid, and
+//! the time it spent hidden. That is the mistake to avoid, and
 //! `Instance.ssab` ships `INDEP_MID_INFINITE_HIDE` — an independent infinite
 //! child hidden through the middle of the parent's timeline — for the check.
 //!
-//! The player's other loop-edge rule — read the pulse from `Context::is_looped`
+//! The player's other loop-edge rule — read the pulse from `Context::just_looped`
 //! rather than inferring it from "the frame went backwards" — has **no test
-//! here on purpose**: the two agree on every path today's public API can reach.
-//! `set_speed_scale` cannot make the frame run backwards (the runtime clamps a
-//! non-positive rate to 1.0) and neither reverse nor ping-pong direction is
-//! exposed, so nothing distinguishes them until one of those lands. The reason
-//! to read the pulse anyway is that it is the runtime's own answer, and the
-//! inference silently becomes wrong the moment the frame can move backwards for
-//! a reason other than a loop.
+//! here yet**. Reverse and ping-pong playback are what tell the two apart: the
+//! frame runs backwards on every tick, so the inference would re-arm every
+//! synced child and effect on every tick. Seeing that takes a synced child's
+//! events or an effect's particles, which nothing in this file watches.
 //!
 //! Skips cleanly when no GPU adapter is available: stepping happens inside
 //! `SSScene::update`, which borrows a device.

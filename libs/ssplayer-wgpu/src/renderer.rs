@@ -1070,8 +1070,8 @@ pub(crate) const SHADER_PARAM_STRIDE: usize = 256;
 pub(crate) const SHADER_PARAM_STRIDE_F32: usize = SHADER_PARAM_STRIDE / 4;
 
 /// id_hash (SDK `PartAttributeShader.id_hash()`, `fnv1a_hash_str("ss-*")`) ->
-/// WGSL fragment entry point. The 13 SpriteStudio integration shaders (,
-/// ports of the WebGL `SSShaderLib.ts`). Hashes are the SDK's precomputed values.
+/// WGSL fragment entry point. The 13 SpriteStudio integration shaders,
+/// ports of the WebGL `SSShaderLib.ts`. Hashes are the SDK's precomputed values.
 const SS_SHADER_ENTRIES: [(u32, &str); 13] = [
     (0x36629dfc, "fs_ss_sepia"),
     (0x8a5c3037, "fs_ss_hsb"),

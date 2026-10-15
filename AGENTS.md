@@ -56,7 +56,7 @@ faces as thin wrappers.
     separate calls; `play()` rewinds to the section start and re-arms the loop count, and `resume()`
     continues in place.
 *   **Slots step from the part list, never the draw order**: the runtime drops hidden parts from
-    `draw_order`. They re-arm on `Context::is_looped()`.
+    `draw_order`. They re-arm on `Context::just_looped()`.
 *   **A pack outlives every tree built from it**: `build_node` binds each `Context` to its pack by raw
     pointer, so re-registering a name never changes what is already playing.
 *   **A tick that did not run reports nothing.** `set_culled(true)` skips the advance, and `build_frame`

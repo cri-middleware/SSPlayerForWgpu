@@ -549,7 +549,7 @@ struct InstanceChild {
     slot: InstanceSlot,
     node: Box<PlaybackNode>,
     /// Frame the slot last left the child on. Read raw — rounding it and writing
-    /// it back would truncate sub-frame progress every tick (instance doc).
+    /// it back would truncate sub-frame progress every tick.
     frame_no: f32,
     /// Whether the slot says the child is showing this frame.
     visible: bool,
@@ -2348,7 +2348,6 @@ impl SSPlayer {
         self.tint
     }
 
-    /// Names of all animations in the main pack, if loaded.
     /// The animation currently set up, or `None` before the first
     /// [`SSPlayer::set_animation`] — and again after a pack registration
     /// replaced what the tree was built from, which is what makes the next
@@ -2357,6 +2356,7 @@ impl SSPlayer {
         self.current_animation.as_deref()
     }
 
+    /// Names of all animations in the main pack, if loaded.
     pub fn animation_names(&self) -> Option<Vec<String>> {
         let anim_resource = self.packs.get(self.main_pack.as_ref()?)?.resource().resource()?;
         Some(anim_resource.get_animation_names())
@@ -2410,19 +2410,6 @@ impl SSPlayer {
         Some(cellmap.cells()?.iter().map(|c| c.name().to_string()).collect())
     }
 
-    /// The atlases a registered pack asks for, or `None` if
-    /// `pack_name` names no pack this player holds. `None` selects the main pack.
-    ///
-    /// This is the reference-mode half of texture supply, and it exists because
-    /// only the `.ssab` knows where its atlases were exported to: a host calls it
-    /// straight after [`SSPlayer::add_ssab`] / [`SSPlayer::load_ssab`], loads
-    /// every entry that is not [`TextureRef::embedded`] by resolving
-    /// [`TextureRef::path`] against the directory the `.ssab` came from, and hands
-    /// the pixels to [`SSRenderer::upload_texture`] **under
-    /// [`SSPlayer::texture_key`]'s answer for that entry**, not under
-    /// [`TextureRef::slot`]. The player never opens a file itself — it has no
-    /// filesystem on the web face, and on any face the host's asset system is the
-    /// one that should own the bytes.
     /// Where a pack's cellmap registers in the renderer's texture map.
     ///
     /// [`TextureRef::slot`] names a *slot inside one `.ssab`*, and two packs from
@@ -2451,6 +2438,19 @@ impl SSPlayer {
         self.atlas_keys.get(name).map(|keys| keys.resolve(slot)).unwrap_or(slot)
     }
 
+    /// The atlases a registered pack asks for, or `None` if
+    /// `pack_name` names no pack this player holds. `None` selects the main pack.
+    ///
+    /// This is the reference-mode half of texture supply, and it exists because
+    /// only the `.ssab` knows where its atlases were exported to: a host calls it
+    /// straight after [`SSPlayer::add_ssab`] / [`SSPlayer::load_ssab`], loads
+    /// every entry that is not [`TextureRef::embedded`] by resolving
+    /// [`TextureRef::path`] against the directory the `.ssab` came from, and hands
+    /// the pixels to [`SSRenderer::upload_texture`] **under
+    /// [`SSPlayer::texture_key`]'s answer for that entry**, not under
+    /// [`TextureRef::slot`]. The player never opens a file itself — it has no
+    /// filesystem on the web face, and on any face the host's asset system is the
+    /// one that should own the bytes.
     pub fn textures(&self, pack_name: Option<&str>) -> Option<&[TextureRef]> {
         let name = pack_name.or(self.main_pack.as_deref())?;
         Some(self.packs.get(name)?.textures())
@@ -2496,7 +2496,7 @@ impl SSPlayer {
     /// `name_hash` for an ordinary part but a texture *file name*'s hash for one
     /// under an authored TextureChange, so the file names a `TCHG` can select
     /// (`common.png` and the like, including a cellmap's own image) are listed
-    /// too — all of them legitimately replaceable (SDK §"Texture resolution").
+    /// too — all of them legitimately replaceable.
     pub fn replaceable_cellmap_names(&self, pack_name: Option<&str>) -> Option<Vec<String>> {
         let name = pack_name.or(self.main_pack.as_deref())?;
         let pack = self.packs.get(name)?;
@@ -2529,10 +2529,9 @@ impl SSPlayer {
     ///
     /// The replacement should share the original atlas's size and cell layout: the
     /// runtime's UVs stay in the *original* cellmap's pixel space, so a different
-    /// resolution samples a different region (SDK §"The size of the replacement
-    /// texture"). Pass a part under a TextureChange its authored file name to
-    /// affect the frames the change is active on — the cellmap name will not,
-    /// because those frames bind through a different hash.
+    /// resolution samples a different region. Pass a part under a TextureChange
+    /// its authored file name to affect the frames the change is active on — the
+    /// cellmap name will not, because those frames bind through a different hash.
     ///
     /// The pixels reach the GPU on the next `update` (the borrow model lends no
     /// device before then), so the swap is visible from the following frame.
@@ -2836,8 +2835,7 @@ impl SSPlayer {
     ///
     /// A diagnostic, like [`SSPlayer::instance_node_count`] — and the only way to
     /// see that a child's clock is running while its part is hidden, since a
-    /// hidden child draws nothing to look at (instance doc §Supporting
-    /// Independent Playback).
+    /// hidden child draws nothing to look at.
     pub fn instance_child_frames(&self) -> Vec<(usize, f32)> {
         let Some(root) = &self.root else { return Vec::new() };
         let mut out: Vec<(usize, f32)> = root.instances.iter().map(|(&part_idx, child)| (part_idx, child.frame_no)).collect();
@@ -2953,9 +2951,8 @@ fn build_rig(
 /// part is hidden. For an independently-played effect or instance — one running
 /// on its own elapsed time rather than the parent's frame — that freezes the
 /// clock and makes it resume late by exactly the time it spent hidden, which is
-/// not what SpriteStudio means by independent playback (instance doc §Supporting
-/// Independent Playback, effect doc). The slots are built from the pack's part
-/// list in [`build_node`], so they are all here to walk.
+/// not what SpriteStudio means by independent playback. The slots are built
+/// from the pack's part list in [`build_node`], so they are all here to walk.
 ///
 /// What the draw walk needs afterwards is left on each slot: the child's frame
 /// and visibility. An effect slot is only handed its clock here, and steps in
@@ -3622,12 +3619,6 @@ unsafe fn slice_i32<'a>(ptr: *const i32, len: usize) -> &'a [i32] {
     if ptr.is_null() || len == 0 { &[] } else { unsafe { std::slice::from_raw_parts(ptr, len) } }
 }
 
-/// Decode a flush's whole batch of atlases and register them **in `jobs` order**.
-///
-/// One call for the batch rather than one per image so the decodes can overlap: a
-/// character with three 4096² atlases otherwise pays for them end to end on the
-/// host's thread, which is the load stall this exists to avoid. The registration
-/// order is still the caller's, not the order the decodes happened to finish in.
 /// Whether the renderer's entry for `key` still has to be built from `encoded`.
 ///
 /// Three answers, and the middle one is the whole point:
@@ -3646,6 +3637,12 @@ fn wanted_now(renderer: &SSRenderer, key: u32, encoded: &[u8]) -> bool {
     renderer.texture_digest(key).is_some_and(|held| held != fnv1a_bytes(encoded))
 }
 
+/// Decode a flush's whole batch of atlases and register them **in `jobs` order**.
+///
+/// One call for the batch rather than one per image so the decodes can overlap: a
+/// character with three 4096² atlases otherwise pays for them end to end on the
+/// host's thread, which is the load stall this exists to avoid. The registration
+/// order is still the caller's, not the order the decodes happened to finish in.
 #[cfg(feature = "embedded")]
 fn decode_and_register(renderer: &mut SSRenderer, device: &wgpu::Device, queue: &wgpu::Queue, jobs: &[(u32, &[u8], Retention)]) {
     let encoded: Vec<&[u8]> = jobs.iter().map(|(_, bytes, _)| *bytes).collect();
