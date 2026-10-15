@@ -81,7 +81,7 @@ finds itself drawing into an sRGB target without it.
 
 | Component | What it carries | Cost of changing it |
 |---|---|---|
-| `SsPlayer` | `src`, `animation` | Rebuilds the playback tree — this is the allocating one |
+| `SsPlayer` | `pack` (a `Handle<SsPack>`), `animation`, `transition_ms` | Rebuilds the playback tree — this is the allocating one |
 | `SsTransform` | `x`, `y`, `scale_x`, `scale_y`, `rotation` | Free |
 | `SsPlayback` | `playing`, `speed_scale`, `order`, `alpha`, `visible`, `culled`, `restart`, `direction`, `style`, `loop_count`, `frame_rate`, `frame_skip_enabled`, `sub_frame_enabled`, `animation_section` | Free |
 
@@ -117,11 +117,12 @@ cargo run -p ssplayer-bevy-viewer     # the interactive development viewer
   speed, `R` restart), with a HUD naming each feature. The one to read first.
 - [`examples/viewer-bevy`](../../examples/viewer-bevy) — a free-form viewer of a
   cast in one pass (pack / animation switching, add / remove characters, layout,
-  draw order, alpha, visibility, drop-to-play), the Bevy sibling of the native
-  `examples/viewer`.
+  draw order, alpha, visibility, track keys, drop-to-play), the Bevy sibling of
+  the native `examples/viewer`.
 
-Both are driven entirely through the three components above; the `Sound` scenes
-play audio, which the host does — the player only names the cue.
+Both are driven through the three components above, and viewer-bevy's track keys
+through the `SsTrackCommand` message as well; the `Sound` scenes play audio,
+which the host does — the player only names the cue.
 
 ## How it is wired
 
@@ -129,9 +130,9 @@ Bevy renders in two worlds, and the crate is split along that seam.
 
 | Where | What |
 |---|---|
-| Main world | The three components above. The whole authoring surface |
+| Main world | The three components above, `SsCrowd`, `SsSceneSettings`, and the `SsPlay` / `SsStop` / `SsSeek` / `SsTrackCommand` messages. The whole authoring surface |
 | `ExtractSchedule` | Copies them, plus the frame delta, into the render world |
-| `Render` / `RenderSystems::Prepare` | Applies them to the playback trees; loads a pack whose `src` changed |
+| `Render` / `RenderSystems::Prepare` | Applies them to the playback trees; takes up a changed or reloaded `pack` once it has loaded |
 | `Core2d` / `Core2dSystems::MainPass` | Advances, builds and draws, after `main_transparent_pass_2d` |
 
 The playback trees, the device-scoped `SSRenderer` and the target-scoped

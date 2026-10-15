@@ -126,8 +126,10 @@
     };
 
     // Remembered choice wins; otherwise follow the browser's language, default ja.
+    // The key is shared by every demo page, so the choice carries over between them.
+    const LANG_KEY = 'ssDemoLang';
     let stored = null;
-    try { stored = localStorage.getItem('ssPartFollowLang'); } catch { /* private mode */ }
+    try { stored = localStorage.getItem(LANG_KEY); } catch { /* private mode */ }
     let lang = (stored === 'ja' || stored === 'en')
       ? stored
       : ((navigator.language || 'ja').toLowerCase().startsWith('ja') ? 'ja' : 'en');
@@ -146,7 +148,7 @@
       document.title = t.title;
       for (const el of document.querySelectorAll('[data-i18n]')) el.innerHTML = t[el.dataset.i18n];
       for (const b of document.querySelectorAll('.lang button')) b.setAttribute('aria-pressed', String(b.dataset.lang === lang));
-      try { localStorage.setItem('ssPartFollowLang', lang); } catch { /* private mode: not remembered */ }
+      try { localStorage.setItem(LANG_KEY, lang); } catch { /* private mode: not remembered */ }
       relabelParts();
       refreshWarn();
     }

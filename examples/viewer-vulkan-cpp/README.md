@@ -1,14 +1,14 @@
 # viewer-vulkan-cpp — Vulkan verification viewer (C API)
 
-> **Status: compiled, never run.** It was written on macOS, where neither the X11
-> nor the Wayland code can be compiled. CI now builds it on Linux for every pull
-> request, but the runner has no display, so it has never opened a window. The
-> first run on a Linux desktop is the check this viewer exists for, and it has
-> not happened yet — so treat everything below as intent, and annotate *What to
-> check on a run* as you work through it.
+> **Status: built in CI, not yet run on a desktop.** It was written on macOS,
+> where neither the X11 nor the Wayland code can be compiled. CI builds it on Linux
+> for every pull request, but the runner has no display, so it has never opened a
+> window; the first run on a Linux desktop is tracked in the
+> [ROADMAP](../../ROADMAP.md). The [verification checklist](#verification-checklist)
+> below is what that run checks.
 
 A Linux host that drives `ssplayer-wgpu` through its **C API** with the Vulkan
-backend forced, so the "③ ffi" face is exercised end to end: this process owns
+backend forced, so the C face (`ssplayer-wgpu-ffi`) is exercised end to end: this process owns
 the window, hands its raw handle to `ss_scene_create`, and calls
 `ss_scene_update` / `ss_scene_render` every frame. No Rust is involved on this
 side of the ABI.
@@ -112,10 +112,10 @@ not implemented here. On X11 that is the XDnD handshake written out by hand, on
 Wayland it is `wl_data_device`, and neither says anything about the C API. Pass a
 directory as the first argument instead.
 
-## What to check on a run
+## Verification checklist
 
-Nothing on this list is recorded as checked. Annotate it as you work through it,
-in order, **and do the whole list once per window path** — they share every line
+Nothing on this list is recorded as checked. Work through it in order, **and do
+the whole list once per window path** — they share every line
 of the playback loop and no line of the window code.
 
 1. `ss_scene_create` returns non-null. That is the raw-handle → surface path

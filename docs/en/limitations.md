@@ -47,7 +47,7 @@ Matching them waits on a definition of their maths rather than on wgpu; the
 [ROADMAP](https://github.com/cri-middleware/SSPlayerForWgpu/blob/main/ROADMAP.md) item says what it needs.
 
 Three more are drawn with a neighbour's state: `Mulalpha` and `Mul2` as `Mul`, and `Screen2` as
-`Screen`. Nobody has compared those three against the editor, so treat them as approximate.
+`Screen`. These three are approximations and have not been checked against the editor.
 
 ## Whole-character alpha applies part by part
 

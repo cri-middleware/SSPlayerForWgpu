@@ -170,8 +170,7 @@ cd examples/viewer-vulkan-cpp  && cmake -B build && cmake --build build && ./bui
 `./scripts/deploy-examples.sh` を先に 1 回だけ実行してください。
 
 !!! note "Linux サンプルはまだ実行されていません"
-    ライブラリは Linux（x86_64 / aarch64）向けにソースからビルドできます。ただし
-    **Vulkan サンプルホスト**はプルリクエストごとに CI でコンパイルされていますが、ランナーにディスプレイが無いため一度もウィンドウを開いたことがなく、X11 / Wayland
+    ライブラリは Linux 向けにソースからビルドでき、CI は x86_64 でビルドしています。**Vulkan サンプルホスト**はプルリクエストごとに CI でコンパイルされていますが、ランナーにディスプレイが無いため一度もウィンドウを開いたことがなく、X11 / Wayland
     どちらの経路も未検証です（[ROADMAP](https://github.com/cri-middleware/SSPlayerForWgpu/blob/main/ROADMAP.md)）。
 
 ## 次に読む

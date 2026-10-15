@@ -1,7 +1,7 @@
 # viewer-metal-cpp — Metal verification viewer (C API)
 
 A macOS/Cocoa host that drives `ssplayer-wgpu` through its **C API** with the
-Metal backend forced, so the "③ ffi" face of the C API
+Metal backend forced, so the C face (`ssplayer-wgpu-ffi`)
 is exercised end to end: Cocoa owns the window and its `CAMetalLayer`, hands the
 layer to `ss_scene_create`, and calls `ss_scene_update` / `ss_scene_render`
 every frame. No Rust is involved on this side of the ABI.

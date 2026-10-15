@@ -231,7 +231,7 @@ flowchart TD
 | パス | 内容 |
 |---|---|
 | [`libs/ssplayer-wgpu/`](./libs/ssplayer-wgpu) | クレート `ssplayer-wgpu` — プレイヤー本体。ただの `rlib` で、`web` と `ffi` のフェイスはフィーチャの下 |
-| [`libs/ssplayer-wgpu-ffi/`](./libs/ssplayer-wgpu-ffi) | クレート `ssplayer-wgpu-ffi` — その 2 つのフェイスを `staticlib` / `cdylib` として出力し（CMake ホストがリンクする C ABI と、`wasm-pack` がビルドする wasm）、`include/ssplayer_wgpu.h` を再生成します。publish しません |
+| [`libs/ssplayer-wgpu-ffi/`](./libs/ssplayer-wgpu-ffi) | クレート `ssplayer-wgpu-ffi` — その 2 つのフェイスを `staticlib` / `cdylib` として出力し（CMake ホストがリンクする C ABI と、`wasm-pack` がビルドする wasm）、`include/ssplayer_wgpu.h` を再生成します。単体では配布せず、成果物はリリース zip と npm パッケージに含まれます |
 | [`libs/ssplayer-bevy/`](./libs/ssplayer-bevy) | クレート `ssplayer-bevy` — Bevy アダプタ。プレイヤーがエンジンに依存しないよう別クレートにしてあります。対象の Bevy ラインはその README を参照 |
 | [`packages/ssplayer-wgpu/`](./packages/ssplayer-wgpu) | npm パッケージ `@spritestudio/ssplayer-wgpu` — wasm と、その上の TypeScript 層 (`.` と `./element`)。この位置から publish します。`wasm/` と `dist/` は gitignore されたビルド生成物 |
 | [`examples/`](./examples) | 環境ごとに 1 ホスト。[サンプル](#-サンプル)を参照 |

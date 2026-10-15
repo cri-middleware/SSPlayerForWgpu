@@ -11,6 +11,12 @@
     h2 { font-size: 1.05rem; margin-top: 2.5rem; }
     nav { float: right; font-size: 0.9em; }
     nav a { margin-left: 1em; }
+
+    /* Language switch: two buttons, the active one filled. */
+    .lang { display: inline-flex; gap: 0; border: 1px solid color-mix(in srgb, currentColor 30%, transparent); border-radius: 6px; overflow: hidden; }
+    .lang button { border: 0; background: transparent; cursor: pointer; padding: 0.2em 0.7em; }
+    .lang button[aria-pressed="true"] { background: color-mix(in srgb, currentColor 18%, transparent); font-weight: 600; }
+
     .cols { display: flex; gap: 1.5rem; flex-wrap: wrap; align-items: flex-start; margin-top: 1rem; }
     .cols > .stage { flex: 1 1 360px; }
     .panel { flex: 0 0 260px; }
@@ -32,13 +38,17 @@
   </style>
 </head>
 <body>
-  <nav><a href="index.html">← デモ index</a><a href="multi.html">1 ページに複数 →</a></nav>
+  <nav>
+    <span class="lang" role="group" aria-label="Language">
+      <button type="button" data-lang="ja">日本語</button>
+      <button type="button" data-lang="en">English</button>
+    </span>
+    <a href="index.html" data-i18n="navIndex">← デモ index</a><a href="multi.html" data-i18n="navMulti">1 ページに複数 →</a>
+  </nav>
   <h1><code>&lt;ss-player-webgpu&gt;</code> — Web Component</h1>
 
-  <p>1 要素 = 1 canvas = 1 体。<strong>マークアップに置くだけ</strong>で再生が始まります。
-     内部ではページ共有の <code>SsContextWeb</code>（device・パイプライン・アトラス）から
-     surface を 1 枚もらっているだけなので、この要素を 10 個置いても <code>GPUDevice</code> は 1 つです
-     （それを実測しているのが <a href="multi.html">1 ページに複数</a>）。</p>
+  <p data-i18n="intro">1 要素 = 1 canvas = 1 体。<strong>マークアップに置くだけ</strong>で再生が始まります。内部ではページ共有の <code>SsContextWeb</code>（device・パイプライン・アトラス）から
+     surface を 1 枚もらっているだけなので、この要素を 10 個置いても <code>GPUDevice</code> は 1 つです（それを実測しているのが <a href="multi.html">1 ページに複数</a>）。</p>
 
   <div class="cols">
     <div class="stage">
@@ -54,10 +64,10 @@
       <label for="pick">ssab</label>
       <select id="pick"></select>
 
-      <label for="anim">アニメーション</label>
+      <label for="anim" data-i18n="labelAnim">アニメーション</label>
       <select id="anim"></select>
 
-      <label>トランスポート</label>
+      <label data-i18n="labelTransport">トランスポート</label>
       <div class="row">
         <button id="play" type="button">play</button>
         <button id="pause" type="button">pause</button>
@@ -66,64 +76,62 @@
         <button id="resume" type="button">resume</button>
         <button id="stop" type="button">stop</button>
       </div>
-      <p class="hint"><code>play()</code> は<strong>頭出し</strong>です。<code>pause()</code> の続きから
-         再生するのは <code>resume()</code> のほう。</p>
+      <p class="hint" data-i18n="hintPlay"><code>play()</code> は<strong>頭出し</strong>です。<code>pause()</code> の続きから再生するのは <code>resume()</code> のほう。</p>
 
-      <label for="speed">再生速度 <span id="spd">1.0</span>×</label>
+      <label for="speed"><span data-i18n="labelSpeed">再生速度</span> <span id="spd">1.0</span>×</label>
       <input id="speed" type="range" min="0" max="3" step="0.1" value="1" />
 
       <label for="fit">fit</label>
       <select id="fit">
-        <option value="contain">contain（既定・箱に収める）</option>
-        <option value="cover">cover（箱を覆う）</option>
-        <option value="none">none（1:1、原点を中央に）</option>
+        <option value="contain" data-i18n="optContain">contain（既定・箱に収める）</option>
+        <option value="cover" data-i18n="optCover">cover（箱を覆う）</option>
+        <option value="none" data-i18n="optNone">none（1:1、原点を中央に）</option>
       </select>
 
       <label for="align">align</label>
       <select id="align">
-        <option value="center">center（既定）</option>
+        <option value="center" data-i18n="optCenter">center（既定）</option>
         <option value="bottom">bottom</option>
         <option value="top">top</option>
       </select>
 
-      <label for="loops">ループ回数</label>
+      <label for="loops" data-i18n="labelLoops">ループ回数</label>
       <select id="loops">
-        <option value="-1">∞（既定）</option>
-        <option value="1">1 回</option>
-        <option value="3">3 回</option>
+        <option value="-1" data-i18n="optLoopForever">∞（既定）</option>
+        <option value="1" data-i18n="optLoopOnce">1 回</option>
+        <option value="3" data-i18n="optLoopThree">3 回</option>
       </select>
 
       <label><input type="checkbox" id="gate" checked style="width:auto" /> pause-when-hidden</label>
-      <p class="hint">画面外・バックグラウンドで rAF を止めます（既定 on）。
-         切り替えは属性を書き換えるだけ。</p>
+      <p class="hint" data-i18n="hintGate">画面外・バックグラウンドで rAF を止めます（既定 on）。切り替えは属性を書き換えるだけ。</p>
     </div>
   </div>
 
-  <h2>いま画面に置かれているもの</h2>
+  <h2 data-i18n="h2Snippet">いま画面に置かれているもの</h2>
   <div class="snip-head">
-    <p class="hint">パネルの操作を反映した、そのままコピーできるマークアップです。</p>
+    <p class="hint" data-i18n="hintSnippet">パネルの操作を反映した、そのままコピーできるマークアップです。</p>
     <button id="copy" type="button">copy</button>
   </div>
   <pre id="snippet"></pre>
 
-  <h2>属性を書き換えるとそのまま反映されます</h2>
-  <p><code>src</code>・<code>pack</code>・<code>animation</code>・<code>speed-scale</code>・<code>fit</code>・<code>align</code>・<code>flip-x</code>・<code>flip-y</code> は、置いた後に書き換えても効きます。上のパネルはどれも <code>setAttribute</code> を 1 行呼んでいるだけです。<code>src</code> を変えたときは、読み込みが済むと <code>load</code> イベントが届きます。</p>
-  <pre>el.setAttribute('src', 'assets/Mesh.ssab');
+  <h2 data-i18n="h2Attrs">属性を書き換えるとそのまま反映されます</h2>
+  <p data-i18n="attrs"><code>src</code>・<code>pack</code>・<code>animation</code>・<code>speed-scale</code>・<code>fit</code>・<code>align</code>・<code>flip-x</code>・<code>flip-y</code> は、置いた後に書き換えても効きます。上のパネルはどれも <code>setAttribute</code> を 1 行呼んでいるだけです。<code>src</code> を変えたときは、読み込みが済むと <code>load</code> イベントが届きます。</p>
+  <pre data-i18n="preAttrs">el.setAttribute('src', 'assets/Mesh.ssab');
 el.addEventListener('load', () => console.log(el.player.animationNames()));
 el.setAttribute('animation', 'walk');   // autoplay があれば頭から再生</pre>
-  <p class="hint">スクリプトから切り替えるなら <code>element.loadSrc(src, pack?, animation?, read?)</code> もあります。戻り値はアニメーション名の配列で、連続で呼んでも要素側で直列化され、最後に呼んだものが画面に残ります。</p>
+  <p class="hint" data-i18n="hintLoadSrc">スクリプトから切り替えるなら <code>element.loadSrc(src, pack?, animation?, read?)</code> もあります。戻り値はアニメーション名の配列で、連続で呼んでも要素側で直列化され、最後に呼んだものが画面に残ります。</p>
 
-  <h2>イベント</h2>
-  <p>再生が起こしたことは DOM イベントとして届きます。<code>animationstarted</code>・<code>animationfinished</code>・<code>animationlooped</code> と、タイムラインの <code>userdata</code>・<code>signal</code>・<code>audio</code>（中身は <code>event.detail</code>）です。上の「イベント」の行は、この 6 つを表示しています。</p>
+  <h2 data-i18n="h2Events">イベント</h2>
+  <p data-i18n="events">再生が起こしたことは DOM イベントとして届きます。<code>animationstarted</code>・<code>animationfinished</code>・<code>animationlooped</code> と、タイムラインの <code>userdata</code>・<code>signal</code>・<code>audio</code>（中身は <code>event.detail</code>）です。上の「イベント」の行は、この 6 つを表示しています。</p>
   <pre>el.addEventListener('animationfinished', () => showNextButton());
 el.addEventListener('userdata', (e) => console.log(e.detail.text));</pre>
 
-  <h2>プレイヤー API にはここから届きます</h2>
-  <pre>el.player    // SsPlayerWeb — トランスポート、パーツ上書き、events()
+  <h2 data-i18n="h2Api">プレイヤー API にはここから届きます</h2>
+  <pre data-i18n="preApi">el.player    // SsPlayerWeb — トランスポート、パーツ上書き、events()
 el.surface   // SsSurfaceWeb — stats()、resize()
 el.ctx       // SsContextWeb — ページ共有の device</pre>
 
-  <p class="hint">WebGPU 対応ブラウザ（Chrome / Edge 113+、Safari 26+、Firefox 141+）と
+  <p class="hint" data-i18n="serve">WebGPU 対応ブラウザ（Chrome / Edge 113+、Safari 26+、Firefox 141+）と
      <code>http://localhost</code> 配信が必要です。</p>
 
   <script type="module">
@@ -134,19 +142,114 @@ el.ctx       // SsContextWeb — ページ共有の device</pre>
     // only wants the context API never carries it.
     defineSsPlayerWebGPUElement();
 
+    // --- i18n ------------------------------------------------------------------
+    // The page is written in Japanese; each [data-i18n] element's markup is read
+    // back as the ja text, and the switch swaps innerHTML. Values with markup are
+    // inserted as innerHTML — they are static, trusted text. The choice is shared
+    // by every demo page (LANG_KEY), so it carries over as you move between them.
+    const LANG_KEY = 'ssDemoLang';
+    const JA = {};
+    for (const el of document.querySelectorAll('[data-i18n]')) JA[el.dataset.i18n] = el.innerHTML;
+    const I18N = {
+      ja: {
+        ...JA,
+        eventsLine: (seen) => `イベント: ${seen.length ? seen.join(' ← ') : '—'}`,
+        starting: '…起動中',
+      },
+      en: {
+        navIndex: '← demo index',
+        navMulti: 'Several on one page →',
+        intro:
+          'One element = one canvas = one character. <strong>Put it in the markup</strong> and it plays. ' +
+          'Inside, it only takes one surface from the page-wide <code>SsContextWeb</code> (device, pipelines, ' +
+          'atlases), so ten of these elements still make one <code>GPUDevice</code> ' +
+          '(<a href="multi.html">Several on one page</a> measures that).',
+        labelAnim: 'Animation',
+        labelTransport: 'Transport',
+        hintPlay:
+          '<code>play()</code> <strong>starts from the head</strong>. To continue after a <code>pause()</code>, ' +
+          'call <code>resume()</code>.',
+        labelSpeed: 'Speed',
+        optContain: 'contain (default: fit inside the box)',
+        optCover: 'cover (cover the box)',
+        optNone: 'none (1:1, origin at the centre)',
+        optCenter: 'center (default)',
+        labelLoops: 'Loop count',
+        optLoopForever: '∞ (default)',
+        optLoopOnce: 'once',
+        optLoopThree: '3 times',
+        hintGate:
+          'Stops rAF while off screen or in a background tab (on by default). Switching it only rewrites ' +
+          'the attribute.',
+        h2Snippet: 'What is on screen now',
+        hintSnippet: 'The markup for what the panel has set, ready to copy.',
+        h2Attrs: 'Rewriting an attribute takes effect at once',
+        attrs:
+          '<code>src</code>, <code>pack</code>, <code>animation</code>, <code>speed-scale</code>, ' +
+          '<code>fit</code>, <code>align</code>, <code>flip-x</code> and <code>flip-y</code> take effect when ' +
+          'rewritten after the element is placed. Every control in the panel above is one ' +
+          '<code>setAttribute</code> call. When <code>src</code> changes, a <code>load</code> event arrives ' +
+          'once the pack has loaded.',
+        preAttrs:
+          "el.setAttribute('src', 'assets/Mesh.ssab');\n" +
+          "el.addEventListener('load', () => console.log(el.player.animationNames()));\n" +
+          "el.setAttribute('animation', 'walk');   // with autoplay, plays from the head",
+        hintLoadSrc:
+          'From a script there is also <code>element.loadSrc(src, pack?, animation?, read?)</code>. It ' +
+          'resolves to the animation names; calls in quick succession are serialised by the element, and ' +
+          'the last one called is what stays on screen.',
+        h2Events: 'Events',
+        events:
+          'What playback does arrives as DOM events: <code>animationstarted</code>, ' +
+          '<code>animationfinished</code> and <code>animationlooped</code>, and the timeline’s ' +
+          '<code>userdata</code>, <code>signal</code> and <code>audio</code> (the payload is in ' +
+          '<code>event.detail</code>). The “Events” line above shows these six.',
+        h2Api: 'Where the player API is reached',
+        preApi:
+          'el.player    // SsPlayerWeb — transport, part overrides, events()\n' +
+          'el.surface   // SsSurfaceWeb — stats(), resize()\n' +
+          'el.ctx       // SsContextWeb — the page-wide device',
+        serve:
+          'Needs a WebGPU browser (Chrome / Edge 113+, Safari 26+, Firefox 141+) served over ' +
+          '<code>http://localhost</code>.',
+        eventsLine: (seen) => `Events: ${seen.length ? seen.join(' ← ') : '—'}`,
+        starting: '…starting',
+      },
+    };
+
+    // Remembered choice wins; otherwise follow the browser's language, default ja.
+    let stored = null;
+    try { stored = localStorage.getItem(LANG_KEY); } catch { /* private mode */ }
+    let lang = (stored === 'ja' || stored === 'en')
+      ? stored
+      : ((navigator.language || 'ja').toLowerCase().startsWith('ja') ? 'ja' : 'en');
+
+    function applyLang(next) {
+      lang = next;
+      const t = I18N[lang];
+      document.documentElement.lang = lang;
+      for (const el of document.querySelectorAll('[data-i18n]')) el.innerHTML = t[el.dataset.i18n];
+      for (const b of document.querySelectorAll('.lang button')) b.setAttribute('aria-pressed', String(b.dataset.lang === lang));
+      try { localStorage.setItem(LANG_KEY, lang); } catch { /* private mode: not remembered */ }
+      for (const o of pick.options) o.textContent = PACKS.find(([url]) => url === o.value)[lang === 'ja' ? 1 : 2];
+      events.textContent = t.eventsLine(seen);
+    }
+    for (const b of document.querySelectorAll('.lang button')) b.addEventListener('click', () => applyLang(b.dataset.lang));
+
+    // [url, ja label, en label]
     const PACKS = [
-      ['assets/Ringo/Ringo.ssab', 'Ringo（キャラクター）'],
-      ['assets/Basic.ssab', 'Basic'],
-      ['assets/Mesh.ssab', 'Mesh（ボーン + メッシュ）'],
-      ['assets/Mask.ssab', 'Mask（マスク）'],
-      ['assets/Effect.ssab', 'Effect（パーティクル）'],
-      ['assets/Shape.ssab', 'Shape'],
-      ['assets/PartsColor.ssab', 'PartsColor'],
-      ['assets/BlendMode.ssab', 'BlendMode'],
-      ['assets/Instance.ssab', 'Instance（兄弟 ssab を参照）'],
-      ['assets/TextureChange.ssab', 'TextureChange（テクスチャ差し替え）'],
-      ['assets_emb/Ringo/Ringo.ssab', 'Ringo — embedded'],
-      ['assets_emb/Basic.ssab', 'Basic — embedded'],
+      ['assets/Ringo/Ringo.ssab', 'Ringo（キャラクター）', 'Ringo (character)'],
+      ['assets/Basic.ssab', 'Basic', 'Basic'],
+      ['assets/Mesh.ssab', 'Mesh（ボーン + メッシュ）', 'Mesh (bones + mesh)'],
+      ['assets/Mask.ssab', 'Mask（マスク）', 'Mask'],
+      ['assets/Effect.ssab', 'Effect（パーティクル）', 'Effect (particles)'],
+      ['assets/Shape.ssab', 'Shape', 'Shape'],
+      ['assets/PartsColor.ssab', 'PartsColor', 'PartsColor'],
+      ['assets/BlendMode.ssab', 'BlendMode', 'BlendMode'],
+      ['assets/Instance.ssab', 'Instance（兄弟 ssab を参照）', 'Instance (plays a sibling ssab)'],
+      ['assets/TextureChange.ssab', 'TextureChange（テクスチャ差し替え）', 'TextureChange (texture swap)'],
+      ['assets_emb/Ringo/Ringo.ssab', 'Ringo — embedded', 'Ringo — embedded'],
+      ['assets_emb/Basic.ssab', 'Basic — embedded', 'Basic — embedded'],
     ];
 
     const el = document.getElementById('player');
@@ -164,7 +267,7 @@ el.ctx       // SsContextWeb — ページ共有の device</pre>
 
     for (const [url, label] of PACKS) {
       const o = document.createElement('option');
-      o.value = url; o.textContent = label;
+      o.value = url; o.textContent = label;   // relabelled by applyLang
       pick.appendChild(o);
     }
     pick.value = el.getAttribute('src');
@@ -228,9 +331,11 @@ el.ctx       // SsContextWeb — ページ共有の device</pre>
       el.addEventListener(type, () => {
         seen.unshift(type);
         seen.length = Math.min(seen.length, 4);
-        events.textContent = `イベント: ${seen.join(' ← ')}`;
+        events.textContent = I18N[lang].eventsLine(seen);
       });
     }
+
+    applyLang(lang);   // the pack labels and the events line exist from here on
 
     document.getElementById('play').addEventListener('click', () => el.player?.play());
     document.getElementById('pause').addEventListener('click', () => el.player?.pause());
@@ -261,7 +366,7 @@ el.ctx       // SsContextWeb — ページ共有の device</pre>
     // status line does not need to run at 60 Hz.
     setInterval(() => {
       const p = el.player;
-      if (!p) { status.textContent = '…起動中'; return; }
+      if (!p) { status.textContent = I18N[lang].starting; return; }
       const state = p.isPausing() ? 'paused' : p.isPlaying() ? 'playing' : 'stopped';
       status.textContent =
         `${state}  frame ${p.frameNo().toFixed(1)} / ${p.totalFrames()}  ` +

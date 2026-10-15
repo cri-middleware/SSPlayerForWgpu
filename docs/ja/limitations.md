@@ -34,7 +34,7 @@ C からエンジン自身の描画と合成するにはオフスクリーン描
 
 再現できるかは wgpu ではなく計算式の定義次第です。何が要るかは [ROADMAP](https://github.com/cri-middleware/SSPlayerForWgpu/blob/main/ROADMAP.md) の項目にあります。
 
-ほかの 3 つは近いモードのステートを借りて描かれます。`Mulalpha` と `Mul2` は `Mul` として、`Screen2` は `Screen` として描かれます。この 3 つをエディタと比べた人はまだいないので、近似として扱ってください。
+ほかの 3 つは近いモードのステートを借りて描かれます。`Mulalpha` と `Mul2` は `Mul` として、`Screen2` は `Screen` として描かれます。この 3 つは近似で、エディタとの一致は確認していません。
 
 ## キャラクター全体のアルファはパーツごとに掛かります { #whole-character-alpha-applies-part-by-part }
 

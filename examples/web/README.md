@@ -15,7 +15,7 @@ are the ones an `npm i` gets, not a second copy that can drift.
 - `rustup target add wasm32-unknown-unknown`
 - [`wasm-pack`](https://rustwasm.github.io/wasm-pack/)
 - `pnpm` (`corepack enable`) — the package's js layer is TypeScript, built by tsdown
-- A WebGPU-capable browser (Chrome / Edge 113+, or Safari Technology Preview)
+- A WebGPU-capable browser (Chrome / Edge 113+, Safari 26+, or Firefox 141+)
 
 ## Build & run
 
@@ -54,14 +54,16 @@ the package when the SDK moves, not when the Rust does.
 ## The four pages
 
 Each is self-contained static HTML — no build step, no bundler, one inline module
-script — and all four share the same staged package and the same data.
+script — and all four share the same staged package and the same data. Each
+switches its prose between Japanese and English, and the choice carries over
+between them.
 
 | Page | What it is for |
 |---|---|
 | [`index.html`](./index.html) | The two shapes of the API side by side: one `<ss-player-webgpu>` element, and one canvas driven directly with several players on it, printing `SceneStats`. Both export modes are selectable, which is what exercises the fetch path as well as the embedded one. A folder dropped on the page joins the element's pack list, played through a `read` in place of `fetch`, and what it lacked is listed from `missingAssets()`. |
 | [`element.html`](./element.html) | The Web Component on its own: the declarative markup, a panel that sets its attributes live (`src`, `animation`, `speed-scale`, `fit`, `align`), the six events as they arrive, `element.player` for transport and loop count, and a copy-pasteable snippet that tracks the panel. |
 | [`multi.html`](./multi.html) | Many elements on one page, in article flow — block, inline, overlapped with HTML above and below, and styled with `border-radius` / `filter`. The HUD counts elements, canvases and **distinct `SsContextWeb` objects**, so "one device however many elements" is measured rather than claimed; per-animation frame counters make `pause-when-hidden` visible. |
-| [`part-follow.html`](./part-follow.html) | Following a part from the host, since the player has no follow object of its own: `partTransform(name)` read back every frame, and a DOM marker over the canvas placed at it. Skinned (bone-bound) mesh parts are marked ⚠, because their own transform stays at the setup pose while the bones draw the vertices. Its prose switches between Japanese and English. |
+| [`part-follow.html`](./part-follow.html) | Following a part from the host, since the player has no follow object of its own: `partTransform(name)` read back every frame, and a DOM marker over the canvas placed at it. Skinned (bone-bound) mesh parts are marked ⚠, because their own transform stays at the setup pose while the bones draw the vertices. |
 
 The element fits the animation's authored canvas into its box by itself, placed by
 the pivot the artist set, so Ringo, who stands on his origin, lands inside the box
@@ -188,11 +190,10 @@ would draw the first one's atlas.
 
 **Ask for the context once.** A second `SsContextWeb.create()` builds a second
 `GPUDevice`, and nothing is shared across a device: the same character on two
-canvases would compile its pipelines twice and upload its atlas twice. That was
-the previous shape of this API and P7 removed it.
+canvases would compile its pipelines twice and upload its atlas twice.
 
-Selecting an animation and starting it are separate calls, matching the
-redesigned `ssplayer-webgl`; the old single `play(name)` is not carried over.
+Selecting an animation and starting it are separate calls, matching
+`ssplayer-webgl`: `setAnimation(name)`, then `play()`.
 
 ## Notes
 
@@ -212,8 +213,9 @@ redesigned `ssplayer-webgl`; the old single `play(name)` is not carried over.
 - **`surface.stats()`** returns the frame counters (players / prims / drawCalls /
   mergeableDraws / redundantTextureBinds / uploadedBytes, plus `gpuPassTimeNs`
   when the browser grants `timestamp-query`). The throughput trade-offs in
-  [`ROADMAP.md`](../../ROADMAP.md) were measured on native only — one WebGPU
-  command is one JS call, so this is how to take the same numbers in a browser.
+  [`ROADMAP.md`](../../ROADMAP.md) were measured on native and in Chrome — one
+  WebGPU command is one JS call, so this is how to take the same numbers in a
+  browser.
 - Measure size from a `build=release` build only, and with `wasm-opt` applied.
   The web face deliberately leaves out the bundled `image` crate and decodes
   through `createImageBitmap` instead, which is a large share of the payload.

@@ -1,13 +1,12 @@
 # viewer-dx12-cpp — DX12 verification viewer (C API)
 
-> **Status: run on Windows hardware, and it works.** It was ported from
+> **Status: run on Windows hardware, and it draws.** It was ported from
 > `viewer-metal-cpp` on macOS, where neither the Win32 code nor the DX12 backend
-> can be compiled or executed, so the first real run was the check this viewer
-> exists for — and it passed. What that covered beyond "it draws" is not recorded
-> here yet; the list below is still the one to work through, and to annotate.
+> can be compiled or executed. Beyond that first run, the
+> [verification checklist](#verification-checklist) below is not recorded as checked.
 
 A Win32 host that drives `ssplayer-wgpu` through its **C API** with the DX12
-backend forced, so the "③ ffi" face of the C API is
+backend forced, so the C face (`ssplayer-wgpu-ffi`) is
 exercised end to end: Win32 owns the window, hands its `HWND` to
 `ss_scene_create`, and calls `ss_scene_update` / `ss_scene_render` every frame.
 No Rust is involved on this side of the ABI.
@@ -80,10 +79,10 @@ printed to the console the viewer was launched from, so run it from a terminal.
 | + / - | add / remove a player (1–6, all in the one scene) |
 | Escape | quit |
 
-## What to check on a run
+## Verification checklist
 
 The first run confirmed that it draws; the rest of this list is not recorded as
-checked yet. Annotate it as you work through it, in order:
+checked. Work through it in order:
 
 1. `ss_scene_create` returns non-null — that is the raw-handle → surface path and
    the DX12 adapter request.

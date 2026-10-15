@@ -1,6 +1,6 @@
 // Vulkan (Linux) verification viewer for the ssplayer-wgpu C API.
 //
-// This is the "③ ffi" face end to end: the process owns the window — an X11 one
+// This is the C face end to end: the process owns the window — an X11 one
 // through Xlib, or a Wayland one through xdg-shell — hands its raw handle to
 // `ss_scene_create`, and drives the scene with `ss_scene_update` /
 // `ss_scene_render`. No Rust in sight. The scene's own host (host.rs) builds the

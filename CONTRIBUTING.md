@@ -302,7 +302,29 @@ cargo test -p ssplayer-wgpu --features ffi --lib
 
 `clippy --fix` を使うときは、先に自分の編集を `git add` してから `--allow-staged` を付けてください。`--allow-dirty` は使いません。clippy の修正が unstaged に残るので、自分の編集と分けてレビューできます。
 
-ビューア・プレビュー・npm パッケージ・ゴールデンダンプ・性能計測を含むマトリクスの残りは、英語版の [Verification](#verification) にあります。
+残りの確認項目は次のとおりです。
+
+| 確認項目 | コマンド |
+|---|---|
+| SDK の取得 | `git submodule update --init` |
+| フィクスチャの生成（初回と、SDK を更新した後） | `./scripts/deploy-examples.sh` — テストは `assets/` を読み、その `.ssab` の形式は SDK に従います |
+| このホスト向けのライブラリのビルド | `./scripts/build.sh` |
+| clone したての状態からサンプルを動かす | `./scripts/run-example.sh`（`example=viewer` / `viewer-bevy` / `overall-bevy` / `web`）— 足りないものと、SDK の更新で古くなったものだけを変換・ビルドします |
+| 最小の Rust ホスト | `cargo run -p ssplayer-wgpu-hello` |
+| ネイティブビューア | `cargo run -p ssplayer-wgpu-viewer` |
+| Metal C++ ビューア（macOS） | `cd examples/viewer-metal-cpp && cmake -B build && cmake --build build && ./build/ssviewer-metal` |
+| DX12 C++ ビューア（Windows） | `cd examples\viewer-dx12-cpp; cmake -B build; cmake --build build --config Release; .\build\Release\ssviewer-dx12.exe` |
+| Vulkan C++ ビューア（Linux） | `cd examples/viewer-vulkan-cpp && cmake -B build && cmake --build build && ./build/ssviewer-vulkan` — `--x11` / `--wayland` でウィンドウの経路を選びます |
+| プレビューシェル | `./scripts/build-preview.sh` の後、`bin/ssplayer-preview.html` をサーバ経由ではなくファイルとして開きます |
+| パック入りのプレビュー | `cargo run -p ssplayer-preview-gen -- pack=assets/Ringo/Ringo.ssab open=yes` |
+| npm パッケージ | `./scripts/build.sh platform=web` — `pnpm`（`corepack enable`）と `wasm-pack` が必要です |
+| js レイヤの型チェック | `cd packages/ssplayer-wgpu && pnpm run typecheck`（`platform=web` のビルドの後） |
+| Web デモ | `./scripts/run-web.sh`。Rust を変更した後は `./scripts/build.sh platform=web && (cd examples/web && python3 -m http.server)` |
+| サードパーティ表記が最新か | `./scripts/generate-licenses.sh` の後、`git diff --exit-code THIRD_PARTY_NOTICES.md` |
+
+**GPU へのジオメトリの渡り方を変える変更では、その前後でゴールデンダンプを取ってください。** `tests/golden.rs::golden_corpus` は `#[ignore]` 付きのテストで、フィクスチャ・アニメーション・フレーム・ステンシルのすべての組み合わせを描画します。`SS_GOLDEN_DIR=/tmp/before cargo test --test golden -- --ignored` を実行し、続いて `SS_GOLDEN_DIR=/tmp/after SS_GOLDEN_COMPARE=/tmp/before` を付けて再実行します。基準は GPU ごとに異なるため、同じマシンで取ったものでなければなりません。これは変更の前後を比べる道具であって、チェックインされたゴールデンセットではありません。比較は `/tmp/after/summary.md` を書き出し、変化した画像ごとに変更前・変更後・差分の 3 枚組を `/tmp/after/diff/` に書き出します。CI の golden ジョブは、すべてのプルリクエストで同じことを lavapipe 上でベースの描画に対して行い、差分が 1 つでもあれば、意図した差分であっても失敗します。意図した差分のときは、アップロードされる 3 枚組（`golden-diff`）が正しい理由を説明に書いてください。
+
+**性能に関わる変更では前後で計測し、その間は実際のフレームループを回してください。** `SSScene::stats()` は、プリミティブ数、ドローコール数、アップロードしたバイト数、描画リストのうちマージできる割合、そしてデバイスが `Features::TIMESTAMP_QUERY` を持つ場合は GPU パスの時間を報告します。どちらのビューアもこれを表示します。`tests/scale.rs` は `update` とレンダーパスを交互に実行します。別々のループで計測すると、フレームをまたいでキャッシュするものが実際より速く見えるからです。GPU 時間は設計上 1〜2 フレーム遅れて読み戻されます。最新の値にするためにストールを足さないでください。
 
 ### ドキュメント
 

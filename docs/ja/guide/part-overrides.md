@@ -302,6 +302,8 @@ function frame(dt) {
 
 `setTransform` を一度も呼ばなければ、プレイヤは中央・等倍なので `wx = m[4]`, `wy = m[5]` に単純化されます。
 
+<a href="../../demo/part-follow.html" target="_blank" rel="noreferrer">part-follow デモ</a>が Ringo でまさにこれを動かします: パーツを選ぶとマーカーが追従し、skinned パーツには印が付きます。
+
 ### 自前の描画パスで — native / C
 
 投影とビューポートは既にあなたが持っているので、surface 固有の処理はありません: 投影 × プレイヤのルート変換
@@ -311,8 +313,6 @@ function frame(dt) {
 ### Bevy
 
 未提供です。Bevy アダプタは配置・再生・イベントは露出しますが、パーツ単位の姿勢は出していないため、現状組み込みのパーツ追従経路はありません。
-
-**part-follow デモ**（`examples/web/part-follow.html`）が Ringo でまさにこれを動かします: パーツを選ぶとマーカーが追従し、skinned パーツには印が付きます。
 
 ## 次に読む
 

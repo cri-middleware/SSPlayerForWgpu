@@ -54,74 +54,66 @@
       border-radius: 8px; padding: 0.7em 1em; backdrop-filter: blur(6px); min-width: 190px; }
     #hud b { font-size: 1.15em; }
     #hud a { font-family: system-ui, sans-serif; }
+    .lang { display: inline-flex; gap: 0; border: 1px solid color-mix(in srgb, currentColor 30%, transparent); border-radius: 6px; overflow: hidden; margin-bottom: 0.4em; }
+    .lang button { font: inherit; border: 0; background: transparent; cursor: pointer; padding: 0.1em 0.7em; }
+    .lang button[aria-pressed="true"] { background: color-mix(in srgb, currentColor 18%, transparent); font-weight: 600; }
     .badge { display: block; text-align: center; font: 11px ui-monospace, monospace; opacity: 0.65; margin-top: 0.3em; }
     .badge.stopped { opacity: 1; color: #d08a2a; }
   </style>
 </head>
 <body>
   <div id="hud">
-    要素数: <b id="count">0</b><br>
-    canvas（surface）: <b id="surfaces">0</b><br>
+    <span class="lang" role="group" aria-label="Language">
+      <button type="button" data-lang="ja">日本語</button><button type="button" data-lang="en">English</button>
+    </span><br>
+    <span data-i18n="hudCount">要素数</span>: <b id="count">0</b><br>
+    <span data-i18n="hudSurfaces">canvas（surface）</span>: <b id="surfaces">0</b><br>
     GPUDevice: <b id="devices">–</b><br>
-    いま進んでいる: <b id="active">0</b><br>
-    <a href="index.html">← デモ index</a> / <a href="element.html">要素の使い方</a>
+    <span data-i18n="hudActive">いま進んでいる</span>: <b id="active">0</b><br>
+    <a href="index.html" data-i18n="navIndex">← デモ index</a> / <a href="element.html" data-i18n="navElement">要素の使い方</a>
   </div>
 
   <article>
-    <h1>1 ページに複数 —<br>device は 1 つ、canvas は要素ごと</h1>
-    <p class="lede">
-      このページのアニメーションはすべて <code>&lt;ss-player-webgpu&gt;</code> です。
-      要素はそれぞれ自分の <code>&lt;canvas&gt;</code> を持ちますが、
-      <strong>WebGPU の device・パイプライン・アトラスはページで 1 組</strong>。
-      右上の HUD の GPUDevice は、全要素の <code>el.ctx</code> が同一オブジェクトか数えた実測値です。
-    </p>
+    <h1 data-i18n="h1">1 ページに複数 —<br>device は 1 つ、canvas は要素ごと</h1>
+    <p class="lede" data-i18n="lede">このページのアニメーションはすべて <code>&lt;ss-player-webgpu&gt;</code> です。要素はそれぞれ自分の <code>&lt;canvas&gt;</code> を持ちますが、<strong>WebGPU の device・パイプライン・アトラスはページで 1 組</strong>。右上の HUD の GPUDevice は、全要素の <code>el.ctx</code> が同一オブジェクトか数えた実測値です。</p>
 
     <figure>
       <ss-player-webgpu class="checker" src="assets/Ringo/Ringo.ssab" autoplay></ss-player-webgpu>
-      <figcaption>ふつうのブロック要素。ページがサイズを決め、要素がそこを canvas で埋めます。</figcaption>
+      <figcaption data-i18n="figBlock">ふつうのブロック要素。ページがサイズを決め、要素がそこを canvas で埋めます。</figcaption>
     </figure>
 
     <pre>&lt;ss-player-webgpu src="Ringo.ssab" autoplay&gt;&lt;/ss-player-webgpu&gt;</pre>
-    <p class="hint">ページ側で書くのはこれだけです。<code>defineSsPlayerWebGPUElement()</code> を 1 回呼べば、
-       何個置いても最初の 1 個が作った device を全員で共有します。</p>
+    <p class="hint" data-i18n="hintShare">ページ側で書くのはこれだけです。<code>defineSsPlayerWebGPUElement()</code> を 1 回呼べば、何個置いても最初の 1 個が作った device を全員で共有します。</p>
 
-    <h2>文中にも置けます</h2>
+    <h2 data-i18n="h2Inline">文中にも置けます</h2>
+    <!-- The paragraph holds a player, so only the text on either side is swapped. -->
     <p>
-      要素は行の中にも収まります <ss-player-webgpu class="inline" src="assets/Ringo/Ringo.ssab" autoplay></ss-player-webgpu>
-      — <code>display: inline-block</code> にして高さを与えるだけで、行送りの一部として扱われます。
-      canvas は要素の CSS ボックスに追従するので、ウィンドウ幅を変えれば解像度も付いてきます。
+      <span data-i18n="inline1">要素は行の中にも収まります</span> <ss-player-webgpu class="inline" src="assets/Ringo/Ringo.ssab" autoplay></ss-player-webgpu>
+      <span data-i18n="inline2">— <code>display: inline-block</code> にして高さを与えるだけで、行送りの一部として扱われます。canvas は要素の CSS ボックスに追従するので、ウィンドウ幅を変えれば解像度も付いてきます。</span>
     </p>
 
-    <h2>他の要素と重ねられます</h2>
-    <p>
-      canvas を要素ごとに持つ設計のいちばんの見返りがこれです。アニメーションはページの合成に
-      普通に参加するので、<strong>上に文字を載せる／下に敷く／間に別の要素を挟む</strong>が
-      そのまま z-index で書けます。
-    </p>
+    <h2 data-i18n="h2Layer">他の要素と重ねられます</h2>
+    <p data-i18n="layer">canvas を要素ごとに持つ設計のいちばんの見返りがこれです。アニメーションはページの合成に普通に参加するので、<strong>上に文字を載せる／下に敷く／間に別の要素を挟む</strong>がそのまま z-index で書けます。</p>
 
     <div class="card">
-      <span class="badge">上に HTML</span>
+      <span class="badge" data-i18n="cardBadge">上に HTML</span>
       <ss-player-webgpu src="assets/Ringo/Ringo.ssab" autoplay></ss-player-webgpu>
       <div class="copy">
-        <h3>テキストはアニメーションの上</h3>
-        <p>グラデーションの帯も、見出しも、ただの子要素です。</p>
+        <h3 data-i18n="cardTitle">テキストはアニメーションの上</h3>
+        <p data-i18n="cardText">グラデーションの帯も、見出しも、ただの子要素です。</p>
       </div>
     </div>
 
     <div class="behind" style="margin-top:2em">
       <ss-player-webgpu class="checker" src="assets/Effect.ssab" autoplay></ss-player-webgpu>
       <div class="text">
-        <h3 style="margin-top:0">下に敷く</h3>
-        <p style="margin-bottom:0">こちらは逆に、アニメーションを <code>position:absolute</code> で背面に置いて
-           本文を上に流したもの。<code>opacity</code> も効いています。</p>
+        <h3 style="margin-top:0" data-i18n="behindTitle">下に敷く</h3>
+        <p style="margin-bottom:0" data-i18n="behindText">こちらは逆に、アニメーションを <code>position:absolute</code> で背面に置いて本文を上に流したもの。<code>opacity</code> も効いています。</p>
       </div>
     </div>
 
-    <h2>CSS もそのまま効きます</h2>
-    <p>
-      要素は本物の DOM ボックスなので、<code>border-radius</code> でのクリップ、<code>filter</code>、
-      <code>opacity</code>、<code>transform</code> がブラウザの合成としてかかります。
-    </p>
+    <h2 data-i18n="h2Css">CSS もそのまま効きます</h2>
+    <p data-i18n="css">要素は本物の DOM ボックスなので、<code>border-radius</code> でのクリップ、<code>filter</code>、<code>opacity</code>、<code>transform</code> がブラウザの合成としてかかります。</p>
 
     <div class="fx">
       <div>
@@ -138,39 +130,25 @@
       </div>
     </div>
 
-    <h2>その代わりに払っているもの</h2>
-    <p>
-      canvas が要素の数だけあるということは、<strong>合成する面もその数だけある</strong>ということです。
-      1 枚の canvas に何体も描く形（<a href="index.html">デモ index の ②</a>）なら描画は 1 パスで済み、
-      キャラクター同士の前後関係も 1 つの <code>order</code> で決まります。
-      ページの流れに沿って散らしたい・CSS で飾りたいときは要素、
-      1 つの舞台に大勢を並べたいときは 1 canvas に N 体 — というのが使い分けです。
-    </p>
+    <h2 data-i18n="h2Cost">その代わりに払っているもの</h2>
+    <p data-i18n="cost">canvas が要素の数だけあるということは、<strong>合成する面もその数だけある</strong>ということです。1 枚の canvas に何体も描く形（<a href="index.html">デモ index の ②</a>）なら描画は 1 パスで済み、キャラクター同士の前後関係も 1 つの <code>order</code> で決まります。ページの流れに沿って散らしたい・CSS で飾りたいときは要素、1 つの舞台に大勢を並べたいときは 1 canvas に N 体 — というのが使い分けです。</p>
 
-    <h2>画面外に出たら止まります</h2>
-    <p>
-      要素は <code>IntersectionObserver</code> と <code>visibilitychange</code> を見ていて、
-      画面外・バックグラウンドタブでは rAF を止めます（<code>pause-when-hidden</code>、既定 on）。
-      各アニメーションの下にフレーム番号を出しているので、スクロールで画面外に送ると数字が止まり、
-      戻すと<strong>止まったところから</strong>続くのが読めます。HUD の「いま進んでいる」も同時に減ります。
-    </p>
+    <h2 data-i18n="h2Hidden">画面外に出たら止まります</h2>
+    <p data-i18n="hidden">要素は <code>IntersectionObserver</code> と <code>visibilitychange</code> を見ていて、画面外・バックグラウンドタブでは rAF を止めます（<code>pause-when-hidden</code>、既定 on）。各アニメーションの下にフレーム番号を出しているので、スクロールで画面外に送ると数字が止まり、戻すと<strong>止まったところから</strong>続くのが読めます。HUD の「いま進んでいる」も同時に減ります。</p>
 
     <div class="pair">
       <ss-player-webgpu class="checker" src="assets/Shape.ssab" autoplay></ss-player-webgpu>
       <ss-player-webgpu class="checker" src="assets/Mesh.ssab" autoplay></ss-player-webgpu>
     </div>
 
-    <p style="margin-top:2em">
-      下の 1 体だけ <code>pause-when-hidden="false"</code> です。画面外に送っても数字が進み続けるので、
-      止まっているのが既定の挙動だと確かめられます。
-    </p>
+    <p style="margin-top:2em" data-i18n="keepRunning">下の 1 体だけ <code>pause-when-hidden="false"</code> です。画面外に送っても数字が進み続けるので、止まっているのが既定の挙動だと確かめられます。</p>
     <figure>
       <ss-player-webgpu class="checker" src="assets/PartsColor.ssab" pause-when-hidden="false" autoplay></ss-player-webgpu>
-      <figcaption>これだけは画面外でも回り続けます。</figcaption>
+      <figcaption data-i18n="figRunning">これだけは画面外でも回り続けます。</figcaption>
     </figure>
 
-    <h2>数を増やしても device は増えません</h2>
-    <p class="hint">以下は数を稼ぐためだけのものです。HUD の canvas は増え、GPUDevice は 1 のままです。</p>
+    <h2 data-i18n="h2More">数を増やしても device は増えません</h2>
+    <p class="hint" data-i18n="hintMore">以下は数を稼ぐためだけのものです。HUD の canvas は増え、GPUDevice は 1 のままです。</p>
     <div class="grid">
       <ss-player-webgpu class="checker" src="assets/Ringo/Ringo.ssab" autoplay></ss-player-webgpu>
       <ss-player-webgpu class="checker" src="assets/Basic.ssab" autoplay></ss-player-webgpu>
@@ -180,17 +158,108 @@
       <ss-player-webgpu class="checker" src="assets/Ringo/Ringo.ssab" autoplay></ss-player-webgpu>
     </div>
 
-    <p style="margin-top:2.5em">
-      同じパックを何度置いても、アトラスのアップロードは 1 回です。テクスチャは device に紐づく
-      <code>SSRenderer</code> が持っていて、2 体目の <code>load</code> は「もうある」と分かった時点で
-      デコードもアップロードもしません。
-    </p>
+    <p style="margin-top:2.5em" data-i18n="atlas">同じパックを何度置いても、アトラスのアップロードは 1 回です。テクスチャは device に紐づく <code>SSRenderer</code> が持っていて、2 体目の <code>load</code> は「もうある」と分かった時点でデコードもアップロードもしません。</p>
   </article>
 
   <script type="module">
     import { defineSsPlayerWebGPUElement } from './ssplayer-wgpu/dist/element.js';
 
     defineSsPlayerWebGPUElement();
+
+    // --- i18n ------------------------------------------------------------------
+    // The page is written in Japanese; each [data-i18n] element's markup is read
+    // back as the ja text, and the switch swaps innerHTML. Values with markup are
+    // inserted as innerHTML — they are static, trusted text. No [data-i18n] holds
+    // a player: rewriting its innerHTML would recreate the elements inside. The
+    // choice is shared by every demo page (LANG_KEY).
+    const LANG_KEY = 'ssDemoLang';
+    const JA = { title: document.title };
+    for (const el of document.querySelectorAll('[data-i18n]')) JA[el.dataset.i18n] = el.innerHTML;
+    const I18N = {
+      ja: JA,
+      en: {
+        title: 'Several on one page — ssplayer-wgpu',
+        hudCount: 'Elements',
+        hudSurfaces: 'canvas (surface)',
+        hudActive: 'Advancing now',
+        navIndex: '← demo index',
+        navElement: 'Using the element',
+        h1: 'Several on one page —<br>one device, a canvas per element',
+        lede:
+          'Every animation on this page is a <code>&lt;ss-player-webgpu&gt;</code>. Each element has a ' +
+          '<code>&lt;canvas&gt;</code> of its own, but <strong>the WebGPU device, pipelines and atlases are ' +
+          'one set for the page</strong>. The GPUDevice figure in the HUD at the top right is measured: it ' +
+          'counts whether every element’s <code>el.ctx</code> is the same object.',
+        figBlock: 'An ordinary block element. The page decides its size, and the element fills it with a canvas.',
+        hintShare:
+          'That is all the page writes. Call <code>defineSsPlayerWebGPUElement()</code> once, and however ' +
+          'many you place, they all share the device the first one created.',
+        h2Inline: 'It sits inside text too',
+        inline1: 'An element fits inside a line as well',
+        inline2:
+          '— give it <code>display: inline-block</code> and a height, and it is laid out as part of the ' +
+          'line. The canvas follows the element’s CSS box, so when the window width changes, the ' +
+          'resolution follows.',
+        h2Layer: 'It layers with other elements',
+        layer:
+          'This is the main payoff of a canvas per element. The animation takes part in the page’s ' +
+          'compositing like anything else, so <strong>text on top, the animation underneath, or another ' +
+          'element in between</strong> is plain z-index.',
+        cardBadge: 'HTML on top',
+        cardTitle: 'The text is above the animation',
+        cardText: 'The gradient band and the heading are just child elements.',
+        behindTitle: 'Underneath',
+        behindText:
+          'This one is the other way round: the animation sits behind with <code>position:absolute</code> ' +
+          'and the body text flows over it. <code>opacity</code> applies too.',
+        h2Css: 'CSS applies as usual',
+        css:
+          'The element is a real DOM box, so clipping with <code>border-radius</code>, <code>filter</code>, ' +
+          '<code>opacity</code> and <code>transform</code> are applied by the browser’s compositing.',
+        h2Cost: 'What this costs',
+        cost:
+          'A canvas per element means <strong>as many surfaces to composite as there are elements</strong>. ' +
+          'Drawing many characters on one canvas (<a href="index.html">② on the demo index</a>) takes one ' +
+          'pass, and one <code>order</code> decides which character is in front. Use elements when you want ' +
+          'them scattered along the page’s flow or styled with CSS, and N characters on one canvas when you ' +
+          'want a crowd on one stage.',
+        h2Hidden: 'Off screen, it stops',
+        hidden:
+          'The element watches <code>IntersectionObserver</code> and <code>visibilitychange</code>, and stops ' +
+          'rAF while off screen or in a background tab (<code>pause-when-hidden</code>, on by default). Each ' +
+          'animation shows its frame number underneath, so scroll one off screen and the number stops; bring ' +
+          'it back and you can read that it continues <strong>from where it stopped</strong>. The HUD’s ' +
+          '“Advancing now” drops at the same time.',
+        keepRunning:
+          'Only the one below has <code>pause-when-hidden="false"</code>. Its number keeps going off screen, ' +
+          'which confirms that stopping is the default behaviour.',
+        figRunning: 'This one keeps running off screen.',
+        h2More: 'More elements, still one device',
+        hintMore: 'What follows is only there to add to the count. The HUD’s canvas count goes up; GPUDevice stays at 1.',
+        atlas:
+          'However many times the same pack is placed, the atlas is uploaded once. The textures are held by ' +
+          'the <code>SSRenderer</code> tied to the device, so the second element’s <code>load</code> sees ' +
+          'they are already there and neither decodes nor uploads.',
+      },
+    };
+
+    // Remembered choice wins; otherwise follow the browser's language, default ja.
+    let stored = null;
+    try { stored = localStorage.getItem(LANG_KEY); } catch { /* private mode */ }
+    const initial = (stored === 'ja' || stored === 'en')
+      ? stored
+      : ((navigator.language || 'ja').toLowerCase().startsWith('ja') ? 'ja' : 'en');
+
+    function applyLang(lang) {
+      const t = I18N[lang];
+      document.documentElement.lang = lang;
+      document.title = t.title;
+      for (const el of document.querySelectorAll('[data-i18n]')) el.innerHTML = t[el.dataset.i18n];
+      for (const b of document.querySelectorAll('.lang button')) b.setAttribute('aria-pressed', String(b.dataset.lang === lang));
+      try { localStorage.setItem(LANG_KEY, lang); } catch { /* private mode: not remembered */ }
+    }
+    for (const b of document.querySelectorAll('.lang button')) b.addEventListener('click', () => applyLang(b.dataset.lang));
+    applyLang(initial);
 
     const els = Array.from(document.querySelectorAll('ss-player-webgpu'));
     document.getElementById('count').textContent = String(els.length);

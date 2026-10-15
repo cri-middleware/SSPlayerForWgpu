@@ -34,12 +34,15 @@ let mut renderer = SSRenderer::new(&device);
 let mut scene = SSScene::new(&device, &SceneConfig {
     color_format: surface_format,
     stencil_format: Some(STENCIL_FORMAT),   // None if you never use mask parts
+    mask: MaskBackend::Stencil,             // or Coverage, which needs no stencil
 });
 scene.set_viewport(&queue, width, height, y_down);
 
 // Per frame, before recording.
 let mut players: Vec<&mut SSPlayer> = cast.iter_mut().map(|m| &mut m.player).collect();
 scene.update(&mut renderer, &device, &queue, delta_secs, &mut players);
+// On the encoder you open your pass with: coverage masks and group-alpha layers.
+scene.encode_offscreen(&mut renderer, &device, &mut encoder);
 
 // Inside a render pass you opened — the scene never opens one itself.
 scene.draw(&renderer, &mut rpass);

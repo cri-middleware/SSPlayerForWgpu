@@ -345,6 +345,9 @@ function frame(dt) {
 If you never call `setTransform`, the player is centred and unscaled, so it collapses to
 `wx = m[4]`, `wy = m[5]`.
 
+The <a href="../demo/part-follow.html" target="_blank" rel="noreferrer">part-follow demo</a> drives
+exactly this on Ringo: pick a part and watch a marker track it, with the skinned parts flagged.
+
 ### In your own render pass — native / C
 
 You already own a projection and a viewport, so there is nothing surface-specific: multiply your
@@ -356,9 +359,6 @@ on every face; `ss_player_part_transform` writes them into a `float[6]`.
 
 Not yet exposed. The Bevy adapter surfaces placement, playback and events, but not per-part poses, so
 there is no built-in part-follow path there today.
-
-The **part-follow demo** (`examples/web/part-follow.html`) drives exactly this on Ringo: pick a part
-and watch a marker track it, with the skinned parts flagged.
 
 ## Next
 

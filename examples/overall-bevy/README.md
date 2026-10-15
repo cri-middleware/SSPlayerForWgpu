@@ -37,11 +37,11 @@ adapter's coverage backend, since Bevy's 2d depth carries no stencil.
 
 ## Where the data lives
 
-This example carries **no `assets/` folder of its own**. The player loads each
-`.ssab` and its atlases through its own loader (rooted on the `src` path), while
-Bevy's `AssetServer` — pointed at the repository's shared, generated `assets/` tree
-via `AssetPlugin { file_path }` — supplies only the sound files. That tree is what
-`deploy-examples` fills and every viewer here reads; it is gitignored. See
+This example carries **no `assets/` folder of its own**. Bevy's `AssetServer` —
+pointed at the repository's shared, generated `assets/` tree via
+`AssetPlugin { file_path }` — loads each `.ssab` as an `SsPack` asset, its atlases
+with it, and the sound files. That tree is what `deploy-examples` fills and every
+viewer here reads; it is gitignored. See
 [`../viewer-bevy/README.md`](../viewer-bevy/README.md) for the fuller note on how a
 shipped Bevy app carries its data (executable plus an `assets/` directory beside
 it — Bevy has no Unity/Godot-style project format).

@@ -195,7 +195,7 @@ They run `cargo` themselves, so there is no separate build step — and
 `./scripts/deploy-examples.sh` once, first, for the animation data.
 
 !!! note "The Linux sample has not been run yet"
-    The library builds from source for Linux (x86_64 and aarch64). The **Vulkan sample**
+    The library builds from source on Linux, and CI builds it on x86_64. The **Vulkan sample**
     compiles in CI on every pull request, but the runner has no display, so it has never opened a
     window and its X11 and Wayland paths are unverified — see the
     [ROADMAP](https://github.com/cri-middleware/SSPlayerForWgpu/blob/main/ROADMAP.md).
