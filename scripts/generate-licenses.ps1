@@ -33,6 +33,7 @@ try {
     if (-not (Get-Command "cargo-about" -ErrorAction SilentlyContinue)) {
         Write-Host "cargo-about is not installed. Installing it now..."
         cargo install cargo-about --locked --features cli
+        if ($LASTEXITCODE -ne 0) { [Console]::Error.WriteLine("${APP}: cargo install cargo-about failed ($LASTEXITCODE)"); exit $LASTEXITCODE }
     }
 
     # The union of the three shipped faces: embedded (the `image` decoder the
@@ -46,6 +47,9 @@ try {
         --features embedded,ffi,web `
         about-markdown.hbs `
         -o $Out
+    # A native command's failure is not an error to PowerShell, so without this a
+    # run that wrote nothing still said "Done" -- where the .sh stops on `set -e`.
+    if ($LASTEXITCODE -ne 0) { [Console]::Error.WriteLine("${APP}: cargo about generate failed ($LASTEXITCODE)"); exit $LASTEXITCODE }
 
     Write-Host "Done. Review the diff before committing."
 }

@@ -35,18 +35,18 @@ usage () {
   echo "  build=<release|debug>"
   echo "                      Cargo profile for the wasm (default: $BUILD). debug is"
   echo "                      several times larger and is only for reading a panic."
-  exit 1
+  echo "  -h | --help         Show this help"
 }
 
 for arg in "$@"; do
   case "$arg" in
     out=*)   OUT="${arg#out=}" ;;
     build=*) BUILD="${arg#build=}" ;;
-    -h|--help) usage ;;
-    *) echo "$APP: unknown option '$arg'" >&2; usage ;;
+    -h|--help) usage; exit 0 ;;
+    *) echo "$APP: unknown option '$arg' (see $APP --help)" >&2; exit 2 ;;
   esac
 done
-case "$BUILD" in release|debug) ;; *) echo "$APP: build must be release or debug" >&2; exit 1 ;; esac
+case "$BUILD" in release|debug) ;; *) echo "$APP: build must be release or debug (got '$BUILD')" >&2; exit 2 ;; esac
 
 command -v wasm-pack >/dev/null 2>&1 || { echo "$APP: wasm-pack not found -- cargo install wasm-pack" >&2; exit 1; }
 

@@ -66,6 +66,40 @@ jobs:
       - name: Format check
         run: cargo fmt --all -- --check
 
+      # The PowerShell half of each script runs on no pull request -- release.yml
+      # takes build.ps1 only when a release is cut -- so a syntax error, or an
+      # option the .sh learned and the .ps1 did not, reached main unseen. Parse
+      # every .ps1, and hold each one and its .sh twin to the same answers:
+      # --help exits 0 and an unknown option exits 2.
+      - name: Check the PowerShell scripts against their .sh twins
+        shell: pwsh
+        run: |
+          $failed = $false
+          function Report([string] $Name, [string] $Message) {
+            Write-Host "::error file=scripts/${Name}::$Message"
+            $script:failed = $true
+          }
+          foreach ($ps1 in Get-ChildItem scripts -Filter *.ps1) {
+            $errors = $null
+            [void][System.Management.Automation.Language.Parser]::ParseFile($ps1.FullName, [ref]$null, [ref]$errors)
+            if ($errors) {
+              foreach ($e in $errors) { Report $ps1.Name "line $($e.Extent.StartLineNumber): $($e.Message)" }
+              continue
+            }
+            $sh = [System.IO.Path]::ChangeExtension($ps1.FullName, ".sh")
+            foreach ($case in @(@{ Arg = "--help"; Want = 0 }, @{ Arg = "no-such-option=1"; Want = 2 })) {
+              pwsh -NoProfile -File $ps1.FullName $case.Arg *> $null
+              if ($LASTEXITCODE -ne $case.Want) { Report $ps1.Name "$($case.Arg) exited $LASTEXITCODE, not $($case.Want)" }
+              if (Test-Path $sh) {
+                bash $sh $case.Arg *> $null
+                if ($LASTEXITCODE -ne $case.Want) { Report (Split-Path $sh -Leaf) "$($case.Arg) exited $LASTEXITCODE, not $($case.Want)" }
+              }
+            }
+          }
+          # Explicit, because the runner otherwise exits with the last native
+          # command's code -- which is the 2 an unknown option is meant to give.
+          if ($failed) { exit 1 } else { exit 0 }
+
       - name: Generate demo assets
         # Also proves the SDK submodule still builds against this checkout. A
         # debug converter converts the samples just as well, and compiles in a
