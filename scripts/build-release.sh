@@ -1,8 +1,9 @@
 #!/usr/bin/env bash
 #
 # Assemble the release: take the per-platform trees the build matrix produced,
-# lay each native one out as the drop-in a C or C++ host expects and zip it, and
-# pack the npm package into the tarball npm is given.
+# lay each native one out as the drop-in a C or C++ host expects and zip it,
+# pack the npm package into the tarball npm is given, and pass the preview shell
+# through as the one file it is.
 #
 #   scripts/build-release.sh                       # assemble from artifacts/
 #   scripts/build-release.sh out=/tmp/rel          # somewhere else
@@ -25,11 +26,17 @@
 # system each, so there is no local equivalent of the matrix and a "local
 # release" would only ever be a partial one.
 #
-# Static libraries only. A C++ host links `libssplayer_wgpu.a` (or the MSVC
-# `.lib`) into its own binary, which is the whole point of the ffi face owning
-# its wgpu device; shipping the `.dylib`/`.so`/`.dll` alongside would add code
-# signing, SONAMEs and import-library pairing to every release for a second way
-# to do the same thing. build.sh still collects them for local work.
+# The static library on every platform, and on macOS the shared one beside it.
+# A C++ host links `libssplayer_wgpu.a` (or the MSVC `.lib`) into its own
+# binary, which is the whole point of the ffi face owning its wgpu device. A
+# host that loads the library instead -- Python, .NET or Dart through an FFI --
+# needs a shared one, and on macOS a downloaded one loads only once it is signed
+# and notarized, which scripts/release-macos.sh does in the macOS job; this
+# script can only check its shape, since codesign does not run here. The
+# Windows zip still carries the static library alone: its DLL would bring the
+# import library `ssplayer_wgpu.dll.lib` beside the static `ssplayer_wgpu.lib`,
+# a pairing a release has not taken on. build.sh still collects every library
+# for local work.
 
 set -eu
 
@@ -42,6 +49,10 @@ ROOT_DIR="$(cd "$(dirname "$0")/.." && pwd)"
 # nothing but a Rust toolchain.
 NATIVE="windows-x86_64 macos-universal"
 WEB="web-wasm32"
+# The self-contained preview shell (PREVIEW.md), which the web job builds with
+# scripts/build-preview.sh beside the package, and its name on the Release.
+PREVIEW="preview-shell"
+SHELL_HTML="ssplayer-preview.html"
 
 # The static library each platform's toolchain emits. MSVC names the staticlib
 # `ssplayer_wgpu.lib`; the import library that sits next to a DLL is
@@ -53,12 +64,21 @@ lib_for () {
   esac
 }
 
+# The shared library a platform's zip carries beside the static one, if any.
+shared_for () {
+  case "$1" in
+    macos-*) echo "libssplayer_wgpu.dylib" ;;
+    *)       echo "" ;;
+  esac
+}
+
 # --- options --------------------------------------------------------------
 
 IN="artifacts"
 OUT="release-dist"
 VERIFY="yes"
 CLEAN="yes"
+SIGN="yes"
 
 usage () {
   echo "Usage: $APP [options]"
@@ -71,18 +91,25 @@ usage () {
   echo "  verify=<yes|no>         Re-open the finished archives and check them (default:"
   echo "                          $VERIFY)."
   echo "  clean=<yes|no>          Delete <out> before assembling (default: $CLEAN)."
+  echo "  sign=<yes|auto>         Whether the macOS dylib must carry a Developer ID"
+  echo "                          signature (default: $SIGN), as scripts/release-macos.sh"
+  echo "                          leaves it. yes is a release; auto reports what it"
+  echo "                          carries, for a dry run without the signing secrets."
+  echo "                          Either way it must be universal with an @rpath name."
     echo "  sdk= skip=              Accepted and ignored here. The family's build-release"
   echo "                          scripts share out= clean= verify= in= sdk= skip=,"
   echo "                          so one command line drives all of them."
 echo "  -h | --help             Show this help"
   echo ""
   echo "Output, in <out>:"
-  echo "  ssplayer-wgpu-<platform>-<arch>.zip   include/, lib/ (the library and VERSION),"
+  echo "  ssplayer-wgpu-<platform>-<arch>.zip   include/, lib/ (the library and VERSION; on"
+  echo "                                        macOS the signed dylib as well),"
   echo "                                        LICENSE.md, LICENSE.ja.md, THIRD_PARTY_NOTICES.md,"
   echo "                                        README.md and docs/ (the documentation)"
   echo "  spritestudio-ssplayer-wgpu-<version>.tgz"
   echo "                                        the npm package, packed by 'npm pack'"
-  echo "  SHA256SUMS                            covers every archive above"
+  echo "  ssplayer-preview.html                 the preview shell, as build-preview.sh wrote it"
+  echo "  SHA256SUMS                            covers every file above"
   echo ""
   echo "Every platform the matrix builds must be present: a partial release is not a"
   echo "thing worth producing, so a missing one is an error that lists everything else"
@@ -102,6 +129,7 @@ while [ $# -gt 0 ]; do
         out)    OUT="$value" ;;
         verify) VERIFY="$(printf '%s' "$value" | tr '[:upper:]' '[:lower:]')" ;;
         clean)  CLEAN="$(printf '%s' "$value" | tr '[:upper:]' '[:lower:]')" ;;
+        sign)   SIGN="$(printf '%s' "$value" | tr '[:upper:]' '[:lower:]')" ;;
         # Accepted so one command line drives build-release in every repository
         # of the family; this one has no use for them.
         sdk|skip) echo "$APP: ${key}= does not apply here; ignored" >&2 ;;
@@ -114,6 +142,7 @@ done
 
 case "$VERIFY" in yes|no) ;; *) echo "$APP: verify must be yes or no (got '$VERIFY')" >&2; exit 2 ;; esac
 case "$CLEAN"  in yes|no) ;; *) echo "$APP: clean must be yes or no (got '$CLEAN')" >&2; exit 2 ;; esac
+case "$SIGN"   in yes|auto) ;; *) echo "$APP: sign must be yes or auto (got '$SIGN')" >&2; exit 2 ;; esac
 
 # Resolve both paths against the invoking directory, before anything cds away.
 case "$IN"  in /*) ;; *) IN="$PWD/$IN" ;; esac
@@ -148,6 +177,7 @@ echo "  in      => $IN"
 echo "  out     => $OUT"
 echo "  verify  => $VERIFY"
 echo "  clean   => $CLEAN"
+echo "  sign    => $SIGN"
 echo "  version => $VERSION"
 echo "  tag     => ${TAG:-(none)}"
 echo "             ($TAG_SOURCE)"
@@ -194,6 +224,34 @@ FAILED=""
 fail () { FAILED="${FAILED}
   $1"; }
 
+# The preview shell's stamp, holes and self-containment, read from the page.
+# Prints the stamp, or the problems on stderr and fails. A function of its own,
+# because bash 3.2 -- macOS's -- cannot parse a here-document inside $( ).
+#   check_preview <file> <version> <SDK commit>
+check_preview () {
+  node - "$1" "$2" "$3" <<'JS'
+const [file, version, sdk] = process.argv.slice(2);
+const page = require('fs').readFileSync(file, 'utf8');
+const problems = [];
+const stamp = (page.match(/<span class="stamp" id="stamp">([^<]*)<\/span>/) || [])[1];
+const parts = stamp && stamp.match(/^ssplayer-wgpu (\S+) \u00b7 SDK ([0-9a-f]{7,40}) \u00b7 \d{4}-\d{2}-\d{2}$/);
+if (!parts) problems.push(`its stamp is ${JSON.stringify(stamp ?? null)}, not "ssplayer-wgpu <version> \u00b7 SDK <commit> \u00b7 <date>"`);
+else {
+  if (parts[1] !== version) problems.push(`it is stamped ${parts[1]}, where this checkout says ${version}`);
+  if (!sdk.startsWith(parts[2])) problems.push(`it was built against SDK ${parts[2]}, where this checkout pins ${sdk.slice(0, 12)}`);
+}
+const left = page.match(/__SS_[A-Z]+__/g);
+if (left) problems.push(`it still holds ${[...new Set(left)].join(', ')}, which the build substitutes`);
+const wasm = (page.match(/<script id="wasm" type="application\/base64">([^<]*)<\/script>/) || [])[1] || '';
+const bytes = Buffer.from(wasm, 'base64');
+if (bytes.length < 8 || bytes.readUInt32BE(0) !== 0x0061736d) problems.push('its wasm hole holds no wasm module');
+if (!page.includes('<script id="ssab" type="application/base64"></script>')) problems.push('its .ssab hole is not empty: a filled preview, not the shell');
+if (/<script\b[^>]*\bsrc\s*=|<link\b[^>]*\bhref\s*=/i.test(page)) problems.push('it loads something by src or href, which file:// blocks');
+if (problems.length) { console.error(problems.join('\n')); process.exit(1); }
+console.log(stamp);
+JS
+}
+
 # Every page a front door links to, looked up in the archive's own listing, so
 # renaming or dropping a page fails the release instead of shipping a link that
 # goes nowhere. <base> is where the links resolve inside the archive.
@@ -207,6 +265,46 @@ check_front_door () {
   for link in $links; do
     printf '%s\n' "$3" | grep -qxF "$4$link" || fail "$1: the front door links to $link, which is not in it"
   done
+}
+
+# A universal dylib's slices, install names and signatures, read from the
+# Mach-O, since this runs where codesign does not. Prints one line naming each
+# slice and its signature, or the problems on stderr and fails. A function of
+# its own, because bash 3.2 -- macOS's -- cannot parse a here-document inside
+# $( ).
+#   check_dylib <file> <sign: yes|auto>
+check_dylib () {
+  node - "$1" "$2" <<'JS'
+const [file, sign] = process.argv.slice(2);
+const bytes = require('fs').readFileSync(file);
+const want = { 0x0100000c: 'arm64', 0x01000007: 'x86_64' };
+const problems = [], slices = [];
+if (bytes.readUInt32BE(0) !== 0xcafebabe) problems.push('it is not a universal Mach-O');
+else {
+  for (let i = 0, n = bytes.readUInt32BE(4); i < n; i++) {
+    const at = 8 + i * 20, cpu = bytes.readUInt32BE(at);
+    const arch = want[cpu] ?? `cpu 0x${cpu.toString(16)}`;
+    const slice = bytes.subarray(bytes.readUInt32BE(at + 8), bytes.readUInt32BE(at + 8) + bytes.readUInt32BE(at + 12));
+    // mach_header_64: magic, cputype, cpusubtype, filetype, ncmds, sizeofcmds, flags, reserved.
+    if (slice.readUInt32LE(0) !== 0xfeedfacf || slice.readUInt32LE(12) !== 6) { problems.push(`its ${arch} slice is not a 64-bit dylib`); continue; }
+    let name = '', signature = 'unsigned';
+    for (let c = 0, cmd = 32, n = slice.readUInt32LE(16); c < n; c++, cmd += slice.readUInt32LE(cmd + 4)) {
+      const kind = slice.readUInt32LE(cmd);
+      if (kind === 0x0d) name = slice.toString('latin1', cmd + slice.readUInt32LE(cmd + 8)).split('\0')[0];  // LC_ID_DYLIB
+      if (kind === 0x1d) {  // LC_CODE_SIGNATURE: the blob's offset and size in the slice
+        const blob = slice.subarray(slice.readUInt32LE(cmd + 8), slice.readUInt32LE(cmd + 8) + slice.readUInt32LE(cmd + 12));
+        signature = blob.includes('Developer ID Application') ? 'Developer ID' : 'ad-hoc';
+      }
+    }
+    if (name !== '@rpath/libssplayer_wgpu.dylib') problems.push(`its ${arch} install name is '${name}'`);
+    if (sign === 'yes' && signature !== 'Developer ID') problems.push(`its ${arch} slice is ${signature}, not signed with a Developer ID`);
+    slices.push(`${arch} (${signature})`);
+  }
+  for (const arch of Object.values(want)) if (!slices.some((s) => s.startsWith(`${arch} `))) problems.push(`it has no ${arch} slice`);
+}
+if (problems.length) { console.error(problems.join('\n')); process.exit(1); }
+console.log(slices.join(', '));
+JS
 }
 
 # --- check the input ------------------------------------------------------
@@ -225,10 +323,12 @@ for p in $NATIVE; do
   os="${p%%-*}"; arch="${p#*-}"
   dir="$IN/$p"
   lib="$(lib_for "$p")"
+  shared="$(shared_for "$p")"
   if [ ! -d "$dir" ]; then
     fail "$p/ is missing"
   else
     [ -f "$dir/libs/$os/$arch/$lib" ] || fail "$p/libs/$os/$arch/$lib is missing (the static library this platform ships)"
+    [ -z "$shared" ] || [ -f "$dir/libs/$os/$arch/$shared" ] || fail "$p/libs/$os/$arch/$shared is missing (the shared library this platform ships)"
     [ -f "$dir/libs/$os/$arch/VERSION" ] || fail "$p/libs/$os/$arch/VERSION is missing (the SDK release the library links)"
     [ -f "$dir/include/ssplayer_wgpu.h" ] || fail "$p/include/ssplayer_wgpu.h is missing"
     [ -f "$dir/LICENSE.md" ] || fail "$p/LICENSE.md is missing"
@@ -246,6 +346,7 @@ else
   [ -f "$IN/$WEB/THIRD_PARTY_NOTICES.md" ] || fail "$WEB/THIRD_PARTY_NOTICES.md is missing (the package's files list it)"
   [ -f "$IN/$WEB/docs/README.md" ] || fail "$WEB/docs/README.md is missing (the documentation build.sh platform=web copies)"
 fi
+[ -f "$IN/$PREVIEW/$SHELL_HTML" ] || fail "$PREVIEW/$SHELL_HTML is missing (the preview shell scripts/build-preview.sh builds)"
 
 if [ -n "$FAILED" ]; then
   echo "$APP: $IN is missing pieces the release needs:$FAILED" >&2
@@ -293,6 +394,22 @@ if [ "$SDK" = "local" ]; then
 fi
 echo "   $SDK, in every artifact"
 
+# The preview shell names its SDK by commit rather than by tag -- the stamp is
+# what a host compares against the converter it used (PREVIEW.md) -- so it is
+# checked against the commit this checkout pins, which the tree records whether
+# or not the submodule is checked out. It must carry the version being
+# released, have every hole the build fills filled and the pack's left empty,
+# and load nothing from outside itself: a page that does works over http:// and
+# fails at file://, which is the only way it is opened. build-preview.sh refuses
+# such a page as well; this is the file that ships.
+step "checking the preview shell"
+SDK_COMMIT="$(git -C "$ROOT_DIR" rev-parse HEAD:SpriteStudio-SDK)"
+if ! STAMP="$(check_preview "$IN/$PREVIEW/$SHELL_HTML" "$VERSION" "$SDK_COMMIT")"; then
+  echo "$APP: $PREVIEW/$SHELL_HTML is not the shell of this release" >&2
+  exit 1
+fi
+echo "   $STAMP"
+
 # The web job wrote the version into the package's own package.json, and that copy
 # is what npm is given. One from another run would go out under a version the
 # Release is not tagged with, and release.yml would ask npm whether it has the
@@ -305,6 +422,27 @@ if [ "$PKG_VERSION" != "$VERSION" ]; then
   exit 1
 fi
 echo "   $PKG_VERSION, as this checkout says"
+
+# The macOS dylib is the one scripts/release-macos.sh finished: both slices, the
+# @rpath install name, and -- on a release -- a Developer ID signature, without
+# which a downloaded copy does not load. codesign does not run here, so
+# check_dylib reads the Mach-O itself: it proves the signature blob carries a
+# Developer ID certificate, not that the signature is valid or notarized. The
+# macOS job checked both, with codesign and against Apple's servers; this
+# catches an artifact that skipped those checks, or came from another run.
+for p in $NATIVE; do
+  shared="$(shared_for "$p")"
+  [ -n "$shared" ] || continue
+  step "checking $p's $shared"
+  if ! summary="$(check_dylib "$IN/$p/libs/${p%%-*}/${p#*-}/$shared" "$SIGN")"; then
+    echo "$APP: $p's $shared is not the one scripts/release-macos.sh finishes" >&2
+    exit 1
+  fi
+  echo "   $summary, @rpath/$shared"
+  case "$summary" in
+    *ad-hoc*|*unsigned*) echo "   not signed with a Developer ID: sign=auto, and a release would stop here" ;;
+  esac
+done
 
 # --- assemble -------------------------------------------------------------
 step "assembling in $OUT"
@@ -322,6 +460,7 @@ ASSETS=""
 for p in $NATIVE; do
   os="${p%%-*}"; arch="${p#*-}"
   lib="$(lib_for "$p")"
+  shared="$(shared_for "$p")"
   stage="$WORK/$p"
   mkdir -p "$stage/include" "$stage/lib"
 
@@ -329,6 +468,8 @@ for p in $NATIVE; do
   # a CMake host points at include/ and lib/ without a per-OS branch.
   cp "$IN/$p/include/ssplayer_wgpu.h" "$stage/include/"
   cp "$IN/$p/libs/$os/$arch/$lib" "$IN/$p/libs/$os/$arch/VERSION" "$stage/lib/"
+  # The signature is inside the Mach-O, so zip carries it as it carries any bytes.
+  [ -z "$shared" ] || cp "$IN/$p/libs/$os/$arch/$shared" "$stage/lib/"
   cp "$IN/$p/LICENSE.md" "$IN/$p/LICENSE.ja.md" "$stage/"
   cp "$ROOT_DIR/THIRD_PARTY_NOTICES.md" "$stage/"
   # The documentation, read offline beside the library it describes
@@ -340,7 +481,7 @@ for p in $NATIVE; do
   zipname="ssplayer-wgpu-$p.zip"
   ( cd "$stage" && zip -qry "$OUT/$zipname" . )
   ASSETS="$ASSETS $zipname"
-  echo "   $zipname ($lib)"
+  echo "   $zipname ($lib${shared:+, $shared})"
 done
 
 # The web face is a package, not a library file: build.sh already assembled
@@ -360,6 +501,13 @@ TGZ="$(npm pack "$IN/$WEB" --pack-destination "$OUT" --ignore-scripts --json |
 ASSETS="$ASSETS $TGZ"
 echo "   $TGZ (npm package)"
 
+# The shell goes out as build-preview.sh wrote it, under the name it has in a
+# checkout. A plugin pins it by the Release's tag, as it would a zip, so its
+# name carries no version either; the stamp inside says which it is.
+cp "$IN/$PREVIEW/$SHELL_HTML" "$OUT/"
+ASSETS="$ASSETS $SHELL_HTML"
+echo "   $SHELL_HTML (preview shell)"
+
 # Canonical checksum manifest so a consumer can verify what they downloaded
 # (`sha256sum -c SHA256SUMS --ignore-missing`).
 step "writing SHA256SUMS"
@@ -375,15 +523,18 @@ if [ "$VERIFY" = "yes" ]; then
 
   for p in $NATIVE; do
     lib="$(lib_for "$p")"
+    shared="$(shared_for "$p")"
     zipname="ssplayer-wgpu-$p.zip"
     names="$(unzip -Z1 "$OUT/$zipname")"
-    for want in "include/ssplayer_wgpu.h" "lib/$lib" "lib/VERSION" "LICENSE.md" "LICENSE.ja.md" "THIRD_PARTY_NOTICES.md" "README.md"; do
+    for want in "include/ssplayer_wgpu.h" "lib/$lib" ${shared:+"lib/$shared"} "lib/VERSION" "LICENSE.md" "LICENSE.ja.md" "THIRD_PARTY_NOTICES.md" "README.md"; do
       printf '%s\n' "$names" | grep -qx "$want" || fail "$zipname does not contain $want"
     done
     check_front_door "$zipname" "$(unzip -p "$OUT/$zipname" README.md)" "$names" ""
-    # A static library that is a few kilobytes is a link that produced nothing.
-    bytes="$(unzip -l "$OUT/$zipname" "lib/$lib" | awk 'NR==4 {print $1}')"
-    [ "${bytes:-0}" -gt 262144 ] || fail "$zipname's lib/$lib is only ${bytes:-0} bytes"
+    # A library that is a few kilobytes is a link that produced nothing.
+    for want in "$lib" $shared; do
+      bytes="$(unzip -l "$OUT/$zipname" "lib/$want" | awk 'NR==4 {print $1}')"
+      [ "${bytes:-0}" -gt 262144 ] || fail "$zipname's lib/$want is only ${bytes:-0} bytes"
+    done
   done
 
   # npm decides what goes in by `files` and its own ignore rules, so the tarball
@@ -395,6 +546,8 @@ if [ "$VERIFY" = "yes" ]; then
     printf '%s\n' "$names" | grep -qx "package/$want" || fail "$TGZ does not contain $want"
   done
   check_front_door "$TGZ" "$(tar -xzOf "$OUT/$TGZ" package/docs/README.md)" "$names" "package/docs/"
+
+  cmp -s "$IN/$PREVIEW/$SHELL_HTML" "$OUT/$SHELL_HTML" || fail "$SHELL_HTML is not the shell that was checked"
 
   ( cd "$OUT" && sha256 -c SHA256SUMS > /dev/null 2>&1 ) || fail "SHA256SUMS does not match the archives it covers"
 

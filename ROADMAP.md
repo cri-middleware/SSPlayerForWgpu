@@ -102,10 +102,10 @@ player, where every host and the C ABI reach it, and the host half belongs in an
       to run would be the only one the main world hears about.
 - [ ] **Self-contained HTML preview** — a Preview button per pack in each host writes one
       fully inlined HTML file and opens it in the browser, so every host shows the same
-      preview without an in-editor renderer. Missing: a release job that publishes a
-      pinned shell (`examples/preview/shell.html`, built by `scripts/build-preview.sh`),
-      so a plugin fetches it rather than builds it, and the buttons themselves, which
-      live in the Player repositories. Design and measurements: [`PREVIEW.md`](./PREVIEW.md).
+      preview without an in-editor renderer. Every Release carries the shell, for a
+      plugin to fetch by its tag rather than build. Missing: the buttons themselves,
+      which live in the Player repositories. Design and measurements:
+      [`PREVIEW.md`](./PREVIEW.md).
 
 ## Resource management
 
@@ -121,11 +121,6 @@ player, where every host and the C ABI reach it, and the host half belongs in an
 
 ## Distribution & verification
 
-- [ ] **macOS signing and notarization** — for the cdylib. Portable from the sibling
-      players, using the existing organisation secrets.
-- [x] **Version stamping** — versions are hand-written and the SDK is a submodule rather
-      than a release zip, so the release zips, the C library and the npm package need to
-      record the SDK commit they were built from. Only the preview shell does.
 - [ ] **crates.io** — `ssruntime` and `ssab` are path dependencies into the
       submodule; cargo will not publish a crate that depends on paths only.
       Blocked on: the SDK crates `ssab` and `ssruntime` being published first.

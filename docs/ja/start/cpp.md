@@ -19,6 +19,7 @@ title: C / C++ ではじめる
 |---|---|
 | `include/ssplayer_wgpu.h` | ヘッダ 1 枚。C99、依存なし。cbindgen が生成 |
 | `lib/libssplayer_wgpu.a`（MSVC では `ssplayer_wgpu.lib`） | 静的ライブラリ |
+| `lib/libssplayer_wgpu.dylib`（macOS のみ） | 共有ライブラリ。署名・公証済み。ライブラリをリンクせずに読み込むホスト向け |
 | `lib/VERSION` | ライブラリがリンクしている SpriteStudio-SDK のリリースのタグ。`ss_sdk_version()` が返すものと同じ |
 | `LICENSE.md` | BSD-3-Clause |
 | `LICENSE.ja.md` | その参考訳 |
@@ -36,7 +37,7 @@ title: C / C++ ではじめる
     | `ssplayer-wgpu-windows-x86_64.zip` | Windows / MSVC（DX12） |
     | `ssplayer-wgpu-macos-universal.zip` | macOS。arm64 + x86_64 が 1 本に（Metal） |
 
-    **静的ライブラリのみ**です。自分のバイナリにリンクする形になるので、横に置いて配布するランタイム依存はありません。共有ライブラリが必要な場合はソースからビルドしてください（`build.sh` が生成します）。Linux でもソースからビルドします。Linux 向けのライブラリはリリースの zip に含まれません。
+    **静的ライブラリをリンクします**。自分のバイナリに組み込まれるので、横に置いて配布するランタイム依存はありません。macOS の zip には `lib/libssplayer_wgpu.dylib` も入っています。Python・.NET・Dart の FFI のように、ライブラリをリンクせずに読み込むホスト向けです。Developer ID で署名・公証してあるので、ダウンロードしたものを macOS がそのまま読み込みます（初回は Gatekeeper がチケットをオンラインで確かめます）。install name は `@rpath/libssplayer_wgpu.dylib` です。Windows で DLL が必要な場合はソースからビルドしてください（`build.ps1` が生成します）。Linux でもソースからビルドします。Linux 向けのライブラリはリリースの zip に含まれません。
 
     Windows のライブラリは、C ランタイムを DLL 版（`/MD`）でリンクしています。CMake と Visual Studio の既定と同じです。静的ランタイム（`/MT`）でビルドするホストは、静的ランタイムを有効にしてソースからビルドしてください（「ソースから」を参照）。
 

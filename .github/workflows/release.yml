@@ -27,16 +27,27 @@ name: Release
 #
 #   dry_run      Build and check everything with the version applied, and
 #                commit, tag, release and stage nothing. The look before a
-#                release.
+#                release. The macOS dylib is signed and notarized as a release
+#                signs it when the signing secrets are there, so a broken one
+#                shows here first; without them it is left ad-hoc signed, with
+#                a warning, where a release stops.
 #
 # A release gets a `ssplayer-wgpu-v<version>` tag and a DRAFT GitHub Release
-# carrying the zips, the npm tarball, SHA256SUMS and a link to the package's
-# CHANGELOG.md, which is where the notes are. A maintainer checks and publishes
-# it, and publishing is what starts pages.yml.
+# carrying the zips, the npm tarball, the preview shell, SHA256SUMS and a link to
+# the package's CHANGELOG.md, which is where the notes are. A maintainer checks
+# and publishes it, and publishing is what starts pages.yml.
 #
 # Staging needs no secret. The package on npm has a trusted publisher for this
 # repository and this workflow file, allowed to stage, and the package job's
 # id-token is what npm trusts.
+#
+# Signing does. The macOS zip carries the shared library, which a downloaded
+# copy loads only once it is signed with a Developer ID and notarized, and the
+# macOS job does both from the organisation's secrets, as the sibling
+# repositories do: APPLE_DEV_ID_APP_CERT (the .p12, base64),
+# APPLE_DEV_ID_APP_CERT_PASS, APPLE_DEV_ID_APP_NAME (the identity),
+# ASC_API_KEY_PASS (the App Store Connect key, base64), ASC_API_KEY_ID and
+# ASC_API_ISSUER_ID.
 on:
   workflow_dispatch:
     inputs:
@@ -115,6 +126,40 @@ jobs:
             os: ubuntu-latest
 
     steps:
+      # A release ships the macOS dylib signed and notarized or not at all: a
+      # browser quarantines what it downloads, and Gatekeeper refuses a
+      # quarantined library that has no ticket (scripts/release-macos.sh says
+      # what a user sees). The secrets are the organisation's, and a fork, or a
+      # repository they are not shared with, has none. A dry run then builds the
+      # library unsigned and says so; a release stops here, before anything is
+      # built, rather than drafting a Release whose macOS zip nobody can load.
+      # Each variable says whether its secret is set, never what it is.
+      - name: Check the signing secrets
+        id: signing
+        if: matrix.artifact == 'macos-universal'
+        env:
+          DRY_RUN: ${{ inputs.dry_run }}
+          APPLE_DEV_ID_APP_CERT: ${{ secrets.APPLE_DEV_ID_APP_CERT != '' }}
+          APPLE_DEV_ID_APP_CERT_PASS: ${{ secrets.APPLE_DEV_ID_APP_CERT_PASS != '' }}
+          APPLE_DEV_ID_APP_NAME: ${{ secrets.APPLE_DEV_ID_APP_NAME != '' }}
+          ASC_API_KEY_PASS: ${{ secrets.ASC_API_KEY_PASS != '' }}
+          ASC_API_KEY_ID: ${{ secrets.ASC_API_KEY_ID != '' }}
+          ASC_API_ISSUER_ID: ${{ secrets.ASC_API_ISSUER_ID != '' }}
+        run: |
+          missing=""
+          for name in APPLE_DEV_ID_APP_CERT APPLE_DEV_ID_APP_CERT_PASS APPLE_DEV_ID_APP_NAME ASC_API_KEY_PASS ASC_API_KEY_ID ASC_API_ISSUER_ID; do
+            [ "${!name}" = "true" ] || missing="$missing $name"
+          done
+          if [ -z "$missing" ]; then
+            echo "sign=yes" >> "$GITHUB_OUTPUT"
+          elif [ "$DRY_RUN" = "true" ]; then
+            echo "::warning::Not set:$missing. This dry run's macOS dylib is ad-hoc signed, and a release would stop here."
+            echo "sign=no" >> "$GITHUB_OUTPUT"
+          else
+            echo "::error::A release signs and notarizes the macOS dylib, and these secrets are not set:$missing"
+            exit 1
+          fi
+
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -198,6 +243,57 @@ jobs:
         if: matrix.artifact == 'web-wasm32'
         run: ./scripts/build.sh platform=web build=release deploy=no
 
+      # Only after the build, and removed before the upload: no crate's build
+      # script runs while the certificate is in a keychain or the notary key is
+      # on disk. The keychain's password is made for this run and never kept,
+      # as in SpriteStudio-SDK.
+      - name: Set up the signing keychain
+        if: steps.signing.outputs.sign == 'yes'
+        env:
+          APPLE_DEV_ID_APP_CERT: ${{ secrets.APPLE_DEV_ID_APP_CERT }}
+          APPLE_DEV_ID_APP_CERT_PASS: ${{ secrets.APPLE_DEV_ID_APP_CERT_PASS }}
+        run: |
+          set -euo pipefail
+          keychain="$RUNNER_TEMP/signing.keychain-db"
+          password="$(openssl rand -base64 24)"
+          printf '%s' "$APPLE_DEV_ID_APP_CERT" | base64 --decode > "$RUNNER_TEMP/certificate.p12"
+          security create-keychain -p "$password" "$keychain"
+          security set-keychain-settings -lut 21600 "$keychain"
+          security unlock-keychain -p "$password" "$keychain"
+          security import "$RUNNER_TEMP/certificate.p12" -P "$APPLE_DEV_ID_APP_CERT_PASS" -f pkcs12 -k "$keychain" -T /usr/bin/codesign
+          security set-key-partition-list -S apple-tool:,apple:,codesign: -s -k "$password" "$keychain" > /dev/null
+          security list-keychains -d user -s "$keychain" login.keychain-db
+          rm -f "$RUNNER_TEMP/certificate.p12"
+
+      - name: Prepare the notary key
+        if: steps.signing.outputs.sign == 'yes'
+        env:
+          ASC_API_KEY_PASS: ${{ secrets.ASC_API_KEY_PASS }}
+        run: |
+          printf '%s' "$ASC_API_KEY_PASS" | base64 --decode > "$RUNNER_TEMP/notary-key.p8"
+          echo "APPLE_API_KEY_PATH=$RUNNER_TEMP/notary-key.p8" >> "$GITHUB_ENV"
+
+      # scripts/release-macos.sh is the macOS half of the release, in bin/ before
+      # the upload: the dylib's install name moves to @rpath, and then it is
+      # signed, notarized and checked against Apple's servers the way Gatekeeper
+      # will check it. sign=yes makes a credential that is missing, or a check
+      # that fails, fatal; a dry run passes auto, and its identity is empty when
+      # the step above found the secrets incomplete, which leaves the dylib
+      # ad-hoc signed.
+      - name: Sign and notarize (macOS)
+        if: matrix.artifact == 'macos-universal'
+        env:
+          APPLE_SIGNING_IDENTITY: ${{ steps.signing.outputs.sign == 'yes' && secrets.APPLE_DEV_ID_APP_NAME || '' }}
+          APPLE_API_KEY: ${{ steps.signing.outputs.sign == 'yes' && secrets.ASC_API_KEY_ID || '' }}
+          APPLE_API_ISSUER: ${{ steps.signing.outputs.sign == 'yes' && secrets.ASC_API_ISSUER_ID || '' }}
+        run: ./scripts/release-macos.sh sign=${{ inputs.dry_run && 'auto' || 'yes' }}
+
+      - name: Remove the signing keychain
+        if: always() && steps.signing.outputs.sign == 'yes'
+        run: |
+          security delete-keychain "$RUNNER_TEMP/signing.keychain-db" || true
+          rm -f "$RUNNER_TEMP/notary-key.p8"
+
       # bin/ for the native platforms; for the web one, the npm package directory
       # minus node_modules -- listed file by file rather than as a directory,
       # because upload-artifact has no exclude and the least common ancestor of
@@ -228,6 +324,25 @@ jobs:
             packages/ssplayer-wgpu/LICENSE.md
             packages/ssplayer-wgpu/LICENSE.ja.md
             packages/ssplayer-wgpu/THIRD_PARTY_NOTICES.md
+          if-no-files-found: error
+          retention-days: 7
+
+      # The self-contained preview shell (PREVIEW.md), which each Player plugin's
+      # packaging script fetches from the Release by its tag. Here because this
+      # job has the wasm toolchain and has just built the same crate with the
+      # same features: the no-modules target differs only in what wasm-bindgen
+      # writes, so cargo reuses that release build. An artifact of its own, named
+      # for build-release.sh, because the package's root is packages/ssplayer-wgpu.
+      - name: Build the preview shell
+        if: matrix.artifact == 'web-wasm32'
+        run: ./scripts/build-preview.sh build=release out=bin/ssplayer-preview.html
+
+      - name: Upload preview-shell
+        if: matrix.artifact == 'web-wasm32'
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: preview-shell
+          path: bin/ssplayer-preview.html
           if-no-files-found: error
           retention-days: 7
 
@@ -268,19 +383,22 @@ jobs:
 
       # scripts/build-release.sh IS the release package: one zip per native
       # platform holding include/, lib/ and the licence, the npm package as the
-      # tarball npm is given, and SHA256SUMS over all of them. Every option is
-      # spelled out so a release cannot change because a default did, and so
-      # this is the command a human runs locally — after
+      # tarball npm is given, the preview shell as the web job built it, and
+      # SHA256SUMS over all of them. Every option is spelled out so a release
+      # cannot change because a default did, and so this is the command a human
+      # runs locally — after
       # `gh run download <this run> -D artifacts` — to reproduce these exact
       # archives without rebuilding four platforms.
       #
       # Its checks are the ones nothing else does: that every platform is present
       # rather than three of four, that the cbindgen header is byte-identical
-      # across them (it is not, if one job built an older commit), that each
-      # finished zip actually holds the library it is named for, and that the
-      # tarball holds what the package advertises.
+      # across them (it is not, if one job built an older commit), that the
+      # macOS dylib is the one release-macos.sh finished -- carrying a Developer
+      # ID signature, on a release -- that each finished zip actually holds the
+      # library it is named for, and that the tarball holds what the package
+      # advertises.
       - name: Build the release
-        run: ./scripts/build-release.sh in=artifacts out=release-dist verify=yes clean=yes
+        run: ./scripts/build-release.sh in=artifacts out=release-dist verify=yes clean=yes sign=${{ inputs.dry_run && 'auto' || 'yes' }}
 
       - name: Upload final release package
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
@@ -328,7 +446,7 @@ jobs:
           notes="See [CHANGELOG.md](${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/blob/${tag}/libs/ssplayer-wgpu/CHANGELOG.md) for what changed."
           args=(--verify-tag --title "SpriteStudio Player for wgpu v${version}" --notes "$notes" --draft)
           case "$version" in *-*) args+=(--prerelease) ;; esac
-          gh release create "$tag" release-dist/*.zip release-dist/*.tgz release-dist/SHA256SUMS "${args[@]}"
+          gh release create "$tag" release-dist/*.zip release-dist/*.tgz release-dist/ssplayer-preview.html release-dist/SHA256SUMS "${args[@]}"
           echo "::notice::Drafted ${tag} — check it and publish it from the Releases page."
 
       # npm 11.21 is the first CLI that sets a dist-tag through trusted
