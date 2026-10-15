@@ -245,6 +245,7 @@ typedef struct {
     uint32_t backend;
     /*
      Drawable size in **pixels** (not points — scale by the display factor).
+     A size past the device's `max_texture_dimension_2d` draws at that limit.
      */
     uint32_t width;
     /*
@@ -2119,7 +2120,8 @@ int32_t ss_scene_stats(ss_scene_t *scene, ss_scene_stats_t *out);
 
 /*
  Resize the swapchain, the depth/stencil buffer and the projection to a new
- drawable size in **pixels**. Zero in either dimension is ignored.
+ drawable size in **pixels**. Zero in either dimension is ignored, and a size
+ past the device's `max_texture_dimension_2d` draws at that limit.
 
  # Safety
  `scene` must be a live handle or null.

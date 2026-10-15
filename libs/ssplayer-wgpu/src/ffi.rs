@@ -97,6 +97,7 @@ pub struct SsSceneDesc {
     /// One of the `SS_BACKEND_*` constants.
     pub backend: u32,
     /// Drawable size in **pixels** (not points — scale by the display factor).
+    /// A size past the device's `max_texture_dimension_2d` draws at that limit.
     pub width: u32,
     /// See `width`.
     pub height: u32,
@@ -2996,7 +2997,8 @@ pub unsafe extern "C" fn ss_scene_stats(scene: *mut SsScene, out: *mut SsSceneSt
 }
 
 /// Resize the swapchain, the depth/stencil buffer and the projection to a new
-/// drawable size in **pixels**. Zero in either dimension is ignored.
+/// drawable size in **pixels**. Zero in either dimension is ignored, and a size
+/// past the device's `max_texture_dimension_2d` draws at that limit.
 ///
 /// # Safety
 /// `scene` must be a live handle or null.

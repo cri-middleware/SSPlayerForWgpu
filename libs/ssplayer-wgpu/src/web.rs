@@ -40,16 +40,13 @@ use crate::player::{AssetLoader, BlendOp, MissingKind, OverridePriority, Playbac
 use crate::renderer::{AlphaMode, Retention, SSRenderer};
 use crate::roster::{Roster, SlotId};
 use crate::scene::{MaskBackend, SSScene, SceneConfig};
+use crate::surface::{STENCIL_FORMAT, Swapchain};
 use std::cell::{Cell, RefCell};
 use std::collections::HashMap;
 use std::rc::Rc;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use wasm_bindgen::prelude::*;
-
-/// Depth/stencil format for masking (matches the native viewer). Masks and the
-/// per-part shader gating rely on a stencil buffer being present.
-const STENCIL_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Depth24PlusStencil8;
 
 /// Map any error into a JS exception value.
 fn js_err<E: core::fmt::Debug>(e: E) -> JsValue {
@@ -76,20 +73,6 @@ fn gone(what: &str) -> JsValue {
 /// canvas context's `alphaMode: "premultiplied"`. Picking the first reported mode
 /// is what made every element an opaque black box.
 const PAGE_ALPHA_MODE: wgpu::CompositeAlphaMode = wgpu::CompositeAlphaMode::PreMultiplied;
-
-fn create_stencil_view(device: &wgpu::Device, width: u32, height: u32) -> wgpu::TextureView {
-    let texture = device.create_texture(&wgpu::TextureDescriptor {
-        label: Some("SpriteStudio Stencil"),
-        size: wgpu::Extent3d { width: width.max(1), height: height.max(1), depth_or_array_layers: 1 },
-        mip_level_count: 1,
-        sample_count: 1,
-        dimension: wgpu::TextureDimension::D2,
-        format: STENCIL_FORMAT,
-        usage: wgpu::TextureUsages::RENDER_ATTACHMENT,
-        view_formats: &[],
-    });
-    texture.create_view(&wgpu::TextureViewDescriptor::default())
-}
 
 /// Decode encoded image bytes (PNG) with **the browser's** decoder.
 ///
@@ -372,9 +355,9 @@ async fn request_adapter(instance: &wgpu::Instance) -> Result<wgpu::Adapter, JsV
 
 /// One canvas: its swapchain and the scene drawn into it.
 struct SurfaceEntry {
-    surface: wgpu::Surface<'static>,
-    config: wgpu::SurfaceConfiguration,
-    stencil_view: wgpu::TextureView,
+    /// Always with a stencil buffer: masks and the per-part shader gating rely
+    /// on one being present.
+    swapchain: Swapchain,
     scene: SSScene,
     /// The players drawn into this canvas. The scene borrows them per frame
     /// rather than owning them, so the owner is the host — here.
@@ -413,34 +396,17 @@ struct WebContext {
 impl WebContext {
     /// Build a surface + scene for `canvas`.
     fn add_surface(&mut self, canvas: web_sys::HtmlCanvasElement) -> Result<SlotId, JsValue> {
-        let width = canvas.width().max(1);
-        let height = canvas.height().max(1);
+        let size = (canvas.width(), canvas.height());
         let surface = self.instance.create_surface(wgpu::SurfaceTarget::Canvas(canvas)).map_err(js_err)?;
-
-        let caps = surface.get_capabilities(&self.adapter);
-        let &first = caps.formats.first().ok_or_else(|| JsValue::from_str("the adapter cannot present to this canvas"))?;
-        // Prefer a non-sRGB format so the premultiplied pipeline composites as authored.
-        let format = caps.formats.iter().copied().find(|f| !f.is_srgb()).unwrap_or(first);
-        let config = wgpu::SurfaceConfiguration {
-            usage: wgpu::TextureUsages::RENDER_ATTACHMENT,
-            format,
-            color_space: wgpu::SurfaceColorSpace::Auto,
-            width,
-            height,
-            present_mode: wgpu::PresentMode::Fifo,
-            alpha_mode: PAGE_ALPHA_MODE,
-            view_formats: vec![],
-            desired_maximum_frame_latency: 2,
-        };
-        surface.configure(&self.device, &config);
+        let swapchain = Swapchain::new(&self.device, &self.adapter, surface, size, Some(PAGE_ALPHA_MODE), true).ok_or_else(|| JsValue::from_str("the adapter cannot present to this canvas"))?;
 
         // The scene is format-specific; the renderer is not, which is
         // what lets canvases with different formats share one of it.
-        let mut scene = SSScene::new(&self.device, &SceneConfig { color_format: format, stencil_format: Some(STENCIL_FORMAT), mask: MaskBackend::Stencil });
+        let mut scene = SSScene::new(&self.device, &SceneConfig { color_format: swapchain.format(), stencil_format: Some(STENCIL_FORMAT), mask: MaskBackend::Stencil });
+        let (width, height) = swapchain.size();
         scene.set_viewport(&self.queue, width as f32, height as f32, false);
-        let stencil_view = create_stencil_view(&self.device, width, height);
 
-        Ok(self.surfaces.insert(SurfaceEntry { surface, config, stencil_view, scene, players: Roster::default() }))
+        Ok(self.surfaces.insert(SurfaceEntry { swapchain, scene, players: Roster::default() }))
     }
 
     /// Upload a decoded `bitmap` and register it under `hash`.
@@ -644,21 +610,19 @@ impl SsContextWeb {
             // Device-scoped first, then each target, then each player's atlases.
             ctx.renderer.restore_device(&device, &queue);
             for surface in ctx.surfaces.iter_mut() {
-                let caps = surface.surface.get_capabilities(&adapter);
-                if !caps.formats.contains(&surface.config.format) {
+                if !surface.swapchain.presents_on(&adapter) {
                     return Err(JsValue::from_str("the restored adapter cannot present a canvas's original surface format; rebuild the context"));
                 }
-                surface.config.alpha_mode = PAGE_ALPHA_MODE;
-                surface.surface.configure(&device, &surface.config);
-                surface.stencil_view = create_stencil_view(&device, surface.config.width, surface.config.height);
+                surface.swapchain.restore(&device, &adapter);
                 surface.scene.restore_device(&device, &queue);
                 for player in surface.players.iter_mut() {
                     player.restore_textures(&mut ctx.renderer, &device, &queue);
                 }
                 // `restore_device` re-applies the viewport the scene last saw, which is
                 // stale if the canvas was resized while the device was gone (`resize`
-                // only records the size then). `config` is authoritative — re-apply from it.
-                surface.scene.set_viewport(&queue, surface.config.width as f32, surface.config.height as f32, false);
+                // only records the size then). The swapchain's is authoritative — re-apply it.
+                let (width, height) = surface.swapchain.size();
+                surface.scene.set_viewport(&queue, width as f32, height as f32, false);
             }
 
             ctx.adapter = adapter;
@@ -744,37 +708,9 @@ impl SsSurfaceWeb {
 
         let mut players: Vec<&mut SSPlayer> = entry.players.iter_mut().collect();
         entry.scene.update(renderer, device, queue, dt, &mut players);
-
-        use wgpu::CurrentSurfaceTexture;
-        let frame = match entry.surface.get_current_texture() {
-            CurrentSurfaceTexture::Success(f) | CurrentSurfaceTexture::Suboptimal(f) => f,
-            // Lost/outdated/timeout (e.g. tab restore): reconfigure and skip this frame.
-            _ => {
-                entry.surface.configure(device, &entry.config);
-                return Ok(());
-            }
-        };
-        let view = frame.texture.create_view(&wgpu::TextureViewDescriptor::default());
-        let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor { label: None });
-        {
-            let mut rpass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
-                label: Some("ss-web frame"),
-                color_attachments: &[Some(wgpu::RenderPassColorAttachment { view: &view, resolve_target: None, ops: wgpu::Operations { load: wgpu::LoadOp::Clear(wgpu::Color::TRANSPARENT), store: wgpu::StoreOp::Store }, depth_slice: None })],
-                depth_stencil_attachment: Some(wgpu::RenderPassDepthStencilAttachment {
-                    view: &entry.stencil_view,
-                    depth_ops: Some(wgpu::Operations { load: wgpu::LoadOp::Clear(1.0), store: wgpu::StoreOp::Store }),
-                    stencil_ops: Some(wgpu::Operations { load: wgpu::LoadOp::Clear(0), store: wgpu::StoreOp::Store }),
-                }),
-                timestamp_writes: entry.scene.timestamp_writes(),
-                occlusion_query_set: None,
-                multiview_mask: None,
-            });
-            entry.scene.draw(renderer, &mut rpass);
-        }
-        entry.scene.resolve_timestamps(&mut encoder);
-        queue.submit(std::iter::once(encoder.finish()));
-        queue.present(frame);
-        Ok(())
+        // A lost surface (a tab restore, say) is configured again and the frame
+        // skipped; the transparent clear is what lets the page show through.
+        entry.swapchain.render(device, queue, renderer, &mut entry.scene, wgpu::Color::TRANSPARENT, "ss-web frame").map_err(JsValue::from_str)
     }
 
     /// Resize the swapchain, the stencil buffer and the projection to the
@@ -784,16 +720,16 @@ impl SsSurfaceWeb {
         let lost = ctx.device_lost.load(Ordering::Relaxed);
         let WebContext { device, queue, surfaces, .. } = ctx;
         let Some(entry) = surfaces.get_mut(self.id) else { return };
-        entry.config.width = width.max(1);
-        entry.config.height = height.max(1);
+        // Zero draws at 1 x 1 rather than being ignored, as the native host
+        // ignores it: configuring sets the canvas's own size, so a canvas the page
+        // set to zero is put back in step with its swapchain and stencil buffer.
         // While the device is gone the new size is only recorded; `restoreDevice`
-        // configures the surface and the stencil from `config` on the way back.
-        if lost {
-            return;
+        // configures the surface and the stencil from it on the way back.
+        entry.swapchain.resize(device, width, height, lost);
+        if !lost {
+            let (width, height) = entry.swapchain.size();
+            entry.scene.set_viewport(queue, width as f32, height as f32, false);
         }
-        entry.surface.configure(device, &entry.config);
-        entry.stencil_view = create_stencil_view(device, entry.config.width, entry.config.height);
-        entry.scene.set_viewport(queue, entry.config.width as f32, entry.config.height as f32, false);
     }
 
     /// What the last frame cost, as a plain JS object.

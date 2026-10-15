@@ -47,6 +47,9 @@ mod renderer;
 #[cfg(any(feature = "ffi", feature = "web"))]
 mod roster;
 mod scene;
+// The swapchain the two faces that own their surface share.
+#[cfg(any(feature = "ffi", feature = "web"))]
+mod surface;
 #[cfg(feature = "web")]
 mod web;
 

@@ -3,7 +3,8 @@
 //!
 //! `Instance` / `Surface` / `Device` / `Queue` live here and the players borrow
 //! device and queue every frame. All of the wgpu work for the C face is in this
-//! module, so `ffi.rs` stays pure ABI translation.
+//! module and the swapchain it shares with the web face (`surface.rs`), so
+//! `ffi.rs` stays pure ABI translation.
 //!
 //! It is plain Rust, so a Rust host that has a window handle rather than a winit
 //! `Window` can use it directly instead of assembling wgpu itself.
@@ -15,15 +16,14 @@ use crate::player::SSPlayer;
 use crate::renderer::{Retention, SSRenderer};
 use crate::roster::Roster;
 use crate::scene::{MaskBackend, SSScene, SceneConfig};
+use crate::surface::Swapchain;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 
 /// Names one player owned by a [`NativeHost`].
 pub use crate::roster::SlotId as PlayerId;
 
-/// Depth/stencil format allocated when masking is enabled. Matches the native
-/// viewer and the web host; the depth aspect is unused.
-pub const STENCIL_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Depth24PlusStencil8;
+pub use crate::surface::STENCIL_FORMAT;
 
 /// How to build a [`NativeHost`].
 pub struct NativeHostConfig {
@@ -50,12 +50,11 @@ pub struct NativeHost {
     renderer: SSRenderer,
     /// One scene per window, drawing every player in `order`.
     scene: SSScene,
-    surface: wgpu::Surface<'static>,
+    /// The window's swapchain, with a stencil buffer unless built with
+    /// `enable_mask = false`.
+    swapchain: Swapchain,
     device: wgpu::Device,
     queue: wgpu::Queue,
-    config: wgpu::SurfaceConfiguration,
-    /// `None` when built with `enable_mask = false`.
-    stencil_view: Option<wgpu::TextureView>,
     clear_color: wgpu::Color,
     y_down: bool,
     /// Set by wgpu when the device is taken away.
@@ -105,46 +104,14 @@ impl NativeHost {
         let adapter = request_adapter(&instance, &surface)?;
         let (device, queue, device_lost) = request_device(&adapter)?;
 
-        let caps = surface.get_capabilities(&adapter);
-        let &first = caps.formats.first().ok_or("the adapter cannot present to this surface")?;
-        // Prefer a non-sRGB format: the atlases are sRGB-encoded bytes sampled as
-        // UNORM, so an sRGB target would encode them a second time (see web.rs).
-        let format = caps.formats.iter().copied().find(|f| !f.is_srgb()).unwrap_or(first);
-
-        let surface_config = wgpu::SurfaceConfiguration {
-            usage: wgpu::TextureUsages::RENDER_ATTACHMENT,
-            format,
-            color_space: wgpu::SurfaceColorSpace::Auto,
-            width: config.width.max(1),
-            height: config.height.max(1),
-            present_mode: wgpu::PresentMode::Fifo,
-            alpha_mode: caps.alpha_modes[0],
-            view_formats: vec![],
-            desired_maximum_frame_latency: 2,
-        };
-        surface.configure(&device, &surface_config);
-
-        let stencil_view = config.enable_mask.then(|| create_stencil_view(&device, surface_config.width, surface_config.height));
+        let swapchain = Swapchain::new(&device, &adapter, surface, (config.width, config.height), None, config.enable_mask).ok_or("the adapter cannot present to this surface")?;
         let renderer = SSRenderer::new(&device);
-        let scene = SSScene::new(&device, &SceneConfig { color_format: format, stencil_format: config.enable_mask.then_some(STENCIL_FORMAT), mask: if config.enable_mask { MaskBackend::Stencil } else { MaskBackend::None } });
+        let mut scene = SSScene::new(&device, &SceneConfig { color_format: swapchain.format(), stencil_format: config.enable_mask.then_some(STENCIL_FORMAT), mask: if config.enable_mask { MaskBackend::Stencil } else { MaskBackend::None } });
+        let (width, height) = swapchain.size();
+        scene.set_viewport(&queue, width as f32, height as f32, config.y_down);
 
         let c = config.clear_color;
-        let mut host = Self {
-            players: Roster::default(),
-            renderer,
-            scene,
-            surface,
-            device,
-            queue,
-            config: surface_config,
-            stencil_view,
-            clear_color: wgpu::Color { r: c[0] as f64, g: c[1] as f64, b: c[2] as f64, a: c[3] as f64 },
-            y_down: config.y_down,
-            device_lost,
-            instance,
-        };
-        host.scene.set_viewport(&host.queue, host.config.width as f32, host.config.height as f32, host.y_down);
-        Ok(host)
+        Ok(Self { players: Roster::default(), renderer, scene, swapchain, device, queue, clear_color: wgpu::Color { r: c[0] as f64, g: c[1] as f64, b: c[2] as f64, a: c[3] as f64 }, y_down: config.y_down, device_lost, instance })
     }
 
     /// Add a player to this window and return its id.
@@ -209,67 +176,35 @@ impl NativeHost {
 
     /// Acquire the swapchain image, draw the prepared frame, and present.
     ///
-    /// A lost/outdated/timed-out surface is absorbed by reconfiguring,
-    /// skipping one frame; that is reported as success.
+    /// A lost/outdated/timed-out surface is absorbed by reconfiguring, and an
+    /// occluded one by waiting, skipping one frame either way; that is reported
+    /// as success.
     pub fn render(&mut self) -> Result<(), String> {
-        use wgpu::CurrentSurfaceTexture;
         if self.is_device_lost() {
             return Ok(());
         }
-        let output = match self.surface.get_current_texture() {
-            CurrentSurfaceTexture::Success(t) | CurrentSurfaceTexture::Suboptimal(t) => t,
-            // Occluded: nothing to present, and the surface is still valid.
-            CurrentSurfaceTexture::Occluded => return Ok(()),
-            CurrentSurfaceTexture::Validation => return Err("surface configuration is invalid".into()),
-            // Lost / Outdated / Timeout: rebuild the swapchain and skip this frame.
-            _ => {
-                self.surface.configure(&self.device, &self.config);
-                return Ok(());
-            }
-        };
-        let view = output.texture.create_view(&wgpu::TextureViewDescriptor::default());
-
-        let mut encoder = self.device.create_command_encoder(&wgpu::CommandEncoderDescriptor { label: Some("ss-native frame") });
-        {
-            let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
-                label: Some("ss-native pass"),
-                color_attachments: &[Some(wgpu::RenderPassColorAttachment { view: &view, resolve_target: None, ops: wgpu::Operations { load: wgpu::LoadOp::Clear(self.clear_color), store: wgpu::StoreOp::Store }, depth_slice: None })],
-                depth_stencil_attachment: self.stencil_view.as_ref().map(|stencil| wgpu::RenderPassDepthStencilAttachment {
-                    view: stencil,
-                    depth_ops: Some(wgpu::Operations { load: wgpu::LoadOp::Clear(1.0), store: wgpu::StoreOp::Store }),
-                    stencil_ops: Some(wgpu::Operations { load: wgpu::LoadOp::Clear(0), store: wgpu::StoreOp::Store }),
-                }),
-                timestamp_writes: self.scene.timestamp_writes(),
-                occlusion_query_set: None,
-                multiview_mask: None,
-            });
-            self.scene.draw(&self.renderer, &mut pass);
-        }
-        self.scene.resolve_timestamps(&mut encoder);
-        self.queue.submit(std::iter::once(encoder.finish()));
-        self.queue.present(output);
-        Ok(())
+        self.swapchain.render(&self.device, &self.queue, &self.renderer, &mut self.scene, self.clear_color, "ss-native frame").map_err(String::from)
     }
 
     /// Resize the swapchain, the depth/stencil buffer and the projection to a new
-    /// drawable size in pixels. Zero in either dimension is ignored.
+    /// drawable size in pixels. Zero in either dimension is ignored, and a size
+    /// past the device's `max_texture_dimension_2d` draws at that limit.
     ///
     /// While the device is lost only the size is recorded, and `restore_device`
     /// applies it.
     pub fn resize(&mut self, width: u32, height: u32) {
+        // A minimized window reports zero. Its last size stays configured until
+        // it comes back, rather than a 1 x 1 swapchain that matches no window;
+        // the web face, whose configure sizes the canvas, clamps instead.
         if width == 0 || height == 0 {
             return;
         }
-        self.config.width = width;
-        self.config.height = height;
-        if self.is_device_lost() {
-            return;
+        let lost = self.is_device_lost();
+        self.swapchain.resize(&self.device, width, height, lost);
+        if !lost {
+            let (width, height) = self.swapchain.size();
+            self.scene.set_viewport(&self.queue, width as f32, height as f32, self.y_down);
         }
-        self.surface.configure(&self.device, &self.config);
-        if self.stencil_view.is_some() {
-            self.stencil_view = Some(create_stencil_view(&self.device, width, height));
-        }
-        self.scene.set_viewport(&self.queue, width as f32, height as f32, self.y_down);
     }
 
     /// Whether the driver has taken the device away. While this is true
@@ -284,18 +219,13 @@ impl NativeHost {
     /// Errors if the GPU is gone for good, or if the replacement adapter cannot
     /// present this window's format — the scene's pipelines are baked against it, so that case is a rebuild from [`NativeHost::new`].
     pub fn restore_device(&mut self) -> Result<(), String> {
-        let adapter = request_adapter(&self.instance, &self.surface)?;
-        let caps = self.surface.get_capabilities(&adapter);
-        if !caps.formats.contains(&self.config.format) {
+        let adapter = request_adapter(&self.instance, self.swapchain.surface())?;
+        if !self.swapchain.presents_on(&adapter) {
             return Err("the restored adapter cannot present this window's original surface format; rebuild the host".into());
         }
         let (device, queue, device_lost) = request_device(&adapter)?;
 
-        self.config.alpha_mode = caps.alpha_modes[0];
-        self.surface.configure(&device, &self.config);
-        if self.stencil_view.is_some() {
-            self.stencil_view = Some(create_stencil_view(&device, self.config.width, self.config.height));
-        }
+        self.swapchain.restore(&device, &adapter);
         // Widest scope first: a player re-registers its atlases into the renderer.
         self.renderer.restore_device(&device, &queue);
         self.scene.restore_device(&device, &queue);
@@ -303,25 +233,12 @@ impl NativeHost {
             player.restore_textures(&mut self.renderer, &device, &queue);
         }
         // After the scene's own restore, which re-applies the viewport it last saw.
-        self.scene.set_viewport(&queue, self.config.width as f32, self.config.height as f32, self.y_down);
+        let (width, height) = self.swapchain.size();
+        self.scene.set_viewport(&queue, width as f32, height as f32, self.y_down);
 
         self.device = device;
         self.queue = queue;
         self.device_lost = device_lost;
         Ok(())
     }
-}
-
-fn create_stencil_view(device: &wgpu::Device, width: u32, height: u32) -> wgpu::TextureView {
-    let texture = device.create_texture(&wgpu::TextureDescriptor {
-        label: Some("SpriteStudio Stencil"),
-        size: wgpu::Extent3d { width: width.max(1), height: height.max(1), depth_or_array_layers: 1 },
-        mip_level_count: 1,
-        sample_count: 1,
-        dimension: wgpu::TextureDimension::D2,
-        format: STENCIL_FORMAT,
-        usage: wgpu::TextureUsages::RENDER_ATTACHMENT,
-        view_formats: &[],
-    });
-    texture.create_view(&wgpu::TextureViewDescriptor::default())
 }
