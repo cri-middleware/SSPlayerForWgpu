@@ -84,7 +84,7 @@ fn render(device: &wgpu::Device, queue: &wgpu::Queue, path: &str, backend: MaskB
     let readback = device.create_buffer(&wgpu::BufferDescriptor { label: Some("readback"), size: (bytes_per_row * h) as u64, usage: wgpu::BufferUsages::MAP_READ | wgpu::BufferUsages::COPY_DST, mapped_at_creation: false });
 
     let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor { label: None });
-    scene.encode_mask_coverage(&mut renderer, device, &mut encoder);
+    scene.encode_offscreen(&mut renderer, device, &mut encoder);
     {
         let depth_stencil_attachment = depth_view.as_ref().map(|view| wgpu::RenderPassDepthStencilAttachment {
             view,

@@ -12,8 +12,8 @@ use crate::events::{SsEvent, decode_events};
 use crate::frame::FrameView;
 use crate::mask::{GeomKind, MaskOp, MaskWriter, PartMaskFlags, ScopedWriter, StencilTest, plan_writers_into};
 use crate::pack::{EmbeddedImage, SSPack, TextureRef};
-use crate::renderer::{Retention, SSRenderer};
-use crate::scene::{BatchInfo, FrameChunk, NodeSlot, pack_tint};
+use crate::renderer::{CROWD_SHIFT, Retention, SSRenderer};
+use crate::scene::{BatchInfo, FrameChunk, NodeSlot, mat4_mul, pack_tint};
 use ssab::ssab::ss::format::{PartType, root_as_ss_anime_binary_unchecked};
 use ssruntime::error::SSRuntimeError;
 use ssruntime::runtime::framedata::ss::runtime::{DrawBatchKind, root_as_frame_data_unchecked};
@@ -466,6 +466,58 @@ impl OverridePriority {
     }
 }
 
+/// The most members [`SSPlayer::set_crowd`] draws; those past it are left out.
+pub const MAX_CROWD_MEMBERS: usize = 1 << CROWD_SHIFT;
+
+/// One of the copies [`SSPlayer::set_crowd`] draws: where it stands, and how it
+/// is faded and tinted, each on top of the player's own.
+///
+/// The placement is in [`SSPlayer::set_transform`]'s terms and is composed under
+/// it, so the player's own transform moves the whole crowd. The default stands
+/// where the player does, unfaded and untinted.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct CrowdMember {
+    pub x: f32,
+    /// Measured downward, as `set_transform`'s is.
+    pub y: f32,
+    pub scale_x: f32,
+    pub scale_y: f32,
+    /// Radians.
+    pub rotation: f32,
+    /// Multiplied into the player's alpha, part by part; clamped to 0..=1.
+    pub alpha: f32,
+    /// `0xRRGGBB`, multiplied into the player's tint.
+    pub tint: u32,
+}
+
+impl Default for CrowdMember {
+    fn default() -> Self {
+        Self { x: 0.0, y: 0.0, scale_x: 1.0, scale_y: 1.0, rotation: 0.0, alpha: 1.0, tint: WHITE_TINT }
+    }
+}
+
+impl CrowdMember {
+    /// The member's placement, composed as `set_transform` composes the player's.
+    pub(crate) fn matrix(&self) -> [f32; 16] {
+        placement(self.x, self.y, self.scale_x, self.scale_y, self.rotation)
+    }
+}
+
+/// Translation, scale, then rotation in radians, as a column-major matrix (see
+/// `mat4_mul` / `apply_transform`): the columns are scale*rotation for x and y,
+/// then z, then the translation.
+fn placement(x: f32, y: f32, scale_x: f32, scale_y: f32, rotation: f32) -> [f32; 16] {
+    let (sin, cos) = rotation.sin_cos();
+    #[rustfmt::skip]
+    let m = [
+        scale_x * cos, scale_x * sin, 0.0, 0.0,
+        -scale_y * sin, scale_y * cos, 0.0, 0.0,
+        0.0, 0.0, 1.0, 0.0,
+        x, y, 0.0, 1.0,
+    ];
+    m
+}
+
 /// Refill `out` with the timeline events the node's last update crossed.
 ///
 /// Cleared first, so it always describes the tick that just ran and never
@@ -681,6 +733,10 @@ pub struct SSPlayer {
     culled: bool,
     /// Player-level fade folded into every vertex (see [`BatchInfo::alpha`]).
     alpha: f32,
+    /// The copies [`SSPlayer::set_crowd`] asked for, clamped as they came in.
+    /// Empty draws the player once, at its own placement. Refilled in place, so
+    /// a host that moves its crowd every frame allocates nothing.
+    crowd: Vec<CrowdMember>,
     /// Player-level tint as the API gives it, `0xRRGGBB` (see
     /// [`SSPlayer::set_tint`]). Kept in that order rather than the shader's so a
     /// reader of this field sees what the caller passed; `pack_tint` converts it
@@ -823,6 +879,7 @@ impl SSPlayer {
             visible: true,
             culled: false,
             alpha: 1.0,
+            crowd: Vec::new(),
             tint: WHITE_TINT,
             loop_count: None,
             transport: HostTransport::default(),
@@ -2254,17 +2311,7 @@ impl SSPlayer {
     /// arbitrary parent matrix for every instance child, so a non-identity root
     /// simply rides along.
     pub fn set_transform(&mut self, x: f32, y: f32, scale_x: f32, scale_y: f32, rotation: f32) {
-        let (sin, cos) = rotation.sin_cos();
-        // Column-major (see `mat4_mul` / `apply_transform`): the columns are
-        // scale*rotation for x and y, then z, then the translation.
-        #[rustfmt::skip]
-        let m = [
-            scale_x * cos, scale_x * sin, 0.0, 0.0,
-            -scale_y * sin, scale_y * cos, 0.0, 0.0,
-            0.0, 0.0, 1.0, 0.0,
-            x, y, 0.0, 1.0,
-        ];
-        self.transform = m;
+        self.transform = placement(x, y, scale_x, scale_y, rotation);
     }
 
     /// Reset the placement to the identity: centred, unscaled, unrotated.
@@ -2324,6 +2371,10 @@ impl SSPlayer {
     /// Player-level fade, clamped to 0..=1 and multiplied into every part's
     /// colour alpha. Mask coverage is deliberately unaffected: a faded player
     /// clips exactly as it would at full opacity.
+    ///
+    /// Part by part, so where two parts overlap the player is more opaque than
+    /// `alpha`; a scene with [`SSScene::set_group_alpha`](crate::SSScene::set_group_alpha)
+    /// on fades the player as one layer instead.
     pub fn set_alpha(&mut self, alpha: f32) {
         self.alpha = alpha.clamp(0.0, 1.0);
     }
@@ -2346,6 +2397,47 @@ impl SSPlayer {
 
     pub fn tint(&self) -> u32 {
         self.tint
+    }
+
+    /// Draw this one playhead at every member's placement: a crowd of copies
+    /// that cost one player's evaluation, one upload of its geometry and one
+    /// player's draw calls, however many there are. Empty — the default — draws
+    /// the player once, where [`SSPlayer::set_transform`] put it. Members past
+    /// [`MAX_CROWD_MEMBERS`] are left out.
+    ///
+    /// The members are copied, into a vector this player keeps, so a host that
+    /// moves its crowd every frame allocates nothing. Everything but placement,
+    /// alpha and tint is shared: the frame, the animation and its tracks, the
+    /// overrides, the events (reported once), the masks and the effects —
+    /// every member's particles are the same ones. `set_order`, `set_visible`,
+    /// `set_culled` and the player's own alpha and tint apply to the crowd as a
+    /// whole; to hide one member, leave it out.
+    ///
+    /// Each draw is issued once for every member, so members interleave draw by
+    /// draw: where two overlap, a later part of the first can cover an earlier
+    /// part of the second. Under [`MaskBackend::Coverage`](crate::MaskBackend::Coverage)
+    /// each member is clipped by its own mask. Under the stencil backend the
+    /// members' masks are written together, so they clip correctly only where
+    /// members do not overlap.
+    ///
+    /// [`SSPlayer::part_transform`] stays in the player's space, without the
+    /// player's placement or any member's: compose a member's onto it to follow
+    /// that member.
+    pub fn set_crowd(&mut self, members: &[CrowdMember]) {
+        self.set_crowd_from(members.iter().copied());
+    }
+
+    /// [`SSPlayer::set_crowd`] for a face whose members arrive in another form,
+    /// converted on the way in rather than collected first.
+    pub(crate) fn set_crowd_from(&mut self, members: impl IntoIterator<Item = CrowdMember>) {
+        self.crowd.clear();
+        self.crowd.extend(members.into_iter().take(MAX_CROWD_MEMBERS).map(|member| CrowdMember { alpha: member.alpha.clamp(0.0, 1.0), tint: member.tint & WHITE_TINT, ..member }));
+    }
+
+    /// The crowd [`SSPlayer::set_crowd`] set, as it is drawn: alpha clamped,
+    /// tint masked to `0xRRGGBB`. Empty when the player draws once.
+    pub fn crowd(&self) -> &[CrowdMember] {
+        &self.crowd
     }
 
     /// The animation currently set up, or `None` before the first
@@ -2761,7 +2853,10 @@ impl SSPlayer {
     /// Called by [`SSScene::update`] for each player in draw order — the scene
     /// owns the frame boundary (`begin_frame` / `end_frame`), because one frame
     /// now spans every player sharing the target.
-    pub(crate) fn build_frame(&mut self, scene: &mut FrameChunk, renderer: &SSRenderer, delta_secs: f32) {
+    ///
+    /// `alpha` is the fade to fold into the parts: the player's own, or 1 when
+    /// the scene fades it as a whole.
+    pub(crate) fn build_frame(&mut self, scene: &mut FrameChunk, renderer: &SSRenderer, delta_secs: f32, alpha: f32) {
         // `culled` means "this player cannot be seen": no timeline advance and no
         // geometry. Textures are still flushed above, so it can be unculled
         // without re-loading anything.
@@ -2826,9 +2921,9 @@ impl SSPlayer {
             return;
         }
 
-        let draw = NodeDraw { alpha: self.alpha, tint: pack_tint(self.tint) };
+        let draw = NodeDraw { alpha, tint: pack_tint(self.tint) };
         let mut build = FrameBuild { scene, renderer, sub_frame: self.sub_frame };
-        render_tree(root, &mut self.walk, &mut build, &self.transform, frame_no, draw);
+        render_tree(root, &mut self.walk, &mut build, Place::Top(&self.transform, &self.crowd), frame_no, draw);
         // The nodes the walk did not prepare draw nothing, and their effect slots
         // still have to keep time: a hidden instance part's sub-animation, a child
         // its slot says is not showing.
@@ -3053,6 +3148,17 @@ struct FrameBuild<'a> {
     sub_frame: bool,
 }
 
+/// Where a node of the tree is placed.
+#[derive(Clone, Copy)]
+enum Place<'c> {
+    /// The top node: at the player's own placement, under each member of its
+    /// crowd.
+    Top(&'c [f32; 16], &'c [CrowdMember]),
+    /// A sub-animation: at its instance part's world matrix, under each of the
+    /// parent node's placements.
+    Under(NodeSlot, [f32; 16]),
+}
+
 /// How one node of the tree is drawn: how opaque it is and how it is tinted.
 ///
 /// `alpha` changes per recursion level (each instance child folds in its
@@ -3118,10 +3224,9 @@ impl InheritedMask {
 /// rebuilds the runtime's buffers under any slice still pointing into them.
 struct NodePrep<'r> {
     frame: FrameView<'r>,
+    /// Where the node draws, in the arena: the player's placement composed with
+    /// every instance part above it, once per member of the crowd.
     slot: NodeSlot,
-    /// Where the node draws: the player's placement composed with every instance
-    /// part above it.
-    transform: [f32; 16],
     /// Node-local to player-local: the chain of instance placements alone. The
     /// coverage bitmap is pinned to the player, not to the screen.
     to_root: [f32; 16],
@@ -3330,10 +3435,10 @@ const IDENTITY_MATRIX: [f32; 16] = [1.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0,
 
 /// Draw one player's instance tree: prepare every node, settle the tree's mask,
 /// then walk it in drawing order.
-fn render_tree(root: &mut PlaybackNode, walk: &mut Walk, build: &mut FrameBuild<'_>, transform: &[f32; 16], frame_no: f32, draw: NodeDraw) {
+fn render_tree(root: &mut PlaybackNode, walk: &mut Walk, build: &mut FrameBuild<'_>, place: Place<'_>, frame_no: f32, draw: NodeDraw) {
     walk.mask.reset(build.scene.mask_backend());
     let mut next_seq = 0;
-    if let Some(top) = prepare_node(root, build, frame_no, *transform, IDENTITY_MATRIX, InheritedMask::ROOT, TREE_START, &mut next_seq, walk) {
+    if let Some(top) = prepare_node(root, build, frame_no, place, IDENTITY_MATRIX, InheritedMask::ROOT, TREE_START, &mut next_seq, walk) {
         match walk.mask.backend {
             crate::MaskBackend::Coverage => bake_coverage(build, &mut walk.preps, &mut walk.mask),
             crate::MaskBackend::Stencil => walk.mask.schedule(),
@@ -3358,7 +3463,7 @@ fn render_tree(root: &mut PlaybackNode, walk: &mut Walk, build: &mut FrameBuild<
 /// `open` is where this node's animation starts on the sequence: the top
 /// animation's before its first part, a sub-animation's at its instance part.
 #[allow(clippy::too_many_arguments)]
-fn prepare_node(node: &mut PlaybackNode, build: &mut FrameBuild<'_>, frame_no: f32, transform: [f32; 16], to_root: [f32; 16], ctx: InheritedMask, open: i32, next_seq: &mut i32, walk: &mut Walk) -> Option<usize> {
+fn prepare_node(node: &mut PlaybackNode, build: &mut FrameBuild<'_>, frame_no: f32, place: Place<'_>, to_root: [f32; 16], ctx: InheritedMask, open: i32, next_seq: &mut i32, walk: &mut Walk) -> Option<usize> {
     // The DISPLAY frame. The playhead keeps its fraction whatever this is set to;
     // flooring it here is the whole of what turning sub-frame off does.
     let frame_no = if build.sub_frame { frame_no } else { frame_no.floor() };
@@ -3369,13 +3474,16 @@ fn prepare_node(node: &mut PlaybackNode, build: &mut FrameBuild<'_>, frame_no: f
     let frame = frame_view(&mut node.context, frame_data);
     // The node's placement goes into the arena first; each part it draws copies
     // its own geometry in after it.
-    let slot = build.scene.push_transform(&transform);
+    let slot = match place {
+        Place::Top(transform, crowd) => build.scene.push_root_transform(transform, crowd),
+        Place::Under(parent, local) => build.scene.push_child_transform(&parent, &local),
+    };
     let index = walk.preps.len();
     let fd = unsafe { root_as_frame_data_unchecked(frame.frame_data) };
     let draw_order = fd.draw_order();
     let seq = walk.seq.len();
     walk.seq.resize(seq + draw_order.len(), 0);
-    walk.preps.push(NodePrep { frame, slot, transform, to_root, ctx, seq });
+    walk.preps.push(NodePrep { frame, slot, to_root, ctx, seq });
 
     // `plan_writers_into` appends them in ascending rank.
     let planned = walk.planned.len();
@@ -3411,7 +3519,7 @@ fn prepare_node(node: &mut PlaybackNode, build: &mut FrameBuild<'_>, frame_no: f
         let m: [f32; 16] = frame.world_matrices[part_idx * 16..part_idx * 16 + 16].try_into().unwrap();
         let child_ctx = InheritedMask::of_instance(&node.mask_flags.get(part_idx).copied().unwrap_or_default());
         let child_frame_no = child.frame_no;
-        child.prep = prepare_node(&mut child.node, build, child_frame_no, mat4_mul(&transform, &m), mat4_mul(&to_root, &m), child_ctx, here, next_seq, walk);
+        child.prep = prepare_node(&mut child.node, build, child_frame_no, Place::Under(slot, m), mat4_mul(&to_root, &m), child_ctx, here, next_seq, walk);
     }
     walk.planned.truncate(planned);
     Some(index)
@@ -3472,7 +3580,7 @@ fn bake_coverage(build: &mut FrameBuild<'_>, preps: &mut [NodePrep<'_>], mask: &
 fn render_node(node: &mut PlaybackNode, index: usize, preps: &[NodePrep<'_>], seqs: &[i32], build: &mut FrameBuild<'_>, draw: NodeDraw, mask: &mut TreeMask) {
     let NodeDraw { alpha, tint } = draw;
     let prep = &preps[index];
-    let (frame, node_slot, transform, ctx) = (&prep.frame, &prep.slot, &prep.transform, prep.ctx);
+    let (frame, node_slot, ctx) = (&prep.frame, &prep.slot, prep.ctx);
     let seq_of = |rank: usize| seqs[prep.seq + rank];
 
     let fd = unsafe { root_as_frame_data_unchecked(frame.frame_data) };
@@ -3552,10 +3660,9 @@ fn render_node(node: &mut PlaybackNode, index: usize, preps: &[NodePrep<'_>], se
                         }
                     };
                     let m: [f32; 16] = frame.world_matrices[part_idx * 16..part_idx * 16 + 16].try_into().unwrap();
-                    let eff_transform = mat4_mul(transform, &m);
                     // The effect draws from its own plan, so it needs its own
                     // arena slot rather than this node's.
-                    let mut eff_slot = build.scene.push_transform(&eff_transform);
+                    let mut eff_slot = build.scene.push_child_transform(node_slot, &m);
                     // Under coverage the slot needs its own view of the bitmap too:
                     // the particles are in the effect part's local space, one
                     // placement below this node's. Without it the replay has no
@@ -3597,21 +3704,6 @@ fn frame_view<'a>(ctx: &mut Context<'static>, frame_data: &'a [u8]) -> FrameView
         shape_vertex_box_coords: unsafe { slice_f32(ctx.get_shape_vertex_box_coords_ptr(), ctx.get_shape_vertex_box_coords_len()) },
         shape_vertex_counts: unsafe { slice_i32(ctx.get_shape_vertex_counts_ptr(), ctx.get_shape_vertex_counts_len()) },
     }
-}
-
-/// Multiply two column-major 4x4 matrices: `a * b`.
-fn mat4_mul(a: &[f32; 16], b: &[f32; 16]) -> [f32; 16] {
-    let mut r = [0.0f32; 16];
-    for col in 0..4 {
-        for row in 0..4 {
-            let mut s = 0.0;
-            for k in 0..4 {
-                s += a[k * 4 + row] * b[col * 4 + k];
-            }
-            r[col * 4 + row] = s;
-        }
-    }
-    r
 }
 
 /// Build a slice from a runtime pointer/length, or empty if null/zero.

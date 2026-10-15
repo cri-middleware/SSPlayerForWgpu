@@ -1,12 +1,14 @@
 //! The playback hot path allocates nothing of its own.
 //!
 //! A frame is `SSScene::update_with` (what `update` calls, and what a host that
-//! keeps its players hands them to), `encode_mask_coverage` and `draw`, and
+//! keeps its players hands them to), `encode_offscreen` and `draw`, and
 //! once every buffer has grown to what the animations need, none of them may
 //! allocate: `FrameChunk::reset` keeps capacity, GPU buffers only grow, and a
 //! per-frame buffer lives on the chunk, the scene or the player's walk.
 //! Nothing else checks that, and an allocation in the walk costs nothing a
-//! test of pixels can see.
+//! test of pixels can see. The cast draws crowds, given their members again
+//! every frame as a host moving them would, and faded players through
+//! group-alpha layers.
 //!
 //! wgpu itself allocates on every frame — a `write_buffer` stages through a
 //! fresh buffer, and a render pass records into vectors — so a count alone
@@ -17,7 +19,7 @@
 //!
 //! Skips itself when no GPU adapter is available, like the rendering tests.
 
-use ssplayer_wgpu::{MaskBackend, SSPlayer, SSRenderer, SSScene, SceneConfig};
+use ssplayer_wgpu::{CrowdMember, MaskBackend, SSPlayer, SSRenderer, SSScene, SceneConfig};
 use std::alloc::{GlobalAlloc, Layout, System};
 use std::cell::Cell;
 use std::sync::Mutex;
@@ -126,7 +128,19 @@ const PACKS: [&str; 6] = ["overall/Basic.ssab", "overall/Instance.ssab", "overal
 
 /// Players with nothing loaded, in descending `order`, so the scene has a
 /// cast to sort past the size a stable sort does without a buffer of its own.
-const CROWD: usize = 1024;
+const EMPTY_PLAYERS: usize = 1024;
+
+/// What every pack but the first draws as: a crowd of three, one faded and one
+/// tinted, so instance children, particles and meshes are placed per member.
+const MEMBERS: [CrowdMember; 3] = [
+    CrowdMember { x: -60.0, y: 0.0, scale_x: 0.5, scale_y: 0.5, rotation: 0.0, alpha: 1.0, tint: 0xFF_FF_FF },
+    CrowdMember { x: 0.0, y: 40.0, scale_x: 0.5, scale_y: 0.5, rotation: 0.5, alpha: 0.5, tint: 0xFF_FF_FF },
+    CrowdMember { x: 60.0, y: 0.0, scale_x: -0.5, scale_y: 0.5, rotation: 0.0, alpha: 1.0, tint: 0x80_C0_FF },
+];
+
+/// The packs faded, which group alpha draws through a layer each: the masked
+/// one, and the character, which is also a crowd.
+const FADED: [usize; 2] = [3, 5];
 
 const SIZE: u32 = 256;
 const STENCIL: wgpu::TextureFormat = wgpu::TextureFormat::Depth24PlusStencil8;
@@ -157,6 +171,7 @@ fn play(device: &wgpu::Device, queue: &wgpu::Queue, mask: MaskBackend) {
     let mut renderer = SSRenderer::new(device);
     let mut scene = SSScene::new(device, &SceneConfig { color_format: wgpu::TextureFormat::Rgba8Unorm, stencil_format: stencil.then_some(STENCIL), mask });
     scene.set_viewport(queue, SIZE as f32, SIZE as f32, false);
+    scene.set_group_alpha(true);
     let mut players: Vec<SSPlayer> = PACKS
         .iter()
         .map(|pack| {
@@ -169,7 +184,10 @@ fn play(device: &wgpu::Device, queue: &wgpu::Queue, mask: MaskBackend) {
             player
         })
         .collect();
-    players.extend((0..CROWD).map(|i| {
+    for index in FADED {
+        players[index].set_alpha(0.5);
+    }
+    players.extend((0..EMPTY_PLAYERS).map(|i| {
         let mut player = SSPlayer::new();
         player.set_order(-(i as i32));
         player
@@ -181,8 +199,11 @@ fn play(device: &wgpu::Device, queue: &wgpu::Queue, mask: MaskBackend) {
         let measured = frame >= WARM_UP;
         let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor::default());
         let run = |scene: &mut SSScene, renderer: &mut SSRenderer, players: &mut [SSPlayer], encoder: &mut wgpu::CommandEncoder| {
+            for player in &mut players[1..PACKS.len()] {
+                player.set_crowd(&MEMBERS);
+            }
             scene.update_with(renderer, device, queue, 1.0 / 60.0, players, |player| Some(player));
-            scene.encode_mask_coverage(renderer, device, encoder);
+            scene.encode_offscreen(renderer, device, encoder);
         };
         if measured {
             armed(|| run(&mut scene, &mut renderer, &mut players, &mut encoder));
@@ -212,6 +233,9 @@ fn play(device: &wgpu::Device, queue: &wgpu::Queue, mask: MaskBackend) {
         // Retire the frame's staging buffers, as a host's present would.
         let _ = device.poll(wgpu::PollType::Poll);
     }
+    // Otherwise the faded packs could have been drawn part by part, and the
+    // layers never measured at all.
+    assert_eq!(scene.stats().group_layers, FADED.len() as u32, "{mask:?}: the faded packs were not drawn through layers");
 }
 
 #[test]

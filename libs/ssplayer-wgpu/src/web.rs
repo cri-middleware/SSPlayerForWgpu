@@ -36,7 +36,7 @@
 use crate::events::{SignalValue, SsEvent};
 use crate::fit::{Align, Fit, Placement, Rect};
 use crate::pack::SSPack;
-use crate::player::{AssetLoader, BlendOp, MissingKind, OverridePriority, PlaybackDirection, PlaybackStyle, SSPlayer};
+use crate::player::{AssetLoader, BlendOp, CrowdMember, MAX_CROWD_MEMBERS, MissingKind, OverridePriority, PlaybackDirection, PlaybackStyle, SSPlayer};
 use crate::renderer::{AlphaMode, Retention, SSRenderer, texture_extent_error};
 use crate::roster::{Roster, Slot, SlotId};
 use crate::scene::{MaskBackend, SSScene, SceneConfig};
@@ -759,6 +759,32 @@ impl SsSurfaceWeb {
         }
     }
 
+    /// Fade each player whose alpha is below 1 as one layer, composited at its
+    /// alpha, rather than part by part — so overlapping parts of a half-faded
+    /// character read half, not three quarters. The WebGL player does this for
+    /// every faded player; here it is off by default.
+    ///
+    /// Each player faded at once costs a render pass per frame and a layer the
+    /// size of the canvas (about 8 MiB at 1920x1080), counted in
+    /// `stats().groupLayers`; turning it off frees them. Inside a layer the parts
+    /// blend against transparency rather than the page: Add, Mul and Screen
+    /// parts composite with the player's own parts alone.
+    #[wasm_bindgen(js_name = setGroupAlpha)]
+    pub fn set_group_alpha(&self, on: bool) -> Result<(), JsValue> {
+        let ctx = &mut *self.ctx.borrow_mut();
+        let entry = ctx.surfaces.get_mut(self.id).ok_or_else(|| gone("surface"))?;
+        entry.scene.set_group_alpha(on);
+        Ok(())
+    }
+
+    /// Whether `setGroupAlpha` is on.
+    #[wasm_bindgen(js_name = groupAlpha)]
+    pub fn group_alpha(&self) -> Result<bool, JsValue> {
+        let ctx = &mut *self.ctx.borrow_mut();
+        let entry = ctx.surfaces.get_mut(self.id).ok_or_else(|| gone("surface"))?;
+        Ok(entry.scene.group_alpha())
+    }
+
     /// What the last frame cost, as a plain JS object.
     ///
     /// `gpuPassTimeNs` is `undefined` unless the browser granted
@@ -780,6 +806,7 @@ impl SsSurfaceWeb {
         set("uploadedBytes", (s.uploaded_bytes as f64).into());
         set("mergeableDraws", s.mergeable_draws.into());
         set("redundantTextureBinds", s.redundant_texture_binds.into());
+        set("groupLayers", s.group_layers.into());
         if let Some(ns) = s.gpu_pass_time_ns {
             set("gpuPassTimeNs", (ns as f64).into());
         }
@@ -2265,7 +2292,9 @@ impl SsPlayerWeb {
         with_player!(self, |p| p.is_culled())
     }
 
-    /// Player-level fade in 0..1, multiplied into every part.
+    /// Player-level fade in 0..1, multiplied into every part — so overlapping
+    /// parts read more opaque than `alpha`, unless the canvas fades each player
+    /// as one layer (`SsSurfaceWeb.setGroupAlpha`).
     #[wasm_bindgen(js_name = setAlpha)]
     pub fn set_alpha(&self, alpha: f32) -> Result<(), JsValue> {
         with_player!(self, |p| p.set_alpha(alpha))
@@ -2287,6 +2316,48 @@ impl SsPlayerWeb {
     /// The player-level tint as `0xRRGGBB`.
     pub fn tint(&self) -> Result<u32, JsValue> {
         with_player!(self, |p| p.tint())
+    }
+
+    /// Draw this one playhead once at each member's placement: a crowd that costs
+    /// one player's evaluation and draw calls, however large.
+    ///
+    /// `placements` holds six numbers a member — `x, y, scaleX, scaleY, rotation,
+    /// alpha`, the first five in `setTransform` terms and composed under it, the
+    /// alpha multiplied into the player's — and `tints`, when given, one
+    /// `0xRRGGBB` a member. An empty array draws the player once again. Throws,
+    /// leaving the crowd as it was, when `placements` is not a whole number of
+    /// members, `tints` does not match it, or there are more than 4096.
+    ///
+    /// Everything else is shared: the frame, the events (reported once), the
+    /// masks and the effects. Each draw is issued for every member in turn, so
+    /// where two members overlap their parts interleave, and masks clip
+    /// correctly only where members do not overlap.
+    #[wasm_bindgen(js_name = setCrowd)]
+    pub fn set_crowd(&self, placements: &[f32], tints: Option<Vec<u32>>) -> Result<(), JsValue> {
+        const STRIDE: usize = 6;
+        if !placements.len().is_multiple_of(STRIDE) {
+            return Err(JsValue::from_str(&format!("setCrowd: {} numbers are not a whole number of members, six apiece", placements.len())));
+        }
+        let count = placements.len() / STRIDE;
+        if count > MAX_CROWD_MEMBERS {
+            return Err(JsValue::from_str(&format!("setCrowd: a crowd of {count} is past the {MAX_CROWD_MEMBERS} one player draws")));
+        }
+        if let Some(tints) = &tints
+            && tints.len() != count
+        {
+            return Err(JsValue::from_str(&format!("setCrowd: {} tints for {count} members", tints.len())));
+        }
+        let member = |i: usize| {
+            let [x, y, scale_x, scale_y, rotation, alpha] = placements[i * STRIDE..i * STRIDE + STRIDE].try_into().expect("a whole member");
+            CrowdMember { x, y, scale_x, scale_y, rotation, alpha, tint: tints.as_ref().map_or(CrowdMember::default().tint, |tints| tints[i]) }
+        };
+        with_player!(self, |p| p.set_crowd_from((0..count).map(member)))
+    }
+
+    /// How many members `setCrowd` last gave this player; 0 when it draws once.
+    #[wasm_bindgen(js_name = crowdCount)]
+    pub fn crowd_count(&self) -> Result<usize, JsValue> {
+        with_player!(self, |p| p.crowd().len())
     }
 
     /// The authored canvas size of the selected animation, as `[width, height]`,

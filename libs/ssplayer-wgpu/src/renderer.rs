@@ -127,10 +127,15 @@ fn wgsl_consts() -> String {
         "const QUAD_FAN_VERTS: u32 = {QUAD_FAN_VERTS}u;\n\
          const SHAPE_FAN_VERTS: u32 = {SHAPE_FAN_VERTS}u;\n\
          const MESH_PRIM_SHIFT: u32 = {MESH_PRIM_SHIFT}u;\n\
+         const CROWD_SHIFT: u32 = {CROWD_SHIFT}u;\n\
+         const NODE_STRIDE: u32 = {}u;\n\
+         const NO_TINT: u32 = {}u;\n\
          const COVERAGE_HEADER: u32 = {}u;\n\
          const COVERAGE_STRIDE: u32 = {}u;\n\
          const MAX_MASK_WRITERS: u32 = {}u;\n\
          const COVERAGE_LAYER_BITS: u32 = {}u;\n",
+        crate::scene::NODE_STRIDE_F32,
+        crate::scene::NO_TINT,
         crate::scene::COVERAGE_HEADER_F32,
         crate::scene::COVERAGE_WRITER_F32,
         crate::mask::MAX_MASK_WRITERS,
@@ -174,6 +179,21 @@ pub(crate) const MESH_PRIM_SHIFT: u32 = 24;
 /// this.
 pub(crate) const MESH_DRAW_PRIMS: u32 = 1 << (32 - MESH_PRIM_SHIFT);
 
+/// Where a draw's `instance_index` splits: the bits below say which member of a
+/// crowd is being drawn, and for a mesh the bits above name the draw's first
+/// primitive, which its stream entries count from.
+///
+/// Every other class has no primitive to carry there, so its `instance_index` is
+/// the member and nothing else. A crowd is drawn by issuing each draw once per
+/// member, which is what makes it cost one player's worth of draws however
+/// many it shows. Twelve bits give [`crate::MAX_CROWD_MEMBERS`] members, and
+/// leave a mesh draw [`MESH_FIRST_PRIMS`] primitives to start from.
+pub(crate) const CROWD_SHIFT: u32 = 12;
+
+/// The first primitive past the last a mesh draw can start at: a frame's meshes
+/// draw only from its first 2^20 primitives. Past that the draw is dropped.
+pub(crate) const MESH_FIRST_PRIMS: u32 = 1 << (32 - CROWD_SHIFT);
+
 /// What a pipeline does, before the render target is taken into account.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub(crate) enum PipelineKind {
@@ -199,6 +219,10 @@ pub(crate) enum PipelineKind {
     /// stencil-tested — shader parts are not masked in v1 — and always
     /// [`GeomClass::Quad`], because only Normal parts carry a SHDR attribute.
     Shader(u32, usize),
+    /// One faded player's offscreen layer, folded back into the target at the
+    /// player's alpha. Drawn from the coverage pipeline layout, whose group(2)
+    /// is the array the layers live in.
+    Composite,
 }
 
 /// What distinguishes one render pipeline from another.
@@ -519,6 +543,10 @@ struct Globals {
 // vs_shape | world matrix | shape vertices | shape box coords | vertices
 // vs_effect| - | particle XY | particle UVs | -
 //
+// `node_base` is the owning node's placement record for the first member of its
+// crowd — one member, the player itself, when it is no crowd — and `node_of`
+// steps to the member being drawn.
+//
 // `colors` is packed RGBA8 but only RGB is read: alpha is kept in `alphas` at
 // full precision, because a part without PartColor takes its alpha straight from
 // the runtime as an f32. `rates` is the per-corner PartsColor rate — also f32,
@@ -579,7 +607,9 @@ fn ss_straight_rgb(tex: vec4<f32>) -> vec3<f32> {
     return select(tex.rgb, tex.rgb / max(tex.a, 0.0001), tex_info.flags.x > 0.5);
 }
 
-@group(2) @binding(0) var t_coverage: texture_2d_array<f32>;
+// group(2) under the coverage layout: the coverage bitmaps for the masked
+// content that replays them, the group-alpha layers for the composite.
+@group(2) @binding(0) var t_layers: texture_2d_array<f32>;
 
 // --- coverage masking ---------------------------------------------------
 
@@ -648,6 +678,24 @@ fn quad_fan_vertex(j: u32) -> u32 {
     return order[j];
 }
 
+// The record of the owning node's placement for one member of a crowd: its
+// matrix, then that member's alpha and tint.
+fn node_of(pi: u32, member: u32) -> u32 {
+    return prims[pi].node_base + member * NODE_STRIDE;
+}
+
+// The player's tint with the member's folded onto it. A member left white hands
+// the player's back as it was, bit for bit; the tint travels as a number,
+// exact below 2^24, so the arena stays all floats.
+fn member_tint(pi: u32, node: u32) -> u32 {
+    let tint = prims[pi].tint;
+    let member = u32(f_arena[node + 17u]);
+    if (member == NO_TINT) {
+        return tint;
+    }
+    return pack4x8unorm(vec4<f32>(unpack4x8unorm(tint).rgb * unpack4x8unorm(member).rgb, 0.0));
+}
+
 // A node's placement applied to a world-space point. Columns are read
 // individually so the sum is accumulated in the same order as the CPU's
 // `apply_transform`.
@@ -688,18 +736,19 @@ fn player_tint(packed: u32) -> vec3<f32> {
     return unpack4x8unorm(packed).rgb;
 }
 
-fn corner_rgba(pi: u32, k: u32) -> vec4<f32> {
-    return vec4<f32>(unpack4x8unorm(prims[pi].colors[k]).rgb, prims[pi].alphas[k] * prims[pi].alpha);
+// The member's alpha comes last, so a member at 1 changes nothing.
+fn corner_rgba(pi: u32, k: u32, node: u32) -> vec4<f32> {
+    return vec4<f32>(unpack4x8unorm(prims[pi].colors[k]).rgb, prims[pi].alphas[k] * prims[pi].alpha * f_arena[node + 16u]);
 }
 
 // A sprite vertex's colour: a corner's own, or for the centre (4) the mean of
 // the four. Summed in pairs so that four equal corners give that value back
 // exactly — a part without PartsColor must not shade its centre.
-fn quad_rgba(pi: u32, k: u32) -> vec4<f32> {
+fn quad_rgba(pi: u32, k: u32, node: u32) -> vec4<f32> {
     if (k < 4u) {
-        return corner_rgba(pi, k);
+        return corner_rgba(pi, k, node);
     }
-    return ((corner_rgba(pi, 0u) + corner_rgba(pi, 1u)) + (corner_rgba(pi, 2u) + corner_rgba(pi, 3u))) * 0.25;
+    return ((corner_rgba(pi, 0u, node) + corner_rgba(pi, 1u, node)) + (corner_rgba(pi, 2u, node) + corner_rgba(pi, 3u, node))) * 0.25;
 }
 
 // A sprite vertex's rate, averaged at the centre like `quad_rgba`. For a mask
@@ -726,53 +775,59 @@ fn varg_of(mode: u32, rate: f32) -> vec4<f32> {
 
 // A sprite as a fan around its centre: the runtime's fifth local vertex and UV,
 // with the mean of the corners' colour and rate.
+//
+// `member` is the crowd member being drawn, which is all a non-mesh draw's
+// `instance_index` carries.
 @vertex
-fn vs_quad(@builtin(vertex_index) vi: u32) -> VertexOutput {
+fn vs_quad(@builtin(vertex_index) vi: u32, @builtin(instance_index) member: u32) -> VertexOutput {
     let pi = vi / QUAD_FAN_VERTS;
     let k = quad_fan_vertex(vi % QUAD_FAN_VERTS);
     let p = &prims[pi];
+    let node = node_of(pi, member);
     let lx = f_arena[(*p).pos_base + k * 2u];
     let ly = f_arena[(*p).pos_base + k * 2u + 1u];
 
     var out: VertexOutput;
-    out.clip_position = to_clip(world_point((*p).aux_base, (*p).node_base, lx, ly));
+    out.clip_position = to_clip(world_point((*p).aux_base, node, lx, ly));
     out.uv = normalize_uv((*p).uv_base, k);
-    out.color = quad_rgba(pi, k);
+    out.color = quad_rgba(pi, k, node);
     out.varg = varg_of((*p).mode, quad_rate(pi, k));
     out.cov_uv = cov_uv_of(pi, local_xy((*p).aux_base, lx, ly));
     out.mask_info = prims[pi].mask_info;
     out.cov_base = prims[pi].cov_base;
-    out.tint = prims[pi].tint;
+    out.tint = member_tint(pi, node);
     return out;
 }
 
 const MESH_VERTEX_MASK: u32 = (1u << MESH_PRIM_SHIFT) - 1u;
+const CROWD_MEMBER_MASK: u32 = (1u << CROWD_SHIFT) - 1u;
 
 @vertex
-fn vs_mesh(@builtin(vertex_index) vi: u32, @builtin(instance_index) first: u32) -> VertexOutput {
+fn vs_mesh(@builtin(vertex_index) vi: u32, @builtin(instance_index) instance: u32) -> VertexOutput {
     let entry = mesh_stream[vi];
-    let pi = first + (entry >> MESH_PRIM_SHIFT);
+    let pi = (instance >> CROWD_SHIFT) + (entry >> MESH_PRIM_SHIFT);
     let k = entry & MESH_VERTEX_MASK;
     let p = &prims[pi];
+    let node = node_of(pi, instance & CROWD_MEMBER_MASK);
     // Mesh vertices arrive already in world space (the runtime skins them), so
     // only the node's placement is left to apply.
     let mx = f_arena[(*p).pos_base + k];
     let my = f_arena[(*p).aux_base + k];
 
     var out: VertexOutput;
-    out.clip_position = to_clip(apply_node((*p).node_base, mx, my, (*p).z));
+    out.clip_position = to_clip(apply_node(node, mx, my, (*p).z));
     out.uv = normalize_uv((*p).uv_base, k);
-    out.color = corner_rgba(pi, 0u);
+    out.color = corner_rgba(pi, 0u, node);
     out.varg = varg_of((*p).mode, (*p).rates[0]);
     out.cov_uv = cov_uv_of(pi, vec2<f32>(mx, my));
     out.mask_info = prims[pi].mask_info;
     out.cov_base = prims[pi].cov_base;
-    out.tint = prims[pi].tint;
+    out.tint = member_tint(pi, node);
     return out;
 }
 
 @vertex
-fn vs_shape(@builtin(vertex_index) vi: u32) -> VertexOutput {
+fn vs_shape(@builtin(vertex_index) vi: u32, @builtin(instance_index) member: u32) -> VertexOutput {
     let pi = vi / SHAPE_FAN_VERTS;
     let r = vi % SHAPE_FAN_VERTS;
     let tri = r / 3u;
@@ -791,13 +846,14 @@ fn vs_shape(@builtin(vertex_index) vi: u32) -> VertexOutput {
 
     // Bilinear fill over the part's box coordinates, matching the CPU's
     // `bilerp_color` term for term.
+    let node = node_of(pi, member);
     let fx = f_arena[(*p).uv_base + v * 2u];
     let fy = f_arena[(*p).uv_base + v * 2u + 1u];
-    let top = corner_rgba(pi, 0u) * (1.0 - fx) + corner_rgba(pi, 1u) * fx;
-    let bot = corner_rgba(pi, 2u) * (1.0 - fx) + corner_rgba(pi, 3u) * fx;
+    let top = corner_rgba(pi, 0u, node) * (1.0 - fx) + corner_rgba(pi, 1u, node) * fx;
+    let bot = corner_rgba(pi, 2u, node) * (1.0 - fx) + corner_rgba(pi, 3u, node) * fx;
 
     var out: VertexOutput;
-    out.clip_position = to_clip(world_point((*p).aux_base, (*p).node_base, lx, ly));
+    out.clip_position = to_clip(world_point((*p).aux_base, node, lx, ly));
     // Shapes are textureless (white fallback), so any constant UV samples white.
     out.uv = vec2<f32>(0.5, 0.5);
     out.color = top * (1.0 - fy) + bot * fy;
@@ -805,32 +861,33 @@ fn vs_shape(@builtin(vertex_index) vi: u32) -> VertexOutput {
     out.cov_uv = cov_uv_of(pi, local_xy((*p).aux_base, lx, ly));
     out.mask_info = prims[pi].mask_info;
     out.cov_base = prims[pi].cov_base;
-    out.tint = prims[pi].tint;
+    out.tint = member_tint(pi, node);
     return out;
 }
 
 @vertex
-fn vs_effect(@builtin(vertex_index) vi: u32) -> VertexOutput {
+fn vs_effect(@builtin(vertex_index) vi: u32, @builtin(instance_index) member: u32) -> VertexOutput {
     let pi = vi / 6u;
     let k = quad_corner(vi % 6u);
     let p = &prims[pi];
+    let node = node_of(pi, member);
     // Particle quads are emitted in world space with vert_stride 2, so Z is zero.
     let px = f_arena[(*p).pos_base + k * 2u];
     let py = f_arena[(*p).pos_base + k * 2u + 1u];
 
     var out: VertexOutput;
-    out.clip_position = to_clip(apply_node((*p).node_base, px, py, 0.0));
+    out.clip_position = to_clip(apply_node(node, px, py, 0.0));
     // Effect UVs are already normalised, unlike the sprite/mesh pixel UVs.
     out.uv = vec2<f32>(f_arena[(*p).uv_base + k * 2u], f_arena[(*p).uv_base + k * 2u + 1u]);
     // One colour per particle, and no PartsColor overlay: plain modulate.
-    out.color = corner_rgba(pi, 0u);
+    out.color = corner_rgba(pi, 0u, node);
     out.varg = varg_of((*p).mode, (*p).rates[0]);
     // The particle's own local point: the effect's coverage block already maps
     // the effect part's space onto the player's bitmap.
     out.cov_uv = cov_uv_of(pi, vec2<f32>(px, py));
     out.mask_info = prims[pi].mask_info;
     out.cov_base = prims[pi].cov_base;
-    out.tint = (*p).tint;
+    out.tint = member_tint(pi, node);
     return out;
 }
 "#;
@@ -864,10 +921,13 @@ fn vs_cov_quad(@builtin(vertex_index) vi: u32) -> VertexOutput {
     return out;
 }
 
+// A bake never reads a placement — the bitmap is the player's, shared by every
+// member of a crowd — so only the mesh's first primitive is taken from its
+// `instance_index`.
 @vertex
-fn vs_cov_mesh(@builtin(vertex_index) vi: u32, @builtin(instance_index) first: u32) -> VertexOutput {
+fn vs_cov_mesh(@builtin(vertex_index) vi: u32, @builtin(instance_index) instance: u32) -> VertexOutput {
     let entry = mesh_stream[vi];
-    let pi = first + (entry >> MESH_PRIM_SHIFT);
+    let pi = (instance >> CROWD_SHIFT) + (entry >> MESH_PRIM_SHIFT);
     let k = entry & MESH_VERTEX_MASK;
     let p = &prims[pi];
     let mx = f_arena[(*p).pos_base + k];
@@ -950,7 +1010,7 @@ fn mask_passes(in: VertexOutput, info: u32, cov_base: u32) -> bool {
         return !inside;
     }
 
-    let dims = vec2<f32>(textureDimensions(t_coverage).xy);
+    let dims = vec2<f32>(textureDimensions(t_layers).xy);
     // `textureLoad`, not a sampler: a filtered read would blend one writer's bit
     // into the next and decode as coverage nobody wrote.
     let texel = vec2<i32>(clamp(uv * dims, vec2<f32>(0.0), dims - 1.0));
@@ -958,7 +1018,7 @@ fn mask_passes(in: VertexOutput, info: u32, cov_base: u32) -> bool {
     // it, `COVERAGE_LAYER_BITS` at a time. Records are in bit order, so each
     // layer is loaded once.
     var loaded = 0u;
-    var cov = textureLoad(t_coverage, texel, layer, 0);
+    var cov = textureLoad(t_layers, texel, layer, 0);
 
     // This part's place on the tree sequence — the whole instance tree numbered
     // in drawing order, so a sub-animation's parts sit between its instance part
@@ -980,7 +1040,7 @@ fn mask_passes(in: VertexOutput, info: u32, cov_base: u32) -> bool {
         let tree_bit = u32(f_arena[rec + 2u]);
         let spill = tree_bit / COVERAGE_LAYER_BITS;
         if (spill != loaded) {
-            cov = textureLoad(t_coverage, texel, layer + i32(spill), 0);
+            cov = textureLoad(t_layers, texel, layer + i32(spill), 0);
             loaded = spill;
         }
         let bit = tree_bit % COVERAGE_LAYER_BITS;
@@ -1058,6 +1118,43 @@ fn fs_mask(in: VertexOutput) -> @location(0) vec4<f32> {
         discard;
     }
     return vec4<f32>(1.0, 1.0, 1.0, 1.0);
+}
+
+// --- group alpha: one faded player's layer, folded back into the target ---
+
+struct CompositeOutput {
+    @builtin(position) clip_position: vec4<f32>,
+    // Where the fragment falls on the layer, 0..1 across and down. A coordinate
+    // rather than the fragment's own pixel, so a host whose pass draws into a
+    // viewport of the target still lands each texel where it was drawn.
+    @location(0) uv: vec2<f32>,
+    @location(1) @interpolate(flat) layer: u32,
+    @location(2) @interpolate(flat) alpha: f32,
+}
+
+// One triangle over the whole target, three vertices to a primitive. The
+// primitive carries the player's alpha, and in `count` the layer it drew into.
+@vertex
+fn vs_composite(@builtin(vertex_index) vi: u32) -> CompositeOutput {
+    let pi = vi / 3u;
+    let k = vi % 3u;
+    // (-1, -1), (3, -1), (-1, 3).
+    let xy = vec2<f32>(f32((k << 1u) & 2u), f32(k & 2u)) * 2.0 - 1.0;
+    var out: CompositeOutput;
+    out.clip_position = vec4<f32>(xy, 0.5, 1.0);
+    out.uv = vec2<f32>(xy.x * 0.5 + 0.5, 0.5 - xy.y * 0.5);
+    out.layer = prims[pi].count;
+    out.alpha = prims[pi].alpha;
+    return out;
+}
+
+// The layer was drawn premultiplied, like everything else, so fading it is one
+// multiply and the blend is the plain premultiplied over.
+@fragment
+fn fs_composite(in: CompositeOutput) -> @location(0) vec4<f32> {
+    let dims = vec2<f32>(textureDimensions(t_layers).xy);
+    let texel = vec2<i32>(clamp(in.uv * dims, vec2<f32>(0.0), dims - 1.0));
+    return textureLoad(t_layers, texel, i32(in.layer), 0) * in.alpha;
 }
 "#;
 
@@ -1646,6 +1743,19 @@ impl SSRenderer {
                     color_format: key.color_format,
                 }
             }
+            PipelineKind::Composite => Recipe {
+                label: "Group Alpha Composite".into(),
+                module: &self.shader_module,
+                layout: &self.coverage_pipeline_layout,
+                vertex_entry: "vs_composite",
+                entry: "fs_composite",
+                blend: Some(blend_state(BlendType::Mix)),
+                write_mask: wgpu::ColorWrites::ALL,
+                // The layer was clipped when it was drawn; here the stencil is
+                // inert, matched to whatever the host attached.
+                depth_stencil: depth_stencil_state(key.stencil_format, wgpu::CompareFunction::Always, wgpu::StencilOperation::Keep, 0x00),
+                color_format: key.color_format,
+            },
         };
 
         Some(device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
@@ -1879,6 +1989,12 @@ impl SSRenderer {
     /// — Shape content and textureless mask writers rely on this.
     pub(crate) fn texture_bind_group(&self, hash: u32) -> &wgpu::BindGroup {
         self.textures.get(&hash).map(|e| &e.bind_group).unwrap_or(&self.white_bind_group)
+    }
+
+    /// The 1x1 white fallback's bind group, for a draw that samples no atlas but
+    /// whose layout still has a texture group to fill.
+    pub(crate) fn white_bind_group(&self) -> &wgpu::BindGroup {
+        &self.white_bind_group
     }
 
     /// Fill the white fallback. Deferred to the first frame because the

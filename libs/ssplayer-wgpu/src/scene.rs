@@ -10,7 +10,10 @@
 use crate::frame::FrameView;
 use crate::mask::{MaskOp, MaskWriter, ScopedWriter, StencilTest};
 use crate::metrics::{GpuTimer, SceneStats};
-use crate::renderer::{COVERAGE_FORMAT, GeomClass, MESH_DRAW_PRIMS, MESH_PRIM_SHIFT, PipelineKey, PipelineKind, QUAD_FAN_VERTS, SHADER_PARAM_STRIDE, SHADER_PARAM_STRIDE_F32, SHAPE_FAN_VERTS, SSRenderer, blend_index, ss_shader_entry};
+use crate::player::CrowdMember;
+use crate::renderer::{
+    COVERAGE_FORMAT, CROWD_SHIFT, GeomClass, MESH_DRAW_PRIMS, MESH_FIRST_PRIMS, MESH_PRIM_SHIFT, PipelineKey, PipelineKind, QUAD_FAN_VERTS, SHADER_PARAM_STRIDE, SHADER_PARAM_STRIDE_F32, SHAPE_FAN_VERTS, SSRenderer, blend_index, ss_shader_entry,
+};
 
 use ssruntime::runtime::effect_draw_plan::ss::runtime::root_as_effect_draw_plan_unchecked;
 use ssruntime::runtime::framedata::ss::runtime::{BlendType, DrawBatchKind, PartAttributeShader, root_as_frame_data_unchecked};
@@ -46,7 +49,7 @@ fn pack_rgb(r: f32, g: f32, b: f32) -> u32 {
 /// The identity player tint: white multiplies nothing away. It shares [`WHITE`]'s
 /// value and not its meaning — that one is a part's missing PartColor, this one is
 /// a player nobody tinted — so the two are named apart.
-const NO_TINT: u32 = WHITE;
+pub(crate) const NO_TINT: u32 = WHITE;
 
 /// Turn a public `0xRRGGBB` tint into the byte order the shader unpacks
 /// ([`pack_rgb`]'s, x = byte 0). Only the outer two bytes move; green is already
@@ -77,7 +80,7 @@ pub enum MaskBackend {
     /// composes its own passes may expose no depth at all. The cost is one extra
     /// pass per masking player per frame, which is why it is not the default.
     ///
-    /// **The host must call [`SSScene::encode_mask_coverage`]** between `update`
+    /// **The host must call [`SSScene::encode_offscreen`]** between `update`
     /// and `draw`: the bitmap is rasterised into its own render pass, and under
     /// the borrow model only the host has an encoder to open one with.
     Coverage,
@@ -141,9 +144,11 @@ struct BatchDrawCall {
     /// class's own arithmetic — 12 per quad, 6 per particle, 30 per shape,
     /// one stream entry per mesh vertex.
     vertices: std::ops::Range<u32>,
-    /// The `instance_index` range to issue: always one instance, the draw's
-    /// first primitive for Mesh, which its stream entries count from, and
-    /// zero for every other class.
+    /// The `instance_index` range to issue: one instance per member of the
+    /// player's crowd — one for a player that is none, and one for a coverage
+    /// bake, whose bitmap the members share. For Mesh the draw's first
+    /// primitive, which its stream entries count from, rides above
+    /// [`CROWD_SHIFT`].
     instances: std::ops::Range<u32>,
     /// Index of this part's block in the shader-params buffer, for
     /// [`PipelineKey::Shader`] draws — the dynamic offset for bind group(2).
@@ -173,9 +178,11 @@ struct Prim {
     pos_base: u32,
     /// Local UVs (Quad/Mesh, texture pixels), box coords (Shape), particle UVs.
     uv_base: u32,
-    /// The owning node's placement matrix.
+    /// The owning node's placement record for the first member of its crowd;
+    /// see [`NODE_STRIDE_F32`].
     node_base: u32,
-    /// Shape: live vertex count. Unused elsewhere.
+    /// Shape: live vertex count. A group-alpha composite: the layer it reads.
+    /// Unused elsewhere.
     count: u32,
     /// PartsColor formula (see [`mode`]).
     mode: u32,
@@ -255,6 +262,30 @@ fn target_mask_info(seq: u32, inside: bool) -> u32 {
     MASK_INFO_ACTIVE | polarity | (seq.min(0xFF_FFFF) << 8)
 }
 
+/// Floats in one member's record of a node's placement: the 4x4 matrix the node
+/// draws at, then that member's alpha and its tint, the tint in [`pack_rgb`]'s
+/// byte order and stored as the number it is (exact, being below 2^24).
+///
+/// A node has one record per member of its player's crowd, back to back, and a
+/// player that is no crowd has one: alpha 1, [`NO_TINT`]. Both multiply in the
+/// vertex stage, so the one record changes nothing.
+pub(crate) const NODE_STRIDE_F32: usize = 18;
+
+/// Multiply two column-major 4x4 matrices: `a * b`.
+pub(crate) fn mat4_mul(a: &[f32; 16], b: &[f32; 16]) -> [f32; 16] {
+    let mut r = [0.0f32; 16];
+    for col in 0..4 {
+        for row in 0..4 {
+            let mut s = 0.0;
+            for k in 0..4 {
+                s += a[k * 4 + row] * b[col * 4 + k];
+            }
+            r[col * 4 + row] = s;
+        }
+    }
+    r
+}
+
 /// Where one node's placement and coverage block sit in the frame arena.
 ///
 /// [`FrameChunk::push_transform`] copies the placement in. A node's parts copy
@@ -262,7 +293,7 @@ fn target_mask_info(seq: u32, inside: bool) -> u32 {
 /// drawn reaches the arena.
 #[derive(Clone, Copy, Debug)]
 pub struct NodeSlot {
-    /// The node's placement matrix (16 floats).
+    /// The node's placement records, one per member (see [`NODE_STRIDE_F32`]).
     transform: u32,
     /// Arena offset of this node's coverage block, or [`NO_COVERAGE`].
     ///
@@ -330,6 +361,28 @@ struct CoverageTargets {
 /// on the tree sequence, its bit, and op_invert.
 pub(crate) const COVERAGE_WRITER_F32: usize = 4;
 
+/// The frame's group-alpha layers: one array texture the size of the target and
+/// in its format, one layer per player drawn through one, so the target's own
+/// pipelines draw into them unchanged.
+///
+/// They are all alive at once, unlike the one offscreen a GL player reuses: each
+/// is folded back from inside the host's pass, which cannot be paused to draw
+/// the next.
+struct LayerTargets {
+    /// Held only to keep the views alive.
+    _texture: wgpu::Texture,
+    /// One view per layer, for its pass to attach to.
+    layer_views: Vec<wgpu::TextureView>,
+    /// The whole array, as the composite reads it.
+    bind_group: wgpu::BindGroup,
+    /// The target's depth-stencil, when it has one: every pipeline is built to
+    /// test against one, and a layer's masks write into it. One serves every
+    /// layer, cleared by each pass.
+    depth_stencil: Option<wgpu::TextureView>,
+    size: (u32, u32),
+    layers: u32,
+}
+
 /// Layer 2b: the per-target, per-frame half — what one render target's worth of
 /// geometry looks like this frame.
 ///
@@ -342,6 +395,18 @@ pub struct SSScene {
     /// This frame's coverage bitmaps, kept across frames so a mask that holds its
     /// size class does not reallocate.
     coverage: Option<CoverageTargets>,
+    /// Whether a faded player is drawn as one layer (see
+    /// [`SSScene::set_group_alpha`]).
+    group_alpha: bool,
+    /// The group-alpha layers, kept across frames like `coverage`.
+    layers: Option<LayerTargets>,
+    /// Whether [`SSScene::encode_offscreen`] has been called since the last
+    /// update, which is what the next one takes to mean it will be called again.
+    /// Without it a faded player is drawn part by part, as it is with group alpha
+    /// off, rather than built opaque into a layer nobody draws.
+    offscreen_seen: bool,
+    /// Whether this frame's layers were drawn. `draw` composites them only then.
+    offscreen_encoded: bool,
     /// How this target draws masks.
     mask: MaskBackend,
     /// The target's formats. Part of every [`PipelineKey`] this builds.
@@ -449,6 +514,10 @@ impl SSScene {
 
         Self {
             coverage: None,
+            group_alpha: false,
+            layers: None,
+            offscreen_seen: false,
+            offscreen_encoded: false,
             mask,
             color_format: config.color_format,
             stencil_format: config.stencil_format,
@@ -496,18 +565,37 @@ impl SSScene {
         }
     }
 
-    /// Rasterise this frame's coverage bitmaps.
+    /// Draw everything this frame draws outside the host's pass: the coverage
+    /// bitmaps, then one layer per player drawn with group alpha.
     ///
-    /// Call between [`SSScene::update`] and [`SSScene::draw`], on **the same
-    /// encoder** the host will open its own pass with. Passes recorded into one
-    /// encoder execute in order, so what this bakes is what the very next pass
-    /// samples — which is why this player has none of the one-frame lag that
-    /// engines whose offscreen targets are only readable next frame have to work
-    /// around. Do not split the two across encoders or frames.
+    /// Call between [`SSScene::update`] and [`SSScene::draw`], every frame, on
+    /// **the same encoder** the host will open its own pass with. Passes recorded
+    /// into one encoder execute in order, so what this draws is what the very
+    /// next pass reads — which is why this player has none of the one-frame lag
+    /// that engines whose offscreen targets are only readable next frame have to
+    /// work around. Do not split the two across encoders or frames.
     ///
-    /// A no-op under any backend but [`MaskBackend::Coverage`], and on frames
-    /// where nothing masks.
+    /// It opens passes of its own and never the host's, so the host's target is
+    /// still drawn in the one pass. Nothing to do — another backend than
+    /// [`MaskBackend::Coverage`] with group alpha off, or a frame where nothing
+    /// masks or fades — opens none.
+    pub fn encode_offscreen(&mut self, renderer: &mut SSRenderer, device: &wgpu::Device, encoder: &mut wgpu::CommandEncoder) {
+        self.offscreen_seen = true;
+        // Coverage first: masked content inside a layer reads this frame's bitmap.
+        self.bake_coverage(renderer, device, encoder);
+        self.offscreen_encoded = self.encode_layers(renderer, device, encoder);
+    }
+
+    /// The name [`SSScene::encode_offscreen`] had when the coverage bitmaps were
+    /// all it drew. It draws everything now.
+    #[deprecated(note = "renamed to `encode_offscreen`, which also draws the group-alpha layers")]
     pub fn encode_mask_coverage(&mut self, renderer: &mut SSRenderer, device: &wgpu::Device, encoder: &mut wgpu::CommandEncoder) {
+        self.encode_offscreen(renderer, device, encoder);
+    }
+
+    /// Rasterise this frame's coverage bitmaps: a no-op under any backend but
+    /// [`MaskBackend::Coverage`], and on frames where nothing masks.
+    fn bake_coverage(&mut self, renderer: &mut SSRenderer, device: &wgpu::Device, encoder: &mut wgpu::CommandEncoder) {
         if self.mask != MaskBackend::Coverage || self.frame.coverage_nodes.is_empty() {
             return;
         }
@@ -547,6 +635,135 @@ impl SSScene {
             }
         }
         self.stats.coverage_layers = layers;
+    }
+
+    /// Draw each group-alpha player into a layer of its own, and say whether
+    /// `draw` may composite them: false only when a layer was due and none could
+    /// be drawn.
+    ///
+    /// Each layer is cleared, then the player's own draws are replayed into it
+    /// against the frame's one upload, exactly as `draw` would have issued them.
+    fn encode_layers(&mut self, renderer: &mut SSRenderer, device: &wgpu::Device, encoder: &mut wgpu::CommandEncoder) -> bool {
+        let layers = self.frame.groups.iter().filter(|group| group.prim.is_some()).count() as u32;
+        if layers == 0 {
+            return true;
+        }
+        let Some((width, height, _)) = self.viewport else { return false };
+        self.ensure_layers(renderer, device, layer_extent(device, width, height), layers);
+        let this = &*self;
+        let (Some(scene_bg), Some(targets)) = (this.scene_bind_group.as_ref(), this.layers.as_ref()) else { return false };
+        let aspects = this.stencil_format.map(|format| (format.has_depth_aspect(), format.has_stencil_aspect()));
+
+        for (group, layer) in this.frame.groups.iter().filter(|group| group.prim.is_some()).zip(0..) {
+            let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+                label: Some("SpriteStudio Group Alpha"),
+                color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                    view: &targets.layer_views[layer],
+                    depth_slice: None,
+                    resolve_target: None,
+                    ops: wgpu::Operations { load: wgpu::LoadOp::Clear(wgpu::Color::TRANSPARENT), store: wgpu::StoreOp::Store },
+                })],
+                // Cleared like the host's: a player leaves the stencil as it
+                // found it, so each layer starts from nothing written.
+                depth_stencil_attachment: targets.depth_stencil.as_ref().zip(aspects).map(|(view, (depth, stencil))| wgpu::RenderPassDepthStencilAttachment {
+                    view,
+                    depth_ops: depth.then_some(wgpu::Operations { load: wgpu::LoadOp::Clear(1.0), store: wgpu::StoreOp::Discard }),
+                    stencil_ops: stencil.then_some(wgpu::Operations { load: wgpu::LoadOp::Clear(0), store: wgpu::StoreOp::Discard }),
+                }),
+                timestamp_writes: None,
+                occlusion_query_set: None,
+                multiview_mask: None,
+            });
+            pass.set_bind_group(0, scene_bg, &this.frame_offsets);
+            if this.stencil_enabled() {
+                pass.set_stencil_reference(0);
+            }
+            for call in &this.frame.draw_calls[group.calls.start as usize..group.calls.end as usize] {
+                this.record(renderer, &mut pass, call);
+            }
+        }
+        self.stats.group_layers = layers;
+        true
+    }
+
+    /// Build or rebuild the layer array when the frame needs more layers than it
+    /// has, or the target changed size. Layers only grow while the size holds; a
+    /// new size starts again from what this frame needs.
+    fn ensure_layers(&mut self, renderer: &SSRenderer, device: &wgpu::Device, size: (u32, u32), layers: u32) {
+        let current = self.layers.as_ref().filter(|targets| targets.size == size);
+        if current.is_some_and(|targets| targets.layers >= layers) {
+            return;
+        }
+        let layers = layers.max(current.map_or(0, |targets| targets.layers));
+        let extent = |depth_or_array_layers| wgpu::Extent3d { width: size.0, height: size.1, depth_or_array_layers };
+        let texture = device.create_texture(&wgpu::TextureDescriptor {
+            label: Some("SpriteStudio Group Alpha"),
+            size: extent(layers),
+            mip_level_count: 1,
+            sample_count: 1,
+            dimension: wgpu::TextureDimension::D2,
+            format: self.color_format,
+            usage: wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::TEXTURE_BINDING,
+            view_formats: &[],
+        });
+        let layer_views = (0..layers)
+            .map(|layer| texture.create_view(&wgpu::TextureViewDescriptor { label: Some("SpriteStudio Group Alpha Layer"), dimension: Some(wgpu::TextureViewDimension::D2), base_array_layer: layer, array_layer_count: Some(1), ..Default::default() }))
+            .collect();
+        let array_view = texture.create_view(&wgpu::TextureViewDescriptor { label: Some("SpriteStudio Group Alpha Array"), dimension: Some(wgpu::TextureViewDimension::D2Array), ..Default::default() });
+        let bind_group = renderer.coverage_bind_group(device, &array_view);
+        let depth_stencil = self.stencil_format.map(|format| {
+            device
+                .create_texture(&wgpu::TextureDescriptor {
+                    label: Some("SpriteStudio Group Alpha Stencil"),
+                    size: extent(1),
+                    mip_level_count: 1,
+                    sample_count: 1,
+                    dimension: wgpu::TextureDimension::D2,
+                    format,
+                    usage: wgpu::TextureUsages::RENDER_ATTACHMENT,
+                    view_formats: &[],
+                })
+                .create_view(&wgpu::TextureViewDescriptor::default())
+        });
+        self.layers = Some(LayerTargets { _texture: texture, layer_views, bind_group, depth_stencil, size, layers });
+    }
+
+    /// Draw each player whose `alpha` is below 1 as one layer, composited at its
+    /// alpha, rather than fading each of its parts: where two parts overlap, half
+    /// a character then reads half, not three quarters. What the WebGL player
+    /// does for every faded player.
+    ///
+    /// Off by default, for what it costs: a render pass per faded player per
+    /// frame, a layer the size of the target for each faded at once — about 8
+    /// MiB at 1920x1080 — and one composite over the target apiece.
+    /// [`SceneStats::group_layers`] counts them. Turning it off frees them.
+    ///
+    /// The host calls [`SSScene::encode_offscreen`] every frame, which is what
+    /// draws the layers. Each update reads whether it was called since the one
+    /// before: a scene it is not called on draws its faded players part by part,
+    /// as with this off, and so does the first frame after a host starts calling
+    /// it. A host that stops draws one frame of them unfaded. Players past
+    /// `max_texture_array_layers` faded at once are drawn part by part too.
+    ///
+    /// Inside a layer the parts blend against transparency, not against what is
+    /// behind the player: an Add, Mul or Screen part composites with the player's
+    /// own parts alone, and a Mul part over nothing reads black. Its masks clip
+    /// within the player, as they always do. A crowd is one player, so it fades as
+    /// one layer; its members' own alphas still apply part by part.
+    pub fn set_group_alpha(&mut self, on: bool) {
+        if self.group_alpha == on {
+            return;
+        }
+        self.group_alpha = on;
+        if !on {
+            self.layers = None;
+        }
+    }
+
+    /// Whether faded players are drawn as one layer each; see
+    /// [`SSScene::set_group_alpha`].
+    pub fn group_alpha(&self) -> bool {
+        self.group_alpha
     }
 
     /// The edge length every coverage layer gets this frame.
@@ -628,8 +845,9 @@ impl SSScene {
     /// for the whole device — then this once per render target, then
     /// [`crate::SSPlayer::restore_textures`] once per player.
     pub fn restore_device(&mut self, device: &wgpu::Device, queue: &wgpu::Queue) {
-        let viewport = self.viewport;
+        let (viewport, group_alpha) = (self.viewport, self.group_alpha);
         *self = Self::new(device, &SceneConfig { color_format: self.color_format, stencil_format: self.stencil_format, mask: self.mask });
+        self.set_group_alpha(group_alpha);
         if let Some((width, height, y_down)) = viewport {
             self.set_viewport(queue, width, height, y_down);
         }
@@ -687,10 +905,23 @@ impl SSScene {
             }
         }
 
+        // Faded players draw through layers only for a host that draws them, and
+        // only as many as one array holds.
+        // Taken every update, so what it says is always about the last frame.
+        let encoded = std::mem::take(&mut self.offscreen_seen);
+        let grouping = self.group_alpha && encoded && self.viewport.is_some();
+        let max_layers = if grouping { device.limits().max_texture_array_layers } else { 0 };
         let mut drawing = 0;
         for &(_, index) in &self.draw_order {
             if let Some(p) = player(&mut players[index as usize]) {
-                p.build_frame(&mut self.frame, renderer, delta_secs);
+                let group = grouping && p.alpha() < 1.0 && self.frame.layered_groups() < max_layers;
+                let first = self.frame.draw_calls.len() as u32;
+                // A group player is drawn opaque into its layer, and faded once,
+                // as a whole, when the layer is folded back.
+                p.build_frame(&mut self.frame, renderer, delta_secs, if group { 1.0 } else { p.alpha() });
+                if group {
+                    self.frame.push_group(first, p.alpha());
+                }
                 drawing += u32::from(p.draws());
             }
         }
@@ -707,6 +938,7 @@ impl SSScene {
             timer.poll();
         }
         self.stats = SceneStats::default();
+        self.offscreen_encoded = false;
         self.frame.reset(self.config());
     }
 
@@ -762,6 +994,9 @@ impl SSScene {
             let key = self.frame.coverage_calls[i].key;
             renderer.ensure_pipeline(device, key);
         }
+        if self.frame.layered_groups() > 0 {
+            renderer.ensure_pipeline(device, self.frame.key(PipelineKind::Composite));
+        }
 
         for i in 0..self.frame.draw_calls.len() {
             let key = self.frame.draw_calls[i].key;
@@ -809,6 +1044,9 @@ impl SSScene {
     /// Recorded fresh every frame. The draw list changes on most frames as parts
     /// appear and disappear, so a recording would be invalidated more often than
     /// it is replayed.
+    ///
+    /// A player drawn with group alpha is one draw here: its layer, folded back
+    /// in its place in the order.
     pub fn draw<'a>(&'a self, renderer: &'a SSRenderer, rpass: &mut wgpu::RenderPass<'a>) -> usize {
         if self.frame.draw_calls.is_empty() {
             return 0;
@@ -823,42 +1061,88 @@ impl SSScene {
             rpass.set_stencil_reference(0);
         }
 
-        let mut issued = 0usize;
-        for call in &self.frame.draw_calls {
-            // Missing texture -> 1x1 white fallback.
-            let texture = renderer.texture_bind_group(call.texture_hash);
-
-            // `end_frame` compiled every key this frame uses, so a miss here means
-            // the key was an `ss-*` shader id `build_pipeline` declined to build.
-            let (Some(pipeline), params_bg) = (renderer.pipelines.get(&call.key), self.ss_params_bind_group.as_ref()) else {
-                continue;
-            };
-            // Integration-shader part: group(2) carries the part's
-            // params at its dynamic offset.
-            let params = match (call.shader_slot, params_bg) {
-                (Some(slot), Some(bg)) => Some((slot, bg)),
-                (Some(_), None) => continue, // params buffer missing — cannot draw
-                (None, _) => None,
-            };
-
-            rpass.set_pipeline(pipeline);
-            rpass.set_bind_group(1, texture, &[]);
-            if let Some((slot, bg)) = params {
-                rpass.set_bind_group(2, bg, &[slot * SHADER_PARAM_STRIDE as u32]);
+        let calls = &self.frame.draw_calls;
+        let mut groups = self.frame.groups.iter().peekable();
+        let (mut issued, mut i) = (0usize, 0usize);
+        while i < calls.len() {
+            if let Some(group) = groups.next_if(|group| group.calls.start as usize == i) {
+                match group.prim {
+                    // Faded out altogether: none of it shows, whatever its parts
+                    // blend with — an Invert part at alpha 0 would still darken.
+                    None => {
+                        i = group.calls.end as usize;
+                        continue;
+                    }
+                    Some(prim) if self.offscreen_encoded => {
+                        issued += usize::from(self.composite(renderer, rpass, prim));
+                        i = group.calls.end as usize;
+                        continue;
+                    }
+                    // Its layer was never drawn, so the player draws straight
+                    // into the target instead.
+                    Some(_) => {}
+                }
             }
-            // Set per draw rather than once: group(2) is the coverage array under
-            // one pipeline layout and the shader params under another, so a shader
-            // part drawn in between invalidates whichever was there.
-            if matches!(call.key.kind, PipelineKind::ContentCoverage(..)) {
-                let Some(coverage) = self.coverage.as_ref() else { continue };
-                rpass.set_bind_group(2, &coverage.bind_group, &[]);
-            }
-            rpass.draw(call.vertices.clone(), call.instances.clone());
-            issued += 1;
+            issued += usize::from(self.record(renderer, rpass, &calls[i]));
+            i += 1;
         }
 
         issued
     }
+
+    /// Issue one recorded draw into `pass`, whose group(0) is already the
+    /// frame's. Returns whether it was issued.
+    fn record(&self, renderer: &SSRenderer, pass: &mut wgpu::RenderPass<'_>, call: &BatchDrawCall) -> bool {
+        // Missing texture -> 1x1 white fallback.
+        let texture = renderer.texture_bind_group(call.texture_hash);
+
+        // `end_frame` compiled every key this frame uses, so a miss here means
+        // the key was an `ss-*` shader id `build_pipeline` declined to build.
+        let (Some(pipeline), params_bg) = (renderer.pipelines.get(&call.key), self.ss_params_bind_group.as_ref()) else {
+            return false;
+        };
+        // Integration-shader part: group(2) carries the part's
+        // params at its dynamic offset.
+        let params = match (call.shader_slot, params_bg) {
+            (Some(slot), Some(bg)) => Some((slot, bg)),
+            (Some(_), None) => return false, // params buffer missing — cannot draw
+            (None, _) => None,
+        };
+
+        pass.set_pipeline(pipeline);
+        pass.set_bind_group(1, texture, &[]);
+        if let Some((slot, bg)) = params {
+            pass.set_bind_group(2, bg, &[slot * SHADER_PARAM_STRIDE as u32]);
+        }
+        // Set per draw rather than once: group(2) is the coverage array under
+        // one pipeline layout and the shader params under another, so a shader
+        // part drawn in between invalidates whichever was there.
+        if matches!(call.key.kind, PipelineKind::ContentCoverage(..)) {
+            let Some(coverage) = self.coverage.as_ref() else { return false };
+            pass.set_bind_group(2, &coverage.bind_group, &[]);
+        }
+        pass.draw(call.vertices.clone(), call.instances.clone());
+        true
+    }
+
+    /// Fold one group-alpha layer back into the target, at the alpha its
+    /// primitive carries. Returns whether it was drawn.
+    fn composite(&self, renderer: &SSRenderer, pass: &mut wgpu::RenderPass<'_>, prim: u32) -> bool {
+        let (Some(pipeline), Some(layers)) = (renderer.pipelines.get(&self.frame.key(PipelineKind::Composite)), self.layers.as_ref()) else { return false };
+        pass.set_pipeline(pipeline);
+        // The layout's texture group, which the composite does not sample.
+        pass.set_bind_group(1, renderer.white_bind_group(), &[]);
+        pass.set_bind_group(2, &layers.bind_group, &[]);
+        pass.draw(prim * 3..prim * 3 + 3, 0..1);
+        true
+    }
+}
+
+/// A group-alpha layer's size for a viewport of `width` x `height`: the target's
+/// own pixels, brought inside what `device` can allocate.
+fn layer_extent(device: &wgpu::Device, width: f32, height: f32) -> (u32, u32) {
+    let max = device.limits().max_texture_dimension_2d;
+    ((width.round() as u32).clamp(1, max), (height.round() as u32).clamp(1, max))
 }
 
 /// Where each of the frame's three arrays may start in the frame buffer.
@@ -939,19 +1223,38 @@ pub struct FrameChunk {
     mesh_stream: Vec<u32>,
     draw_calls: Vec<BatchDrawCall>,
     /// Writer draws for the coverage bitmap, kept apart from `draw_calls` because
-    /// they are replayed into a different render pass — the one
-    /// [`SSScene::encode_mask_coverage`] opens before the host opens its own.
+    /// they are replayed into a different render pass — one
+    /// [`SSScene::encode_offscreen`] opens before the host opens its own.
     /// Empty under every backend but [`MaskBackend::Coverage`].
     coverage_calls: Vec<BatchDrawCall>,
     /// One entry per node that writes coverage this frame, in layer order.
     coverage_nodes: Vec<CoverageNode>,
     /// Per-part integration-shader params, one `SHADER_PARAM_STRIDE_F32` slot each.
     ss_params: Vec<f32>,
+    /// The players drawn with group alpha this frame, in draw order.
+    groups: Vec<GroupLayer>,
+    /// How many members the crowd being built has: every node pushes a record
+    /// apiece, and every content draw is issued once for each. One for a player
+    /// that is no crowd. Set by the player's top node.
+    members: u32,
+}
+
+/// One player drawn with group alpha: into a layer of its own, which takes its
+/// draws' place in the target.
+#[derive(Clone, Debug)]
+struct GroupLayer {
+    /// The player's draws in [`FrameChunk::draw_calls`]: replayed into the layer,
+    /// skipped by [`SSScene::draw`]. Never empty.
+    calls: std::ops::Range<u32>,
+    /// The composite's primitive, whose `alpha` is the player's and whose
+    /// `count` is its layer; `None` for a player faded out altogether, which
+    /// takes no layer and draws nothing.
+    prim: Option<u32>,
 }
 
 impl FrameChunk {
     fn new(config: SceneConfig) -> Self {
-        Self { config, arena: Vec::new(), prims: Vec::new(), mesh_stream: Vec::new(), draw_calls: Vec::new(), coverage_calls: Vec::new(), coverage_nodes: Vec::new(), ss_params: Vec::new() }
+        Self { config, arena: Vec::new(), prims: Vec::new(), mesh_stream: Vec::new(), draw_calls: Vec::new(), coverage_calls: Vec::new(), coverage_nodes: Vec::new(), ss_params: Vec::new(), groups: Vec::new(), members: 1 }
     }
 
     /// Empty it for reuse, keeping the allocations — the frame is rebuilt every
@@ -965,6 +1268,28 @@ impl FrameChunk {
         self.coverage_calls.clear();
         self.coverage_nodes.clear();
         self.ss_params.clear();
+        self.groups.clear();
+        self.members = 1;
+    }
+
+    /// The groups this frame that take a layer.
+    fn layered_groups(&self) -> u32 {
+        self.groups.iter().filter(|group| group.prim.is_some()).count() as u32
+    }
+
+    /// Close the group a player at `alpha` opened at draw call `first`: its draws
+    /// since then go into a layer, folded back at `alpha` by a primitive of its
+    /// own. A player that drew nothing is no group at all.
+    fn push_group(&mut self, first: u32, alpha: f32) {
+        let calls = first..self.draw_calls.len() as u32;
+        if calls.is_empty() {
+            return;
+        }
+        let prim = (alpha > 0.0).then(|| {
+            let layer = self.layered_groups();
+            self.push_prim(Prim { alpha, count: layer, ..Default::default() })
+        });
+        self.groups.push(GroupLayer { calls, prim });
     }
 
     /// Whether the hardware stencil is in use for the target this is built for.
@@ -1056,17 +1381,48 @@ impl FrameChunk {
         base
     }
 
-    /// Copy a placement matrix into the arena: a node's, before any of its
-    /// primitives, or an effect's, whose particles the plan already placed
-    /// relative to it.
-    ///
-    /// `transform` is the player's placement for a root, composed with the
-    /// world matrix of every instance part above it for a child, and with the
-    /// effect part's for an effect.
+    /// Copy a placement matrix into the arena, for a top node that is no crowd:
+    /// before any of its primitives, and the draws after it are issued once.
     pub fn push_transform(&mut self, transform: &[f32; 16]) -> NodeSlot {
+        self.push_root_transform(transform, &[])
+    }
+
+    /// The top node's placement: the player's own `transform`, once for each
+    /// member of its `crowd` composed over that member's placement — or, for no
+    /// crowd, once as it is. Sets how many members every draw after it is issued
+    /// for.
+    pub(crate) fn push_root_transform(&mut self, transform: &[f32; 16], crowd: &[CrowdMember]) -> NodeSlot {
         let base = self.arena.len() as u32;
-        self.arena.extend_from_slice(transform);
+        self.members = crowd.len().max(1) as u32;
+        if crowd.is_empty() {
+            self.push_record(transform, 1.0, NO_TINT);
+        }
+        for member in crowd {
+            self.push_record(&mat4_mul(transform, &member.matrix()), member.alpha, pack_tint(member.tint));
+        }
         NodeSlot { transform: base, ..Default::default() }
+    }
+
+    /// A node placed under `parent`: each member's placement of the parent,
+    /// composed with `local` — an instance part's world matrix for an instance's
+    /// sub-animation, an effect part's for its particles, which the plan already
+    /// placed relative to it. The members keep their alpha and tint.
+    pub(crate) fn push_child_transform(&mut self, parent: &NodeSlot, local: &[f32; 16]) -> NodeSlot {
+        let base = self.arena.len() as u32;
+        for member in 0..self.members as usize {
+            let at = parent.transform as usize + member * NODE_STRIDE_F32;
+            let matrix: [f32; 16] = self.arena[at..at + 16].try_into().expect("a placement record holds a matrix");
+            let (alpha, tint) = (self.arena[at + 16], self.arena[at + 17]);
+            self.arena.extend_from_slice(&mat4_mul(&matrix, local));
+            self.arena.extend_from_slice(&[alpha, tint]);
+        }
+        NodeSlot { transform: base, ..Default::default() }
+    }
+
+    /// Append one member's placement record; see [`NODE_STRIDE_F32`].
+    fn push_record(&mut self, matrix: &[f32; 16], alpha: f32, tint: u32) {
+        self.arena.extend_from_slice(matrix);
+        self.arena.extend_from_slice(&[alpha, tint as f32]);
     }
 
     /// Append `prim`, returning its index in the frame's primitive table.
@@ -1094,7 +1450,7 @@ impl FrameChunk {
             // Mesh draws are driven by the stream, not by primitive arithmetic.
             GeomClass::Mesh => return,
         };
-        self.draw_calls.push(BatchDrawCall { key, texture_hash, vertices: first * stride..last * stride, instances: 0..1, shader_slot, cov_layer: None });
+        self.draw_calls.push(BatchDrawCall { key, texture_hash, vertices: first * stride..last * stride, instances: 0..self.members, shader_slot, cov_layer: None });
     }
 
     /// Append one Normal/Mesh DrawBatch's geometry into the frame accumulation,
@@ -1393,7 +1749,10 @@ impl FrameChunk {
             // Mesh draws are driven by the stream, not by primitive arithmetic.
             GeomClass::Mesh => return,
         };
-        let call = BatchDrawCall { key, texture_hash, vertices: first * stride..last * stride, instances: 0..1, shader_slot: None, cov_layer };
+        // A bake is the player's, shared by every member; a stencil writer is
+        // drawn where each member stands.
+        let members = if cov_layer.is_some() { 1 } else { self.members };
+        let call = BatchDrawCall { key, texture_hash, vertices: first * stride..last * stride, instances: 0..members, shader_slot: None, cov_layer };
         self.writer_calls(dest).push(call);
     }
 
@@ -1446,10 +1805,14 @@ impl FrameChunk {
     }
 
     /// The draw over the stream from `stream_start` to its end, whose first
-    /// primitive is `draw_prim`, or `None` when that is empty.
+    /// primitive is `draw_prim`, or `None` when that is empty — or when
+    /// `draw_prim` is past what an `instance_index` can name above the member
+    /// (see [`CROWD_SHIFT`]).
     fn mesh_draw(&self, key: PipelineKey, texture_hash: u32, stream_start: u32, draw_prim: u32, cov_layer: Option<u32>) -> Option<BatchDrawCall> {
         let stream_end = self.mesh_stream.len() as u32;
-        (stream_end > stream_start).then(|| BatchDrawCall { key, texture_hash, vertices: stream_start..stream_end, instances: draw_prim..draw_prim + 1, shader_slot: None, cov_layer })
+        let members = if cov_layer.is_some() { 1 } else { self.members };
+        let first = draw_prim << CROWD_SHIFT;
+        (stream_end > stream_start && draw_prim < MESH_FIRST_PRIMS).then(|| BatchDrawCall { key, texture_hash, vertices: stream_start..stream_end, instances: first..first + members, shader_slot: None, cov_layer })
     }
 
     /// Record one Shape part, drawn as a fan from vertex 0 by `vs_shape`: copy

@@ -82,9 +82,10 @@ waits and reaches the GPU on the first `update`. See [Loading and assets](../gui
 // 1. Advance every player and build this target's geometry.
 scene.update(&mut renderer, &device, &queue, delta_secs, &mut [&mut player]);
 
-// 2. Bake mask coverage, if this scene uses that backend. A no-op under `Stencil`,
-//    and it must go on the SAME encoder as the pass below.
-scene.encode_mask_coverage(&mut renderer, &device, &mut encoder);
+// 2. Draw what the scene draws offscreen: coverage-mask bitmaps and group-alpha
+//    layers. Nothing when there are neither, and it must go on the SAME encoder
+//    as the pass below.
+scene.encode_offscreen(&mut renderer, &device, &mut encoder);
 
 // 3. Draw into a pass you opened.
 let mut rpass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {

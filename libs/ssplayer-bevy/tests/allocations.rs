@@ -28,7 +28,7 @@ use bevy::render::RenderPlugin;
 use bevy::render::render_resource::{Extent3d, TextureDimension, TextureFormat, TextureUsages};
 use bevy::render::view::Msaa;
 use bevy::window::WindowPlugin;
-use ssplayer_bevy::{SsCellmapTextures, SsPlayback, SsPlayer, SsPlayerPlugin, SsTrackCommand, SsTransform, TrackCommand, TrackSync};
+use ssplayer_bevy::{CrowdMember, SsCellmapTextures, SsCrowd, SsPlayback, SsPlayer, SsPlayerPlugin, SsSceneSettings, SsTrackCommand, SsTransform, TrackCommand, TrackSync};
 use std::alloc::{GlobalAlloc, Layout, System};
 use std::backtrace::Backtrace;
 use std::cell::Cell;
@@ -154,12 +154,14 @@ fn headless_app() -> Option<App> {
 }
 
 /// Every kind of per-character state this crate carries across a frame: a track
-/// stack of two with an added source, a texture override, and draw orders the
-/// scene has to sort.
+/// stack of two with an added source, a texture override, a crowd, a character
+/// faded through a group-alpha layer, and draw orders the scene has to sort.
 fn spawn_cast(world: &mut World) {
     let server = world.resource::<AssetServer>().clone();
+    world.resource_mut::<SsSceneSettings>().group_alpha = true;
 
-    let masked = world.spawn((SsPlayer { pack: server.load(MASK_PACK), animation: MASK_ANIM.into(), ..default() }, SsTransform { scale_x: 0.5, scale_y: 0.5, ..default() }, SsPlayback { order: 1, ..default() })).id();
+    let crowd = SsCrowd { members: vec![CrowdMember { x: -30.0, ..default() }, CrowdMember { x: 30.0, alpha: 0.5, tint: 0x80_C0_FF, ..default() }] };
+    let masked = world.spawn((SsPlayer { pack: server.load(MASK_PACK), animation: MASK_ANIM.into(), ..default() }, SsTransform { scale_x: 0.5, scale_y: 0.5, ..default() }, SsPlayback { order: 1, ..default() }, crowd)).id();
     for command in [TrackCommand::SetSync { track: 1, sync: TrackSync::Start }, TrackCommand::AddSource { track: 0, animation: MASK_ANIM.into(), weight: 0.5 }] {
         world.write_message(SsTrackCommand { entity: masked, command });
     }
@@ -173,7 +175,7 @@ fn spawn_cast(world: &mut World) {
     world.spawn((
         SsPlayer { pack: server.load(RINGO_PACK), animation, ..default() },
         SsTransform { x: 40.0, scale_x: 0.25, scale_y: 0.25, ..default() },
-        SsPlayback { order: -1, ..default() },
+        SsPlayback { order: -1, alpha: 0.5, ..default() },
         SsCellmapTextures { overrides: HashMap::from_iter([(cellmap, atlas)]) },
     ));
 }

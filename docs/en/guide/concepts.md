@@ -62,7 +62,7 @@ The shape is identical: **advance everything, then draw everything, once.**
 
     ```rust
     scene.update(&mut renderer, &device, &queue, delta_secs, &mut [&mut a, &mut b]);
-    scene.encode_mask_coverage(&mut renderer, &device, &mut encoder); // no-op under Stencil
+    scene.encode_offscreen(&mut renderer, &device, &mut encoder); // coverage masks, group-alpha layers
     let mut rpass = encoder.begin_render_pass(&descriptor);
     scene.draw(&renderer, &mut rpass);
     ```
@@ -108,6 +108,8 @@ for what is planned.
 | [Part overrides: visibility, cell, colour](./part-overrides.md) | ✅ | ✅ | ✅ | — |
 | [Texture replacement: a whole cell map](./texture-replacement.md) | ✅ | ✅ | ✅ | ✅ |
 | [Part transform lookup](./part-overrides.md#reading-a-parts-transform) | ✅ | ✅ | ✅ | — |
+| [Group alpha: a fade as one layer](./part-overrides.md#whole-character-tint-and-alpha) | ✅ | ✅ | ✅ | ✅ |
+| [Crowds: one character at many placements](./crowds.md) | ✅ | ✅ | ✅ | ✅ |
 | [Motion blending: tracks, crossfade, sources](./motion-blending.md) | ✅ | ✅ | ✅ | ✅ |
 | [Masks — stencil](./masks.md) | ✅ | ✅ | ✅ | — |
 | [Masks — coverage bitmap](./masks.md) | ✅ | — | — | ✅ |

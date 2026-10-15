@@ -41,6 +41,7 @@ whichever character took its slot.
 | `ss_scene_update(scene, delta_seconds)` | Advance every player, build this frame's geometry |
 | `ss_scene_render(scene)` | One render pass for the whole cast, then present |
 | `ss_scene_resize(scene, width, height)` | Drawable pixels |
+| `ss_scene_set_group_alpha(scene, on)` / `ss_scene_group_alpha(scene)` | Fade each faded player as one layer. See [Whole-character tint and alpha](../guide/part-overrides.md#whole-character-tint-and-alpha) |
 | `ss_scene_stats(scene, out)` | See [Performance](../guide/performance.md) |
 | `ss_scene_is_device_lost(scene)` / `ss_scene_restore_device(scene)` | See [Device loss](../guide/device-loss.md) |
 
@@ -132,6 +133,7 @@ parameter's `value_type` is one of `SS_SIGNAL_VALUE_NONE` / `_BOOL` / `_INDEX` /
 | `ss_player_set_visible(player, visible)` / `ss_player_is_visible(player)` | Hidden characters draw nothing but keep playing and reporting events |
 | `ss_player_set_culled(player, culled)` / `ss_player_is_culled(player)` | Culled characters **do not advance** and report no events |
 | `ss_player_set_alpha(player, a)` / `ss_player_set_tint(player, rgb)` | Whole-character alpha and tint. Read back with `ss_player_alpha` / `ss_player_tint` |
+| `ss_player_set_crowd(player, members, count)` / `ss_player_crowd_count(player)` | Draw the character at each `ss_crowd_member_t`'s placement; `count` 0 draws it once. See [Crowds](../guide/crowds.md) |
 
 `fit` is one of `SS_FIT_CONTAIN` / `_COVER` / `_NONE` (0–2) and `align` one of `SS_ALIGN_CENTER`,
 `_TOP`, `_BOTTOM`, `_LEFT`, `_RIGHT`, `_TOP_LEFT`, `_TOP_RIGHT`, `_BOTTOM_LEFT`, `_BOTTOM_RIGHT`

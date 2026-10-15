@@ -44,7 +44,8 @@ import { defineSsPlayerWebGPUElement } from '@spritestudio/ssplayer-wgpu/element
 | `createPlayer()` | キャラクターを追加 |
 | `frame(dt)` | このキャンバスの全プレイヤーを更新し、1 パスで描画。`dt` は**秒** |
 | `resize(width, height)` | 描画ピクセル |
-| `stats()` | `{ players, prims, drawCalls, uploadedBytes, mergeableDraws, redundantTextureBinds, gpuPassTimeNs? }` |
+| `setGroupAlpha(on)` / `groupAlpha()` | フェード中のプレイヤーをそれぞれ 1 枚のレイヤーとしてフェード。[キャラクター全体の tint とアルファ](../guide/part-overrides.md#whole-character-tint-and-alpha)を参照 |
+| `stats()` | `{ players, prims, drawCalls, uploadedBytes, mergeableDraws, redundantTextureBinds, groupLayers, gpuPassTimeNs? }` |
 | `playerCount()` | 診断用 |
 | `destroy()` | 明示的かつ冪等。JS 参照を捨てるだけではスワップチェーンが残ります |
 
@@ -93,6 +94,7 @@ import { defineSsPlayerWebGPUElement } from '@spritestudio/ssplayer-wgpu/element
 | `setVisible(v)` / `isVisible()` | 非表示のキャラクターは描画されませんが、再生は続きイベントも出します |
 | `setCulled(c)` / `isCulled()` | カリング中のキャラクターは**進みません**。イベントも出しません |
 | `setAlpha(a)` / `setTint(rgb)` | キャラクター全体。`alpha()` / `tint()` で読み出せます |
+| `setCrowd(placements, tints?)` / `crowdCount()` | キャラクターを多数の配置に描きます。`Float32Array` にメンバー 1 体あたり 6 つの数値（`x, y, scaleX, scaleY, rotation, alpha`）、省略可能な `Uint32Array` にメンバー 1 体あたり 1 つの `0xRRGGBB`。空の配列なら 1 体だけ。[群衆描画](../guide/crowds.md)を参照 |
 | `destroy()` | 明示的かつ冪等 |
 
 **パーツ・オーバーライド・イベント** — 各オーバーライドには `ByIndex` 版があります。

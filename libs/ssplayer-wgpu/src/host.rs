@@ -198,7 +198,18 @@ impl NativeHost {
         if self.is_device_lost() {
             return Ok(());
         }
-        self.swapchain.render(&self.device, &self.queue, &self.renderer, &mut self.scene, self.clear_color, "ss-native frame").map_err(String::from)
+        self.swapchain.render(&self.device, &self.queue, &mut self.renderer, &mut self.scene, self.clear_color, "ss-native frame").map_err(String::from)
+    }
+
+    /// Fade each player as one layer rather than part by part; see
+    /// [`SSScene::set_group_alpha`]. Kept across a device restore.
+    pub fn set_group_alpha(&mut self, on: bool) {
+        self.scene.set_group_alpha(on);
+    }
+
+    /// Whether players fade as one layer each.
+    pub fn group_alpha(&self) -> bool {
+        self.scene.group_alpha()
     }
 
     /// Resize the swapchain, the depth/stencil buffer and the projection to a new

@@ -66,6 +66,8 @@ scene.draw(&renderer, &mut rpass);
 `pause` / `resume` / `stop` / `set_speed_scale` are allocation-free transport. Players are drawn
 in ascending `set_order`, and `set_transform` / `set_visible` / `set_alpha` place
 each one in the scene. `set_culled` drops one that cannot be seen, timeline and all.
+`set_crowd` draws one player at many placements for one player's CPU cost, and
+`SSScene::set_group_alpha` fades each faded player as one layer.
 
 Hosts that supply their own textures — an engine with an asset system — lend a
 `TextureView` through `SSRenderer::set_texture` instead of letting the player

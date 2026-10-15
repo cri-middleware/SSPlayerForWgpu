@@ -73,6 +73,11 @@
 #define SS_BACKEND_VULKAN 3
 
 /*
+ The most members `ss_player_set_crowd` takes.
+ */
+#define SS_MAX_CROWD_MEMBERS 4096
+
+/*
  What kind of thing an `ss_event_t` is; read it before the payload.
  */
 #define SS_EVENT_USER_DATA 0
@@ -512,6 +517,28 @@ typedef struct {
 } SsPlaced;
 
 /*
+ One copy of a player in a crowd: where it stands, in `ss_player_set_transform`
+ terms and composed under that, and its alpha (0..1) and tint (`0xRRGGBB`),
+ each multiplied into the player's own. `{0, 0, 1, 1, 0, 1, 0xFFFFFF}` stands
+ where the player does, unchanged.
+ */
+typedef struct {
+    float x;
+    /*
+     Measured downward, as `ss_player_set_transform`'s is.
+     */
+    float y;
+    float scale_x;
+    float scale_y;
+    /*
+     Radians.
+     */
+    float rotation;
+    float alpha;
+    uint32_t tint;
+} ss_crowd_member_t;
+
+/*
  What the last frame cost, flattened for the ABI.
 
  `gpu_pass_time_ns` is 0 when the adapter has no timestamp query, or before
@@ -531,7 +558,11 @@ typedef struct {
      Draw calls recorded. The gap from `prims` is draw-call merging headroom.
      */
     uint32_t draw_calls;
-    uint32_t _reserved;
+    /*
+     Players faded as one layer this frame (`ss_scene_set_group_alpha`), each
+     a render pass and a window-sized layer of its own.
+     */
+    uint32_t group_layers;
     /*
      Bytes written to the frame's storage buffers.
      */
@@ -2064,10 +2095,42 @@ bool ss_player_is_culled(ss_player_t *handle);
  Player-level fade, clamped to 0..1. Mask coverage is unaffected: a faded
  player clips exactly as it would at full opacity.
 
+ Part by part, so overlapping parts read more opaque than `alpha`, unless the
+ scene fades each player as one layer (`ss_scene_set_group_alpha`).
+
  # Safety
  `handle` must be a live handle or null.
  */
 void ss_player_set_alpha(ss_player_t *handle, float alpha);
+
+/*
+ Draw this one playhead `count` times, once at each member's placement: a crowd
+ that costs one player's evaluation and draw calls, however large. `count` 0
+ draws the player once again, where `ss_player_set_transform` put it. The
+ members are copied; `members` may be null when `count` is 0.
+
+ Everything else is shared: the frame, the events (reported once), the masks
+ and the effects. Each draw is issued for every member in turn, so where two
+ members overlap their parts interleave, and this face's stencil masks clip
+ correctly only where members do not overlap.
+
+ `SS_ERROR_INVALID_ARGUMENT` for a null or destroyed handle, a null `members`
+ with a `count`, or a `count` past `SS_MAX_CROWD_MEMBERS`; the crowd is left
+ as it was.
+
+ # Safety
+ `members` must be null or point at `count` readable `ss_crowd_member_t`s.
+ */
+int32_t ss_player_set_crowd(ss_player_t *handle, const ss_crowd_member_t *members, uint32_t count);
+
+/*
+ How many members `ss_player_set_crowd` last gave the player; 0 when it draws
+ once, and for a null handle.
+
+ # Safety
+ `handle` must be a live handle or null.
+ */
+uint32_t ss_player_crowd_count(ss_player_t *handle);
 
 /*
  The player-level fade in effect, after `ss_player_set_alpha` clamped it to
@@ -2134,6 +2197,31 @@ int32_t ss_scene_render(ss_scene_t *scene);
  `out` must point at a writable `ss_scene_stats_t`.
  */
 int32_t ss_scene_stats(ss_scene_t *scene, ss_scene_stats_t *out);
+
+/*
+ Fade each player whose alpha is below 1 as one layer, composited at its
+ alpha, rather than part by part — so overlapping parts of a half-faded
+ character read half, not three quarters. Off by default.
+
+ Each player faded at once costs a render pass per frame and a layer the size
+ of the window (about 8 MiB at 1920x1080), counted in
+ `ss_scene_stats_t::group_layers`; turning it off frees them. Inside a layer
+ the parts blend against transparency rather than the window: Add, Mul and
+ Screen parts composite with the player's own parts alone. Kept across
+ `ss_scene_restore_device`.
+
+ # Safety
+ `scene` must be a live handle or null.
+ */
+void ss_scene_set_group_alpha(ss_scene_t *scene, bool on);
+
+/*
+ Whether `ss_scene_set_group_alpha` is on; `false` for a null scene.
+
+ # Safety
+ `scene` must be a live handle or null.
+ */
+bool ss_scene_group_alpha(ss_scene_t *scene);
 
 /*
  Resize the swapchain, the depth/stencil buffer and the projection to a new

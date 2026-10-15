@@ -14,7 +14,8 @@ and what each face exposes today is the matrix in
 | **WebGPU only**, with no OpenGL / WebGL backend — a browser without it needs a fallback | Web | [Requirements](./start/web.md#requirements) |
 | **`Div2` / `Overlay2` draw as `Mix`** — no GPU blend state reproduces them | every face | [below](#div2-and-overlay2-draw-as-mix) |
 | **`Mulalpha` / `Mul2` draw as `Mul`, and `Screen2` as `Screen`** | every face | [below](#div2-and-overlay2-draw-as-mix) |
-| **Whole-character alpha applies part by part** — where two parts overlap, `set_alpha(0.5)` leaves 0.75 | every face | [below](#whole-character-alpha-applies-part-by-part) |
+| **Whole-character alpha applies part by part** unless group alpha is on — where two parts overlap, `set_alpha(0.5)` leaves 0.75 | every face | [below](#whole-character-alpha-applies-part-by-part) |
+| **A crowd's members play one frame**, and interleave draw by draw where they overlap; under the stencil backend their masks clip correctly only where they do not | every face | [Crowds](./guide/crowds.md#what-members-share) |
 | **Integration shaders draw only on Normal parts with no mask**, and their extra cells (`map0` / `map1`) are not bound | every face | [below](#integration-shaders) |
 | **Audio events are cues**; the player produces no sound | every face | [Events and user data](./guide/events.md) |
 
@@ -50,14 +51,17 @@ Three more are drawn with a neighbour's state: `Mulalpha` and `Mul2` as `Mul`, a
 
 ## Whole-character alpha applies part by part
 
-`set_alpha` fades each part as it draws, not the character as a whole, so where two parts overlap
-the one behind shows through the one in front: two halves of a character at 0.5 leave the overlap
-at 0.75, and a fading character shows its own seams. Drawing the character whole and compositing it
-once fixes that, and needs an offscreen path the player does not have yet; it is a
-[ROADMAP](https://github.com/cri-middleware/SSPlayerForWgpu/blob/main/ROADMAP.md) item.
+By default `set_alpha` fades each part as it draws, not the character as a whole, so where two
+parts overlap the one behind shows through the one in front: two halves of a character at 0.5
+leave the overlap at 0.75, and a fading character shows its own seams.
 
-Until then, fade something that is composited once: on the web, the canvas, with CSS `opacity`; on
-the Rust face, a texture of your own that you drew the character into.
+Group alpha fixes that by drawing each faded character whole into a layer of its own and
+compositing it once — `set_group_alpha` on the Rust face, `ss_scene_set_group_alpha` in C,
+`setGroupAlpha` in JavaScript, `SsSceneSettings::group_alpha` on Bevy. It is off by default for
+what it costs: a render pass per faded character per frame, and a layer the size of the target for
+each one faded at once. Inside a layer, Add, Mul and Screen parts blend against transparency rather
+than against what is behind the character. See
+[Whole-character tint and alpha](./guide/part-overrides.md#whole-character-tint-and-alpha).
 
 ## Integration shaders
 

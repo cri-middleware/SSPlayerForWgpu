@@ -116,13 +116,14 @@ impl Swapchain {
     }
 
     /// Acquire this frame's texture, draw `scene` into it over `clear`, and
-    /// present it.
+    /// present it. What the scene draws offscreen goes first, on the same
+    /// encoder.
     ///
     /// A lost, outdated or timed-out surface is configured again and the frame
     /// skipped; an occluded one, which is still valid, skips the frame alone.
     /// Both are success, since the next frame draws. Only a configuration the
     /// surface rejects is an error.
-    pub fn render(&mut self, device: &wgpu::Device, queue: &wgpu::Queue, renderer: &SSRenderer, scene: &mut SSScene, clear: wgpu::Color, label: &'static str) -> Result<(), &'static str> {
+    pub fn render(&mut self, device: &wgpu::Device, queue: &wgpu::Queue, renderer: &mut SSRenderer, scene: &mut SSScene, clear: wgpu::Color, label: &'static str) -> Result<(), &'static str> {
         use wgpu::CurrentSurfaceTexture;
         let frame = match self.surface.get_current_texture() {
             CurrentSurfaceTexture::Success(frame) | CurrentSurfaceTexture::Suboptimal(frame) => frame,
@@ -136,6 +137,7 @@ impl Swapchain {
         };
         let view = frame.texture.create_view(&wgpu::TextureViewDescriptor::default());
         let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor { label: Some(label) });
+        scene.encode_offscreen(renderer, device, &mut encoder);
         {
             let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
                 label: Some(label),

@@ -69,16 +69,16 @@ Player の側だからです。
 // 1. CPU：このターゲットの全キャラクターを進め、ジオメトリを構築する。
 scene.update(&mut renderer, &device, &queue, dt, &mut players);
 
-// 2. このシーンがカバレッジでマスクするなら、ビットマップを焼く —
-//    下の本描画パスと同じ encoder に。
-scene.encode_mask_coverage(&mut renderer, &device, &mut encoder);
+// 2. シーンがオフスクリーンに描くもの — カバレッジマスクのビットマップと
+//    group alpha のレイヤー — を、下の本描画パスと同じ encoder に描く。
+scene.encode_offscreen(&mut renderer, &device, &mut encoder);
 
 // 3. 自分のグラフの適切な位置で、自分のパスに描画を記録する。
 let mut rpass = encoder.begin_render_pass(&descriptor);
 scene.draw(&renderer, &mut rpass);
 ```
 
-微妙なのは 2 です。1 つの `CommandEncoder` の中のパスは順に実行されるため、マスクビットマップとそれをサンプルする変換がどちらも「このフレームのもの」になります。encoder・システム・フレームを跨いで分けると、この Player には無いはずのマスク 1 フレーム遅延が戻ってきます。
+微妙なのは 2 です。1 つの `CommandEncoder` の中のパスは順に実行されるため、2 が描くマスクビットマップとレイヤーは、本描画パスがサンプルする時点で「このフレームのもの」になります。encoder・システム・フレームを跨いで分けると、この Player には無いはずの 1 フレーム遅延が戻ってきます。
 
 1 は `&mut [&mut SSPlayer]` を受け取ります。キャラクターを自前のコレクション（`Vec<SSPlayer>` やエンジンのスロットなど）に持つホストは、代わりにそのコレクションを `update_with` に渡し、各要素のプレイヤーへたどるクロージャを添えます。こうすれば `Vec<&mut SSPlayer>` を毎フレーム作らずに済みます。この Vec は借用を抱えるので、フレームを越えて持ち越せないからです。どちらの呼び出しでも描画順は `order` の昇順、同じ値どうしは渡した順で、渡したものを並べ替えることはありません。
 

@@ -12,7 +12,8 @@ use bevy::render::Extract;
 use bevy::render::sync_world::MainEntity;
 
 use crate::asset::SsPack;
-use crate::components::{SsCellmapTextures, SsPlay, SsPlayback, SsPlayer, SsSeek, SsStop, SsTrackCommand, SsTransform, TrackCommand};
+use crate::components::{SsCellmapTextures, SsCrowd, SsPlay, SsPlayback, SsPlayer, SsSceneSettings, SsSeek, SsStop, SsTrackCommand, SsTransform, TrackCommand};
+use ssplayer_wgpu::CrowdMember;
 
 /// One character's worth of main-world state, as of this frame.
 pub(crate) struct ExtractedPlayer {
@@ -31,12 +32,24 @@ pub(crate) struct ExtractedPlayer {
     /// when it spawned no [`SsCellmapTextures`]. The render world reconciles this
     /// against what it has bound.
     pub overrides: Vec<(String, Handle<Image>)>,
+    /// The character's [`SsCrowd`] members; empty when it spawned none.
+    pub crowd: Vec<CrowdMember>,
 }
 
 /// A slot for `extract_players` to fill: what a cast that grew is padded with.
 impl Default for ExtractedPlayer {
     fn default() -> Self {
-        Self { entity: MainEntity::from(Entity::PLACEHOLDER), pack: AssetId::default(), settled: false, animation: String::new(), transition_ms: 0.0, transform: SsTransform::default(), playback: SsPlayback::default(), overrides: Vec::new() }
+        Self {
+            entity: MainEntity::from(Entity::PLACEHOLDER),
+            pack: AssetId::default(),
+            settled: false,
+            animation: String::new(),
+            transition_ms: 0.0,
+            transform: SsTransform::default(),
+            playback: SsPlayback::default(),
+            overrides: Vec::new(),
+            crowd: Vec::new(),
+        }
     }
 }
 
@@ -48,6 +61,8 @@ impl Default for ExtractedPlayer {
 #[derive(Resource, Default)]
 pub(crate) struct ExtractedPlayers {
     pub delta_secs: f32,
+    /// [`SsSceneSettings::group_alpha`], as of this frame.
+    pub group_alpha: bool,
     pub players: Vec<ExtractedPlayer>,
     /// The transport commands written this frame, each kind in the order its
     /// messages were written.
@@ -78,9 +93,11 @@ pub(crate) fn extract_players(
     plays: Extract<Res<Messages<SsPlay>>>,
     stops: Extract<Res<Messages<SsStop>>>,
     track_commands: Extract<Res<Messages<SsTrackCommand>>>,
-    query: Extract<Query<(Entity, &SsPlayer, &SsTransform, &SsPlayback, Option<&SsCellmapTextures>)>>,
+    settings: Extract<Res<SsSceneSettings>>,
+    query: Extract<Query<(Entity, &SsPlayer, &SsTransform, &SsPlayback, Option<&SsCellmapTextures>, Option<&SsCrowd>)>>,
 ) {
     extracted.delta_secs = time.delta_secs();
+    extracted.group_alpha = settings.group_alpha;
     let ExtractedPlayers { seeks: seek_list, plays: play_list, stops: stop_list, track_commands: track_list, seek_cursor, play_cursor, stop_cursor, track_cursor, .. } = &mut *extracted;
     seek_list.clear();
     seek_list.extend(seek_cursor.read(&seeks).map(|seek| (MainEntity::from(seek.entity), seek.frame)));
@@ -95,7 +112,7 @@ pub(crate) fn extract_players(
     let count = query.iter().len();
     extracted.players.truncate(count);
     extracted.players.resize_with(count, ExtractedPlayer::default);
-    for ((entity, player, transform, playback, textures), out) in query.iter().zip(&mut extracted.players) {
+    for ((entity, player, transform, playback, textures, crowd), out) in query.iter().zip(&mut extracted.players) {
         out.entity = MainEntity::from(entity);
         out.pack = player.pack.id();
         out.settled = matches!(asset_server.get_recursive_dependency_load_state(&player.pack), Some(RecursiveDependencyLoadState::Loaded | RecursiveDependencyLoadState::Failed(_)));
@@ -104,6 +121,8 @@ pub(crate) fn extract_players(
         out.transform = *transform;
         out.playback = *playback;
         copy_overrides(&mut out.overrides, textures.map(|t| &t.overrides));
+        out.crowd.clear();
+        out.crowd.extend_from_slice(crowd.map_or(&[][..], |crowd| &crowd.members));
     }
 }
 

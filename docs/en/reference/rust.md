@@ -44,8 +44,8 @@ Most applications touch six of these: `SSRenderer`, `SSScene`, `SceneConfig`, `S
 | Type | Scope | Key calls |
 |---|---|---|
 | `SSRenderer` | one device | `new`, `set_texture`, `upload_texture`, `texture_size`, `restore_device` |
-| `SSScene` | one render target | `new`, `set_viewport`, `update`, `update_with`, `encode_mask_coverage`, `draw`, `stats`, `restore_device` |
-| `SSPlayer` | one character | `load`, `set_animation`, transport, overrides, `set_cellmap_texture`, `events`, `set_transform`, `restore_textures` |
+| `SSScene` | one render target | `new`, `set_viewport`, `update`, `update_with`, `encode_offscreen`, `set_group_alpha`, `draw`, `stats`, `restore_device` |
+| `SSPlayer` | one character | `load`, `set_animation`, transport, overrides, `set_cellmap_texture`, `events`, `set_transform`, `set_crowd`, `restore_textures` |
 
 `SSPlayer` holds **no wgpu-typed field**, so one scene carries any number of them and they share
 one upload of a pack's atlases. See [The borrow model](../wgpu/borrow-model.md).

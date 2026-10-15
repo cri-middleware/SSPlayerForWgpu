@@ -25,7 +25,7 @@ use bevy::render::render_resource::{Extent3d, TextureDimension, TextureFormat, T
 use bevy::render::view::Msaa;
 use bevy::sprite::Sprite;
 use bevy::window::WindowPlugin;
-use ssplayer_bevy::{PlaybackDirection, PlaybackStyle, SsPlay, SsPlayback, SsPlaybackState, SsPlayer, SsPlayerPlugin, SsSeek, SsStop, SsTrackCommand, SsTrackState, SsTransform, TrackCommand, TrackSync};
+use ssplayer_bevy::{CrowdMember, PlaybackDirection, PlaybackStyle, SsCrowd, SsPlay, SsPlayback, SsPlaybackState, SsPlayer, SsPlayerPlugin, SsSceneSettings, SsSeek, SsStop, SsTrackCommand, SsTrackState, SsTransform, TrackCommand, TrackSync};
 use std::path::Path;
 use std::sync::{Arc, Mutex};
 
@@ -208,6 +208,80 @@ fn a_tint_reaches_the_character() {
     let red_or_green = pixels.as_chunks::<4>().0.iter().filter(|p| p[0] > 8 || p[1] > 8).count();
     assert!(blue > 0, "the tinted character drew nothing");
     assert_eq!(red_or_green, 0, "{red_or_green} pixels kept red or green under a blue-only tint");
+}
+
+/// `SsCrowd` reaches the player: two members set apart draw the character
+/// twice, where the same character without one draws once.
+#[test]
+fn a_crowd_draws_every_member() {
+    if !fixtures_present() {
+        eprintln!("assets not generated, skipping");
+        return;
+    }
+    let (Some((app, handle, captured)), Some((app2, handle2, captured2))) = (headless_app(), headless_app()) else {
+        eprintln!("no GPU adapter available, skipping");
+        return;
+    };
+    let held = |world: &World| {
+        let (player, transform, playback) = masked_character(world);
+        (player, transform, SsPlayback { playing: false, ..playback })
+    };
+
+    let single = run(app, handle, captured, |world| {
+        let character = held(world);
+        world.spawn(character);
+    });
+    let crowd = run(app2, handle2, captured2, |world| {
+        let character = held(world);
+        let members = [-180.0, 180.0].map(|x| CrowdMember { x, scale_x: 0.5, scale_y: 0.5, ..default() });
+        world.spawn((character, SsCrowd { members: members.to_vec() }));
+    });
+
+    dump("01-crowd", &crowd);
+    let (one, two) = (drawn_pixels(&single), drawn_pixels(&crowd));
+    assert!(one > 0, "the character drew nothing — this test would pass vacuously");
+    // Each member is half the character's size, so a quarter of its area: two of
+    // them are half of it. Well clear of one member's quarter, which is what
+    // a crowd reduced to its first member would draw.
+    assert!(two > one * 3 / 8, "a crowd of two drew {two} px against the character's {one} — not every member drew");
+}
+
+/// `SsSceneSettings::group_alpha` reaches the scene, and its layers are drawn
+/// before the pass that composites them: a half-faded character stops showing
+/// its own overlapping parts through each other, so it is darker wherever two
+/// overlap than the same character faded part by part, and nowhere brighter.
+#[test]
+fn group_alpha_fades_a_character_as_one() {
+    if !fixtures_present() {
+        eprintln!("assets not generated, skipping");
+        return;
+    }
+    let (Some((app, handle, captured)), Some((app2, handle2, captured2))) = (headless_app(), headless_app()) else {
+        eprintln!("no GPU adapter available, skipping");
+        return;
+    };
+    let faded = |world: &World| {
+        let (player, transform, playback) = masked_character(world);
+        (player, transform, SsPlayback { playing: false, alpha: 0.5, ..playback })
+    };
+
+    let per_part = run(app, handle, captured, |world| {
+        let character = faded(world);
+        world.spawn(character);
+    });
+    let grouped = run(app2, handle2, captured2, |world| {
+        world.resource_mut::<SsSceneSettings>().group_alpha = true;
+        let character = faded(world);
+        world.spawn(character);
+    });
+
+    dump("01-faded-per-part", &per_part);
+    dump("01-faded-grouped", &grouped);
+    let brighter = |a: &[u8], b: &[u8]| a.as_chunks::<4>().0.iter().zip(b.as_chunks::<4>().0).filter(|(p, q)| (0..3).any(|c| p[c] > q[c].saturating_add(2))).count();
+    let (overlaps, wrong) = (brighter(&per_part, &grouped), brighter(&grouped, &per_part));
+    assert!(drawn_pixels(&grouped) > 0, "the grouped character drew nothing");
+    assert!(overlaps > 0, "group alpha drew what part by part does — the setting did not reach the scene, or its layers were not drawn");
+    assert_eq!(wrong, 0, "the grouped character is brighter than part by part in {wrong} px — a layer was composited wrongly");
 }
 
 /// The mask has to actually clip.

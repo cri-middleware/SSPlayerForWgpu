@@ -119,9 +119,11 @@ impl Hello {
         let view = output.texture.create_view(&wgpu::TextureViewDescriptor::default());
         let mut encoder = self.device.create_command_encoder(&wgpu::CommandEncoderDescriptor::default());
 
-        // 2. Bake mask coverage. A no-op under the stencil backend; it has to go on
-        //    the same encoder as the pass below if the scene ever switches.
-        self.scene.encode_mask_coverage(&mut self.renderer, &self.device, &mut encoder);
+        // 2. Draw what the scene draws outside the pass: mask coverage, and each
+        //    faded player's layer under group alpha. Nothing at all under the
+        //    stencil backend with group alpha off, but it has to go on the same
+        //    encoder as the pass below whenever there is.
+        self.scene.encode_offscreen(&mut self.renderer, &self.device, &mut encoder);
 
         // 3. Draw into a pass this program opened.
         {

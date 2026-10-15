@@ -25,7 +25,7 @@ parse_deps = false
 [export]
 # cbindgen sweeps up every `pub const` in the crate, including ones that have
 # nothing to do with the C API. Keep the header to `src/ffi.rs`'s surface.
-exclude = ["IDENTITY_TRANSFORM", "MAX_MASK_WRITERS", "COVERAGE_LAYER_BITS"]
+exclude = ["IDENTITY_TRANSFORM", "MAX_MASK_WRITERS", "COVERAGE_LAYER_BITS", "MAX_CROWD_MEMBERS"]
 
 # Types keep idiomatic Rust names in the source and take their C names here.
 [export.rename]
@@ -33,5 +33,6 @@ exclude = ["IDENTITY_TRANSFORM", "MAX_MASK_WRITERS", "COVERAGE_LAYER_BITS"]
 "SsPlayer" = "ss_player_t"
 "SsSceneDesc" = "ss_scene_desc_t"
 "SsSceneStats" = "ss_scene_stats_t"
+"SsCrowdMember" = "ss_crowd_member_t"
 "SsTextureRef" = "ss_texture_ref_t"
 "SsWindowHandle" = "ss_window_handle_t"

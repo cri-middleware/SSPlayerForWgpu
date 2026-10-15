@@ -39,6 +39,13 @@
 //! draw pass is opened on, which is what makes the clip this frame's rather than
 //! the last one's. It costs one extra render pass per masking character.
 //!
+//! # Fades and crowds
+//!
+//! [`SsSceneSettings::group_alpha`] fades a character as one layer rather than
+//! part by part, drawn ahead of the pass into the same encoder, as the masks
+//! are. [`SsCrowd`] draws one character's playhead at many placements for the
+//! cost of one.
+//!
 //! # Limits of this version
 //!
 //! * **One view.** The adapter holds one `SSScene` with every character in it,
@@ -54,11 +61,11 @@ mod feedback;
 mod render;
 
 pub use asset::{SsPack, SsPackLoadError, SsPackLoader};
-pub use components::{SsCellmapTextures, SsPlay, SsPlayback, SsPlaybackState, SsPlayer, SsSeek, SsSourceInfo, SsStop, SsTrackCommand, SsTrackInfo, SsTrackState, SsTransform, TrackCommand};
+pub use components::{SsCellmapTextures, SsCrowd, SsPlay, SsPlayback, SsPlaybackState, SsPlayer, SsSceneSettings, SsSeek, SsSourceInfo, SsStop, SsTrackCommand, SsTrackInfo, SsTrackState, SsTransform, TrackCommand};
 pub use feedback::{SsEventMessage, SsFinished, SsLooped, SsStarted};
 // The event payloads a host matches on, re-exported so it need not also depend
 // on `ssplayer-wgpu` just to name them.
-pub use ssplayer_wgpu::{AudioEvent, PlaybackDirection, PlaybackStyle, SignalEvent, SignalParam, SignalValue, SsEvent, TrackBlend, TrackSync, UserDataEvent};
+pub use ssplayer_wgpu::{AudioEvent, CrowdMember, PlaybackDirection, PlaybackStyle, SignalEvent, SignalParam, SignalValue, SsEvent, TrackBlend, TrackSync, UserDataEvent};
 
 use bevy::app::{App, Plugin, PreUpdate};
 use bevy::asset::AssetApp;
@@ -92,6 +99,7 @@ impl Plugin for SsPlayerPlugin {
             .add_message::<SsPlay>()
             .add_message::<SsStop>()
             .add_message::<SsTrackCommand>()
+            .init_resource::<SsSceneSettings>()
             .insert_resource(channel.clone())
             // In `PreUpdate` so a gameplay system reading these in `Update` sees
             // the same frame's batch.
