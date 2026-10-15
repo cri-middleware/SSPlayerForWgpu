@@ -46,7 +46,7 @@ faces as thin wrappers.
     held across frames.
 *   **No per-frame allocations in the playback hot path.** `FrameChunk::reset` empties every buffer and
     keeps its capacity, and GPU buffers only grow; a new per-frame buffer goes on the chunk, or on the
-    player's `Walk` when only that player's walk uses it.
+    player's `Walk` when only that player's walk uses it. `tests/allocations.rs` pins it.
 *   **Textures are borrowed**: `set_texture` takes a supplier-owned `TextureView`, and `SSPack` holds CPU
     data only. Per-texture facts that vary (`AlphaMode`, texel size) go in the group(1) `TexInfo` uniform,
     never the pipeline key. Every texture list reads `external_textures()` as well as `cellmaps()` — a

@@ -27,7 +27,8 @@ use crate::feedback::{FeedbackChannel, PlaybackFeedback};
 /// One character's playback tree, plus what it was last built from.
 ///
 /// `pack` and `animation` are kept so a change to either can be told from the
-/// frame-to-frame traffic: rebuilding the tree allocates, the rest does not.
+/// frame-to-frame traffic: rebuilding the tree is the expensive step, and only a
+/// change to one of them asks for it.
 ///
 /// `started` / `playing` / `restart` track transport, because the player's
 /// `play()` rewinds (it is a start, not a resume) and `is_playing()` stays true
@@ -264,7 +265,8 @@ pub(crate) fn sync_players(mut state: Option<ResMut<SsRenderState>>, extracted: 
             slot.added_sources.clear();
         }
 
-        // Allocation-free from here down.
+        // No tree work from here down: the slot hands this frame's values to the
+        // player, whose setters allocate nothing.
         let transform = extracted_player.transform;
         slot.player.set_transform(transform.x, transform.y, transform.scale_x, transform.scale_y, transform.rotation);
 
