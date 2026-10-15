@@ -109,13 +109,15 @@ cargo fmt --all -- --check
 cargo clippy --workspace --all-targets -- -D warnings
 cargo test --workspace                    # needs deploy-examples.sh first
 cargo build -p ssplayer-wgpu --target wasm32-unknown-unknown --no-default-features --features web
+cargo clippy -p ssplayer-wgpu --target wasm32-unknown-unknown --no-default-features --features web -- -D warnings
 cargo clippy -p ssplayer-wgpu --features ffi --all-targets -- -D warnings
 cargo build -p ssplayer-wgpu-ffi          # regenerates the C header
 cargo test -p ssplayer-wgpu --features ffi --lib
 ```
 
 No default command compiles `src/ffi.rs` or `src/host.rs`, which is why the C
-face takes three lines of its own. **`ssplayer-wgpu-ffi` is the crate that
+face takes three lines of its own; `src/web.rs` needs the `web` feature on wasm32,
+which is why the web face takes two. **`ssplayer-wgpu-ffi` is the crate that
 regenerates the header** — its `build.rs` runs cbindgen; building
 `-p ssplayer-wgpu --features ffi` compiles the module but regenerates nothing.
 `libs/ssplayer-wgpu-ffi/include/ssplayer_wgpu.h` is committed output, so if it
@@ -285,12 +287,13 @@ cargo fmt --all -- --check
 cargo clippy --workspace --all-targets -- -D warnings
 cargo test --workspace                    # needs deploy-examples.sh first
 cargo build -p ssplayer-wgpu --target wasm32-unknown-unknown --no-default-features --features web
+cargo clippy -p ssplayer-wgpu --target wasm32-unknown-unknown --no-default-features --features web -- -D warnings
 cargo clippy -p ssplayer-wgpu --features ffi --all-targets -- -D warnings
 cargo build -p ssplayer-wgpu-ffi          # regenerates the C header
 cargo test -p ssplayer-wgpu --features ffi --lib
 ```
 
-既定のコマンドでは `src/ffi.rs` も `src/host.rs` もコンパイルされないため、C フェイスだけ 3 行を要します。**ヘッダを再生成するのは `ssplayer-wgpu-ffi` クレート**で、その `build.rs` が cbindgen を実行します。`-p ssplayer-wgpu --features ffi` のビルドはモジュールをコンパイルしますが、再生成は行いません。`libs/ssplayer-wgpu-ffi/include/ssplayer_wgpu.h` はコミットされる生成物なので、変更が出たらコミットしてください。CI は `git diff --exit-code` で確認しています。
+既定のコマンドでは `src/ffi.rs` も `src/host.rs` もコンパイルされないため、C フェイスは 3 行を要します。`src/web.rs` は wasm32 向けに `web` feature を付けたときだけコンパイルされるため、web フェイスは 2 行を要します。**ヘッダを再生成するのは `ssplayer-wgpu-ffi` クレート**で、その `build.rs` が cbindgen を実行します。`-p ssplayer-wgpu --features ffi` のビルドはモジュールをコンパイルしますが、再生成は行いません。`libs/ssplayer-wgpu-ffi/include/ssplayer_wgpu.h` はコミットされる生成物なので、変更が出たらコミットしてください。CI は `git diff --exit-code` で確認しています。
 
 `clippy --fix` を使うときは、先に自分の編集を `git add` してから `--allow-staged` を付けてください。`--allow-dirty` は使いません。clippy の修正が unstaged に残るので、自分の編集と分けてレビューできます。
 

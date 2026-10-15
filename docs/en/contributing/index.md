@@ -50,6 +50,7 @@ themselves (`deploy-examples.sh when=stale`).
 | Format | `cargo fmt --all -- --check` / `cargo fmt --all` |
 | Tests | `cargo test --workspace` |
 | **wasm / JS face** | `cargo build -p ssplayer-wgpu --target wasm32-unknown-unknown --no-default-features --features web` |
+| Lint (wasm / JS face) | `cargo clippy -p ssplayer-wgpu --target wasm32-unknown-unknown --no-default-features --features web -- -D warnings` |
 | **C face** (+ header regeneration) | `cargo build -p ssplayer-wgpu-ffi` |
 | C handle lifetimes | `cargo test -p ssplayer-wgpu --features ffi --lib` |
 | npm package (wasm + TS layer) | `./scripts/build.sh platform=web` — needs `pnpm` and `wasm-pack` |
@@ -67,8 +68,8 @@ themselves (`deploy-examples.sh when=stale`).
 Ordinary `cargo build`, `clippy --all-targets` and `cargo test` compile **none** of the following.
 Each rots silently until someone builds it deliberately:
 
-1. **`web.rs`** sits behind the `web` feature and is compiled by no native command. Build the wasm
-   target after touching it.
+1. **`web.rs`** sits behind the `web` feature and is compiled by no native command. Build and lint
+   the wasm target after touching it.
 2. **The TypeScript layer** types itself against wasm-pack's generated `.d.ts`, so renaming a
    `#[wasm_bindgen]` method breaks it while cargo stays happy. Run the typecheck after changing the
    web face's public surface.
@@ -116,7 +117,10 @@ cargo fmt --all -- --check
 cargo clippy --workspace --all-targets -- -D warnings
 cargo test --workspace                                    # needs deploy-examples.sh first
 cargo build -p ssplayer-wgpu --target wasm32-unknown-unknown --no-default-features --features web
+cargo clippy -p ssplayer-wgpu --target wasm32-unknown-unknown --no-default-features --features web -- -D warnings
+cargo clippy -p ssplayer-wgpu --features ffi --all-targets -- -D warnings
 cargo build -p ssplayer-wgpu-ffi                          # also regenerates the C header
+cargo test -p ssplayer-wgpu --features ffi --lib
 ```
 
 Three testing notes:

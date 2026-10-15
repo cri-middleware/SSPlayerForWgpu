@@ -194,6 +194,7 @@ jobs:
         with:
           # Pinned by SHA, so the channel must be named explicitly here.
           toolchain: stable
+          components: clippy
 
       - name: Setup Rust cache
         uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
@@ -205,6 +206,11 @@ jobs:
 
       - name: Build the js face
         run: cargo build -p ssplayer-wgpu --target wasm32-unknown-unknown --no-default-features --features web
+
+      # The Linux job's clippy builds default features, which leave src/web.rs
+      # out, so until this step the js face was compiled but never linted.
+      - name: Clippy (js face)
+        run: cargo clippy -p ssplayer-wgpu --target wasm32-unknown-unknown --no-default-features --features web -- -D warnings
 
       # The TypeScript layer of @spritestudio/ssplayer-wgpu types itself against
       # wasm-pack's generated .d.ts, so a change to the js face's Rust signatures
