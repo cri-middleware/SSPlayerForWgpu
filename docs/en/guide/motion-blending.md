@@ -192,6 +192,14 @@ if player.is_track_finished(2) {
 above 0 finishing nor looping is an edge the player raises for you; only track 0's end is
 `just_finished`.
 
+The tracks keep a character moving after track 0 has finished, but only while one of them still
+moves its pose: a fade in progress, or an animation that plays at a speed and a weight above 0 on a
+track whose alpha is above 0. A cleared or finished track, one at alpha 0, weight 0 or speed 0
+does not, and neither does anything while the character is paused; such a character keeps the
+frame it last drew and costs nothing (see [Performance](./performance.md#a-scene-with-nothing-moving)).
+A call that changes the stack, a scrub with `set_track_frame` included, is drawn on the next frame
+whether the character is moving or not.
+
 ## Scrubbing a track: continuous control
 
 Author a control axis as an animation — a head turning from full left to full right, an eyelid

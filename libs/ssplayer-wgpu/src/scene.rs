@@ -440,6 +440,14 @@ pub struct SSScene {
     /// allocates nothing; sorting the slice itself would, since the stable sort
     /// takes a buffer of its own once a cast passes a few hundred.
     draw_order: Vec<(i32, u32)>,
+    /// What `frame` was built from, `None` until a frame is — and so after a
+    /// restore, which starts the scene over. An update whose players are all
+    /// settled keeps the frame only while these still read the same.
+    built: Option<BuiltFrom>,
+    /// The players `frame` holds, as `(order, id)` in the order they were drawn:
+    /// a player added, removed, replaced or reordered changes the frame though
+    /// none of them moved. Refilled in place, like `draw_order`.
+    built_players: Vec<(i32, u32)>,
 
     // --- Integration shaders (`ss-*`). Only touched when a frame has
     // shader parts; shader-free animations never build any of this. ---
@@ -452,6 +460,15 @@ pub struct SSScene {
     /// GPU pass timing, present only when the device was created with
     /// `Features::TIMESTAMP_QUERY`.
     timer: Option<GpuTimer>,
+}
+
+/// The scene-wide inputs a frame was built from (see `SSScene::built`).
+#[derive(Clone, Copy, PartialEq)]
+struct BuiltFrom {
+    /// [`SSRenderer::texture_changes`]: the frame reads the texture sizes.
+    textures: u64,
+    /// Whether faded players were drawn into layers.
+    grouping: bool,
 }
 
 /// Column-major 4x4 identity. Used as the root transform (children compose their
@@ -529,6 +546,8 @@ impl SSScene {
             frame_offsets: [0; 2],
             frame: FrameChunk::new(*config),
             draw_order: Vec::new(),
+            built: None,
+            built_players: Vec::new(),
             ss_params_buffer: None,
             ss_params_bind_group: None,
             stats: SceneStats::default(),
@@ -877,8 +896,13 @@ impl SSScene {
     /// For a host that keeps its cast from frame to frame: a `Vec<&mut SSPlayer>`
     /// collected out of it cannot outlive the borrow it holds, so `update` would
     /// cost a fresh one every frame. Ties in `order` keep the order of `players`.
+    ///
+    /// When every player is settled — stopped, finished or held with nothing of
+    /// its own still moving, and unchanged since the last frame — the frame that
+    /// frame built is kept: nothing is evaluated, rebuilt or uploaded, and
+    /// [`SSScene::draw`] draws it again. One player that moves rebuilds the
+    /// whole frame, the settled ones with it, since they share its buffer.
     pub fn update_with<P>(&mut self, renderer: &mut SSRenderer, device: &wgpu::Device, queue: &wgpu::Queue, delta_secs: f32, players: &mut [P], player: impl Fn(&mut P) -> Option<&mut crate::SSPlayer>) {
-        self.begin_frame();
         self.draw_order.clear();
         self.draw_order.extend(players.iter_mut().enumerate().filter_map(|(index, slot)| player(slot).map(|p| (p.order(), index as u32))));
         // The index makes every key distinct, so the unstable sort, which needs
@@ -903,9 +927,22 @@ impl SSScene {
         if !self.group_alpha {
             self.layers = None;
         }
+        let from = BuiltFrom { textures: renderer.texture_changes(), grouping };
+        if self.built == Some(from) && self.cast_unchanged(players, &player) {
+            self.keep_frame();
+            for &(_, index) in &self.draw_order {
+                if let Some(p) = player(&mut players[index as usize]) {
+                    p.skip_tick();
+                }
+            }
+            return;
+        }
+
+        self.begin_frame();
         let max_layers = if grouping { device.limits().max_texture_array_layers } else { 0 };
         let mut drawing = 0;
-        for &(_, index) in &self.draw_order {
+        self.built_players.clear();
+        for &(order, index) in &self.draw_order {
             if let Some(p) = player(&mut players[index as usize]) {
                 let group = grouping && p.alpha() < 1.0 && self.frame.layered_groups() < max_layers;
                 let first = self.frame.draw_calls.len() as u32;
@@ -916,10 +953,31 @@ impl SSScene {
                     self.frame.push_group(first, p.alpha());
                 }
                 drawing += u32::from(p.draws());
+                self.built_players.push((order, p.id()));
             }
         }
         self.stats.players = drawing;
         self.end_frame(renderer, device, queue);
+        self.built = Some(from);
+    }
+
+    /// Whether the players are the ones the kept frame was built from, in the
+    /// same order, and every one of them settled. Asked before any of them
+    /// updates, which is when a player can say whether its update would move it.
+    fn cast_unchanged<P>(&self, players: &mut [P], player: &impl Fn(&mut P) -> Option<&mut crate::SSPlayer>) -> bool {
+        self.draw_order.len() == self.built_players.len() && self.draw_order.iter().zip(&self.built_players).all(|(&(order, index), &built)| player(&mut players[index as usize]).is_some_and(|p| (order, p.id()) == built && p.settled()))
+    }
+
+    /// Draw the last frame again: [`SSScene::begin_frame`] without emptying it.
+    /// The counts still describe it, except that nothing was uploaded, and the
+    /// offscreen ones, which the next [`SSScene::encode_offscreen`] sets afresh.
+    fn keep_frame(&mut self) {
+        if let Some(timer) = self.timer.as_mut() {
+            timer.settle();
+            timer.poll();
+        }
+        self.stats = SceneStats { uploaded_bytes: 0, coverage_layers: 0, group_layers: 0, ..self.stats };
+        self.offscreen_encoded = false;
     }
 
     /// Reset per-frame accumulation. Call once before appending any batches.
@@ -933,6 +991,8 @@ impl SSScene {
         self.stats = SceneStats::default();
         self.offscreen_encoded = false;
         self.frame.reset(self.config());
+        // Whatever goes into the frame now, `update_with` did not check it.
+        self.built = None;
     }
 
     /// Upload the accumulated frame to the GPU. Call once after all batches.
