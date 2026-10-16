@@ -589,7 +589,7 @@ extern "C" {
 const char *ss_last_error(void);
 
 /*
- This library's version: `7.0.0-beta.1`.
+ This library's version.
 
  The string is static and owned by the library. Never null.
  */
@@ -597,8 +597,8 @@ const char *ss_version(void);
 
 /*
  The SpriteStudio-SDK release whose runtime this library links: its tag,
- `v7.0.0-beta.1`, or `local` for an SDK built from a commit that is not a
- release. The release zips carry the same string in `lib/VERSION`.
+ or `local` for an SDK built from a commit that is not a release. The
+ release zips carry the same string in `lib/VERSION`.
 
  The string is static and owned by the library. Never null.
  */
@@ -1954,8 +1954,7 @@ const char *ss_player_cell_name(ss_player_t *handle, const char *cellmap, uint32
  then rotation in radians.
 
  `y` is measured **downward** from the centre, matching the Y-down space the
- players and `ss_player_part_transform` live in. Before v7.0.0-beta.2 this
- axis pointed up.
+ players and `ss_player_part_transform` live in.
 
  Without this every player sits at the origin, on top of the others.
 

@@ -21,7 +21,7 @@ exclude = ["SpriteStudio-SDK"]
 # release tag is `ssplayer-wgpu-v` followed by it, and scripts/set-versions.mjs is
 # what changes it. Every other crate declares its own.
 #
-# The player and the Bevy adapter (`ssplayer-bevy`, `7.0.0-alpha.1`) carry the SDK
+# The player and the Bevy adapter (`ssplayer-bevy`) carry the SDK
 # family line, which is what `ssab` and `ssruntime` resolve to. The prerelease word
 # is the maturity signal and is not cosmetic: beta means the surface is frozen and
 # only quality moves, alpha means it is still open, which the Bevy adapter is while
