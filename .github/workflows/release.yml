@@ -83,10 +83,13 @@ jobs:
     # Refuse to release from anywhere but main, even if dispatched on another ref.
     if: github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     permissions:
       contents: read
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
 
       - name: Set the versions
         if: inputs.versions != ''
@@ -108,7 +111,9 @@ jobs:
     name: ${{ matrix.name }}
     needs: changelog
     runs-on: ${{ matrix.os }}
-    timeout-minutes: 45
+    # The macOS leg builds, then waits up to 60 minutes on the notary service
+    # (release-macos.sh).
+    timeout-minutes: 120
     permissions:
       contents: read
     strategy:
@@ -164,6 +169,7 @@ jobs:
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           submodules: recursive
+          persist-credentials: false
 
       # build.sh names the SDK release the library links by the submodule's tag
       # -- the VERSION file and ss_sdk_version() -- and the checkout fetched the
@@ -350,6 +356,7 @@ jobs:
     name: 📦 Package
     needs: build
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     permissions:
       contents: write # the version commit, the tag and the draft Release
       id-token: write # trusted publishing on npm
@@ -357,7 +364,8 @@ jobs:
     steps:
       # No submodule here: this job assembles what the matrix already built, so
       # it never touches the SDK and needs no token for it. Full history and
-      # tags, so that a tag a run left behind is reused.
+      # tags, so that a tag a run left behind is reused. The only checkout that
+      # keeps its credentials: this job pushes the version commit and the tag.
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 0

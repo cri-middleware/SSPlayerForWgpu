@@ -211,10 +211,14 @@ if [ "$NOTARIZE" = "yes" ]; then
   # submission, so the status it reports is what decides, as in SpriteStudio-SDK,
   # and a non-zero exit is kept rather than fatal until that has been read.
   # plutil parses the JSON: it ships with macOS, and jq does not.
+  #
+  # --timeout bounds the wait: a submission still in progress then ends here
+  # with its status reported below, rather than holding the job until the
+  # workflow's timeout kills it without the notary log.
   rc=0
   xcrun notarytool submit "$WORK/notarize.zip" \
     --key "$APPLE_API_KEY_PATH" --key-id "$APPLE_API_KEY" --issuer "$APPLE_API_ISSUER" \
-    --wait --output-format json > "$WORK/notarize.json" || rc=$?
+    --wait --timeout 60m --output-format json > "$WORK/notarize.json" || rc=$?
   cat "$WORK/notarize.json"; echo ""
   status="$(plutil -extract status raw -o - -- "$WORK/notarize.json" 2>/dev/null || true)"
   id="$(plutil -extract id raw -o - -- "$WORK/notarize.json" 2>/dev/null || true)"
