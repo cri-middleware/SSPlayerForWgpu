@@ -370,7 +370,6 @@ fi
 
 echo ""
 echo "$APP: done -> packages/ssplayer-wgpu/ (wasm/ + dist/ + docs/)"
-echo "$APP:      publish it with: (cd packages/ssplayer-wgpu && pnpm publish)"
 if [ "$DEPLOY" = "yes" ]; then
   echo "$APP:      -> examples/web/ssplayer-wgpu/"
   echo "$APP: serve it: (cd examples/web && python3 -m http.server) then open http://localhost:8000"
