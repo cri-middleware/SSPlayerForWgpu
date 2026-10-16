@@ -97,7 +97,7 @@ npm cannot stage a package it does not have yet, so the run that releases the pa
 
 ### 6. Check the draft
 
-Nothing on the draft needs writing, and a version with a `-` is already marked as a pre-release. Check the attachments: `ssplayer-wgpu-windows-x86_64.zip`, `ssplayer-wgpu-macos-universal.zip`, `spritestudio-ssplayer-wgpu-<version>.tgz`, `ssplayer-preview.html` and `SHA256SUMS`. The macOS zip holds `lib/libssplayer_wgpu.dylib` beside the static library, and the run has already checked its signature and its ticket with Apple; on a Mac, `spctl --assess --type open --context context:primary-signature --verbose=2` on it answers `source=Notarized Developer ID`, which is what Gatekeeper decides on a user's Mac. Look at them before anything on npm is approved: until then, a fault is undone by deleting the draft and rejecting what was staged (see [Undoing a release](#undoing-a-release)), and after it, only a new version fixes it. The block lists the attachments, then what the tarball holds — what npm is given.
+Nothing on the draft needs writing, and `scripts/release-channel.sh` has already marked it: a pre-release when a full release is already tagged, ready to become Latest otherwise. Check the attachments: `ssplayer-wgpu-windows-x86_64.zip`, `ssplayer-wgpu-macos-universal.zip`, `spritestudio-ssplayer-wgpu-<version>.tgz`, `ssplayer-preview.html` and `SHA256SUMS`. The macOS zip holds `lib/libssplayer_wgpu.dylib` beside the static library, and the run has already checked its signature and its ticket with Apple; on a Mac, `spctl --assess --type open --context context:primary-signature --verbose=2` on it answers `source=Notarized Developer ID`, which is what Gatekeeper decides on a user's Mac. Look at them before anything on npm is approved: until then, a fault is undone by deleting the draft and rejecting what was staged (see [Undoing a release](#undoing-a-release)), and after it, only a new version fixes it. The block lists the attachments, then what the tarball holds — what npm is given.
 
 ```bash
 tag=$(gh release list --json tagName,isDraft -q '[.[] | select(.isDraft) | .tagName | select(startswith("ssplayer-wgpu-v"))][0] // empty')
@@ -130,7 +130,7 @@ gh release download "${tag:?}" -p '*.tgz' -D "$dir" &&
 
 ### 8. Publish
 
-Then **a person publishes the Release**: a published Release is permanent. Publishing also starts `pages.yml`, which deploys the [documentation site](https://cri-middleware.github.io/SSPlayerForWgpu/) with the rustdoc and the WebGPU demo.
+Then **a person publishes the Release**: a published Release is permanent. Publishing also starts `pages.yml`, which deploys the [documentation site](https://cri-middleware.github.io/SSPlayerForWgpu/) with the rustdoc and the WebGPU demo, unless the Release is a pre-release, which leaves the site as it is.
 
 ```bash
 tag=$(gh release list --json tagName,isDraft -q '[.[] | select(.isDraft) | .tagName | select(startswith("ssplayer-wgpu-v"))][0] // empty')
@@ -295,7 +295,7 @@ npm はまだ無いパッケージを stage できないので、パッケージ
 
 ### 6. 下書きを確かめる
 
-下書きに書き足すものはありません。`-` を含むバージョンは、すでに pre-release になっています。添付を確かめます。`ssplayer-wgpu-windows-x86_64.zip`、`ssplayer-wgpu-macos-universal.zip`、`spritestudio-ssplayer-wgpu-<version>.tgz`、`ssplayer-preview.html`、`SHA256SUMS` の 5 つです。macOS の zip は静的ライブラリの横に `lib/libssplayer_wgpu.dylib` を持ち、その署名と公証のチケットは run が Apple に確かめ済みです。Mac では、それに対する `spctl --assess --type open --context context:primary-signature --verbose=2` が `source=Notarized Developer ID` と答えます。利用者の Mac で Gatekeeper が下す判断がこれです。npm で承認する前に確かめます。それまでなら、下書きを消して stage したものを取り下げれば取り消せますが（「リリースの取り消し」を参照）、承認した後は新しいバージョンでしか直せません。ブロックは添付を一覧し、続けて tarball の中身（npm に渡すもの）を一覧します。
+下書きに書き足すものはありません。印は `scripts/release-channel.sh` が付けてあります。正式版のタグがすでにあれば pre-release、なければ Latest になります。添付を確かめます。`ssplayer-wgpu-windows-x86_64.zip`、`ssplayer-wgpu-macos-universal.zip`、`spritestudio-ssplayer-wgpu-<version>.tgz`、`ssplayer-preview.html`、`SHA256SUMS` の 5 つです。macOS の zip は静的ライブラリの横に `lib/libssplayer_wgpu.dylib` を持ち、その署名と公証のチケットは run が Apple に確かめ済みです。Mac では、それに対する `spctl --assess --type open --context context:primary-signature --verbose=2` が `source=Notarized Developer ID` と答えます。利用者の Mac で Gatekeeper が下す判断がこれです。npm で承認する前に確かめます。それまでなら、下書きを消して stage したものを取り下げれば取り消せますが（「リリースの取り消し」を参照）、承認した後は新しいバージョンでしか直せません。ブロックは添付を一覧し、続けて tarball の中身（npm に渡すもの）を一覧します。
 
 ```bash
 tag=$(gh release list --json tagName,isDraft -q '[.[] | select(.isDraft) | .tagName | select(startswith("ssplayer-wgpu-v"))][0] // empty')
@@ -328,7 +328,7 @@ gh release download "${tag:?}" -p '*.tgz' -D "$dir" &&
 
 ### 8. 公開
 
-続けて Release を公開します。**Release の公開は人が行います。** 公開した Release は取り消せないためです。公開すると `pages.yml` が動き、[ドキュメントサイト](https://cri-middleware.github.io/SSPlayerForWgpu/) を rustdoc と WebGPU デモ付きでデプロイします。
+続けて Release を公開します。**Release の公開は人が行います。** 公開した Release は取り消せないためです。公開すると `pages.yml` が動き、[ドキュメントサイト](https://cri-middleware.github.io/SSPlayerForWgpu/) を rustdoc と WebGPU デモ付きでデプロイします。pre-release の公開ではサイトはそのままです。
 
 ```bash
 tag=$(gh release list --json tagName,isDraft -q '[.[] | select(.isDraft) | .tagName | select(startswith("ssplayer-wgpu-v"))][0] // empty')

@@ -452,7 +452,8 @@ jobs:
           fi
           notes="See [CHANGELOG.md](${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/blob/${tag}/libs/ssplayer-wgpu/CHANGELOG.md) for what changed."
           args=(--verify-tag --title "SpriteStudio Player for wgpu v${version}" --notes "$notes" --draft)
-          case "$version" in *-*) args+=(--prerelease) ;; esac
+          channel="$(./scripts/release-channel.sh "$tag")"
+          [ "$channel" != prerelease ] || args+=(--prerelease)
           gh release create "$tag" release-dist/*.zip release-dist/*.tgz release-dist/ssplayer-preview.html release-dist/SHA256SUMS "${args[@]}"
           echo "::notice::Drafted ${tag} — check it and publish it from the Releases page."
 
