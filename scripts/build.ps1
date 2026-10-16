@@ -304,7 +304,6 @@ if ($opts.deploy -eq "yes") {
 
 Write-Host ""
 Write-Host "${APP}: done -> packages/ssplayer-wgpu/ (wasm/ + dist/ + docs/)"
-Write-Host "${APP}:      publish it with: (cd packages/ssplayer-wgpu; pnpm publish)"
 if ($opts.deploy -eq "yes") {
     Write-Host "${APP}:      -> examples/web/ssplayer-wgpu/"
     Write-Host "${APP}: serve it: (cd examples/web; python3 -m http.server) then open http://localhost:8000"
