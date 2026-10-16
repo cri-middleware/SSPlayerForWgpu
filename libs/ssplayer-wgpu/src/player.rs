@@ -2335,7 +2335,7 @@ impl SSPlayer {
     ///
     /// `y` is measured **downward** from the centre, matching the Y-down space
     /// the players and their [`SSPlayer::part_transform`] output live in (and
-    /// ForWeb's `offsetY`). Before v7.0.0-beta.2 this axis pointed up.
+    /// ForWeb's `offsetY`).
     ///
     /// The per-player half of placement: the projection belongs to the render
     /// target ([`SSScene::set_viewport`](crate::SSScene::set_viewport)), the

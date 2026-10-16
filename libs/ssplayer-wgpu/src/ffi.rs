@@ -488,7 +488,7 @@ pub unsafe extern "C" fn ss_last_error() -> *const c_char {
     LAST_ERROR.with(|slot| slot.borrow().as_ptr())
 }
 
-/// This library's version: `7.0.0-beta.1`.
+/// This library's version.
 ///
 /// The string is static and owned by the library. Never null.
 #[unsafe(no_mangle)]
@@ -497,8 +497,8 @@ pub extern "C" fn ss_version() -> *const c_char {
 }
 
 /// The SpriteStudio-SDK release whose runtime this library links: its tag,
-/// `v7.0.0-beta.1`, or `local` for an SDK built from a commit that is not a
-/// release. The release zips carry the same string in `lib/VERSION`.
+/// or `local` for an SDK built from a commit that is not a release. The
+/// release zips carry the same string in `lib/VERSION`.
 ///
 /// The string is static and owned by the library. Never null.
 #[unsafe(no_mangle)]
@@ -2722,8 +2722,7 @@ pub unsafe extern "C" fn ss_player_cell_name(handle: *mut SsPlayer, cellmap: *co
 /// then rotation in radians.
 ///
 /// `y` is measured **downward** from the centre, matching the Y-down space the
-/// players and `ss_player_part_transform` live in. Before v7.0.0-beta.2 this
-/// axis pointed up.
+/// players and `ss_player_part_transform` live in.
 ///
 /// Without this every player sits at the origin, on top of the others.
 ///

@@ -599,15 +599,15 @@ impl SsContextWeb {
         self.inner.borrow().device_lost.load(Ordering::Relaxed)
     }
 
-    /// This player's version: `7.0.0-beta.1`.
+    /// This player's version.
     #[wasm_bindgen(getter)]
     pub fn version(&self) -> String {
         crate::VERSION.to_owned()
     }
 
     /// The SpriteStudio-SDK release whose runtime this build links: its tag,
-    /// `v7.0.0-beta.1`, or `local` for an SDK built from a commit that is not a
-    /// release. The package carries the same string in `wasm/VERSION`.
+    /// or `local` for an SDK built from a commit that is not a release. The
+    /// package carries the same string in `wasm/VERSION`.
     #[wasm_bindgen(getter, js_name = sdkVersion)]
     pub fn sdk_version(&self) -> String {
         crate::SDK_VERSION.to_owned()

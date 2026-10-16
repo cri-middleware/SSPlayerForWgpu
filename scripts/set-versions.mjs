@@ -8,8 +8,9 @@
 //
 //   ssplayer-wgpu   Cargo.toml's [workspace.package] version, which ssplayer-wgpu
 //                   and ssplayer-wgpu-ffi inherit; their two entries in
-//                   Cargo.lock; packages/ssplayer-wgpu/package.json; and the
-//                   version the CDN samples in examples/cdn pin.
+//                   Cargo.lock; packages/ssplayer-wgpu/package.json; the
+//                   version the CDN samples in examples/cdn pin; and the
+//                   player's own line in THIRD_PARTY_NOTICES.md.
 //
 // It also turns the `## [Unreleased]` notes in the package's CHANGELOG.md into
 // `## [<version>] - <date>` under a fresh, empty `## [Unreleased]`: the changelog
@@ -73,6 +74,13 @@ const cdnPins = (text, from, to) => {
   return text.split(`${pin}${from}`).join(`${pin}${to}`);
 };
 
+// cargo-about lists the player among the crates it covers, under its version.
+const noticesEntry = (text, from, to) => {
+  const entry = (v) => `- **ssplayer-wgpu ${v}**`;
+  if (text.split(entry(from)).length !== 2) throw new Error(`no single '${entry(from)}' line`);
+  return text.replace(entry(from), entry(to));
+};
+
 const jsonVersion = (text, from, to) => {
   const next = text.replace(new RegExp(`("version"\\s*:\\s*")${escape(from)}(")`), `$1${to}$2`);
   if (JSON.stringify({ ...JSON.parse(text), version: to }) !== JSON.stringify(JSON.parse(next))) {
@@ -93,6 +101,7 @@ const PACKAGES = {
       ['examples/cdn/element.html', cdnPins],
       ['examples/cdn/api.html', cdnPins],
       ['examples/cdn/README.md', cdnPins],
+      ['THIRD_PARTY_NOTICES.md', noticesEntry],
     ],
     changelog: 'libs/ssplayer-wgpu/CHANGELOG.md',
   },
