@@ -639,6 +639,10 @@ struct EffectClock {
 
 /// The SpriteStudio player. One instance owns one animation-instance tree.
 pub struct SSPlayer {
+    /// The playback tree. Declared before `packs` and `retired` because its
+    /// contexts borrow the resources they hold, and fields drop in declaration
+    /// order.
+    root: Option<PlaybackNode>,
     /// All registered packs, keyed by pack name (matches `ref_anime_pack`).
     /// Cloning a pack shares its parse and its bytes, so N players of
     /// one character cost one copy of the `.ssab` between them.
@@ -656,7 +660,6 @@ pub struct SSPlayer {
     /// releases these.
     retired: Vec<SSPack>,
     main_pack: Option<String>,
-    root: Option<PlaybackNode>,
     current_animation: Option<String>,
     /// Names of packs whose embedded atlases have not been offered to
     /// a renderer yet. The offer happens on the next `update`, which is the
