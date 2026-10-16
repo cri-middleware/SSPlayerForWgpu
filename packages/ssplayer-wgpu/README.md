@@ -18,7 +18,7 @@ the [WebGL player](https://www.npmjs.com/package/@spritestudio/ssplayer-webgl)) 
 ## Install
 
 ```bash
-npm i @spritestudio/ssplayer-wgpu@beta
+npm i @spritestudio/ssplayer-wgpu
 ```
 
 The package is ESM-only and has no runtime dependencies. It ships the wasm binary; a bundler

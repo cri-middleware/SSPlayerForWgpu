@@ -18,7 +18,7 @@ WebGPU 対応ブラウザ：**Chrome / Edge 113+、Safari 26+、Firefox 141+**�
 ## 導入 { #install }
 
 ```bash
-npm i @spritestudio/ssplayer-wgpu@beta
+npm i @spritestudio/ssplayer-wgpu
 ```
 
 ESM 専用・ランタイム依存なし。wasm バイナリを同梱しており、バンドラ（Vite / webpack 5 / Rollup）は設定なしでアセットとして拾います。

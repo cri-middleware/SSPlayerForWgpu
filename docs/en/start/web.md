@@ -23,7 +23,7 @@ away.
 ## Install
 
 ```bash
-npm i @spritestudio/ssplayer-wgpu@beta
+npm i @spritestudio/ssplayer-wgpu
 ```
 
 ESM-only, no runtime dependencies. It ships the wasm binary, and a bundler (Vite, webpack 5,

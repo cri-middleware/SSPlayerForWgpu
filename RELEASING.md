@@ -116,15 +116,15 @@ npm stage list @spritestudio/ssplayer-wgpu        # each staged version, with it
 npm stage approve <stage-id>
 ```
 
-A version the run did not stage — every run with `publish_npm=false`, the first release among them, and any after a failed **Stage on npm** — is published by hand instead, from the very tarball on the draft. The block takes the dist-tag from the version: the prerelease's word (`beta`), or `latest` for a full release.
+A version the run did not stage — every run with `publish_npm=false`, the first release among them, and any after a failed **Stage on npm** — is published by hand instead, from the very tarball on the draft. `scripts/npm-dist-tag.sh` picks the dist-tag: `latest` for a full release, and for a prerelease while the package's `latest` is not yet a full release; the prerelease's word (`beta`, `rc`) after that.
 
 ```bash
 tag=$(gh release list --json tagName,isDraft -q '[.[] | select(.isDraft) | .tagName | select(startswith("ssplayer-wgpu-v"))][0] // empty')
 version=${tag#ssplayer-wgpu-v}
-case "$version" in *-*) dist=${version#*-}; dist=${dist%%.*} ;; *) dist=latest ;; esac
+dist=$(scripts/npm-dist-tag.sh @spritestudio/ssplayer-wgpu "$version")
 dir=$(mktemp -d)
 gh release download "${tag:?}" -p '*.tgz' -D "$dir" &&
-  npm publish "$dir"/*.tgz --tag "$dist" --access public &&
+  npm publish "$dir"/*.tgz --tag "${dist:?}" --access public &&
   npm view @spritestudio/ssplayer-wgpu dist-tags
 ```
 
@@ -314,15 +314,15 @@ npm stage list @spritestudio/ssplayer-wgpu        # stage されたバージョ�
 npm stage approve <stage-id>
 ```
 
-run が stage しなかったバージョンは、下書きに添付された tarball そのものを手作業で publish します。`publish_npm=false` で実行した run（初回のリリースを含む）と、**Stage on npm** が失敗した後がこれにあたります。ブロックは dist-tag をバージョンから決めます。プレリリースならその語（`beta`）、正式版なら `latest` です。
+run が stage しなかったバージョンは、下書きに添付された tarball そのものを手作業で publish します。`publish_npm=false` で実行した run（初回のリリースを含む）と、**Stage on npm** が失敗した後がこれにあたります。dist-tag は `scripts/npm-dist-tag.sh` が決めます。正式版は `latest` です。プレリリースも、パッケージの `latest` がまだ正式版でなければ `latest`、正式版になった後はその語（`beta`・`rc`）です。
 
 ```bash
 tag=$(gh release list --json tagName,isDraft -q '[.[] | select(.isDraft) | .tagName | select(startswith("ssplayer-wgpu-v"))][0] // empty')
 version=${tag#ssplayer-wgpu-v}
-case "$version" in *-*) dist=${version#*-}; dist=${dist%%.*} ;; *) dist=latest ;; esac
+dist=$(scripts/npm-dist-tag.sh @spritestudio/ssplayer-wgpu "$version")
 dir=$(mktemp -d)
 gh release download "${tag:?}" -p '*.tgz' -D "$dir" &&
-  npm publish "$dir"/*.tgz --tag "$dist" --access public &&
+  npm publish "$dir"/*.tgz --tag "${dist:?}" --access public &&
   npm view @spritestudio/ssplayer-wgpu dist-tags
 ```
 

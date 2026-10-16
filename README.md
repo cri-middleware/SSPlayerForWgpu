@@ -117,7 +117,7 @@ it. The package's own [README](./packages/ssplayer-wgpu/README.md) is the JavaSc
 Install it from npm:
 
 ```bash
-npm i @spritestudio/ssplayer-wgpu@beta
+npm i @spritestudio/ssplayer-wgpu
 ```
 
 To build it from this repository instead:

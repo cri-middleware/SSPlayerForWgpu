@@ -95,7 +95,7 @@ JavaScript 側から読むべき README は[パッケージ自身のもの](./pa
 npm からインストールします:
 
 ```bash
-npm i @spritestudio/ssplayer-wgpu@beta
+npm i @spritestudio/ssplayer-wgpu
 ```
 
 このリポジトリからビルドする場合:

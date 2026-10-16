@@ -17,9 +17,8 @@ name: Release
 #                through trusted publishing, unless npm already has that
 #                version, staged or published. Nothing is public until a
 #                maintainer approves it with 2FA, on npmjs.com or with
-#                `npm stage approve`. A version with a prerelease part
-#                (X.Y.Z-beta.N) is staged under that word's dist-tag, so
-#                `latest` stays on the last full release. Off, the Release still
+#                `npm stage approve`, under the dist-tag
+#                scripts/npm-dist-tag.sh picks. Off, the Release still
 #                carries the tarball. That is how the package's first version
 #                ships: npm sets up a trusted publisher only for a package it
 #                already has, so a maintainer publishes that version by hand
@@ -477,10 +476,7 @@ jobs:
             echo "::notice::${name}@${version} is already on npm — skipping."
             exit 0
           fi
-          case "$version" in
-            *-*) dist_tag="${version#*-}"; dist_tag="${dist_tag%%.*}" ;;
-            *)   dist_tag="latest" ;;
-          esac
+          dist_tag="$(scripts/npm-dist-tag.sh "$name" "$version")"
           if ! out="$(npm stage publish release-dist/*.tgz --tag "$dist_tag" --access public 2>&1)"; then
             echo "$out"
             if grep -qE "409 Conflict.*previously (published|staged) version \"${version}\"" <<< "$out"; then
