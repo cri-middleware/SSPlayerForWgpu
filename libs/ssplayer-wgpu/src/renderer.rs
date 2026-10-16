@@ -374,6 +374,11 @@ pub struct SSRenderer {
     /// is that N players of one pack upload its atlas once between them, and only
     /// a counter — not the map's length — can tell that from N overwrites.
     texture_uploads: usize,
+    /// Bumped by every change to `textures`. A frame is built against the sizes
+    /// registered here, so a scene that keeps its last frame keeps it only while
+    /// this reads what it read when that frame was built. Carried across a
+    /// device restore, which changes every entry.
+    texture_changes: u64,
 }
 
 /// How a registration is remembered — the two things that outlive the upload
@@ -1625,6 +1630,7 @@ impl SSRenderer {
             texture_sources: HashMap::new(),
             texture_digests: HashMap::new(),
             texture_uploads: 0,
+            texture_changes: 0,
         }
     }
 
@@ -1824,6 +1830,7 @@ impl SSRenderer {
         let bind_group = self.create_texture_bind_group(device, view, &info);
         self.texture_digests.remove(&hash);
         self.textures.insert(hash, TextureEntry { bind_group, size, _info_buffer: info, alpha });
+        self.texture_changes += 1;
     }
 
     /// Drop a texture registration (and any retained pixels for it).
@@ -1833,6 +1840,7 @@ impl SSRenderer {
     /// an engine means an unload that does not actually free anything. Draws that
     /// still reference `hash` fall back to the 1x1 white texture.
     pub fn forget_texture(&mut self, hash: u32) {
+        self.texture_changes += 1;
         self.textures.remove(&hash);
         self.texture_sources.remove(&hash);
         self.texture_digests.remove(&hash);
@@ -1951,6 +1959,7 @@ impl SSRenderer {
         let info = tex_info_buffer(device, TexInfo::new(size, AlphaMode::Premultiplied));
         let bind_group = self.create_texture_bind_group(device, &view, &info);
         self.textures.insert(hash, TextureEntry { bind_group, size, _info_buffer: info, alpha: AlphaMode::Premultiplied });
+        self.texture_changes += 1;
         true
     }
     fn create_texture_bind_group(&self, device: &wgpu::Device, view: &wgpu::TextureView, info: &wgpu::Buffer) -> wgpu::BindGroup {
@@ -1983,6 +1992,11 @@ impl SSRenderer {
     /// [`SSRenderer::texture_count`] reads the same either way.
     pub fn texture_upload_count(&self) -> usize {
         self.texture_uploads
+    }
+
+    /// See `texture_changes`.
+    pub(crate) fn texture_changes(&self) -> u64 {
+        self.texture_changes
     }
 
     /// The bind group for `hash`, or the 1x1 white fallback when it is missing
@@ -2036,9 +2050,10 @@ impl SSRenderer {
         // Lift the sources out *before* replacing self — everything else in here
         // belonged to the dead device, but these are plain CPU pixels.
         let sources = std::mem::take(&mut self.texture_sources);
-        let uploads = self.texture_uploads;
+        let (uploads, changes) = (self.texture_uploads, self.texture_changes);
         *self = Self::new(device);
         self.texture_uploads = uploads;
+        self.texture_changes = changes + 1;
         for (hash, (premul, w, h)) in &sources {
             // Straight back out to the new device: these were retained *after*
             // premultiplying, so putting them through it again would darken every

@@ -793,6 +793,11 @@ pub struct SSPlayer {
     pending_forgets: Vec<u32>,
     /// What one frame's draw walk fills, emptied after it rather than dropped.
     walk: Walk,
+    /// A call since the last build changed what the tree draws, so the next
+    /// update has to build it even if nothing in it moves (see
+    /// [`SSPlayer::settled`]). Lowered by the build that follows; a scene whose
+    /// players are all settled keeps the frame it built last.
+    rebuild: bool,
 }
 
 /// The transport settings of [`SSPlayer::transport`](SSPlayer), at the
@@ -848,6 +853,11 @@ fn override_key(id: u32, cellmap_hash: u32) -> u32 {
     fnv1a_bytes(&buf)
 }
 
+/// A crowd member as it is drawn: alpha clamped, tint masked to `0xRRGGBB`.
+fn clamp_member(member: CrowdMember) -> CrowdMember {
+    CrowdMember { alpha: member.alpha.clamp(0.0, 1.0), tint: member.tint & WHITE_TINT, ..member }
+}
+
 impl Default for SSPlayer {
     fn default() -> Self {
         Self::new()
@@ -896,6 +906,7 @@ impl SSPlayer {
             pending_overrides: Vec::new(),
             pending_forgets: Vec::new(),
             walk: Walk::default(),
+            rebuild: true,
         }
     }
 
@@ -1156,6 +1167,8 @@ impl SSPlayer {
     /// [`SSPlayer::record_atlas_keys`] and the override redirects, which speak the
     /// same table but decide its contents differently.
     fn apply_atlas_entries(&mut self, pack: &str, entries: Vec<(u32, u32)>) {
+        // A redirected cellmap draws from another texture on the next frame.
+        self.rebuild = true;
         let mut table = self.atlas_keys.get(pack).map(|keys| (**keys).clone()).unwrap_or_default();
         for (cellmap_hash, key) in entries {
             table.set(cellmap_hash, key);
@@ -1253,6 +1266,7 @@ impl SSPlayer {
         self.add_pack(pack);
         self.main_pack = Some(pack.name().to_string());
         self.root = None;
+        self.rebuild = true;
         self.current_animation = None;
         // Nothing points into a retired pack once the tree is gone.
         self.retired.clear();
@@ -1340,6 +1354,7 @@ impl SSPlayer {
         // started nothing that a tick could report.
         self.started_edge = false;
         self.start_pending = false;
+        self.rebuild = true;
         Ok(())
     }
 
@@ -1381,6 +1396,7 @@ impl SSPlayer {
     /// and the frame it starts from becomes the reference the loop counts from.
     pub fn play_from(&mut self, start_frame: f32) {
         self.prev_finished = false;
+        self.rebuild = true;
         if let Some(root) = &mut self.root {
             root.context.play_with_start_frame(start_frame);
             self.start_pending = true;
@@ -1397,6 +1413,7 @@ impl SSPlayer {
         // previous run and the *next* completion would never be reported — one of
         // the defects found in sibling Players.
         self.prev_finished = false;
+        self.rebuild = true;
         if let Some(root) = &mut self.root {
             root.context.play();
             self.start_pending = true;
@@ -1496,6 +1513,7 @@ impl SSPlayer {
     /// Jump to `frame`. Fractional values are honoured — the tree is evaluated
     /// at the sub-frame position on the next update.
     pub fn seek(&mut self, frame: f32) {
+        self.rebuild = true;
         if let Some(root) = &mut self.root {
             root.context.set_frame_no(frame);
         }
@@ -1590,6 +1608,8 @@ impl SSPlayer {
     /// something inside the animation they were measured in, and setting an
     /// animation rebuilds the tree and takes the section with it.
     pub fn set_animation_section(&mut self, start: i32, end: i32) {
+        // The playhead may be clamped into the new range.
+        self.rebuild = true;
         if let Some(root) = &mut self.root {
             root.context.set_animation_section(start, end);
         }
@@ -1606,12 +1626,20 @@ impl SSPlayer {
     // Instance children are not layered: they run their own contexts, driven by
     // their slots from the root's frame.
 
+    /// The root, for a track, source or part-override call: whatever it changes
+    /// shows on the next frame, so it marks one rebuild — a stopped or held
+    /// player would otherwise go on showing the frame it last built.
+    fn root_posed(&mut self) -> Result<&mut PlaybackNode, SSRuntimeError> {
+        self.rebuild = true;
+        self.root.as_mut().ok_or(SSRuntimeError::NotLoaded)
+    }
+
     /// Put `anim_name` on `track`, replacing what it was playing. Track 0 is
     /// better set with [`SSPlayer::set_animation`], which rebuilds the instance
     /// tree; this is for the overlay tracks above it. On track 0 it still makes
     /// `anim_name` the [`SSPlayer::current_animation`].
     pub fn set_track_animation(&mut self, track: u32, anim_name: &str) -> Result<(), SSRuntimeError> {
-        let root = self.root.as_mut().ok_or(SSRuntimeError::NotLoaded)?;
+        let root = self.root_posed()?;
         root.context.set_track_animation(track, anim_name)?;
         if track == 0 {
             self.track_zero_switched(anim_name);
@@ -1621,7 +1649,7 @@ impl SSPlayer {
 
     /// How much of `track` survives onto the pose the tracks below it produced.
     pub fn set_track_alpha(&mut self, track: u32, alpha: f32) -> Result<(), SSRuntimeError> {
-        let root = self.root.as_mut().ok_or(SSRuntimeError::NotLoaded)?;
+        let root = self.root_posed()?;
         root.context.set_track_alpha(track, alpha)
     }
 
@@ -1632,7 +1660,7 @@ impl SSPlayer {
     /// [`TrackBlend::Mix`] lerps toward the track's pose; [`TrackBlend::Additive`]
     /// adds its offset from the setup pose, leaving what is below showing through.
     pub fn set_track_blend(&mut self, track: u32, blend: TrackBlend) -> Result<(), SSRuntimeError> {
-        let root = self.root.as_mut().ok_or(SSRuntimeError::NotLoaded)?;
+        let root = self.root_posed()?;
         root.context.set_track_blend(track, blend)
     }
 
@@ -1645,7 +1673,7 @@ impl SSPlayer {
     /// at, so a run laid over a walk keeps its stride. Set it before laying;
     /// [`SSPlayer::set_animation`] resets every track to `Free`.
     pub fn set_track_sync(&mut self, track: u32, sync: TrackSync) -> Result<(), SSRuntimeError> {
-        let root = self.root.as_mut().ok_or(SSRuntimeError::NotLoaded)?;
+        let root = self.root_posed()?;
         root.context.set_track_sync(track, sync)
     }
 
@@ -1659,7 +1687,7 @@ impl SSPlayer {
 
     /// Silence a track. Track 0 is refused — fade it to alpha 0 instead.
     pub fn clear_track(&mut self, track: u32) -> Result<(), SSRuntimeError> {
-        let root = self.root.as_mut().ok_or(SSRuntimeError::NotLoaded)?;
+        let root = self.root_posed()?;
         root.context.clear_track(track)
     }
 
@@ -1676,7 +1704,7 @@ impl SSPlayer {
     ///
     /// [`SSScene::update`]: crate::SSScene::update
     pub fn crossfade(&mut self, track: u32, anim_name: &str, duration_ms: f32) -> Result<(), SSRuntimeError> {
-        let root = self.root.as_mut().ok_or(SSRuntimeError::NotLoaded)?;
+        let root = self.root_posed()?;
         root.context.crossfade(track, anim_name, duration_ms)?;
         if track == 0 {
             self.track_zero_switched(anim_name);
@@ -1687,7 +1715,7 @@ impl SSPlayer {
     /// Drive `track`'s alpha to `target` over `duration_ms`. Fading track 0 to 0
     /// settles the pose onto the setup pose.
     pub fn fade_track(&mut self, track: u32, target: f32, duration_ms: f32) -> Result<(), SSRuntimeError> {
-        let root = self.root.as_mut().ok_or(SSRuntimeError::NotLoaded)?;
+        let root = self.root_posed()?;
         root.context.fade_track(track, target, duration_ms)
     }
 
@@ -1696,14 +1724,14 @@ impl SSPlayer {
     }
 
     pub fn cancel_track_fade(&mut self, track: u32) -> Result<(), SSRuntimeError> {
-        let root = self.root.as_mut().ok_or(SSRuntimeError::NotLoaded)?;
+        let root = self.root_posed()?;
         root.context.cancel_track_fade(track)
     }
 
     /// Seek a track's animation — how a continuous-control axis is driven:
     /// author it as an animation and scrub it with the tracked value.
     pub fn set_track_frame(&mut self, track: u32, frame: f32) -> Result<(), SSRuntimeError> {
-        let root = self.root.as_mut().ok_or(SSRuntimeError::NotLoaded)?;
+        let root = self.root_posed()?;
         root.context.set_track_frame(track, frame)
     }
 
@@ -1712,7 +1740,7 @@ impl SSPlayer {
     }
 
     pub fn set_track_speed(&mut self, track: u32, speed: f32) -> Result<(), SSRuntimeError> {
-        let root = self.root.as_mut().ok_or(SSRuntimeError::NotLoaded)?;
+        let root = self.root_posed()?;
         root.context.set_track_speed(track, speed)
     }
 
@@ -1731,7 +1759,7 @@ impl SSPlayer {
 
     /// [`SSPlayer::set_frame_rate`] for one track.
     pub fn set_track_frame_rate(&mut self, track: u32, fps: i32) -> Result<(), SSRuntimeError> {
-        let root = self.root.as_mut().ok_or(SSRuntimeError::NotLoaded)?;
+        let root = self.root_posed()?;
         root.context.set_track_frame_rate(track, fps)
     }
 
@@ -1743,7 +1771,7 @@ impl SSPlayer {
 
     /// [`SSPlayer::set_frame_skip_enabled`] for one track.
     pub fn set_track_frame_skip_enabled(&mut self, track: u32, skip: bool) -> Result<(), SSRuntimeError> {
-        let root = self.root.as_mut().ok_or(SSRuntimeError::NotLoaded)?;
+        let root = self.root_posed()?;
         root.context.set_track_skip_frames(track, skip)
     }
 
@@ -1753,7 +1781,7 @@ impl SSPlayer {
 
     /// [`SSPlayer::set_playback_direction`] for one track.
     pub fn set_track_playback_direction(&mut self, track: u32, direction: PlaybackDirection, style: PlaybackStyle) -> Result<(), SSRuntimeError> {
-        let root = self.root.as_mut().ok_or(SSRuntimeError::NotLoaded)?;
+        let root = self.root_posed()?;
         root.context.set_track_playback_direction(track, direction.into(), style.into())
     }
 
@@ -1771,7 +1799,7 @@ impl SSPlayer {
     /// [`SSPlayer::set_loop_count`]: the player keeps the count and puts it
     /// back on every animation laid there.
     pub fn set_track_loop_count(&mut self, track: u32, count: i32) -> Result<(), SSRuntimeError> {
-        let root = self.root.as_mut().ok_or(SSRuntimeError::NotLoaded)?;
+        let root = self.root_posed()?;
         root.context.set_track_loop_count(track, count)?;
         if track == 0 {
             // Written past the kept count, the next switch of track 0 would put
@@ -1806,7 +1834,7 @@ impl SSPlayer {
     /// begins, when the incoming one starts firing; `0.5` keeps it firing for
     /// the first half. Kept by the track, so it holds for every crossfade on it.
     pub fn set_track_outgoing_event_threshold(&mut self, track: u32, threshold: f32) -> Result<(), SSRuntimeError> {
-        let root = self.root.as_mut().ok_or(SSRuntimeError::NotLoaded)?;
+        let root = self.root_posed()?;
         root.context.set_track_outgoing_event_threshold(track, threshold)
     }
 
@@ -1831,14 +1859,14 @@ impl SSPlayer {
     /// and return its handle. On an empty track it becomes the main source.
     /// It starts per the track's [`TrackSync`].
     pub fn add_track_source(&mut self, track: u32, anim_name: &str, weight: f32) -> Result<u32, SSRuntimeError> {
-        let root = self.root.as_mut().ok_or(SSRuntimeError::NotLoaded)?;
+        let root = self.root_posed()?;
         root.context.add_track_source(track, anim_name, weight)
     }
 
     /// A source's share **within its track**: weights are ratios, so `(0.7, 0.3)`
     /// and `(7, 3)` mix alike. The track's strength is [`SSPlayer::set_track_alpha`].
     pub fn set_source_weight(&mut self, source: u32, weight: f32) -> Result<(), SSRuntimeError> {
-        let root = self.root.as_mut().ok_or(SSRuntimeError::NotLoaded)?;
+        let root = self.root_posed()?;
         root.context.set_source_weight(source, weight)
     }
 
@@ -1849,7 +1877,7 @@ impl SSPlayer {
     /// Seek one source. Sources of different lengths drift apart; this is how a
     /// host keeps them in step.
     pub fn set_source_frame(&mut self, source: u32, frame: f32) -> Result<(), SSRuntimeError> {
-        let root = self.root.as_mut().ok_or(SSRuntimeError::NotLoaded)?;
+        let root = self.root_posed()?;
         root.context.set_source_frame(source, frame)
     }
 
@@ -1861,7 +1889,7 @@ impl SSPlayer {
     /// main source fires by default (the default threshold is `+∞`); lower this
     /// to the source's weight or below to have it fire too.
     pub fn set_source_event_threshold(&mut self, source: u32, threshold: f32) -> Result<(), SSRuntimeError> {
-        let root = self.root.as_mut().ok_or(SSRuntimeError::NotLoaded)?;
+        let root = self.root_posed()?;
         root.context.set_source_event_threshold(source, threshold)
     }
 
@@ -1906,6 +1934,7 @@ impl SSPlayer {
     /// frames decides whether a long tick catches up or advances one frame; this
     /// decides whether what is drawn may sit between two of them.
     pub fn set_sub_frame_enabled(&mut self, enabled: bool) {
+        self.rebuild |= self.sub_frame != enabled;
         self.sub_frame = enabled;
     }
 
@@ -1990,7 +2019,7 @@ impl SSPlayer {
 
     /// Index form of [`SSPlayer::set_part_visibility_override`].
     pub fn set_part_visibility_override_by_index(&mut self, part: u32, hide: bool, cascade: bool) -> Result<(), SSRuntimeError> {
-        let root = self.root.as_mut().ok_or(SSRuntimeError::NotLoaded)?;
+        let root = self.root_posed()?;
         root.context.set_part_visibility_override(part, u8::from(hide), cascade)
     }
 
@@ -2002,7 +2031,7 @@ impl SSPlayer {
 
     /// Index form of [`SSPlayer::clear_part_visibility_override`].
     pub fn clear_part_visibility_override_by_index(&mut self, part: u32) -> Result<(), SSRuntimeError> {
-        let root = self.root.as_mut().ok_or(SSRuntimeError::NotLoaded)?;
+        let root = self.root_posed()?;
         root.context.clear_part_visibility_override(part)
     }
 
@@ -2026,7 +2055,7 @@ impl SSPlayer {
 
     /// Index form of [`SSPlayer::set_part_color_override`].
     pub fn set_part_color_override_by_index(&mut self, part: u32, rgba: u32, blend_op: BlendOp, priority: OverridePriority) -> Result<(), SSRuntimeError> {
-        let root = self.root.as_mut().ok_or(SSRuntimeError::NotLoaded)?;
+        let root = self.root_posed()?;
         root.context.set_part_color_override(part, blend_op.as_wire(), rgba, priority.as_wire())
     }
 
@@ -2044,7 +2073,7 @@ impl SSPlayer {
 
     /// Index form of [`SSPlayer::set_part_color_override_corners`].
     pub fn set_part_color_override_corners_by_index(&mut self, part: u32, corners: [[u8; 4]; 4], blend_op: BlendOp, priority: OverridePriority) -> Result<(), SSRuntimeError> {
-        let root = self.root.as_mut().ok_or(SSRuntimeError::NotLoaded)?;
+        let root = self.root_posed()?;
         root.context.set_part_color_override_corners(part, blend_op.as_wire(), corners, priority.as_wire())
     }
 
@@ -2057,7 +2086,7 @@ impl SSPlayer {
 
     /// Index form of [`SSPlayer::clear_part_color_override`].
     pub fn clear_part_color_override_by_index(&mut self, part: u32) -> Result<(), SSRuntimeError> {
-        let root = self.root.as_mut().ok_or(SSRuntimeError::NotLoaded)?;
+        let root = self.root_posed()?;
         root.context.clear_part_color_override(part)
     }
 
@@ -2075,7 +2104,7 @@ impl SSPlayer {
 
     /// Index form of [`SSPlayer::set_part_cell_override`].
     pub fn set_part_cell_override_by_index(&mut self, part: u32, cellmap_name: &str, cell_name: &str, priority: OverridePriority) -> Result<(), SSRuntimeError> {
-        let root = self.root.as_mut().ok_or(SSRuntimeError::NotLoaded)?;
+        let root = self.root_posed()?;
         let cellmap_hash = ssruntime::fnv1a_hash_str(cellmap_name);
         let cell_hash = ssruntime::fnv1a_hash_str(cell_name);
         root.context.set_part_cell_override(part, cellmap_hash, cell_hash, priority.as_wire())
@@ -2089,12 +2118,13 @@ impl SSPlayer {
 
     /// Index form of [`SSPlayer::clear_part_cell_override`].
     pub fn clear_part_cell_override_by_index(&mut self, part: u32) -> Result<(), SSRuntimeError> {
-        let root = self.root.as_mut().ok_or(SSRuntimeError::NotLoaded)?;
+        let root = self.root_posed()?;
         root.context.clear_part_cell_override(part)
     }
 
     /// Drop every override on the root animation at once.
     pub fn clear_all_part_overrides(&mut self) {
+        self.rebuild = true;
         if let Some(root) = &mut self.root {
             root.context.clear_all_part_overrides();
         }
@@ -2314,12 +2344,20 @@ impl SSPlayer {
     /// arbitrary parent matrix for every instance child, so a non-identity root
     /// simply rides along.
     pub fn set_transform(&mut self, x: f32, y: f32, scale_x: f32, scale_y: f32, rotation: f32) {
-        self.transform = placement(x, y, scale_x, scale_y, rotation);
+        self.place(placement(x, y, scale_x, scale_y, rotation));
     }
 
     /// Reset the placement to the identity: centred, unscaled, unrotated.
     pub fn reset_transform(&mut self) {
-        self.transform = IDENTITY;
+        self.place(IDENTITY);
+    }
+
+    /// Take a new root transform. The placement setters compare before they mark
+    /// a rebuild, because an engine adapter writes them every frame whether they
+    /// changed or not, and a mark per write would keep the player from settling.
+    fn place(&mut self, transform: [f32; 16]) {
+        self.rebuild |= self.transform != transform;
+        self.transform = transform;
     }
 
     /// Draw order within a scene; lower draws first. Ties keep whatever order the
@@ -2342,6 +2380,7 @@ impl SSPlayer {
     /// To stop paying for a character that cannot be seen at all, use
     /// [`SSPlayer::set_culled`] instead.
     pub fn set_visible(&mut self, visible: bool) {
+        self.rebuild |= self.visible != visible;
         self.visible = visible;
     }
 
@@ -2359,6 +2398,7 @@ impl SSPlayer {
     /// effect: a character blinked with it plays in slow motion. Use
     /// [`SSPlayer::set_visible`] for that, or [`SSPlayer::set_alpha`] for a fade.
     pub fn set_culled(&mut self, culled: bool) {
+        self.rebuild |= self.culled != culled;
         self.culled = culled;
     }
 
@@ -2379,7 +2419,9 @@ impl SSPlayer {
     /// `alpha`; a scene with [`SSScene::set_group_alpha`](crate::SSScene::set_group_alpha)
     /// on fades the player as one layer instead.
     pub fn set_alpha(&mut self, alpha: f32) {
-        self.alpha = alpha.clamp(0.0, 1.0);
+        let alpha = alpha.clamp(0.0, 1.0);
+        self.rebuild |= self.alpha != alpha;
+        self.alpha = alpha;
     }
 
     pub fn alpha(&self) -> f32 {
@@ -2395,7 +2437,9 @@ impl SSPlayer {
     /// is unaffected, exactly as with [`SSPlayer::set_alpha`]: a tinted player
     /// clips the shape it always did.
     pub fn set_tint(&mut self, rgb: u32) {
-        self.tint = rgb & 0x00FF_FFFF;
+        let tint = rgb & 0x00FF_FFFF;
+        self.rebuild |= self.tint != tint;
+        self.tint = tint;
     }
 
     pub fn tint(&self) -> u32 {
@@ -2427,14 +2471,21 @@ impl SSPlayer {
     /// player's placement or any member's: compose a member's onto it to follow
     /// that member.
     pub fn set_crowd(&mut self, members: &[CrowdMember]) {
+        // Compared before it is copied, for the reason `place` compares: an
+        // engine adapter hands over the same crowd every frame.
+        let kept = &members[..members.len().min(MAX_CROWD_MEMBERS)];
+        if kept.len() == self.crowd.len() && kept.iter().map(|member| clamp_member(*member)).eq(self.crowd.iter().copied()) {
+            return;
+        }
         self.set_crowd_from(members.iter().copied());
     }
 
     /// [`SSPlayer::set_crowd`] for a face whose members arrive in another form,
     /// converted on the way in rather than collected first.
     pub(crate) fn set_crowd_from(&mut self, members: impl IntoIterator<Item = CrowdMember>) {
+        self.rebuild = true;
         self.crowd.clear();
-        self.crowd.extend(members.into_iter().take(MAX_CROWD_MEMBERS).map(|member| CrowdMember { alpha: member.alpha.clamp(0.0, 1.0), tint: member.tint & WHITE_TINT, ..member }));
+        self.crowd.extend(members.into_iter().take(MAX_CROWD_MEMBERS).map(clamp_member));
     }
 
     /// The crowd [`SSPlayer::set_crowd`] set, as it is drawn: alpha clamped,
@@ -2860,6 +2911,7 @@ impl SSPlayer {
     /// `alpha` is the fade to fold into the parts: the player's own, or 1 when
     /// the scene fades it as a whole.
     pub(crate) fn build_frame(&mut self, scene: &mut FrameChunk, renderer: &SSRenderer, delta_secs: f32, alpha: f32) {
+        self.rebuild = false;
         // `culled` means "this player cannot be seen": no timeline advance and no
         // geometry. Textures are still flushed above, so it can be unculled
         // without re-loading anything.
@@ -2931,6 +2983,40 @@ impl SSPlayer {
         // still have to keep time: a hidden instance part's sub-animation, a child
         // its slot says is not showing.
         step_undrawn_effects(root);
+    }
+
+    /// Whether this player's next update would build exactly what its last one
+    /// did: nothing moves it, and no call has changed what it draws since.
+    ///
+    /// Read **before** the update, as the runtime's stack state has to be: the
+    /// tick a fade ends on still moves the pose, and has to be built.
+    ///
+    /// Nothing moves a player whose clock is stopped, or whose track 0 has
+    /// finished with no fade or other source left playing. A held clock moves
+    /// only what plays on its own, an independent effect or instance. These are
+    /// the runtime's reads every time; the player keeps no copy of its tracks,
+    /// which would go stale the moment the runtime releases a source itself.
+    pub(crate) fn settled(&self) -> bool {
+        if self.rebuild {
+            return false;
+        }
+        let Some(root) = self.root.as_ref().filter(|_| !self.culled) else { return true };
+        let context = &root.context;
+        if !context.is_playing() && !(context.is_clock_playing() && context.is_stack_in_motion()) {
+            return true;
+        }
+        context.is_clock_pausing() && !plays_on_its_own(root)
+    }
+
+    /// Report an update the scene did not run because every player was settled.
+    pub(crate) fn skip_tick(&mut self) {
+        self.report_no_tick();
+    }
+
+    /// This player's identity: what a scene tells it from another by, wherever
+    /// the host keeps it.
+    pub(crate) fn id(&self) -> u32 {
+        self.id
     }
 
     /// Empty what a tick reports, for an update that did not run one. The reads
@@ -3101,6 +3187,13 @@ fn step_slots(node: &mut PlaybackNode, frame_no: f32, delta_secs: f32, node_loop
         // runs on its own clock, so that is the edge they must re-fire on.
         step_slots(&mut child.node, child.frame_no, child_delta, r.child_looped);
     }
+}
+
+/// Whether anything under `node` plays on its own clock — an effect or an
+/// instance child its slot runs independently — and so moves while the node's
+/// own clock is held.
+fn plays_on_its_own(node: &PlaybackNode) -> bool {
+    node.effects.values().any(|effect| effect.slot.is_independent()) || node.instances.values().any(|child| child.slot.is_independent() || plays_on_its_own(&child.node))
 }
 
 /// Step every effect slot of `node` on the clock [`step_slots`] left it — once a

@@ -15,6 +15,20 @@ Three things hold whatever you draw:
 * **A target's whole cast is one render pass.** Every character goes through one `update` and one
   pass, so a second character costs a playback tree and nothing on the GPU.
 
+## A scene with nothing moving
+
+When no character in a scene has anything to move, `update` keeps the frame it built last: nothing
+is evaluated, rebuilt or uploaded, and `draw` draws the same frame again. A character has nothing to
+move when it is stopped, has finished, or is paused with no independently played effect or instance
+in it, and when no track fade or other track is still moving its pose (see
+[Motion blending](./motion-blending.md)).
+
+One character that moves rebuilds the whole frame, because every character in a scene shares one
+buffer. A call that changes what a character draws — a track or part override, a seek, a new
+placement — rebuilds it once. Writing the same placement, alpha, tint or visibility again costs
+nothing, so a host may write them every frame. `uploaded_bytes` reads `0` on an update that kept
+the frame.
+
 ## Reading the counters
 
 === "Rust"
