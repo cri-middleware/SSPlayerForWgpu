@@ -333,7 +333,7 @@ impl PlaybackDirection {
     }
 }
 
-impl From<PlaybackDirection> for ssruntime::core::playback_controller::PlaybackDirection {
+impl From<PlaybackDirection> for ssruntime::eval::playback_controller::PlaybackDirection {
     fn from(value: PlaybackDirection) -> Self {
         match value {
             PlaybackDirection::Forward => Self::Forward,
@@ -342,11 +342,11 @@ impl From<PlaybackDirection> for ssruntime::core::playback_controller::PlaybackD
     }
 }
 
-impl From<ssruntime::core::playback_controller::PlaybackDirection> for PlaybackDirection {
-    fn from(value: ssruntime::core::playback_controller::PlaybackDirection) -> Self {
+impl From<ssruntime::eval::playback_controller::PlaybackDirection> for PlaybackDirection {
+    fn from(value: ssruntime::eval::playback_controller::PlaybackDirection) -> Self {
         match value {
-            ssruntime::core::playback_controller::PlaybackDirection::Forward => Self::Forward,
-            ssruntime::core::playback_controller::PlaybackDirection::Backward => Self::Backward,
+            ssruntime::eval::playback_controller::PlaybackDirection::Forward => Self::Forward,
+            ssruntime::eval::playback_controller::PlaybackDirection::Backward => Self::Backward,
         }
     }
 }
@@ -375,7 +375,7 @@ impl PlaybackStyle {
     }
 }
 
-impl From<PlaybackStyle> for ssruntime::core::playback_controller::PlaybackStyle {
+impl From<PlaybackStyle> for ssruntime::eval::playback_controller::PlaybackStyle {
     fn from(value: PlaybackStyle) -> Self {
         match value {
             PlaybackStyle::Normal => Self::Normal,
@@ -384,11 +384,11 @@ impl From<PlaybackStyle> for ssruntime::core::playback_controller::PlaybackStyle
     }
 }
 
-impl From<ssruntime::core::playback_controller::PlaybackStyle> for PlaybackStyle {
-    fn from(value: ssruntime::core::playback_controller::PlaybackStyle) -> Self {
+impl From<ssruntime::eval::playback_controller::PlaybackStyle> for PlaybackStyle {
+    fn from(value: ssruntime::eval::playback_controller::PlaybackStyle) -> Self {
         match value {
-            ssruntime::core::playback_controller::PlaybackStyle::Normal => Self::Normal,
-            ssruntime::core::playback_controller::PlaybackStyle::PingPong => Self::PingPong,
+            ssruntime::eval::playback_controller::PlaybackStyle::Normal => Self::Normal,
+            ssruntime::eval::playback_controller::PlaybackStyle::PingPong => Self::PingPong,
         }
     }
 }
