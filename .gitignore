@@ -653,3 +653,7 @@ CLAUDE.md
 # The package's own build outputs (dist/, wasm/, node_modules/) stay ignored by
 # packages/ssplayer-wgpu/.gitignore.
 !/packages/ssplayer-wgpu/
+
+# Pre-release provenance reports: scripts/scan-snippets.sh writes its SCANOSS
+# report here, and RELEASING.md downloads provenance.yml's ScanCode report here.
+/qa/

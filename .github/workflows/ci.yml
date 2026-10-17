@@ -125,10 +125,18 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y mesa-vulkan-drivers vulkan-tools
 
+      # Mesa names the lavapipe ICD lvp_icd.x86_64.json up to Ubuntu 24.04 and
+      # lvp_icd.json from 26.04.
+      - name: Find the lavapipe ICD
+        run: |
+          set -- /usr/share/vulkan/icd.d/lvp_icd*.json
+          [ -f "$1" ] || { echo "::error::no lavapipe ICD in /usr/share/vulkan/icd.d"; exit 1; }
+          echo "LAVAPIPE_ICD=$1" >> "$GITHUB_ENV"
+
       - name: Show the adapter the tests will use
         env:
-          VK_DRIVER_FILES: /usr/share/vulkan/icd.d/lvp_icd.x86_64.json
-          VK_ICD_FILENAMES: /usr/share/vulkan/icd.d/lvp_icd.x86_64.json
+          VK_DRIVER_FILES: ${{ env.LAVAPIPE_ICD }}
+          VK_ICD_FILENAMES: ${{ env.LAVAPIPE_ICD }}
         # Deliberately a hard failure: the rendering tests skip themselves when
         # there is no adapter, so without this a broken driver install would come
         # back as a green run that drew nothing.
@@ -139,8 +147,8 @@ jobs:
           # Point the Vulkan loader at lavapipe alone, so the suite cannot pick up
           # some other adapter the image happens to carry. VK_DRIVER_FILES is the
           # current name, VK_ICD_FILENAMES the one older loaders read.
-          VK_DRIVER_FILES: /usr/share/vulkan/icd.d/lvp_icd.x86_64.json
-          VK_ICD_FILENAMES: /usr/share/vulkan/icd.d/lvp_icd.x86_64.json
+          VK_DRIVER_FILES: ${{ env.LAVAPIPE_ICD }}
+          VK_ICD_FILENAMES: ${{ env.LAVAPIPE_ICD }}
         # `golden_corpus` stays out of this: it byte-compares against a dump from
         # the same machine, so it is `#[ignore]`d, and the golden job runs it
         # against the base's rendering instead.
@@ -226,17 +234,25 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y mesa-vulkan-drivers vulkan-tools
 
+      # Mesa names the lavapipe ICD lvp_icd.x86_64.json up to Ubuntu 24.04 and
+      # lvp_icd.json from 26.04.
+      - name: Find the lavapipe ICD
+        run: |
+          set -- /usr/share/vulkan/icd.d/lvp_icd*.json
+          [ -f "$1" ] || { echo "::error::no lavapipe ICD in /usr/share/vulkan/icd.d"; exit 1; }
+          echo "LAVAPIPE_ICD=$1" >> "$GITHUB_ENV"
+
       - name: Show the adapter the images come from
         env:
-          VK_DRIVER_FILES: /usr/share/vulkan/icd.d/lvp_icd.x86_64.json
-          VK_ICD_FILENAMES: /usr/share/vulkan/icd.d/lvp_icd.x86_64.json
+          VK_DRIVER_FILES: ${{ env.LAVAPIPE_ICD }}
+          VK_ICD_FILENAMES: ${{ env.LAVAPIPE_ICD }}
         run: vulkaninfo --summary
 
       - name: Render the base
         working-directory: golden-base
         env:
-          VK_DRIVER_FILES: /usr/share/vulkan/icd.d/lvp_icd.x86_64.json
-          VK_ICD_FILENAMES: /usr/share/vulkan/icd.d/lvp_icd.x86_64.json
+          VK_DRIVER_FILES: ${{ env.LAVAPIPE_ICD }}
+          VK_ICD_FILENAMES: ${{ env.LAVAPIPE_ICD }}
           SS_GOLDEN_DIR: ${{ runner.temp }}/golden/base
         # Each checkout converts its own fixtures, so an SDK bump is compared
         # too, and builds into its own target dir, so the base compiles its
@@ -250,8 +266,8 @@ jobs:
 
       - name: Render the head and compare
         env:
-          VK_DRIVER_FILES: /usr/share/vulkan/icd.d/lvp_icd.x86_64.json
-          VK_ICD_FILENAMES: /usr/share/vulkan/icd.d/lvp_icd.x86_64.json
+          VK_DRIVER_FILES: ${{ env.LAVAPIPE_ICD }}
+          VK_ICD_FILENAMES: ${{ env.LAVAPIPE_ICD }}
           SS_GOLDEN_DIR: ${{ runner.temp }}/golden/head
           SS_GOLDEN_COMPARE: ${{ runner.temp }}/golden/base
         run: |
@@ -363,6 +379,8 @@ jobs:
 
       - name: Setup pnpm
         uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
+        with:
+          package_json_file: packages/ssplayer-wgpu/package.json
 
       - name: Setup Node
         uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
