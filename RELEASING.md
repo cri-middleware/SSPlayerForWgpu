@@ -50,8 +50,8 @@ gh pr merge release-notes --merge --delete-branch
 `pages.yml` builds the site only once a Release is published, from its tag, and a re-run builds that same tag: a fault in the docs, the rustdoc or the demo found then can only be fixed in `main` and deployed from there. So build the site now, from the `main` the release will be cut from. `scripts/build-pages.sh` builds what `pages.yml` deploys, in the same order. A failure is fixed by a pull request into `main` before step 4.
 
 ```bash
-git switch main && git pull --ff-only && git submodule update --init
-scripts/build-pages.sh                            # -> site/, the site pages.yml would deploy
+git switch main && git pull --ff-only && git submodule update --init &&
+  scripts/build-pages.sh                            # -> site/, the site pages.yml would deploy
 ```
 
 ### 4. Look at it first
@@ -184,12 +184,14 @@ Then open the site. A failed run leaves the Release published and the site as it
 
 ## Building the release locally
 
-`scripts/build-release.sh` is the release package, and `release.yml`'s package job runs exactly this script. It builds nothing — the two native platforms need an operating system each — so it assembles a run's artifacts instead: one zip per native platform, the npm package as the tarball npm is given (`npm pack`, so it needs `npm`), the preview shell as the web job built it, and `SHA256SUMS` over them. Its checks are the ones nothing else does: every platform is present, the C header is the same in all of them, every platform links the same SDK release — a release, not `local` — the npm package carries the version being released, the macOS shared library is universal, named `@rpath/libssplayer_wgpu.dylib` and signed with a Developer ID, the preview shell is stamped with that version and the SDK commit the checkout pins and has its pack hole empty, each zip holds the library it is named for, and the tarball holds what the package advertises. It reads that signature out of the Mach-O, since `codesign` does not run on Linux, so it proves who signed rather than that the signature holds; `scripts/release-macos.sh`, in the macOS job, is what verifies it and the notarization. The artifacts of a dry run that had no signing secrets take `sign=auto`. `<run-id>` is the `release.yml` run whose artifacts it assembles.
+`scripts/build-release.sh` is the release package, and `release.yml`'s package job runs exactly this script. It builds nothing — the two native platforms need an operating system each — so it assembles a run's artifacts instead: one zip per native platform, the npm package as the tarball npm is given (`npm pack`, so it needs `npm`), the preview shell as the web job built it, and `SHA256SUMS` over them. Its checks are the ones nothing else does: every platform is present, the C header is the same in all of them, every platform links the same SDK release — a release, not `local` — the npm package carries the version being released, the macOS shared library is universal, named `@rpath/libssplayer_wgpu.dylib` and signed with a Developer ID, the preview shell is stamped with that version and the SDK commit the checkout pins and has its pack hole empty, each zip holds the library it is named for, and the tarball holds what the package advertises. It reads that signature out of the Mach-O, since `codesign` does not run on Linux, so it proves who signed rather than that the signature holds; `scripts/release-macos.sh`, in the macOS job, is what verifies it and the notarization. `<tag>` is the release being rebuilt, `ssplayer-wgpu-v<version>`, and `<run-id>` the `release.yml` run that built it.
 
 ```bash
+TAG=<tag>
 RUN=<run-id>
-gh run download "${RUN:?}" -D artifacts           # a release.yml run, whole
-scripts/build-release.sh                          # -> release-dist/
+git checkout "${TAG:?}" &&
+  gh run download "${RUN:?}" -D artifacts &&    # a release.yml run, whole
+  scripts/build-release.sh                        # -> release-dist/
 ```
 
 <br>
@@ -248,8 +250,8 @@ gh pr merge release-notes --merge --delete-branch
 `pages.yml` がサイトをビルドするのは Release を公開したときだけで、そのタグから作ります。再実行しても同じタグをビルドするだけなので、そこで docs・rustdoc・デモの不具合が見つかると、`main` で直してそこからデプロイするしかありません。そこで、リリースを切る `main` から、先にサイトをビルドしておきます。`scripts/build-pages.sh` は、`pages.yml` がデプロイするものを同じ順にビルドします。失敗したら、手順 4 の前にプルリクエストで `main` を直します。
 
 ```bash
-git switch main && git pull --ff-only && git submodule update --init
-scripts/build-pages.sh                            # -> site/。pages.yml がデプロイするサイト
+git switch main && git pull --ff-only && git submodule update --init &&
+  scripts/build-pages.sh                            # -> site/。pages.yml がデプロイするサイト
 ```
 
 ### 4. 先に確かめる
@@ -382,10 +384,12 @@ gh run watch "${RUN:?}" --exit-status
 
 ## リリースのローカルビルド
 
-`scripts/build-release.sh` がリリースのパッケージそのもので、`release.yml` の package ジョブはこのスクリプトを実行しているだけです。何もビルドしません（ネイティブの 2 プラットフォームには、それぞれの OS が要ります）。代わりに run の成果物を組み立てます。ネイティブのプラットフォームごとの zip、npm に渡す tarball にした npm パッケージ（`npm pack` なので `npm` が要ります）、web ジョブがビルドしたままのプレビューのシェル、それらに対する `SHA256SUMS` です。ほかのどこもしない検査を受け持ちます。全プラットフォームが揃っていること、C ヘッダがどれも同じであること、全プラットフォームが同じ SDK のリリース（`local` ではなくリリース）をリンクしていること、npm パッケージがリリースするバージョンを持っていること、macOS の共有ライブラリがユニバーサルで、`@rpath/libssplayer_wgpu.dylib` という名前を持ち、Developer ID で署名されていること、プレビューのシェルのスタンプがそのバージョンとチェックアウトが指す SDK のコミットを示し、パックの穴が空のままであること、各 zip が名前どおりのライブラリを持っていること、tarball がパッケージの告知するものを持っていることです。その署名は Mach-O から読み取ります（Linux では `codesign` が動かないため）。証明できるのは誰が署名したかで、署名が有効であることではありません。署名と公証を検証するのは、macOS ジョブで動く `scripts/release-macos.sh` です。署名の secret が無かった dry run の成果物には `sign=auto` を付けます。`<run-id>` は、成果物を組み立てる `release.yml` の run の ID です。
+`scripts/build-release.sh` がリリースのパッケージそのもので、`release.yml` の package ジョブはこのスクリプトを実行しているだけです。何もビルドしません（ネイティブの 2 プラットフォームには、それぞれの OS が要ります）。代わりに run の成果物を組み立てます。ネイティブのプラットフォームごとの zip、npm に渡す tarball にした npm パッケージ（`npm pack` なので `npm` が要ります）、web ジョブがビルドしたままのプレビューのシェル、それらに対する `SHA256SUMS` です。ほかのどこもしない検査を受け持ちます。全プラットフォームが揃っていること、C ヘッダがどれも同じであること、全プラットフォームが同じ SDK のリリース（`local` ではなくリリース）をリンクしていること、npm パッケージがリリースするバージョンを持っていること、macOS の共有ライブラリがユニバーサルで、`@rpath/libssplayer_wgpu.dylib` という名前を持ち、Developer ID で署名されていること、プレビューのシェルのスタンプがそのバージョンとチェックアウトが指す SDK のコミットを示し、パックの穴が空のままであること、各 zip が名前どおりのライブラリを持っていること、tarball がパッケージの告知するものを持っていることです。その署名は Mach-O から読み取ります（Linux では `codesign` が動かないため）。証明できるのは誰が署名したかで、署名が有効であることではありません。署名と公証を検証するのは、macOS ジョブで動く `scripts/release-macos.sh` です。`<tag>` は組み立て直すリリースのタグ（`ssplayer-wgpu-v<version>`）、`<run-id>` はそれをビルドした `release.yml` の run の ID です。
 
 ```bash
+TAG=<tag>
 RUN=<run-id>
-gh run download "${RUN:?}" -D artifacts           # release.yml の run の成果物一式
-scripts/build-release.sh                          # -> release-dist/
+git checkout "${TAG:?}" &&
+  gh run download "${RUN:?}" -D artifacts &&    # release.yml の run の成果物一式
+  scripts/build-release.sh                        # -> release-dist/
 ```
