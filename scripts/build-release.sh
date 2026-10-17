@@ -18,7 +18,7 @@
 # by the versions release.yml set and the download that populated in=. So there
 # is no option here that re-decides either:
 #
-#   git checkout ssplayer-wgpu-v0.2.0         # which release
+#   git checkout ssplayer-wgpu-v<version>     # which release
 #   gh run download <run-id> -D artifacts     # which build's binaries
 #   scripts/build-release.sh                  # this
 #

@@ -121,8 +121,9 @@ The tag is the pin, so the file name carries no version, like the zips'.
 Player's first door may need a clone, so the shell has to arrive with the plugin rather
 than from a sibling checkout.
 
-**The version stamp is load-bearing.** The `.ssab` schema is still moving at version 1,
-so a stale shell does not fail — it quietly draws something else. The page shows the
+**The version stamp is load-bearing.** A shell from another SDK release reads the same
+`.ssab` and draws it as that release does, so a stale shell does not fail — it quietly
+draws something else. The page shows the
 version it was built from, and a host compares it against the version it converted with
 and says so when they differ. Without that, every "the preview disagrees with my engine"
 report has to be re-diagnosed from scratch.
