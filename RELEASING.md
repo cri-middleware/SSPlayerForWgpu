@@ -151,6 +151,37 @@ gh run watch "${RUN:?}" --exit-status
 
 Then open the site. A failed run leaves the Release published and the site as it was. When the cause was a setting outside the repository, re-run it with `gh run rerun <run-id>`, the run the block watched; a fix in the repository goes into `main` by pull request and deploys with `gh workflow run pages.yml --ref main`.
 
+## Patching an earlier line
+
+Fixes go to the latest release (SECURITY.md). When one has to reach an earlier version of a package on request, as `ssplayer-wgpu` 7.0.2 after 7.1.0, `main` carries the newer line, so it is released from a `maint/` branch cut from that version's tag. `release.yml` runs from a `maint/` branch as it does from `main`, and pushes the version commit back to that branch. `set-versions.mjs` compares with the branch's own version, so the patch is no step backwards, and a package whose Release already exists is skipped, so only the patched one is tagged and drafted.
+
+1. **Branch.** The first block cuts a `maint/` branch from the line's latest full release. Commit or cherry-pick the fix onto it, with notes under the package's `## [Unreleased]` in its CHANGELOG.md.
+2. **Release.** The second block runs the release from the branch, as step 5 does from `main`. The tarball is staged on npm under `latest-X.Y`, which `scripts/npm-dist-tag.sh` picks since npm's `latest` is a newer full release, so a bare `npm install` keeps getting the newest; approve it as step 7 does.
+3. **Publish.** `scripts/release-channel.sh` calls the Release `old`, and `pages.yml` deploys nothing for it. Publish it with the last block, not from the Releases page, whose default would make it Latest.
+4. **Back to main.** Cherry-pick the fix onto `main` if it still needs it; the last block deletes the branch.
+
+```bash
+git fetch origin --tags
+LINE=<x.y>                                        # the line, as major.minor
+BASE=$(git tag --list "ssplayer-wgpu-v${LINE:?}.*" --sort=-v:refname | grep -E -- '-v[0-9]+\.[0-9]+\.[0-9]+$' | head -n 1)
+git switch -c "maint/ssplayer-wgpu-v${LINE:?}" "${BASE:?}" && git push -u origin "maint/ssplayer-wgpu-v$LINE"
+```
+
+```bash
+LINE=<x.y>
+VERSION=<version>                                 # the patch
+RUN=$(gh workflow run release.yml --ref "maint/ssplayer-wgpu-v${LINE:?}" -f versions="ssplayer-wgpu@${VERSION:?}" | sed 's|.*/||')
+gh run watch "${RUN:?}" --exit-status
+```
+
+```bash
+git fetch origin --tags
+LINE=<x.y>
+TAG=$(git describe --exact-match --tags --match "ssplayer-wgpu-v${LINE:?}.*" "origin/maint/ssplayer-wgpu-v${LINE:?}")
+gh release edit "${TAG:?}" --draft=false --latest=false &&
+  git push origin --delete "maint/ssplayer-wgpu-v$LINE"
+```
+
 ## Undoing a release
 
 **A version npm has made public is permanent**, whether approved or published by hand: it cannot be withdrawn, only superseded. So is a published Release, whose tag and assets hosts have downloaded. A fault found after either is fixed by a new patch version. A staged version is not public yet, and `npm stage reject <stage-id>` removes it (a person, with 2FA). Before that:
@@ -350,6 +381,37 @@ gh run watch "${RUN:?}" --exit-status
 ```
 
 終わったら、サイトを開いて確かめます。run が失敗しても Release は公開されたままで、サイトは元のまま残ります。原因がリポジトリの外の設定にあったなら、ブロックが見届けた run を `gh run rerun <run-id>` で再実行します。リポジトリ内の修正は、プルリクエストで `main` に入れてから `gh workflow run pages.yml --ref main` でデプロイします。
+
+## 古い系統へのパッチ
+
+修正は最新のリリースにだけ出します（SECURITY.md）。依頼を受けてパッケージの古い版を直すとき（7.1.0 の後の `ssplayer-wgpu` 7.0.2 など）は、`main` が新しい系統を持っているので、その版のタグから切った `maint/` ブランチから出します。`release.yml` は `maint/` ブランチからも `main` と同じように動き、版のコミットはそのブランチへ push します。`set-versions.mjs` はブランチ自身の版と比べるので、パッチは版の後退になりません。Release がすでにあるパッケージは飛ばすので、タグと下書きができるのは直したパッケージだけです。
+
+1. **ブランチ。** 最初のブロックで、その系統の最新の正式版のタグから `maint/` ブランチを切ります。修正をコミットするか cherry-pick し、パッケージの CHANGELOG.md の `## [Unreleased]` にノートを書きます。
+2. **リリース。** 2 つめのブロックで、手順 5 と同じようにブランチからリリースを実行します。npm には `latest-X.Y` で stage されます。npm の `latest` がより新しい正式版なので、`scripts/npm-dist-tag.sh` がそれを選び、素の `npm install` では最新の版が入り続けます。承認は手順 7 のとおりです。
+3. **公開。** `scripts/release-channel.sh` がこの Release を `old` と判定し、`pages.yml` は何もデプロイしません。公開は Releases ページではなく最後のブロックで行います。ページの既定のままだと Latest になるためです。
+4. **main へは戻さない。** `main` にも要る修正なら cherry-pick します。最後のブロックがブランチを消します。
+
+```bash
+git fetch origin --tags
+LINE=<x.y>                                        # 系統（major.minor）
+BASE=$(git tag --list "ssplayer-wgpu-v${LINE:?}.*" --sort=-v:refname | grep -E -- '-v[0-9]+\.[0-9]+\.[0-9]+$' | head -n 1)
+git switch -c "maint/ssplayer-wgpu-v${LINE:?}" "${BASE:?}" && git push -u origin "maint/ssplayer-wgpu-v$LINE"
+```
+
+```bash
+LINE=<x.y>
+VERSION=<version>                                 # パッチの版
+RUN=$(gh workflow run release.yml --ref "maint/ssplayer-wgpu-v${LINE:?}" -f versions="ssplayer-wgpu@${VERSION:?}" | sed 's|.*/||')
+gh run watch "${RUN:?}" --exit-status
+```
+
+```bash
+git fetch origin --tags
+LINE=<x.y>
+TAG=$(git describe --exact-match --tags --match "ssplayer-wgpu-v${LINE:?}.*" "origin/maint/ssplayer-wgpu-v${LINE:?}")
+gh release edit "${TAG:?}" --draft=false --latest=false &&
+  git push origin --delete "maint/ssplayer-wgpu-v$LINE"
+```
 
 ## リリースの取り消し
 
