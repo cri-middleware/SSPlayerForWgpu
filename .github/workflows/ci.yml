@@ -1,7 +1,7 @@
 name: CI
 
 # Two tiers, as in SpriteStudio-SDK. Every pull request lints and tests the
-# crates on Linux, compares its rendering with its base's there, builds the C
+# crates on Linux, checks them with the declared rust-version, compares its rendering with its base's there, builds the C
 # face with the Vulkan viewer there and the DX12 viewer on Windows, and builds
 # the wasm face with the npm package and the preview shell. The weekly run and
 # a dispatch also build for macOS the way release.yml does (universal), with the
@@ -181,6 +181,48 @@ jobs:
           sudo apt-get install -y libx11-dev libwayland-dev wayland-protocols
           cmake -S examples/viewer-vulkan-cpp -B examples/viewer-vulkan-cpp/build -DCMAKE_BUILD_TYPE=Debug
           cmake --build examples/viewer-vulkan-cpp/build
+
+  # The rust-version Cargo.toml declares, checked with that toolchain as
+  # SpriteStudio-SDK's msrv job does. The SDK crates are path dependencies into
+  # the submodule, so a bump that raises their floor fails here.
+  msrv:
+    name: 🦀 MSRV (declared rust-version)
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          submodules: recursive
+          persist-credentials: false
+
+      - name: Extract MSRV from Cargo.toml
+        id: msrv
+        run: |
+          msrv=$(grep -E '^rust-version = ' Cargo.toml | sed -E 's/rust-version = "(.+)"/\1/')
+          if [ -z "$msrv" ]; then
+            echo "::error::rust-version not found in workspace Cargo.toml"
+            exit 1
+          fi
+          echo "version=$msrv" >> "$GITHUB_OUTPUT"
+          echo "Declared MSRV: $msrv"
+        shell: bash
+
+      - name: Install pinned Rust toolchain
+        uses: dtolnay/rust-toolchain@683b588c487a69d01f6c6ddf40f036ff682cc2c8 # master
+        with:
+          toolchain: ${{ steps.msrv.outputs.version }}
+
+      - name: Setup Rust cache (MSRV)
+        uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+        with:
+          save-if: ${{ github.ref == 'refs/heads/main' }}
+
+      - name: cargo check (workspace)
+        run: cargo check --workspace --locked
+        shell: bash
 
   # The suite's other rendering tests assert on invariants and pixel counts,
   # which a part moved by a pixel or a colour that drifted passes. This renders
@@ -385,7 +427,7 @@ jobs:
       - name: Setup Node
         uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
-          node-version: 22
+          node-version: 26
           cache: pnpm
           cache-dependency-path: packages/ssplayer-wgpu/pnpm-lock.yaml
 

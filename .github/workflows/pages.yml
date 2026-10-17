@@ -24,7 +24,8 @@ jobs:
   # A Release deploys the site only when it becomes Latest
   # (scripts/release-channel.sh, read from the default branch): a pre-release
   # once its package has a full release, or a patch to an earlier line, leaves
-  # the site as it is. A dispatch always deploys.
+  # the site as it is. A dispatch deploys from a tag or main (RELEASING deploys
+  # a fix to the docs from main), and refuses any other branch.
   channel:
     runs-on: ubuntu-latest
     timeout-minutes: 5
@@ -41,8 +42,14 @@ jobs:
           TAG: ${{ github.event.release.tag_name }}
         run: |
           if [ "$GITHUB_EVENT_NAME" != release ]; then
-            echo "deploy=true" >> "$GITHUB_OUTPUT"
-            exit 0
+            case "$GITHUB_REF" in
+              refs/tags/* | refs/heads/main)
+                echo "deploy=true" >> "$GITHUB_OUTPUT"
+                exit 0
+                ;;
+            esac
+            echo "::error::a dispatch deploys from a tag or main, and ${GITHUB_REF_NAME} is neither"
+            exit 1
           fi
           channel="$(./scripts/release-channel.sh "$TAG")"
           echo "::notice::${TAG} is a ${channel} release"
@@ -112,7 +119,7 @@ jobs:
       - name: Setup Node
         uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
-          node-version: 22
+          node-version: 26
           cache: pnpm
           cache-dependency-path: packages/ssplayer-wgpu/pnpm-lock.yaml
 
