@@ -85,7 +85,7 @@ RUN=$(gh workflow run release.yml --ref main -f versions="ssplayer-wgpu@${VERSIO
 gh run watch "${RUN:?}" --exit-status
 ```
 
-The run first checks the changelog, then builds the library for Windows and macOS (universal), the npm package and the preview shell, all with the version applied, signs and notarizes the macOS library, then assembles and checks the zips, the package's tarball and the shell, and only then commits the version and the dated changelog to `main`, tags `ssplayer-wgpu-v<version>`, creates a **draft** Release carrying the two zips, the tarball, the preview shell, `SHA256SUMS` and a link to the changelog, and stages that tarball on npm, where it waits for step 7. A failure before the commit leaves `main` untouched, and so does a `main` that moved during the run, which rejects the push. Then see what it made:
+The run first checks the changelog, then builds the library for Windows and macOS (universal), the npm package and the preview shell, all with the version applied, signs and notarizes the macOS library, then assembles and checks the zips, the package's tarball and the shell, and only then commits the version and the dated changelog to `main`, tags `ssplayer-wgpu-v<version>`, creates a **draft** Release carrying the platform zips, the tarball, the preview shell, `SHA256SUMS` and a link to the changelog, and stages that tarball on npm, where it waits for step 7. A failure before the commit leaves `main` untouched, and so does a `main` that moved during the run, which rejects the push. Then see what it made:
 
 ```bash
 git fetch origin --tags
@@ -283,7 +283,7 @@ RUN=$(gh workflow run release.yml --ref main -f versions="ssplayer-wgpu@${VERSIO
 gh run watch "${RUN:?}" --exit-status
 ```
 
-run はまず changelog を検査し、続けて Windows・macOS（ユニバーサル）向けのライブラリと npm パッケージ、プレビューのシェルを、どれもバージョンを適用してビルドし、macOS のライブラリを署名・公証し、zip とパッケージの tarball、シェルを組み立てて検査します。そのあとで初めてバージョンと日付を入れた changelog を `main` へコミットし、`ssplayer-wgpu-v<version>` のタグを打ち、2 つの zip と tarball、プレビューのシェル、`SHA256SUMS`、changelog へのリンク付きで**下書き**の Release を作り、その tarball を npm に stage します。stage したものは手順 7 を待ちます。コミットより前に失敗すれば `main` は変わりません。run の途中で `main` が進んでいた場合も、push が拒否されるので同じです。終わったら、できたものを確かめます。
+run はまず changelog を検査し、続けて Windows・macOS（ユニバーサル）向けのライブラリと npm パッケージ、プレビューのシェルを、どれもバージョンを適用してビルドし、macOS のライブラリを署名・公証し、zip とパッケージの tarball、シェルを組み立てて検査します。そのあとで初めてバージョンと日付を入れた changelog を `main` へコミットし、`ssplayer-wgpu-v<version>` のタグを打ち、プラットフォームごとの zip と tarball、プレビューのシェル、`SHA256SUMS`、changelog へのリンク付きで**下書き**の Release を作り、その tarball を npm に stage します。stage したものは手順 7 を待ちます。コミットより前に失敗すれば `main` は変わりません。run の途中で `main` が進んでいた場合も、push が拒否されるので同じです。終わったら、できたものを確かめます。
 
 ```bash
 git fetch origin --tags
@@ -295,7 +295,7 @@ npm はまだ無いパッケージを stage できないので、パッケージ
 
 ### 6. 下書きを確かめる
 
-下書きに書き足すものはありません。印は `scripts/release-channel.sh` が付けてあります。正式版のタグがすでにあれば pre-release、なければ Latest になります。添付を確かめます。`ssplayer-wgpu-windows-x86_64.zip`、`ssplayer-wgpu-macos-universal.zip`、`spritestudio-ssplayer-wgpu-<version>.tgz`、`ssplayer-preview.html`、`SHA256SUMS` の 5 つです。macOS の zip は静的ライブラリの横に `lib/libssplayer_wgpu.dylib` を持ち、その署名と公証のチケットは run が Apple に確かめ済みです。Mac では、それに対する `spctl --assess --type open --context context:primary-signature --verbose=2` が `source=Notarized Developer ID` と答えます。利用者の Mac で Gatekeeper が下す判断がこれです。npm で承認する前に確かめます。それまでなら、下書きを消して stage したものを取り下げれば取り消せますが（「リリースの取り消し」を参照）、承認した後は新しいバージョンでしか直せません。ブロックは添付を一覧し、続けて tarball の中身（npm に渡すもの）を一覧します。
+下書きに書き足すものはありません。印は `scripts/release-channel.sh` が付けてあります。正式版のタグがすでにあれば pre-release、なければ Latest になります。添付を確かめます。`ssplayer-wgpu-windows-x86_64.zip`、`ssplayer-wgpu-macos-universal.zip`、`spritestudio-ssplayer-wgpu-<version>.tgz`、`ssplayer-preview.html`、`SHA256SUMS` です。macOS の zip は静的ライブラリの横に `lib/libssplayer_wgpu.dylib` を持ち、その署名と公証のチケットは run が Apple に確かめ済みです。Mac では、それに対する `spctl --assess --type open --context context:primary-signature --verbose=2` が `source=Notarized Developer ID` と答えます。利用者の Mac で Gatekeeper が下す判断がこれです。npm で承認する前に確かめます。それまでなら、下書きを消して stage したものを取り下げれば取り消せますが（「リリースの取り消し」を参照）、承認した後は新しいバージョンでしか直せません。ブロックは添付を一覧し、続けて tarball の中身（npm に渡すもの）を一覧します。
 
 ```bash
 tag=$(gh release list --json tagName,isDraft -q '[.[] | select(.isDraft) | .tagName | select(startswith("ssplayer-wgpu-v"))][0] // empty')

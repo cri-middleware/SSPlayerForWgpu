@@ -319,6 +319,12 @@ if [ ! -d "$IN" ]; then
   exit 1
 fi
 
+# NATIVE and WEB are the build matrix's artifacts. One the matrix gains and they
+# do not would be built and then shipped nowhere.
+MATRIX="$(sed -n 's/^[[:space:]]*artifact:[[:space:]]*\([A-Za-z0-9_-]*\).*$/\1/p' "$ROOT_DIR/.github/workflows/release.yml" | sort | tr '\n' ' ')"
+LISTED="$(printf '%s\n' $NATIVE $WEB | sort | tr '\n' ' ')"
+[ "$MATRIX" = "$LISTED" ] || fail "release.yml's build matrix makes ${MATRIX% }, but NATIVE and WEB list ${LISTED% }"
+
 for p in $NATIVE; do
   os="${p%%-*}"; arch="${p#*-}"
   dir="$IN/$p"
