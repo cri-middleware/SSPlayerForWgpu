@@ -195,6 +195,10 @@ jobs:
 
       - name: Setup Rust cache
         uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+        with:
+          # A cache saved from a maint/ branch would be visible to that branch
+          # alone.
+          save-if: ${{ github.ref == 'refs/heads/main' }}
 
       # Both Apple targets, so build.sh arch=universal has something to lipo.
       # macos-latest is arm64; the x86_64 slice is a cross-build from the same
