@@ -79,8 +79,9 @@ jobs:
   # version nobody wrote notes for stops -- first, before any platform builds.
   changelog:
     name: 📝 Changelog
-    # Refuse to release from anywhere but main, even if dispatched on another ref.
-    if: github.ref == 'refs/heads/main'
+    # Release from main, or from a maint/ branch for a patch to an earlier line
+    # (RELEASING.md). Refuse anything else, even if dispatched on it.
+    if: github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/heads/maint/')
     runs-on: ubuntu-latest
     timeout-minutes: 10
     permissions:
@@ -425,7 +426,7 @@ jobs:
           retention-days: 7
 
       # Pushed only now, after every platform built and the release checked out.
-      # A main that moved during the run rejects the push, and nothing is tagged.
+      # A branch that moved during the run rejects the push, and nothing is tagged.
       - name: Commit the versions
         if: inputs.versions != '' && !inputs.dry_run
         env:
@@ -435,7 +436,7 @@ jobs:
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git add --pathspec-from-file="$RUNNER_TEMP/versioned-files"
           git commit -m "chore(release): $VERSIONS"
-          git push origin HEAD:main
+          git push origin "HEAD:${GITHUB_REF}"
 
       - name: Tag and draft the Release
         if: ${{ !inputs.dry_run }}
