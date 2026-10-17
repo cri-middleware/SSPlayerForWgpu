@@ -174,7 +174,7 @@ them as well: `libs/ssplayer-wgpu/docs` and `libs/ssplayer-bevy/docs` are symlin
 `cargo package` packs as the files they point at. On Windows, enable symlinks (`git config
 core.symlinks true`, with Developer Mode) before packaging a crate, or the checkout holds a one-line
 text file there.
-If you edit a page, build both locales before you finish: nothing builds the docs on a pull request, so that local build is the only gate before the merge (CI builds them weekly).
+If you edit a page, build both locales before you finish. CI builds them too, both `--strict`, on a pull request that touches the site's sources and weekly.
 
 ```bash
 ./scripts/prepare-docs.sh            # once: .venv + the pins in docs/requirements.txt
@@ -328,7 +328,7 @@ cargo test -p ssplayer-wgpu --features ffi --lib
 
 ### ドキュメント
 
-ページは `docs/en/<path>` と `docs/ja/<path>` の両方にあり、`nav` も両方のロケール設定にあります。ページの追加・改名は両方を編集してください。英語のページはリリースの zip と npm パッケージにも入り、`scripts/release-docs/` の入口ページから案内されます。入口ページが指すページを改名したら入口ページも直してください（行き先の無いリンクは `build-release.sh` が拒否します）。crate にも入ります。`libs/ssplayer-wgpu/docs` と `libs/ssplayer-bevy/docs` は `docs/en` への symlink で、`cargo package` はその指す先をファイルとして詰めます。Windows で crate をパッケージする前は symlink を有効にしてください（`git config core.symlinks true` と開発者モード）。有効でないと、checkout にはそこに 1 行のテキストファイルが置かれます。ページを編集したら、仕上げる前に両ロケールをビルドしてください。プルリクエストでは docs はビルドされないため、マージ前のゲートは手元のビルドだけです（CI がビルドするのは週次です）。
+ページは `docs/en/<path>` と `docs/ja/<path>` の両方にあり、`nav` も両方のロケール設定にあります。ページの追加・改名は両方を編集してください。英語のページはリリースの zip と npm パッケージにも入り、`scripts/release-docs/` の入口ページから案内されます。入口ページが指すページを改名したら入口ページも直してください（行き先の無いリンクは `build-release.sh` が拒否します）。crate にも入ります。`libs/ssplayer-wgpu/docs` と `libs/ssplayer-bevy/docs` は `docs/en` への symlink で、`cargo package` はその指す先をファイルとして詰めます。Windows で crate をパッケージする前は symlink を有効にしてください（`git config core.symlinks true` と開発者モード）。有効でないと、checkout にはそこに 1 行のテキストファイルが置かれます。ページを編集したら、仕上げる前に両ロケールをビルドしてください。CI も、サイトのソースに触れるプルリクエストと週次の実行で、両ロケールを `--strict` でビルドします。
 
 ```bash
 ./scripts/prepare-docs.sh            # 一度だけ: .venv と docs/requirements.txt のピン

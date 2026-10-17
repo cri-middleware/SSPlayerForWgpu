@@ -1,0 +1,84 @@
+name: Docs
+
+# Builds the site the way pages.yml publishes it, so a broken page surfaces
+# before a release publishes it.
+#
+# A pull request that touches the site's sources runs this on its own, and
+# builds the docs alone: the rustdoc and the Web demo wait for ci.yml, which
+# calls this for the weekly run and a dispatch. ci.yml cannot carry the
+# pull-request half itself, because it ignores a change to Markdown alone, and
+# the docs are almost nothing else.
+on:
+  pull_request:
+    paths:
+      - 'docs/**'
+      - 'overrides/**'
+      - 'mkdocs*.yml'
+      - 'scripts/prepare-docs.*'
+      - 'scripts/build-docs.*'
+      - 'scripts/build-pages.*'
+      - '.github/workflows/docs.yml'
+  workflow_call:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: docs-${{ github.event_name }}-${{ github.head_ref || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    name: 📚 Docs site
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          submodules: recursive
+          persist-credentials: false
+
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: 3.x
+          cache: pip
+          cache-dependency-path: docs/requirements.txt
+
+      - name: Install the documentation toolchain
+        run: pip install -r docs/requirements.txt
+
+      # The site carries the rustdoc and the web demo as well, so it needs the
+      # wasm toolchain and the npm package's build.
+      - name: Setup Rust toolchain
+        uses: dtolnay/rust-toolchain@e2a55d2ffb04f378e9626c28d38b36d230d1e12f # master
+        with:
+          toolchain: stable
+
+      - name: Setup Rust cache
+        uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+        with:
+          save-if: ${{ github.ref == 'refs/heads/main' }}
+
+      - name: Install the wasm target
+        run: rustup target add wasm32-unknown-unknown
+
+      - name: Install wasm-pack
+        uses: taiki-e/install-action@1168f6810a3cb30a3514bf5756a3b7f0422c6df8 # v2.87.28
+        with:
+          tool: wasm-pack
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
+
+      - name: Setup Node
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 22
+          cache: pnpm
+          cache-dependency-path: packages/ssplayer-wgpu/pnpm-lock.yaml
+
+      - name: Build the site (docs + rustdoc + demo)
+        env:
+          FULL: ${{ github.event_name == 'pull_request' && 'no' || 'yes' }}
+        run: ./scripts/build-pages.sh prepare=no "api=$FULL" "demo=$FULL"

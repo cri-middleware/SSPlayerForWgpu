@@ -95,7 +95,7 @@ The site is Markdown plus two grafts, and needs no cargo for the prose half:
 | **English is the source, `docs/ja` mirrors it** | Same paths in both trees; only the prose and the nav labels differ |
 | **The nav lives in two files** | `mkdocs.yml` and `mkdocs.ja.yml`. Adding, moving or renaming a page means editing both |
 | **English builds first** | It clears `site/`, and the Japanese site, the rustdoc and the demo all live inside it |
-| **`--strict`, always** | Nothing builds the docs on a pull request, so a broken internal link would otherwise surface only in CI's weekly run |
+| **`--strict`, always** | A broken internal link fails the build, here and in CI, rather than passing as a warning |
 
 `build-pages.sh api=no demo=no` is the fast loop while writing prose.
 
