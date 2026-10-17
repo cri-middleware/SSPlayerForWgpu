@@ -99,6 +99,13 @@ jobs:
 
       - name: Setup Rust cache
         uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+        with:
+          # release.yml's job is named build too, and its web leg runs on the
+          # same image: without a key of its own, the two would share a cache.
+          key: pages
+          # A Release's run is on its tag, and a cache saved there would be
+          # visible to that tag alone.
+          save-if: ${{ github.ref == 'refs/heads/main' }}
 
       - name: Install the wasm target
         run: rustup target add wasm32-unknown-unknown
