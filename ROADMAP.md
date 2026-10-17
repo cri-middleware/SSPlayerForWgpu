@@ -23,12 +23,12 @@ the constraints a change most often breaks are in [CONTRIBUTING.md](./CONTRIBUTI
 wgpu is a GPU API, not a UI toolkit, so this splits in two: the portable half belongs in the
 player, where every host and the C ABI reach it, and the host half belongs in an adapter crate.
 
-- [ ] **Part rect read-out and hit testing** — `part_transform` reports where a part is;
-      nothing reports how big it is, so a host cannot turn a part into a clickable region.
-      The `PartState` the runtime already delivers every frame carries `size_x` / `size_y`,
-      `anchor` and `pivot` — `part_rect` over those and the part transform, then
-      `hit_test_part(x, y)` over that, in player-local coordinates. Portable: it is C-ABI
-      shaped, needs no GPU work, and every adapter crate inherits it.
+- [ ] **Part rect read-out and hit testing** — `part_transform` reports where a part is
+      but nothing reports how big it is, so a host cannot turn a part into a clickable
+      region. `part_rect` over the `PartState` fields the runtime delivers every frame
+      (`size_x` / `size_y`, `anchor`, `pivot`) and the part transform, then
+      `hit_test_part(x, y)` over that in player-local coordinates, is C-ABI shaped and
+      needs no GPU work, so every adapter crate inherits it.
 - [ ] **Bevy UI (`Node`)** — `ssplayer-bevy` gives Bevy a player in the world; a player inside
       Bevy's UI tree is a different thing — it has to size from `ComputedNode`, respect the UI
       camera's stacking and clipping, and answer `Interaction` picking. The part rect above
@@ -37,78 +37,61 @@ player, where every host and the C ABI reach it, and the host half belongs in an
 
 ## Expressiveness
 
-- [ ] **One mask backend, once Bevy's 2d pass carries a stencil** — both
-      exist because each is the cheap answer somewhere: a host that lends a
-      stencil pays nothing extra for it, while coverage ([mask doc §5](https://github.com/cri-middleware/SpriteStudio-SDK/blob/HEAD/libs/ssruntime/docs/40_parts/40_mask.md#5-implementing-on-engines-without-a-stencil-coverage-bitmap)) is the only
-      answer for a pass with none to lend — and Bevy's is one, `bevy_core_pipeline`
-      0.20 fixing `CORE_2D_DEPTH_FORMAT` at `Depth32Float`. Folding onto coverage
-      would charge every stencil host an extra pass and a coverage array per
-      masking player, so the fold waits for that constant to gain a stencil, and
-      goes the other way: dropping coverage takes the extra pass with it, while
-      `SceneConfig::stencil_format` and `TreeMask::finish` stay. A unit test in
-      `ssplayer-bevy/src/render.rs` fails when the constant changes, so a Bevy bump
-      cannot move it unnoticed. Until then every mask feature lands in both. Blocked
-      on: Bevy's 2d pass carrying a stencil.
-- [ ] **Exact masks, past what the stencil can express** — mixed INCR / INVERT
-      overlaps are approximated and nesting is limited by 8 bits. The coverage
-      backend already lifts the nesting limit — its accumulators are shader
-      variables, not stencil bits — but both backends still stop at 96 writers
-      across a player's instance tree, the limit the Godot Player shares; the
-      coverage backend spends one more RGBA8 layer per 24 of them. Going past 96
-      alone would fork that limit.
-- [ ] **Backdrop-reading blends (`Div2` / `Overlay2`)** — they read what is
-      behind the part, which `SSScene::encode_offscreen` could copy for them as it
-      draws the group-alpha layers, so this is blocked on semantics rather than on
-      wgpu. No reference defines the maths — the sibling players fall back to `Mix`
-      and the published docs call that fallback intentional — and no fixture
-      authors the modes. Blocked on: a formula with a source, a fixture, and
-      agreement across the other Players.
+- [ ] **One mask backend, once Bevy's 2d pass carries a stencil** — both backends exist
+      because each is the cheap answer somewhere: a host that lends a stencil pays
+      nothing extra for it, while coverage
+      ([mask doc §5](https://github.com/cri-middleware/SpriteStudio-SDK/blob/HEAD/libs/ssruntime/docs/40_parts/40_mask.md#5-implementing-on-engines-without-a-stencil-coverage-bitmap))
+      is the only answer for a pass with none to lend, and Bevy's 2d pass is one
+      (`CORE_2D_DEPTH_FORMAT` is `Depth32Float`). When that constant gains a stencil,
+      coverage goes and the stencil backend stays, and a unit test in `ssplayer-bevy`
+      fails when it changes; until then every mask feature lands in both. Blocked on:
+      Bevy's 2d pass carrying a stencil.
+- [ ] **Exact masks, past what the stencil can express** — mixed INCR / INVERT overlaps
+      are approximated and nesting is limited by 8 bits; the coverage backend lifts the
+      nesting limit, but both backends stop at 96 writers across a player's instance
+      tree. The Godot Player shares that limit, so going past it alone would fork it.
+- [ ] **Backdrop-reading blends (`Div2` / `Overlay2`)** — they read what is behind the
+      part, which `SSScene::encode_offscreen` could copy for them, so this is blocked on
+      semantics rather than on wgpu: no reference defines the maths, the sibling players
+      fall back to `Mix` (which the published docs call intentional), and no fixture
+      authors the modes. Blocked on: a formula with a source, a fixture, and agreement
+      across the other Players.
 
 ## Hosts & platforms
 
-- [ ] **Vulkan C++ viewer (Linux)** — `examples/viewer-vulkan-cpp`. Written on
-      macOS, where neither the X11 nor the Wayland code compiles, and built by CI on
-      Linux for every pull request — but never run, because the runner has no
-      display. It carries both window paths in one binary because
-      Xwayland means an X11 window never reaches the `SS_WINDOW_WAYLAND` arm, so
-      closing this needs one run per path on a Linux desktop. Until then the Xlib
-      and Wayland arms of `surface_target` stay unverified.
-- [ ] **Bevy: more than one camera** — the adapter holds one `SSScene`, binds it to
-      the first view that renders and skips the rest with a warning
-      (`ssplayer-bevy/src/render.rs`, `bound_view`), so a UI camera, a
-      render-to-texture portrait, a minimap or a split screen leaves every
-      character in whichever view happened to come first. A scene per view, keyed
-      by the view `Entity`, closes it **with no change to the player**: each player
-      still belongs to one view, so nothing is advanced twice, and
-      `tests/pack.rs::scenes_share_one_renderer` already pins N scenes on one
-      renderer. What the adapter has to settle: which view a player draws into
-      (`RenderLayers`), what a player no view draws does (it never advances, so it
-      freezes), and moving the feedback store off the per-view path —
-      `FeedbackChannel::store` replaces the batch wholesale, so today the last view
-      to run would be the only one the main world hears about.
+- [ ] **Vulkan C++ viewer (Linux)** — `examples/viewer-vulkan-cpp` is built by CI on
+      Linux for every pull request but never run, because the runner has no display, so
+      the Xlib and Wayland arms of `surface_target` are unverified. Closing it takes one
+      run per window path on a Linux desktop, since under Xwayland an X11 window never
+      reaches the `SS_WINDOW_WAYLAND` arm.
+- [ ] **Bevy: more than one camera** — the adapter binds its one `SSScene` to the first
+      view that renders and skips the rest with a warning, so a UI camera, a
+      render-to-texture portrait, a minimap or a split screen leaves every character in
+      whichever view came first. A scene per view, keyed by the view `Entity`, closes it
+      with no change to the player; the adapter has to settle which view a player draws
+      into (`RenderLayers`), what a player no view draws does (it never advances, so it
+      freezes), and a feedback store that today hears only the last view to run.
 - [ ] **An offscreen target on the C face** — a scene renders only to the window or
       layer it was created on, so a C/C++ engine cannot composite a character with its
-      own drawing; the route the docs give for it — render into a texture and bring it
-      in through the engine's interop — has no call behind it. Needs: a scene created
-      on a texture rather than a window, and a way for that texture to leave.
-      **Undecided**: whether that is a native shared handle per backend (a DXGI shared
-      handle, an `IOSurface`, Vulkan external memory — none of which wgpu creates by
-      default), a CPU readback as the portable floor, or both.
-- [ ] **Self-contained HTML preview** — a Preview button per pack in each host writes one
-      fully inlined HTML file and opens it in the browser, so every host shows the same
-      preview without an in-editor renderer. Every Release carries the shell, for a
-      plugin to fetch by its tag rather than build. Missing: the buttons themselves,
-      which live in the Player repositories. Design and measurements:
-      [`PREVIEW.md`](./PREVIEW.md).
+      own drawing, and the route the docs give (render into a texture, bring it in
+      through the engine's interop) has no call behind it. It needs a scene created on a
+      texture and a way for that texture to leave — **undecided** whether that is a
+      native shared handle per backend (a DXGI shared handle, an `IOSurface`, Vulkan
+      external memory), a CPU readback as the portable floor, or both.
+- [ ] **Self-contained HTML preview** — a Preview button per pack in each host writes
+      one fully inlined HTML file and opens it in the browser, so every host shows the
+      same preview without an in-editor renderer; every Release carries the shell for a
+      plugin to fetch by its tag. Missing: the buttons themselves, which live in the
+      Player repositories (design and measurements in [`PREVIEW.md`](./PREVIEW.md)).
 
 ## Resource management
 
-- [ ] **Pack and texture eviction** — `SSRenderer::forget_texture` drops one texture by
-      hash on the Rust face, but a player only accumulates packs, the renderer cannot
-      list the textures it holds, and the C and JavaScript faces have no forget call —
-      so a host that swaps characters grows `.ssab` bytes and VRAM with no way to
-      reclaim them. Missing: a per-player pack release on every face. It must retire
-      rather than drop: a `Context` points at its pack's resource by raw pointer.
+- [ ] **Pack and texture eviction** — a player only accumulates packs, the renderer
+      cannot list the textures it holds, and only the Rust face can forget one
+      (`SSRenderer::forget_texture`), so a host that swaps characters grows `.ssab`
+      bytes and VRAM with no way to reclaim them. Missing: a per-player pack release on
+      every face, which must retire the pack rather than drop it, since a `Context`
+      points at its resource by raw pointer.
 
 ## Distribution & verification
 
@@ -129,14 +112,10 @@ player, where every host and the C ABI reach it, and the host half belongs in an
 
 - **Throughput optimisation** — draw-call merging, bindless textures, texture
   bind-group dedup, render bundles, threading the player walk, indirect draws for
-  Shape. Measured against a 256-player frame and not worth their complexity;
-  bindless is additionally unavailable on WebGPU. The browser does not change that.
-  `tests/scale.rs`'s cast in Chrome 155 (release wasm, Apple M4 Max, macOS 26.7) draws
-  the same list as native — at 256 players 2496 draws, 704 mergeable, 1983 rebinds —
-  and pays more per call for it: 1.86 ms per `surface.frame()` against 0.87 ms native,
-  and 0.52 ms of GPU pass against 0.10 ms. The browser's figure also covers acquiring
-  the canvas texture and the submit, about 0.16 ms of it fixed. Merging every
-  mergeable draw would remove 28% of the calls, a fraction of a millisecond.
+  Shape. Measured against a 256-player frame (`tests/scale.rs`), natively and in the
+  browser, and not worth their complexity: merging every mergeable draw would remove
+  28% of the calls, a fraction of a millisecond. Bindless is additionally unavailable
+  on WebGPU.
 - **One player drawn into several views** — a minimap, a split screen, a portal, a
   tool's preview beside its output. `SSScene::update` fuses the timeline
   advance with the geometry build, so handing one player to two scenes plays it at
