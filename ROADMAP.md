@@ -109,9 +109,6 @@ player, where every host and the C ABI reach it, and the host half belongs in an
       so a host that swaps characters grows `.ssab` bytes and VRAM with no way to
       reclaim them. Missing: a per-player pack release on every face. It must retire
       rather than drop: a `Context` points at its pack's resource by raw pointer.
-- [ ] **Generation-checked scene handles on the C face** — `ss_player_t` is safe
-      against a stale handle; the `*mut SsScene` it holds is not, so destroying
-      the scene first cannot be detected. Closing it is an ABI change.
 
 ## Distribution & verification
 
@@ -127,11 +124,6 @@ player, where every host and the C ABI reach it, and the host half belongs in an
       points of one animation is the SDK's
       [Animation Instancing](https://github.com/cri-middleware/SpriteStudio-SDK/blob/HEAD/ROADMAP.md#phase-3-feature-expansion-post-release),
       one evaluation context driving many instances. Waits for: that item.
-- [ ] **GPU expansion of effect particles** — passing particle state and expanding
-      in the vertex stage cuts the transfer to a quarter and removes the CPU
-      trigonometry, but it changes the shape of `EffectDrawPlan`: an SDK pull
-      request plus a submodule bump. Waits for: an `EffectDrawPlan` that carries
-      particle state (the SDK ROADMAP has no entry for it).
 
 ## Deliberate non-goals
 
