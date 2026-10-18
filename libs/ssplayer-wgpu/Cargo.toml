@@ -8,6 +8,8 @@ license.workspace = true
 repository.workspace = true
 homepage.workspace = true
 description.workspace = true
+keywords = ["spritestudio", "animation", "gamedev", "wgpu", "2d"]
+categories = ["game-development", "graphics", "rendering"]
 
 [lib]
 crate-type = ["rlib"]
