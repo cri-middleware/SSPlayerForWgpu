@@ -6,35 +6,25 @@ animations (`.ssab`).
 This is first and foremost a **Rust** player: a clean Rust API over the
 SpriteStudio runtime, with WebGPU (wasm-bindgen) and C/C++ (cbindgen) as thin
 wrappers on top. Because it renders through wgpu, one code path covers WebGPU,
-Vulkan, DX12 and Metal.
-
-For the repository as a whole — examples, build scripts, asset generation — see
-the [top-level README](../../README.md).
+Vulkan, DX12 and Metal. It never owns the device: the host lends its `Device`,
+`Queue` and render pass per frame, so the player rides along inside any wgpu
+application — your own app, egui, macroquad, Bevy.
 
 The documentation is at <https://cri-middleware.github.io/SSPlayerForWgpu/>. The same pages for this
 version are in this crate's `docs/` as Markdown, readable offline: start at `docs/index.md`; the Rust
 pages are `docs/start/rust.md` and `docs/reference/rust.md`.
 
-## The borrow model
+## Install
 
-The player does not own the wgpu `Device` / `Queue` / `Surface`, nor the
-`SSRenderer`. **The host owns them and lends them per frame**, so the player
-rides along inside any wgpu application — your own app, egui, macroquad, Bevy —
-without locking you into an engine.
+Rust 1.99 or newer, and an app on the **30** line of wgpu. Add the crate as a git dependency; cargo
+checks out the `SpriteStudio-SDK` submodule for you:
 
-Three types, split by how long their resources stay useful:
+```toml
+[dependencies]
+ssplayer-wgpu = { git = "https://github.com/cri-middleware/SSPlayerForWgpu" }
+```
 
-| Type | Scope | Holds |
-|---|---|---|
-| `SSRenderer` | one **device** | pipelines, bind group layouts, sampler, atlas textures |
-| `SSScene` | one **render target** | projection, the frame's geometry arena, the draw list |
-| `SSPlayer` | one **character** | the playback tree, transform, order, visibility, alpha |
-
-A player holds no GPU resource at all, so a scene carries any number of them and
-they share one upload of a pack's atlases. The host keeps a single `SSRenderer`
-per device — never one per canvas or window.
-
-## Usage
+## First frame
 
 ```rust
 use ssplayer_wgpu::{MaskBackend, SSPlayer, SSRenderer, SSScene, SceneConfig};
@@ -62,77 +52,17 @@ scene.update(&mut renderer, &device, &queue, delta_secs, &mut [&mut player]);
 scene.draw(&renderer, &mut rpass);
 ```
 
-`set_animation` builds the instance tree and is the allocating step; `play` /
-`pause` / `resume` / `stop` / `set_speed_scale` are allocation-free transport. Players are drawn
-in ascending `set_order`, and `set_transform` / `set_visible` / `set_alpha` place
-each one in the scene. `set_culled` drops one that cannot be seen, timeline and all.
-`set_crowd` draws one player at many placements for one player's CPU cost, and
-`SSScene::set_group_alpha` fades each faded player as one layer.
+**Read next:** [Get started with Rust](https://cri-middleware.github.io/SSPlayerForWgpu/start/rust/) ·
+[Rust API reference](https://cri-middleware.github.io/SSPlayerForWgpu/reference/rust/) ·
+[The borrow model](https://cri-middleware.github.io/SSPlayerForWgpu/wgpu/borrow-model/)
 
-Hosts that supply their own textures — an engine with an asset system — lend a
-`TextureView` through `SSRenderer::set_texture` instead of letting the player
-upload; the player never takes ownership of a GPU texture.
+## Working on it
 
-## Faces and features
-
-| Feature | Default | What it adds |
-|---|---|---|
-| `embedded` | ✅ | Decodes embedded-mode `.ssab` atlases in-crate (the `image` crate). Turn off where the host decodes instead. |
-| `web` | | The WebGPU / JS face: `SsContextWeb` (page) / `SsSurfaceWeb` (canvas) / `SsPlayerWeb` (character), via wasm-bindgen. Deliberately does **not** pull `embedded` — the browser already ships a decoder, so atlases go out encoded and come back through `createImageBitmap`. |
-| `ffi` | | The C / C++ face: `ss_scene_*` + `ss_player_*` entry points and `NativeHost`, which builds wgpu from a raw window handle. The companion `ssplayer-wgpu-ffi` crate compiles these into the binary library; its `build.rs` runs cbindgen to emit `ssplayer-wgpu-ffi/include/ssplayer_wgpu.h`. |
-
-This crate is a plain `rlib`; the companion `ssplayer-wgpu-ffi` crate is built as
-`cdylib` + `staticlib` and as the wasm module, so the same source still serves
-a Rust dependency, a browser and a native shared library.
-
-## Modules
-
-| Module | Role |
-|---|---|
-| `renderer` | device-scoped: pipelines (built on first use), shaders, the texture map |
-| `scene` | target-scoped: projection, the frame arena, the draw list, GPU timing |
-| `player` | the playback node tree, loading, transport, per-part overrides |
-| `pack` | `SSPack` — a `.ssab` shared between players, CPU data only |
-| `assets` / `decode` | the loader seam, and bulk atlas decoding |
-| `mask` | the stencil planner |
-| `events` / `metrics` / `roster` | animation events, frame counters, generation-tagged handles |
-| `web` / `host` + `ffi` | the two wrapper faces |
-
-## Requirements
-
-- Rust 1.99+
-- A GPU backend supported by wgpu **30**
-- For the web face: `wasm-pack` and `rustup target add wasm32-unknown-unknown`
-
-## wgpu version
-
-wgpu is pinned to the **30** line so that a Slint UI and this player can be
-composed on one device: Slint's `unstable-wgpu-NN` feature requires an exact wgpu
-major. A workspace resolves exactly one wgpu, so this is a
-repository-wide constraint: check Slint's supported major before bumping it.
-
-## Using it in your own project
-
-Add it as a git dependency; cargo checks out the `SpriteStudio-SDK` submodule
-for you:
-
-```toml
-[dependencies]
-ssplayer-wgpu = { git = "https://github.com/cri-middleware/SSPlayerForWgpu" }
-```
-
-## Why the SDK is a submodule
-
-Unlike the other players (Godot, Unity, Ren'Py, Web, Flutter), which talk to the
-SDK through the stable C-API in a released zip, this player links `ssruntime` and
-`ssab` as Rust crates and reads their FlatBuffers types directly, so it has to
-track unreleased `.ssab` schema changes. Bump it with:
-
-```bash
-git -C SpriteStudio-SDK fetch origin && git -C SpriteStudio-SDK checkout origin/develop
-cargo test --workspace
-git add SpriteStudio-SDK && git commit -m "chore: bump SDK submodule"
-```
+For the repository as a whole — examples, build scripts, asset generation — see
+the [top-level README](../../README.md) and [CONTRIBUTING.md](../../CONTRIBUTING.md). Unlike the
+other players, this one links the SDK's `ssruntime` and `ssab` as Rust crates through the
+`SpriteStudio-SDK` submodule rather than its released C-API; how to bump it is in
+[Contributing](https://cri-middleware.github.io/SSPlayerForWgpu/contributing/).
 
 ## License
 
