@@ -112,7 +112,7 @@ import { defineSsPlayerWebGPUElement } from '@spritestudio/ssplayer-wgpu/element
 `SsContextWeb` / `SsSurfaceWeb` / `SsPlayerWeb` are the full API — one device per page, one surface
 per canvas, any number of characters in one pass — and the custom element is the one-character
 convenience wrapper over them, in its own entry point so a bundle that does not use it does not carry
-it. The package's own [README](./packages/ssplayer-wgpu/README.md) is the JavaScript-facing one.
+it. [Get started on the web](./docs/en/start/web.md) is the JavaScript-facing guide.
 
 Install it from npm:
 

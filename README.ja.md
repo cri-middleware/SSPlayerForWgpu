@@ -90,7 +90,7 @@ import { defineSsPlayerWebGPUElement } from '@spritestudio/ssplayer-wgpu/element
 
 `SsContextWeb` / `SsSurfaceWeb` / `SsPlayerWeb` が API の全体です（ページごとに 1 デバイス、canvas ごとに
 1 サーフェス、1 パスに任意個数のキャラクター）。カスタム要素はその上に載る 1 キャラクター用の簡便なラッパーで、使わないバンドルが抱え込まずに済むよう独立したエントリポイントに分けてあります。
-JavaScript 側から読むべき README は[パッケージ自身のもの](./packages/ssplayer-wgpu/README.ja.md)です。
+JavaScript 側から読むべきガイドは [Web ではじめる](./docs/ja/start/web.md) です。
 
 npm からインストールします:
 
