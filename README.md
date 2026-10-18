@@ -36,8 +36,7 @@ files, no re-authoring, no engine lock-in.
 
 **Using it in your application?** Read on — pick your host, then [Usage](#-usage).
 Everything after the first character (events, per-part overrides, motion blending,
-device-loss recovery) is the same path further in, in the [crate README](./libs/ssplayer-wgpu)
-and the [documentation](./docs/en/index.md).
+device-loss recovery) is the same path further in, in the [documentation](./docs/en/index.md).
 **Working on the player itself?** [Contributing](#-contributing).
 
 > The player links `ssruntime` and `ssab` as Rust crates rather than through a released C-API, so the
@@ -112,7 +111,7 @@ import { defineSsPlayerWebGPUElement } from '@spritestudio/ssplayer-wgpu/element
 `SsContextWeb` / `SsSurfaceWeb` / `SsPlayerWeb` are the full API — one device per page, one surface
 per canvas, any number of characters in one pass — and the custom element is the one-character
 convenience wrapper over them, in its own entry point so a bundle that does not use it does not carry
-it. The package's own [README](./packages/ssplayer-wgpu/README.md) is the JavaScript-facing one.
+it. [Get started on the web](./docs/en/start/web.md) is the JavaScript-facing guide.
 
 Install it from npm:
 
@@ -149,7 +148,8 @@ scene.draw(&renderer, &mut rpass);           // into a pass the host opened
 ```
 
 The full API — the three scopes, loading, transport, per-part overrides, events, motion blending,
-device-loss recovery — is in the [crate README](./libs/ssplayer-wgpu). The C and JavaScript faces are
+device-loss recovery — is in the [Rust API reference](./docs/en/reference/rust.md) and the guides it
+links to. The C and JavaScript faces are
 the same shape under different names, and each sample below documents its own.
 
 **Several animations on one character.** A stack of tracks folds onto the setup pose: `set_animation`

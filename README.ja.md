@@ -28,7 +28,7 @@
 
 ## 📦 インストール
 
-**アプリケーションで使う場合**はこのまま下へ。ホストを選んで、[使い方](#-使い方)へ。最初の 1 体から先（イベント、パーツ単位の上書き、モーションブレンディング、デバイスロストからの復帰）も同じ道の続きで、[クレートの README](./libs/ssplayer-wgpu) と[ドキュメント](./docs/ja/index.md)にあります。**プレイヤー自体を開発する場合**は[コントリビュート](#-コントリビュート)へ。
+**アプリケーションで使う場合**はこのまま下へ。ホストを選んで、[使い方](#-使い方)へ。最初の 1 体から先（イベント、パーツ単位の上書き、モーションブレンディング、デバイスロストからの復帰）も同じ道の続きで、[ドキュメント](./docs/ja/index.md)にあります。**プレイヤー自体を開発する場合**は[コントリビュート](#-コントリビュート)へ。
 
 > このプレイヤーは公開済みの C-API 経由ではなく `ssruntime` と `ssab` を Rust クレートとして直接リンクするため、SDK は git submodule として入ります。
 
@@ -90,7 +90,7 @@ import { defineSsPlayerWebGPUElement } from '@spritestudio/ssplayer-wgpu/element
 
 `SsContextWeb` / `SsSurfaceWeb` / `SsPlayerWeb` が API の全体です（ページごとに 1 デバイス、canvas ごとに
 1 サーフェス、1 パスに任意個数のキャラクター）。カスタム要素はその上に載る 1 キャラクター用の簡便なラッパーで、使わないバンドルが抱え込まずに済むよう独立したエントリポイントに分けてあります。
-JavaScript 側から読むべき README は[パッケージ自身のもの](./packages/ssplayer-wgpu/README.ja.md)です。
+JavaScript 側から読むべきガイドは [Web ではじめる](./docs/ja/start/web.md) です。
 
 npm からインストールします:
 
@@ -125,7 +125,7 @@ scene.update(&mut renderer, &device, &queue, delta_secs, &mut [&mut player]);
 scene.draw(&renderer, &mut rpass);           // into a pass the host opened
 ```
 
-API の全体 — 3 つのスコープ、ロード、トランスポート、パーツ単位の上書き、イベント、モーションブレンディング、デバイスロストからの復帰 — は[クレートの README](./libs/ssplayer-wgpu) にあります。
+API の全体 — 3 つのスコープ、ロード、トランスポート、パーツ単位の上書き、イベント、モーションブレンディング、デバイスロストからの復帰 — は [Rust API リファレンス](./docs/ja/reference/rust.md)と、そこからリンクしたガイドにあります。
 C と JavaScript のフェイスは名前が違うだけで同じ形をしており、以下の各サンプルがそれぞれの環境について自分で説明しています。
 
 **1 体のキャラクターに複数のアニメーションを重ねられます。** トラックのスタックがセットアップポーズへ順に畳み込まれます。`set_animation` がトラック 0 を決めて構造を担い、その上に `set_track_animation` /

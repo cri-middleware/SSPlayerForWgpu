@@ -33,7 +33,8 @@ faces as thin wrappers.
 
 | Question | File |
 |---|---|
-| Use, per face | [README.md](./README.md), the [docs site](./docs/en/) |
+| Using it, per face: every API and limitation | the [docs site](./docs/en/) |
+| Install per host, first frame, where to read next; in a crate's or package's README, also working on it | [README.md](./README.md) and each crate's and package's, per `SpriteStudio-SDK/MAINTAINING_PLAYERS.md` |
 | Constraints, build, verify, docs, scripts | [CONTRIBUTING.md](./CONTRIBUTING.md), each script's `--help` |
 | Releases, maintainers only | [RELEASING.md](./RELEASING.md) |
 | Plans, and what was measured and declined | [ROADMAP.md](./ROADMAP.md), and [PREVIEW.md](./PREVIEW.md) |
