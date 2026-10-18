@@ -9,7 +9,9 @@ authors.workspace = true
 license.workspace = true
 repository.workspace = true
 homepage.workspace = true
-description = "Bevy adapter for SpriteStudio Player for wgpu"
+description = "Bevy adapter for SpriteStudio Player for wgpu: spawns a SpriteStudio animation (.ssab) as an entity in a Bevy app."
+keywords = ["spritestudio", "animation", "gamedev", "bevy", "2d"]
+categories = ["game-development", "graphics", "rendering"]
 
 [dependencies]
 ssplayer-wgpu = { workspace = true }
