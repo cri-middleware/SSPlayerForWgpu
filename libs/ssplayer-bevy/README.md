@@ -12,18 +12,18 @@ The documentation is at <https://cri-middleware.github.io/SSPlayerForWgpu/>. The
 version are in this crate's `docs/` as Markdown, readable offline: start at `docs/index.md`; the Bevy
 pages are `docs/start/bevy.md` and `docs/reference/bevy.md`.
 
-## Supported Bevy
+## Install
 
-**0.20.x, and no other line.**
+**Bevy 0.20.x, and no other line.** Bevy and the player must resolve to one `wgpu`, so another
+line is a compile error rather than a runtime surprise
+([why](https://cri-middleware.github.io/SSPlayerForWgpu/start/bevy/#supported-bevy)).
 
-Bevy and the player must resolve to one `wgpu`: `bevy_render` 0.20 requires
-`wgpu ^30` and the player is pinned to the 30 line. Two majors of `wgpu` are
-two unrelated sets of types, and no glue bridges them — a mismatch is a compile
-error, not a runtime surprise. npm would call this a peer dependency; cargo has
-no such thing, so the range is stated here and the workspace resolving a single
-`wgpu` is what enforces it.
+```toml
+[dependencies]
+ssplayer-bevy = { git = "https://github.com/cri-middleware/SSPlayerForWgpu" }
+```
 
-## Using it
+## First frame
 
 ```rust
 use bevy::prelude::*;
@@ -41,7 +41,7 @@ fn main() {
 
 fn setup(mut commands: Commands, asset_server: Res<AssetServer>) {
     // MSAA has to be off: the player's pipelines are single-sampled.
-    // CompositingSpace::Srgb is needed for correct colour (see below).
+    // CompositingSpace::Srgb is needed for correct colour; without it every character is too bright.
     commands.spawn((Camera2d, Msaa::Off, CompositingSpace::Srgb));
 
     commands.spawn((
@@ -52,51 +52,12 @@ fn setup(mut commands: Commands, asset_server: Res<AssetServer>) {
 }
 ```
 
-`SsTransform` and `SsPlayback` are required components, so spawning `SsPlayer`
-alone gives you both at their defaults.
+The pack is an asset path: put the converted `.ssab` and the images beside it under your app's
+`assets/` folder.
 
-The pack is an `SsPack` asset, loaded through Bevy's `AssetServer` from the app's
-`assets/` folder (or whatever source the app configures). The character appears
-once the pack and its atlases have loaded; characters sharing a pack share one
-parse of it and one GPU texture per atlas, lent to the player rather than copied.
-With Bevy's `file_watcher` feature, reconverting rebuilds the character from the
-new file.
-
-## Colour: give the camera `CompositingSpace::Srgb`
-
-SpriteStudio atlases are authored in sRGB, and the player writes those bytes
-verbatim into whatever target it is given — it does no colour management, the
-same as the native and C++ hosts. Bevy's **default** 2d camera renders into an
-**sRGB** target, which encodes those bytes a *second* time on write, so every
-character comes out visibly too bright.
-
-Adding `CompositingSpace::Srgb` to the camera makes Bevy pick a non-sRGB
-(`Rgba8Unorm`) target and composite in sRGB space — which is exactly the player's
-(and the WebGL reference's) model, so colours match. The adapter warns once if it
-finds itself drawing into an sRGB target without it.
-
-> HDR is a separate case still: an `Hdr` camera renders at `Rgba16Float` (linear
-> light) and the player's sRGB-space output is not tone-mapping-correct there.
-> For faithful colour, use an SDR camera with `CompositingSpace::Srgb`.
-
-| Component | What it carries | Cost of changing it |
-|---|---|---|
-| `SsPlayer` | `pack` (a `Handle<SsPack>`), `animation`, `transition_ms` | Rebuilds the playback tree — this is the allocating one |
-| `SsTransform` | `x`, `y`, `scale_x`, `scale_y`, `rotation` | Free |
-| `SsPlayback` | `playing`, `speed_scale`, `order`, `alpha`, `visible`, `culled`, `restart`, `direction`, `style`, `loop_count`, `frame_rate`, `frame_skip_enabled`, `sub_frame_enabled`, `animation_section` | Free |
-
-An optional `SsCrowd` component draws one character at many placements for one
-character's CPU cost, and the `SsSceneSettings` resource's `group_alpha` fades
-each faded character as one layer rather than part by part.
-
-Deliberately not Bevy's `Transform`: that is a 3D affine whose decomposition into
-the player's five scalars is lossy. An app that wants the two linked can write
-the one system that copies across, and keeps the choice of which is authoritative.
-
-`SsPlayback::playing` pauses and resumes without rewinding, so it cannot replay a
-finished animation. To restart one from its head, **bump `SsPlayback::restart`**
-(any change of value) — it is a generation counter, so a host re-triggers a
-one-shot by incrementing it, with nothing to clear afterwards.
+**Read next:** [Get started with Bevy](https://cri-middleware.github.io/SSPlayerForWgpu/start/bevy/) ·
+[Bevy API reference](https://cri-middleware.github.io/SSPlayerForWgpu/reference/bevy/) ·
+[Engine integration](https://cri-middleware.github.io/SSPlayerForWgpu/wgpu/engines/#case-study-bevy)
 
 ## Examples
 
@@ -111,101 +72,6 @@ cargo run -p ssplayer-bevy-overall    # the guided feature tour — read first
 cargo run -p ssplayer-bevy-viewer     # the interactive development viewer
 ```
 
-- [`examples/overall-bevy`](../../examples/overall-bevy) — the Bevy counterpart of
-  the sibling players' `overall` / `webgl-example` demos: one character stepped
-  through the whole sample set (`[` `]` scene, `Space` play/pause, `Up`/`Down`
-  speed, `R` restart), with a HUD naming each feature. The one to read first.
-- [`examples/viewer-bevy`](../../examples/viewer-bevy) — a free-form viewer of a
-  cast in one pass (pack / animation switching, add / remove characters, layout,
-  draw order, alpha, visibility, track keys, drop-to-play), the Bevy sibling of
-  the native `examples/viewer`.
-
-Both are driven through the three components above, and viewer-bevy's track keys
-through the `SsTrackCommand` message as well; the `Sound` scenes play audio,
-which the host does — the player only names the cue.
-
-## How it is wired
-
-Bevy renders in two worlds, and the crate is split along that seam.
-
-| Where | What |
-|---|---|
-| Main world | The three components above, `SsCrowd`, `SsSceneSettings`, and the `SsPlay` / `SsStop` / `SsSeek` / `SsTrackCommand` messages. The whole authoring surface |
-| `ExtractSchedule` | Copies them, plus the frame delta, into the render world |
-| `Render` / `RenderSystems::Prepare` | Applies them to the playback trees; takes up a changed or reloaded `pack` once it has loaded |
-| `Core2d` / `Core2dSystems::MainPass` | Advances, builds and draws, after `main_transparent_pass_2d` |
-
-The playback trees, the device-scoped `SSRenderer` and the target-scoped
-`SSScene` all live in the render world. The player never owns Bevy's `Device` /
-`Queue` / render target — the draw system lends them for the frame, which is the
-same borrow model the winit viewer and the C++ hosts honour.
-
-The draw system is ordered *after* `main_transparent_pass_2d`, not merely placed
-in the same set. Two systems that each take a `RenderContext` get their own
-command encoder, and only an explicit edge decides which buffer reaches the queue
-first — without it, whether the characters land over or under Bevy's sprites is a
-race.
-
-## Masks, without a stencil
-
-Bevy's 2d depth texture is `Depth32Float`, which carries no stencil — so this
-adapter selects the player's **coverage-bitmap** mask backend instead of its
-stencil one. The player rasterises each masking character's mask parts into a
-bitmap of its own and the content shader replays them per fragment; nothing is
-asked of Bevy's attachments, and the draw stays inside Bevy's own pass.
-
-The bake is recorded onto the same `CommandEncoder` the draw pass is opened on,
-in the same system. That ordering is the whole guarantee: passes in one encoder
-run in order, so a character is clipped by *this* frame's mask. Splitting the
-bake into its own system would give it a separate encoder and put the order back
-in the hands of whatever ran first.
-
-The cost is one extra render pass per masking character per frame.
-
-## Reacting to playback
-
-Playback runs in the render world, so what it produces comes back to gameplay
-through two surfaces:
-
-| Surface | Kind | Use it for |
-|---|---|---|
-| `SsPlaybackState` component | Polled | The current `frame_no`, whether the animation has `finished`, and whether it is `playing_forward` |
-| `SsEventMessage` | `MessageReader` | Timeline events — match on `SsEvent` for the user-data marker, the signal, or the audio cue |
-| `SsStarted` / `SsFinished` / `SsLooped` | `MessageReader` | The one-shot start, completion and loop edges |
-
-```rust
-fn play_sounds(mut events: MessageReader<SsEventMessage>) {
-    for message in events.read() {
-        if let SsEvent::Audio(audio) = &message.event {
-            // The player produces no sound itself; feed your own audio stack.
-            info!("play {:?} x{}", audio.sound_name, audio.loop_num);
-        }
-    }
-}
-```
-
-Both surfaces are **one frame behind**: what you read this frame is what playback
-produced last frame, because it ran in the render world after last frame's
-`Update`. For a sound cue or a state change that is imperceptible; a host that
-cannot tolerate it would need playback moved into the main world, which this
-crate deliberately does not do.
-
-## Robustness
-
-| Event | What happens |
-|---|---|
-| **Window resize** | Followed automatically — the draw system reprojects to the camera's viewport every frame |
-| **HDR camera** | The view's format becomes `Rgba16Float`; the scene rebuilds its pipelines for it on the frame the format changes, mask included |
-| **Device loss** | Recovers by riding Bevy's own recovery: on a new device Bevy re-runs `RenderStartup`, which rebuilds the renderer, and the players are rebuilt from the packs already in the render world next frame, their atlases re-lent once Bevy has prepared its images again. **You must opt in** — Bevy's default error handler *quits* on device loss, so install a `RenderErrorHandler` that returns `RenderErrorPolicy::Recover` for it |
-
-## What this version does not do yet
-
-* **One view.** The adapter holds one `SSScene` and binds it to the first view
-  that renders; later views are skipped, with a warning, because one scene holding
-  every player would run `SSScene::update` twice a frame and advance every
-  animation twice. So a second camera of any kind — a UI camera, a
-  render-to-texture portrait, a minimap, a split screen — leaves every character
-  in whichever view came first.
-* **MSAA must be off** — the player's pipelines are single-sampled. Bevy's
-  default camera has MSAA on, so give it `Msaa::Off`; the adapter warns once and
-  skips (rather than crashing) if it finds a multisampled target.
+[`examples/overall-bevy`](../../examples/overall-bevy) steps one character through the whole sample
+set; [`examples/viewer-bevy`](../../examples/viewer-bevy) is a free-form viewer of a cast in one pass.
+Each README lists its keys.

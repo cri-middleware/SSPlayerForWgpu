@@ -239,11 +239,14 @@ take a `RenderContext` get their own command encoder, and only an explicit edge 
 buffer reaches the queue first. Without it, whether characters land over or under Bevy's sprites
 would be a race.
 
+A window resize needs nothing from you: the draw system reprojects to the camera's viewport every
+frame.
+
 ## What this adapter does not do yet
 
 | | |
 |---|---|
-| **One view** | The adapter holds one `SSScene` with every character in it, and `SSScene::update` fuses the timeline advance with the geometry build, so a second view would advance every animation twice per frame. Later views are skipped, with a warning |
+| **One view** | The adapter holds one `SSScene` with every character in it, and `SSScene::update` fuses the timeline advance with the geometry build, so a second view would advance every animation twice per frame. Later views are skipped, with a warning — so a UI camera, a render-to-texture portrait, a minimap or a split screen leaves every character in whichever view came first |
 | **MSAA** | must be off. The adapter warns once and skips a multisampled target rather than crashing |
 | **Part overrides** | not exposed as components. See [Scopes and names](../guide/concepts.md#what-each-face-can-do) |
 
