@@ -421,16 +421,21 @@ pub struct SSScene {
     /// (the projection lives in a buffer that dies with the device).
     viewport: Option<(f32, f32, bool)>,
 
-    /// The frame's arena, primitive table and mesh stream, in that order, in one
-    /// buffer: wgpu stages every write through a new buffer of its own, and
-    /// making one costs more than a frame's copy, so one write it is.
+    /// The frame's arena, primitive table, mesh stream and shader params, in
+    /// that order, in one buffer: wgpu stages every write through a new buffer
+    /// of its own, and making one costs more than a frame's copy, so one write
+    /// it is.
     frame_buffer: Option<wgpu::Buffer>,
     /// The bytes each of group(0)'s three storage bindings covers, so the most
-    /// a frame may put in each. They only grow, and the buffer holds all three.
-    frame_capacity: [u64; 3],
+    /// a frame may put in each, then the room for the shader params. They only
+    /// grow, and the buffer holds all four.
+    frame_capacity: [u64; 4],
     /// Where this frame's primitive table and mesh stream start in the buffer:
     /// group(0)'s dynamic offsets. The arena starts at zero.
     frame_offsets: [u32; 2],
+    /// Where this frame's shader params start in the buffer. A shader part's
+    /// group(2) offset is this plus its slot's.
+    params_at: u32,
 
     /// This frame's geometry, every player's in `order`. This is what reaches
     /// the GPU.
@@ -449,9 +454,9 @@ pub struct SSScene {
     /// none of them moved. Refilled in place, like `draw_order`.
     built_players: Vec<(i32, u32)>,
 
-    // --- Integration shaders (`ss-*`). Only touched when a frame has
-    // shader parts; shader-free animations never build any of this. ---
-    ss_params_buffer: Option<wgpu::Buffer>,
+    /// group(2) of an integration-shader (`ss-*`) part: the frame buffer, one
+    /// params slot wide. Built by the first frame with shader parts after the
+    /// buffer was (re)allocated; shader-free animations never build it.
     ss_params_bind_group: Option<wgpu::BindGroup>,
 
     /// This frame's counts. Free to keep, and the only way
@@ -542,13 +547,13 @@ impl SSScene {
             scene_bind_group: None,
             viewport: None,
             frame_buffer: None,
-            frame_capacity: [0; 3],
+            frame_capacity: [0; 4],
             frame_offsets: [0; 2],
+            params_at: 0,
             frame: FrameChunk::new(*config),
             draw_order: Vec::new(),
             built: None,
             built_players: Vec::new(),
-            ss_params_buffer: None,
             ss_params_bind_group: None,
             stats: SceneStats::default(),
             // Deferred to the first frame: `new` has no `Queue` to read the
@@ -1015,12 +1020,15 @@ impl SSScene {
         }
 
         // Each array starts at the first aligned offset past the one before it.
-        let bytes = [std::mem::size_of_val(self.frame.arena.as_slice()), std::mem::size_of_val(self.frame.prims.as_slice()), std::mem::size_of_val(self.frame.mesh_stream.as_slice())].map(|n| n as u64);
+        let bytes =
+            [std::mem::size_of_val(self.frame.arena.as_slice()), std::mem::size_of_val(self.frame.prims.as_slice()), std::mem::size_of_val(self.frame.mesh_stream.as_slice()), std::mem::size_of_val(self.frame.ss_params.as_slice())].map(|n| n as u64);
         let prims_at = bytes[0].next_multiple_of(FRAME_ALIGN);
         let stream_at = (prims_at + bytes[1]).next_multiple_of(FRAME_ALIGN);
+        let params_at = (stream_at + bytes[2]).next_multiple_of(FRAME_ALIGN);
         self.frame_offsets = [prims_at as u32, stream_at as u32];
+        self.params_at = params_at as u32;
 
-        // Growing any of the three invalidates group(0), so the buffer is sized
+        // Growing any of the four invalidates group(0), so the buffer is sized
         // for all of them and the bind group rebuilt only when it actually moved.
         if self.ensure_frame_buffer(device, bytes) || self.scene_bind_group.is_none() {
             let buffer = self.frame_buffer.as_ref().expect("ensure_frame_buffer just built it");
@@ -1030,9 +1038,19 @@ impl SSScene {
                 layout: &renderer.scene_bind_group_layout,
                 entries: &[wgpu::BindGroupEntry { binding: 0, resource: self.globals_buffer.as_entire_binding() }, binding(1, self.frame_capacity[0]), binding(2, self.frame_capacity[1]), binding(3, self.frame_capacity[2])],
             }));
+            self.ss_params_bind_group = None;
+        }
+        if !self.frame.ss_params.is_empty() && self.ss_params_bind_group.is_none() {
+            let buffer = self.frame_buffer.as_ref().expect("ensure_frame_buffer built it");
+            // The binding window is one `SsParams` (64 B); the dynamic offset picks the slot.
+            self.ss_params_bind_group = Some(device.create_bind_group(&wgpu::BindGroupDescriptor {
+                label: Some("SpriteStudio SS Params Bind Group"),
+                layout: &renderer.ss_params_bind_group_layout,
+                entries: &[wgpu::BindGroupEntry { binding: 0, resource: wgpu::BindingResource::Buffer(wgpu::BufferBinding { buffer, offset: 0, size: wgpu::BufferSize::new(64) }) }],
+            }));
         }
         if let Some(buffer) = self.frame_buffer.as_ref() {
-            upload_frame(queue, buffer, &self.frame, self.frame_offsets);
+            upload_frame(queue, buffer, &frame_parts(&self.frame, [prims_at, stream_at, params_at]));
         }
 
         // Compile whatever this frame draws with and has not drawn with before. After the first few frames every key is a cache hit, so
@@ -1068,29 +1086,6 @@ impl SSScene {
             // collapse into one however well their ranges line up.
             if call.key == previous.key && call.texture_hash == previous.texture_hash && call.shader_slot.is_none() && previous.shader_slot.is_none() && call.vertices.start == previous.vertices.end {
                 self.stats.mergeable_draws += 1;
-            }
-        }
-
-        // Integration shaders: upload this frame's per-part params.
-        // Nothing here runs for shader-free frames (`ss_params` stays empty).
-        if !self.frame.ss_params.is_empty() {
-            let bytes: &[u8] = bytemuck::cast_slice(&self.frame.ss_params);
-            let needed_size = bytes.len() as u64;
-            let current = self.ss_params_buffer.as_ref().map(|b| b.size()).unwrap_or(0);
-            if current < needed_size {
-                let new_size = (needed_size * 2).max(SHADER_PARAM_STRIDE as u64);
-                let buffer = device.create_buffer(&wgpu::BufferDescriptor { label: Some("SpriteStudio SS Params Buffer"), size: new_size, usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST, mapped_at_creation: false });
-                // The binding window is one `SsParams` (64 B); the dynamic offset picks the slot.
-                let bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
-                    label: Some("SpriteStudio SS Params Bind Group"),
-                    layout: &renderer.ss_params_bind_group_layout,
-                    entries: &[wgpu::BindGroupEntry { binding: 0, resource: wgpu::BindingResource::Buffer(wgpu::BufferBinding { buffer: &buffer, offset: 0, size: wgpu::BufferSize::new(64) }) }],
-                });
-                self.ss_params_buffer = Some(buffer);
-                self.ss_params_bind_group = Some(bind_group);
-            }
-            if let Some(ref buffer) = self.ss_params_buffer {
-                queue.write_buffer(buffer, 0, bytes);
             }
         }
     }
@@ -1169,7 +1164,7 @@ impl SSScene {
         pass.set_pipeline(pipeline);
         pass.set_bind_group(1, texture, &[]);
         if let Some((slot, bg)) = params {
-            pass.set_bind_group(2, bg, &[slot * SHADER_PARAM_STRIDE as u32]);
+            pass.set_bind_group(2, bg, &[self.params_at + slot * SHADER_PARAM_STRIDE as u32]);
         }
         // Set per draw rather than once: group(2) is the coverage array under
         // one pipeline layout and the shader params under another, so a shader
@@ -1202,17 +1197,18 @@ fn layer_extent(device: &wgpu::Device, width: f32, height: f32) -> (u32, u32) {
     ((width.round() as u32).clamp(1, max), (height.round() as u32).clamp(1, max))
 }
 
-/// Where each of the frame's three arrays may start in the frame buffer.
+/// Where each of the frame's four arrays may start in the frame buffer.
 ///
-/// The largest `min_storage_buffer_offset_alignment` a device may ask for, so
-/// every device takes it: the limit is a power of two no larger than this.
+/// The largest `min_storage_buffer_offset_alignment` and
+/// `min_uniform_buffer_offset_alignment` a device may ask for, so every device
+/// takes it: each limit is a power of two no larger than this.
 const FRAME_ALIGN: u64 = 256;
 
 impl SSScene {
-    /// Make sure each of group(0)'s three bindings can hold `bytes` of its array,
-    /// reallocating the buffer (with headroom) if not. Returns whether it was
-    /// replaced — the bind group is stale if so.
-    fn ensure_frame_buffer(&mut self, device: &wgpu::Device, bytes: [u64; 3]) -> bool {
+    /// Make sure the buffer can hold `bytes` of each of the frame's arrays,
+    /// reallocating it (with headroom) if not. Returns whether it was replaced —
+    /// the bind groups are stale if so.
+    fn ensure_frame_buffer(&mut self, device: &wgpu::Device, bytes: [u64; 4]) -> bool {
         if self.frame_buffer.is_some() && bytes.iter().zip(&self.frame_capacity).all(|(needed, held)| needed <= held) {
             return false;
         }
@@ -1225,9 +1221,10 @@ impl SSScene {
         }
         // The binding past each start is a whole capacity long, and a start is
         // never later than the capacities before it add up to: the arena's
-        // binding overlaps the arrays after it, which read-only bindings may.
+        // binding overlaps the arrays after it, and the stream's the params,
+        // which bindings that only read may.
         let size = self.frame_capacity.iter().sum();
-        self.frame_buffer = Some(device.create_buffer(&wgpu::BufferDescriptor { label: Some("SpriteStudio Frame"), size, usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST, mapped_at_creation: false }));
+        self.frame_buffer = Some(device.create_buffer(&wgpu::BufferDescriptor { label: Some("SpriteStudio Frame"), size, usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST, mapped_at_creation: false }));
         true
     }
 }
@@ -1238,29 +1235,48 @@ fn f32s(bytes: &[u8]) -> impl Iterator<Item = f32> + '_ {
     bytes.as_chunks::<4>().0.iter().map(|word| f32::from_le_bytes(*word))
 }
 
-/// Write the frame's three arrays where `offsets` put them.
+/// The frame's four arrays, each with where it starts in the frame buffer:
+/// the arena, the primitive table, the mesh stream and the shader params.
+type FrameParts<'a> = [(usize, &'a [u8]); 4];
+
+fn frame_parts(frame: &FrameChunk, [prims_at, stream_at, params_at]: [u64; 3]) -> FrameParts<'_> {
+    [(0, bytemuck::cast_slice(&frame.arena)), (prims_at as usize, bytemuck::cast_slice(&frame.prims)), (stream_at as usize, bytemuck::cast_slice(&frame.mesh_stream)), (params_at as usize, bytemuck::cast_slice(&frame.ss_params))]
+}
+
+/// How much of the frame buffer an upload covers: up to the end of the last array.
+#[cfg(not(target_arch = "wasm32"))]
+fn frame_len(parts: &FrameParts) -> usize {
+    let (at, bytes) = parts[3];
+    at + bytes.len()
+}
+
+/// Copy the arrays into `view`, the frame buffer's first [`frame_len`] bytes,
+/// zeroing the gaps between them.
+#[cfg(not(target_arch = "wasm32"))]
+fn fill_frame(mut view: wgpu::WriteOnly<'_, [u8]>, parts: &FrameParts) {
+    let mut end = 0;
+    for &(at, bytes) in parts {
+        view.slice(end..at).fill(0);
+        view.slice(at..at + bytes.len()).copy_from_slice(bytes);
+        end = at + bytes.len();
+    }
+}
+
+/// Write the frame's arrays where `parts` puts them.
 ///
 /// Natively in one `write_buffer_with`, so the frame goes up through one staging
 /// buffer. The browser's `writeBuffer` stages for us and reads straight out of
 /// wasm memory, while `write_buffer_with` there fills a zeroed copy on the heap
-/// first, so on the web the arrays go up as three writes.
-fn upload_frame(queue: &wgpu::Queue, buffer: &wgpu::Buffer, frame: &FrameChunk, offsets: [u32; 2]) {
-    let arena: &[u8] = bytemuck::cast_slice(&frame.arena);
-    let prims: &[u8] = bytemuck::cast_slice(&frame.prims);
-    let stream: &[u8] = bytemuck::cast_slice(&frame.mesh_stream);
-    let [prims_at, stream_at] = offsets.map(|at| at as usize);
+/// first, so on the web each array goes up as a write of its own.
+fn upload_frame(queue: &wgpu::Queue, buffer: &wgpu::Buffer, parts: &FrameParts) {
     #[cfg(not(target_arch = "wasm32"))]
     {
-        let Some(size) = wgpu::BufferSize::new((stream_at + stream.len()) as u64) else { return };
+        let Some(size) = wgpu::BufferSize::new(frame_len(parts) as u64) else { return };
         let Some(mut view) = queue.write_buffer_with(buffer, 0, size) else { return };
-        view.slice(..arena.len()).copy_from_slice(arena);
-        view.slice(arena.len()..prims_at).fill(0);
-        view.slice(prims_at..prims_at + prims.len()).copy_from_slice(prims);
-        view.slice(prims_at + prims.len()..stream_at).fill(0);
-        view.slice(stream_at..).copy_from_slice(stream);
+        fill_frame(view.slice(..), parts);
     }
     #[cfg(target_arch = "wasm32")]
-    for (at, bytes) in [(0, arena), (prims_at, prims), (stream_at, stream)] {
+    for &(at, bytes) in parts {
         if !bytes.is_empty() {
             queue.write_buffer(buffer, at as u64, bytes);
         }
