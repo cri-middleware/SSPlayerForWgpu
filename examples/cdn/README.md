@@ -45,5 +45,5 @@ fails on CORS. They need a browser with WebGPU.
    `http://localhost:8000/api.html`:
 
    ```bash
-   (cd examples/cdn && python3 -m http.server)
+   (cd examples/cdn && python3 -m http.server --bind 127.0.0.1)
    ```

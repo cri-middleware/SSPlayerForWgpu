@@ -306,6 +306,6 @@ Write-Host ""
 Write-Host "${APP}: done -> packages/ssplayer-wgpu/ (wasm/ + dist/ + docs/)"
 if ($opts.deploy -eq "yes") {
     Write-Host "${APP}:      -> examples/web/ssplayer-wgpu/"
-    Write-Host "${APP}: serve it: (cd examples/web; python3 -m http.server) then open http://localhost:8000"
+    Write-Host "${APP}: serve it: (cd examples/web; python3 -m http.server --bind 127.0.0.1) then open http://localhost:8000"
     Write-Host "${APP}: the demo's .ssab come from scripts/deploy-examples.ps1"
 }

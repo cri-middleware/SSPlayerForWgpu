@@ -144,7 +144,7 @@ The rest of the matrix:
 | Preview with a pack in it | `cargo run -p ssplayer-preview-gen -- pack=assets/Ringo/Ringo.ssab open=yes` |
 | npm package | `./scripts/build.sh platform=web` — needs `pnpm` (`corepack enable`) and `wasm-pack` |
 | js layer typecheck | `cd packages/ssplayer-wgpu && pnpm run typecheck`, after a `platform=web` build |
-| Web demo | `./scripts/run-web.sh`, or `./scripts/build.sh platform=web && (cd examples/web && python3 -m http.server)` after changing the Rust |
+| Web demo | `./scripts/run-web.sh`, or `./scripts/build.sh platform=web && (cd examples/web && python3 -m http.server --bind 127.0.0.1)` after changing the Rust |
 | Third-party notices current | `./scripts/generate-licenses.sh`, then `git diff --exit-code THIRD_PARTY_NOTICES.md` |
 
 **Before and after anything that changes how geometry reaches the GPU, take a golden dump.**
@@ -319,7 +319,7 @@ cargo test -p ssplayer-wgpu --features ffi --lib
 | パック入りのプレビュー | `cargo run -p ssplayer-preview-gen -- pack=assets/Ringo/Ringo.ssab open=yes` |
 | npm パッケージ | `./scripts/build.sh platform=web` — `pnpm`（`corepack enable`）と `wasm-pack` が必要です |
 | js レイヤの型チェック | `cd packages/ssplayer-wgpu && pnpm run typecheck`（`platform=web` のビルドの後） |
-| Web デモ | `./scripts/run-web.sh`。Rust を変更した後は `./scripts/build.sh platform=web && (cd examples/web && python3 -m http.server)` |
+| Web デモ | `./scripts/run-web.sh`。Rust を変更した後は `./scripts/build.sh platform=web && (cd examples/web && python3 -m http.server --bind 127.0.0.1)` |
 | サードパーティ表記が最新か | `./scripts/generate-licenses.sh` の後、`git diff --exit-code THIRD_PARTY_NOTICES.md` |
 
 **GPU へのジオメトリの渡り方を変える変更では、その前後でゴールデンダンプを取ってください。** `tests/golden.rs::golden_corpus` は `#[ignore]` 付きのテストで、フィクスチャ・アニメーション・フレーム・ステンシルのすべての組み合わせを描画します。`SS_GOLDEN_DIR=/tmp/before cargo test --test golden -- --ignored` を実行し、続いて `SS_GOLDEN_DIR=/tmp/after SS_GOLDEN_COMPARE=/tmp/before` を付けて再実行します。基準は GPU ごとに異なるため、同じマシンで取ったものでなければなりません。これは変更の前後を比べる道具であって、チェックインされたゴールデンセットではありません。比較は `/tmp/after/summary.md` を書き出し、変化した画像ごとに変更前・変更後・差分の 3 枚組を `/tmp/after/diff/` に書き出します。CI の golden ジョブは、すべてのプルリクエストで同じことを lavapipe 上でベースの描画に対して行い、差分が 1 つでもあれば、意図した差分であっても失敗します。意図した差分のときは、アップロードされる 3 枚組（`golden-diff`）が正しい理由を説明に書いてください。

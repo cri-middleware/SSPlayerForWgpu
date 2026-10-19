@@ -49,7 +49,7 @@ To just *see* it running, the repository's own demo page is one command more:
 ```bash
 ./scripts/deploy-examples.sh              # animation data, once
 ./scripts/build.sh platform=web
-(cd examples/web && python3 -m http.server)
+(cd examples/web && python3 -m http.server --bind 127.0.0.1)
 ```
 
 ## One character: the custom element
