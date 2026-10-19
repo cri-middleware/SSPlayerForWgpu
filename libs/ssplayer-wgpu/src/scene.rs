@@ -840,8 +840,12 @@ impl SSScene {
     }
 
     /// Set the projection to the render target's pixel dimensions. Remembered, so
-    /// [`SSScene::restore_device`] can re-apply it to a rebuilt buffer.
+    /// [`SSScene::restore_device`] can re-apply it to a rebuilt buffer. The same
+    /// viewport again writes nothing, so a host may call this every frame.
     pub fn set_viewport(&mut self, queue: &wgpu::Queue, width: f32, height: f32, y_down: bool) {
+        if self.viewport == Some((width, height, y_down)) {
+            return;
+        }
         self.update_projection(queue, width, height, y_down);
         self.viewport = Some((width, height, y_down));
     }
