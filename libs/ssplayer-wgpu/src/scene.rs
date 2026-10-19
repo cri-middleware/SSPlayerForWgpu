@@ -17,6 +17,10 @@ use crate::renderer::{
 
 use ssruntime::runtime::effect_draw_plan::ss::runtime::root_as_effect_draw_plan_unchecked;
 use ssruntime::runtime::framedata::ss::runtime::{BlendType, DrawBatchKind, PartAttributeShader, root_as_frame_data_unchecked};
+#[cfg(not(target_arch = "wasm32"))]
+use std::sync::Arc;
+#[cfg(not(target_arch = "wasm32"))]
+use std::sync::atomic::{AtomicBool, Ordering};
 
 /// PartsColor formula selector, matching `varg_of` in the WGSL. Only four exist,
 /// so the shader takes two bits per primitive rather than three floats per vertex.
@@ -424,7 +428,7 @@ pub struct SSScene {
     /// The frame's arena, primitive table, mesh stream and shader params, in
     /// that order, in one buffer: wgpu stages every write through a new buffer
     /// of its own, and making one costs more than a frame's copy, so one write
-    /// it is.
+    /// it is — or natively, for a large frame, one copy out of `staging`.
     frame_buffer: Option<wgpu::Buffer>,
     /// The bytes each of group(0)'s three storage bindings covers, so the most
     /// a frame may put in each, then the room for the shader params. They only
@@ -436,6 +440,8 @@ pub struct SSScene {
     /// Where this frame's shader params start in the buffer. A shader part's
     /// group(2) offset is this plus its slot's.
     params_at: u32,
+    #[cfg(not(target_arch = "wasm32"))]
+    staging: FrameStaging,
 
     /// This frame's geometry, every player's in `order`. This is what reaches
     /// the GPU.
@@ -550,6 +556,8 @@ impl SSScene {
             frame_capacity: [0; 4],
             frame_offsets: [0; 2],
             params_at: 0,
+            #[cfg(not(target_arch = "wasm32"))]
+            staging: FrameStaging::default(),
             frame: FrameChunk::new(*config),
             draw_order: Vec::new(),
             built: None,
@@ -1050,7 +1058,14 @@ impl SSScene {
             }));
         }
         if let Some(buffer) = self.frame_buffer.as_ref() {
-            upload_frame(queue, buffer, &frame_parts(&self.frame, [prims_at, stream_at, params_at]));
+            let parts = frame_parts(&self.frame, [prims_at, stream_at, params_at]);
+            #[cfg(not(target_arch = "wasm32"))]
+            let staged = frame_len(&parts) >= STAGED_UPLOAD_MIN && self.staging.upload(device, queue, buffer, &parts);
+            #[cfg(target_arch = "wasm32")]
+            let staged = false;
+            if !staged {
+                upload_frame(queue, buffer, &parts);
+            }
         }
 
         // Compile whatever this frame draws with and has not drawn with before. After the first few frames every key is a cache hit, so
@@ -1280,6 +1295,67 @@ fn upload_frame(queue: &wgpu::Queue, buffer: &wgpu::Buffer, parts: &FrameParts) 
         if !bytes.is_empty() {
             queue.write_buffer(buffer, at as u64, bytes);
         }
+    }
+}
+
+/// Natively, a frame this large or larger goes up through [`FrameStaging`].
+/// Below it, the copy's own submit costs about what the staging buffer
+/// `write_buffer_with` does without saves.
+#[cfg(not(target_arch = "wasm32"))]
+const STAGED_UPLOAD_MIN: usize = 64 * 1024;
+
+/// Staging buffers of the scene's own that a large frame is copied through,
+/// natively: `write_buffer_with` makes a new one for every write, which past
+/// [`STAGED_UPLOAD_MIN`] costs more than writing into a mapped one that is
+/// kept and submitting the copy. Each is mapped again once the GPU has copied
+/// out of it.
+#[cfg(not(target_arch = "wasm32"))]
+#[derive(Default)]
+struct FrameStaging {
+    /// Three, so that a host with two frames in flight still finds one free.
+    /// None free, the frame goes up through `write_buffer_with`.
+    slots: [Option<StagingSlot>; 3],
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+struct StagingSlot {
+    buffer: wgpu::Buffer,
+    /// Raised by the map callback, once the buffer may be written again.
+    mapped: Arc<AtomicBool>,
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+impl FrameStaging {
+    /// Copy the frame into `target` through a free buffer, made as large as
+    /// `target` when none is or the free one is too small. Returns false, having
+    /// written nothing, when every one is still in flight.
+    fn upload(&mut self, device: &wgpu::Device, queue: &wgpu::Queue, target: &wgpu::Buffer, parts: &FrameParts) -> bool {
+        let len = frame_len(parts) as u64;
+        let free = self.slots.iter().position(|slot| slot.as_ref().is_some_and(|slot| slot.mapped.load(Ordering::Acquire)));
+        let Some(index) = free.or_else(|| self.slots.iter().position(Option::is_none)) else { return false };
+        let slot = match &mut self.slots[index] {
+            Some(slot) if slot.buffer.size() >= len => slot,
+            other => other.insert(StagingSlot::new(device, target.size())),
+        };
+        let mut view = slot.buffer.get_mapped_range_mut(..len).expect("a free staging buffer is mapped, and nothing else views it");
+        fill_frame(view.slice(..), parts);
+        drop(view);
+        slot.buffer.unmap();
+        slot.mapped.store(false, Ordering::Relaxed);
+        let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor { label: Some("SpriteStudio Frame Upload") });
+        encoder.copy_buffer_to_buffer(&slot.buffer, 0, target, 0, len);
+        queue.submit([encoder.finish()]);
+        let mapped = Arc::clone(&slot.mapped);
+        slot.buffer.map_async(wgpu::MapMode::Write, .., move |result| mapped.store(result.is_ok(), Ordering::Release));
+        true
+    }
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+impl StagingSlot {
+    fn new(device: &wgpu::Device, size: u64) -> Self {
+        let buffer = device.create_buffer(&wgpu::BufferDescriptor { label: Some("SpriteStudio Frame Staging"), size, usage: wgpu::BufferUsages::MAP_WRITE | wgpu::BufferUsages::COPY_SRC, mapped_at_creation: true });
+        Self { buffer, mapped: Arc::new(AtomicBool::new(true)) }
     }
 }
 
@@ -2205,5 +2281,44 @@ mod tests {
 
         scene.update(&mut renderer, &device, &queue, 0.0, &mut []);
         assert!(scene.layers.is_none(), "group alpha is off, and its layers outlived the next update");
+    }
+
+    /// A frame copied up through the staging buffers lands in the frame buffer
+    /// byte for byte as `write_buffer_with` puts it: through a new buffer, through
+    /// one mapped again after a frame laid out differently — whose bytes would
+    /// show in the gaps if they were not cleared — and through one replaced for a
+    /// frame larger than it.
+    #[cfg(not(target_arch = "wasm32"))]
+    #[test]
+    fn a_staged_frame_lands_as_a_written_one() {
+        let Some((device, queue)) = gpu() else {
+            eprintln!("no GPU adapter available, skipping headless render test");
+            return;
+        };
+        let read = |buffer: &wgpu::Buffer| -> Vec<u8> {
+            let readback = device.create_buffer(&wgpu::BufferDescriptor { label: None, size: buffer.size(), usage: wgpu::BufferUsages::MAP_READ | wgpu::BufferUsages::COPY_DST, mapped_at_creation: false });
+            let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor { label: None });
+            encoder.copy_buffer_to_buffer(buffer, 0, &readback, 0, buffer.size());
+            queue.submit([encoder.finish()]);
+            readback.slice(..).map_async(wgpu::MapMode::Read, |r| r.unwrap());
+            device.poll(wgpu::PollType::Wait { submission_index: None, timeout: None }).unwrap();
+            readback.slice(..).get_mapped_range().unwrap().to_vec()
+        };
+        let mut staging = FrameStaging::default();
+        for (frame, lens) in [[9_004, 30_000, 12_008, 512], [8_004, 30_000, 12_008, 512], [27_004, 90_000, 36_008, 1_024]].into_iter().enumerate() {
+            let arrays = lens.map(|len| (0..len).map(|i| (i as u8).wrapping_mul(31).wrapping_add(frame as u8 + 1)).collect::<Vec<u8>>());
+            let mut end = 0usize;
+            let parts: FrameParts = std::array::from_fn(|i| {
+                let at = end.next_multiple_of(FRAME_ALIGN as usize);
+                end = at + arrays[i].len();
+                (at, arrays[i].as_slice())
+            });
+            let target = || device.create_buffer(&wgpu::BufferDescriptor { label: None, size: end as u64, usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::COPY_SRC, mapped_at_creation: false });
+            let (written, staged) = (target(), target());
+            upload_frame(&queue, &written, &parts);
+            assert!(staging.upload(&device, &queue, &staged, &parts), "frame {frame}: no staging buffer was free, though the last frame was waited for");
+            assert!(read(&written) == read(&staged), "frame {frame}: the staged frame differs from the written one");
+        }
+        assert_eq!(staging.slots.iter().flatten().count(), 1, "a staging buffer was made while one was free");
     }
 }
