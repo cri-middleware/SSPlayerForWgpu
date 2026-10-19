@@ -134,6 +134,9 @@ try {
     }
 
     # --- serve ------------------------------------------------------------
+    # Bound to loopback. On every interface, http.server announces
+    # http://[::]:PORT/, which is not a secure context, so Copy as Markdown
+    # cannot copy there.
     Write-Host ""
     if ($SERVE -eq "yes") {
         $python = Get-Command python3 -ErrorAction SilentlyContinue
@@ -143,7 +146,7 @@ try {
         Write-Host "${APP}: http://localhost:$PORT/ja/  (Japanese)"
         Write-Host "${APP}: Ctrl-C to stop"
         Write-Host ""
-        & $python.Source -m http.server $PORT -d site
+        & $python.Source -m http.server $PORT --bind 127.0.0.1 -d site
     } else {
         Write-Host "${APP}: serve it (one server over both locales, so the language selector resolves):"
         Write-Host "${APP}:   $APP serve=yes"
