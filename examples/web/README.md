@@ -26,9 +26,9 @@ was converted. By hand, two repository scripts fill it, split by what they produ
 code and the data:
 
 ```sh
-../../scripts/deploy-examples.sh       # .ssab + atlases, both export modes
-../../scripts/build.sh platform=web    # release wasm (build=debug for a fast, larger one)
-python3 -m http.server                 # serve THIS directory
+../../scripts/deploy-examples.sh         # .ssab + atlases, both export modes
+../../scripts/build.sh platform=web      # release wasm (build=debug for a fast, larger one)
+python3 -m http.server --bind 127.0.0.1  # serve THIS directory
 # open http://localhost:8000
 ```
 

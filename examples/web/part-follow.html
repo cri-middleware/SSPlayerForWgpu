@@ -94,7 +94,7 @@
         labelPart: '追従先パーツ:',
         serve:
           'WebGPU 対応ブラウザ（Chrome / Edge 113+ など）＋ <code>http://localhost</code> 配信が必要です。' +
-          'ビルド: <code>../../scripts/build.sh platform=web</code> → 本ディレクトリを <code>python3 -m http.server</code> で配信。',
+          'ビルド: <code>../../scripts/build.sh platform=web</code> → 本ディレクトリを <code>python3 -m http.server --bind 127.0.0.1</code> で配信。',
         skinnedOpt: (n) => `⚠ ${n}（スキン）`,
         warn: (n) => `⚠ 「${n}」はスキンメッシュです — マーカーは絵ではなくルート付近に留まります。`,
         skinnedTag: '（スキンメッシュ）',
@@ -118,7 +118,7 @@
         serve:
           'Needs a WebGPU browser (Chrome / Edge 113+, etc.) served over <code>http://localhost</code>. ' +
           'Build: <code>../../scripts/build.sh platform=web</code>, then serve this directory with ' +
-          '<code>python3 -m http.server</code>.',
+          '<code>python3 -m http.server --bind 127.0.0.1</code>.',
         skinnedOpt: (n) => `⚠ ${n} (skinned)`,
         warn: (n) => `⚠ “${n}” is a skinned mesh — the marker stays near the root, not on the art.`,
         skinnedTag: ' (skinned mesh)',

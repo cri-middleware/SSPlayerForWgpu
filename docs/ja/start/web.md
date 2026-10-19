@@ -39,7 +39,7 @@ cd packages/ssplayer-wgpu && pnpm pack    # -> spritestudio-ssplayer-wgpu-<versi
 ```bash
 ./scripts/deploy-examples.sh              # アニメーションデータ（1 回だけ）
 ./scripts/build.sh platform=web
-(cd examples/web && python3 -m http.server)
+(cd examples/web && python3 -m http.server --bind 127.0.0.1)
 ```
 
 ## 1 体だけ：カスタム要素

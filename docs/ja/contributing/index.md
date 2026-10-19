@@ -54,7 +54,7 @@ SDK を上げたら、もう一度実行してください。`.ssab` の形式�
 | Metal C++ ビューア（macOS） | `cd examples/viewer-metal-cpp && cmake -B build && cmake --build build && ./build/ssviewer-metal` |
 | DX12 C++ ビューア（Windows） | `cd examples\viewer-dx12-cpp; cmake -B build; cmake --build build --config Release` |
 | Vulkan C++ ビューア（Linux） | `cd examples/viewer-vulkan-cpp && cmake -B build && cmake --build build && ./build/ssviewer-vulkan` |
-| Web デモ | `./scripts/build.sh platform=web && (cd examples/web && python3 -m http.server)` |
+| Web デモ | `./scripts/build.sh platform=web && (cd examples/web && python3 -m http.server --bind 127.0.0.1)` |
 
 ## 知っておくべき 3 つの死角
 

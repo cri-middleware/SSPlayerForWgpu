@@ -61,7 +61,7 @@ themselves (`deploy-examples.sh when=stale`).
 | Metal C++ viewer (macOS) | `cd examples/viewer-metal-cpp && cmake -B build && cmake --build build && ./build/ssviewer-metal` |
 | DX12 C++ viewer (Windows) | `cd examples\viewer-dx12-cpp; cmake -B build; cmake --build build --config Release` |
 | Vulkan C++ viewer (Linux) | `cd examples/viewer-vulkan-cpp && cmake -B build && cmake --build build && ./build/ssviewer-vulkan` |
-| Web demo | `./scripts/build.sh platform=web && (cd examples/web && python3 -m http.server)` |
+| Web demo | `./scripts/build.sh platform=web && (cd examples/web && python3 -m http.server --bind 127.0.0.1)` |
 
 ## Three blind spots to know about
 
