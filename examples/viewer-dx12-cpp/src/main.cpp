@@ -554,7 +554,7 @@ bool Viewer::HandleKey(WPARAM key) {
             if (paused_) {
                 ss_player_pause(players_[i]);
             } else {
-                ss_player_play(players_[i]);
+                ss_player_resume(players_[i]);
             }
         }
         PrintStatus();

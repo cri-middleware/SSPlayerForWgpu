@@ -100,7 +100,7 @@ pack. Status is printed to the terminal it was launched from.
 
 | Key | Action |
 |---|---|
-| Space | pause / resume (`ss_player_pause` / `ss_player_play`) |
+| Space | pause / resume (`ss_player_pause` / `ss_player_resume`) |
 | Left / Right | previous / next `.ssab` in the asset directory |
 | Up / Down | previous / next animation in the current pack |
 | R | restart the current animation |

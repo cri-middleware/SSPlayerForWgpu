@@ -52,7 +52,7 @@ the asset directory to keep the built-in default and still pick a pack.
 
 | Key | Action |
 |---|---|
-| Space | pause / resume (`ss_player_pause` / `ss_player_play`) |
+| Space | pause / resume (`ss_player_pause` / `ss_player_resume`) |
 | Left / Right | previous / next `.ssab` |
 | Up / Down | previous / next animation |
 | R | restart the current animation |

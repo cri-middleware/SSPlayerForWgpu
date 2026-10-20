@@ -72,7 +72,7 @@ printed to the console the viewer was launched from, so run it from a terminal.
 
 | Key | Action |
 |---|---|
-| Space | pause / resume (`ss_player_pause` / `ss_player_play`) |
+| Space | pause / resume (`ss_player_pause` / `ss_player_resume`) |
 | Left / Right | previous / next `.ssab` in the asset directory |
 | Up / Down | previous / next animation in the current pack |
 | R | restart the current animation |
