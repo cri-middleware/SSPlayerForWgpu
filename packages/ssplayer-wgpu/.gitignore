@@ -5,6 +5,8 @@
 # the notices for the crates compiled into the wasm, copied from the repository root
 # by scripts/build.sh platform=web
 /THIRD_PARTY_NOTICES.md
-# the documentation, copied from docs/en by scripts/build.sh platform=web
+# the documentation, and the same pages as an Agent Skill, copied from docs/en by
+# scripts/build.sh platform=web
 /docs/
+/skills/
 node_modules/

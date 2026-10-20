@@ -38,7 +38,7 @@ defineSsPlayerWebGPUElement(); // <ss-player-webgpu> を登録
 
 ## リンク
 
-- [ドキュメント](https://cri-middleware.github.io/SSPlayerForWgpu/ja/) — このバージョンの同じページ（英語の Markdown）がパッケージの `docs/` にあり、オフラインで読めます（入口は `docs/README.md`）
+- [ドキュメント](https://cri-middleware.github.io/SSPlayerForWgpu/ja/) — このバージョンの同じページ（英語の Markdown）がパッケージの `docs/` にあり、オフラインで読めます（入口は `docs/README.md`）。同じページは Agent Skill として `skills/ssplayer-wgpu/` にもあり、pnpm 12.11 以降では `pnpm approve @spritestudio/ssplayer-wgpu` のあと、コーディングエージェントの skills ディレクトリにリンクされます
 - [リポジトリ](https://github.com/cri-middleware/SSPlayerForWgpu) — Rust ライブラリ本体と、同じコアで動く Metal / DX12 / Vulkan の C/C++ ビューア
 - [Issues](https://github.com/cri-middleware/SSPlayerForWgpu/issues)
 - [SpriteStudio](https://www.webtech.co.jp/spritestudio/)
