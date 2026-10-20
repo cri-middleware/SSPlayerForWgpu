@@ -471,7 +471,7 @@ impl WebContext {
 /// const ctx = await SsContextWeb.create();
 /// const surf = ctx.createSurface(canvas);
 /// const player = surf.createPlayer();
-/// player.loadSsab('Basic', bytes);
+/// await player.loadSsab(bytes);
 /// player.setAnimation('idle');
 /// player.play();
 /// ```

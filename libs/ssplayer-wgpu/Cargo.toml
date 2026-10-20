@@ -32,8 +32,9 @@ embedded = ["dep:image"]
 # Add `embedded` back for a page that would rather not write that glue.
 web = ["dep:wasm-bindgen", "dep:wasm-bindgen-futures", "dep:js-sys", "dep:web-sys", "dep:console_error_panic_hook", "wasm-bindgen/std"]
 # C/C++ bindings (the "ffi" face): `ss_player_*` entry points plus a
-# self-contained host that builds wgpu from a raw window handle. `build.rs` runs
-# cbindgen over `src/ffi.rs` to emit `include/ssplayer_wgpu.h`. Pulls `embedded`
+# self-contained host that builds wgpu from a raw window handle. The
+# `ssplayer-wgpu-ffi` crate's `build.rs` runs cbindgen over `src/ffi.rs` to emit
+# its `include/ssplayer_wgpu.h`. Pulls `embedded`
 # so a single self-contained .ssab renders with no host texture supply.
 ffi = ["dep:pollster", "embedded"]
 

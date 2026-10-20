@@ -2032,8 +2032,9 @@ impl FrameChunk {
             let vert_last = (particle_offset + quad_count) * 4;
 
             // The particle quads go into the arena as they are — the runtime
-            // already put them in world space. Only the effect part's own
-            // placement is left, and the vertex stage applies that.
+            // emits them in the effect part's own space, relative to the slot.
+            // The effect part's placement is left, and the vertex stage
+            // applies that.
             let pos_base = self.arena.len() as u32;
             self.arena.extend(f32s(&verts[vert_first * 8..vert_last * 8]));
             let uv_base = self.arena.len() as u32;
