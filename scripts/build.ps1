@@ -19,6 +19,7 @@
 #   packages/ssplayer-wgpu/dist/                (tsdown; the npm package is published
 #                                                from that directory as it stands)
 #   packages/ssplayer-wgpu/docs/                (the documentation, as Markdown)
+#   packages/ssplayer-wgpu/skills/ssplayer-wgpu/ (the same pages, as an Agent Skill)
 #   examples/web/ssplayer-wgpu/                 (deploy=yes)
 #
 # Playback data is not this script's business at all: converting the SDK's test
@@ -277,8 +278,9 @@ Write-SdkVersion $wasmDir
 Copy-Item -Force (Join-Path $ROOT_DIR "THIRD_PARTY_NOTICES.md") $PKG_DIR
 
 # The documentation of this build, read offline beside it (scripts/copy-docs.mjs),
-# with docs/README.md as the folder's front door. `files` lists docs too.
-Invoke-Checked "copy-docs" { & node (Join-Path $ROOT_DIR "scripts/copy-docs.mjs") (Join-Path $PKG_DIR "docs") }
+# with docs/README.md as the folder's front door, and the same pages as the
+# agent skill skills/ssplayer-wgpu/. `files` lists both.
+Invoke-Checked "copy-docs" { & node (Join-Path $ROOT_DIR "scripts/copy-docs.mjs") (Join-Path $PKG_DIR "docs") (Join-Path $PKG_DIR "skills/ssplayer-wgpu") }
 Copy-Item -Force (Join-Path $ROOT_DIR "scripts/release-docs/npm-README.md") (Join-Path $PKG_DIR "docs/README.md")
 
 Write-Host ">> pnpm install + build (tsdown) -> packages/ssplayer-wgpu/dist"

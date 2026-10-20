@@ -49,6 +49,9 @@ ROOT_DIR="$(cd "$(dirname "$0")/.." && pwd)"
 # nothing but a Rust toolchain.
 NATIVE="windows-x86_64 macos-universal"
 WEB="web-wasm32"
+# The npm package's documentation as an Agent Skill (scripts/copy-docs.mjs),
+# named after the package.
+WEB_SKILL="skills/ssplayer-wgpu"
 # The self-contained preview shell (PREVIEW.md), which the web job builds with
 # scripts/build-preview.sh beside the package, and its name on the Release.
 PREVIEW="preview-shell"
@@ -351,6 +354,7 @@ else
   [ -f "$IN/$WEB/wasm/VERSION" ] || fail "$WEB/wasm/VERSION is missing (the SDK release the wasm links)"
   [ -f "$IN/$WEB/THIRD_PARTY_NOTICES.md" ] || fail "$WEB/THIRD_PARTY_NOTICES.md is missing (the package's files list it)"
   [ -f "$IN/$WEB/docs/README.md" ] || fail "$WEB/docs/README.md is missing (the documentation build.sh platform=web copies)"
+  [ -f "$IN/$WEB/$WEB_SKILL/SKILL.md" ] || fail "$WEB/$WEB_SKILL/SKILL.md is missing (the agent skill build.sh platform=web copies)"
 fi
 [ -f "$IN/$PREVIEW/$SHELL_HTML" ] || fail "$PREVIEW/$SHELL_HTML is missing (the preview shell scripts/build-preview.sh builds)"
 
@@ -548,10 +552,15 @@ if [ "$VERIFY" = "yes" ]; then
   names="$(tar -tzf "$OUT/$TGZ")"
   for want in "wasm/ssplayer_wgpu_bg.wasm" "wasm/ssplayer_wgpu.js" "wasm/ssplayer_wgpu.d.ts" "wasm/VERSION" \
               "dist/index.js" "dist/index.d.ts" "dist/element.js" "package.json" "LICENSE.md" "THIRD_PARTY_NOTICES.md" \
-              "docs/README.md"; do
+              "docs/README.md" "$WEB_SKILL/SKILL.md"; do
     printf '%s\n' "$names" | grep -qx "package/$want" || fail "$TGZ does not contain $want"
   done
   check_front_door "$TGZ" "$(tar -xzOf "$OUT/$TGZ" package/docs/README.md)" "$names" "package/docs/"
+  check_front_door "$TGZ" "$(tar -xzOf "$OUT/$TGZ" "package/$WEB_SKILL/SKILL.md")" "$names" "package/$WEB_SKILL/"
+  # The skills CLIs know a skill by the name in its frontmatter, which the
+  # Agent Skills format requires to be its folder's.
+  printf '%s\n' "$(tar -xzOf "$OUT/$TGZ" "package/$WEB_SKILL/SKILL.md")" | grep -qxF "name: ${WEB_SKILL#skills/}" \
+    || fail "$TGZ: $WEB_SKILL/SKILL.md does not name the skill ${WEB_SKILL#skills/}"
 
   cmp -s "$IN/$PREVIEW/$SHELL_HTML" "$OUT/$SHELL_HTML" || fail "$SHELL_HTML is not the shell that was checked"
 

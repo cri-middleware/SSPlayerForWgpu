@@ -18,6 +18,7 @@
 #   packages/ssplayer-wgpu/dist/                (tsdown; the npm package is published
 #                                                from that directory as it stands)
 #   packages/ssplayer-wgpu/docs/                (the documentation, as Markdown)
+#   packages/ssplayer-wgpu/skills/ssplayer-wgpu/ (the same pages, as an Agent Skill)
 #   examples/web/ssplayer-wgpu/                 (deploy=yes)
 #
 # Playback data is not this script's business at all: converting the SDK's test
@@ -349,8 +350,9 @@ printf '%s\n' "$SDK_VERSION" > "$PKG_DIR/wasm/VERSION"
 cp "$ROOT_DIR/THIRD_PARTY_NOTICES.md" "$PKG_DIR/"
 
 # The documentation of this build, read offline beside it (scripts/copy-docs.mjs),
-# with docs/README.md as the folder's front door. `files` lists docs too.
-node "$ROOT_DIR/scripts/copy-docs.mjs" "$PKG_DIR/docs"
+# with docs/README.md as the folder's front door, and the same pages as the
+# agent skill skills/ssplayer-wgpu/. `files` lists both.
+node "$ROOT_DIR/scripts/copy-docs.mjs" "$PKG_DIR/docs" "$PKG_DIR/skills/ssplayer-wgpu"
 cp "$ROOT_DIR/scripts/release-docs/npm-README.md" "$PKG_DIR/docs/README.md"
 
 echo ">> pnpm install + build (tsdown) -> packages/ssplayer-wgpu/dist"
