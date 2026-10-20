@@ -190,7 +190,7 @@
 player.load_with(&mut my_loader, "res://characters/Ringo.ssab").await?;
 ```
 
-`AssetLoader` は 6 メソッド（`reset_base` / `set_base` / `read` / `supply_texture` / `has_texture` / `warn`）で、走査側の契約は固定されテストされています：
+`AssetLoader` は 8 メソッド（実装するのは `reset_base` / `set_base` / `read` / `supply_texture` / `has_texture` / `warn`、既定の実装があるのは `read_pack` / `texture_key`）で、走査側の契約は固定されテストされています：
 
 1. まず `reset_base()`。1 つのローダーで何度でもロードできるようにするため；
 2. `read` には `src` が**そのまま**渡ります。走査はパスを組み立てず、`src` の中身を覗きません；

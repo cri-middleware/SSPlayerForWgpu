@@ -15,8 +15,8 @@ title: C API リファレンス
 | 戻り値 | 失敗しうる関数は `int32_t`：`SS_OK`（0）、`SS_ERROR_INVALID_ARGUMENT`（-1）、`SS_ERROR_GPU`（-2） |
 | エラーテキスト | `ss_last_error()` — 呼び出しスレッドで最後に起きた失敗。ログ用であり、分岐用ではありません |
 | バージョン | `ss_version()` — このライブラリのバージョン。`ss_sdk_version()` — リンクしている SpriteStudio-SDK のリリースのタグ。リリースでない SDK なら `local`。どちらも静的な文字列で、解放しません |
-| null ハンドル | どの関数も null ハンドルを許容し、クラッシュではなく `SS_ERROR_INVALID_ARGUMENT`（またはゼロ値）を返します |
-| 文字列 | 入力は UTF-8 の `const char *`。**出力**の文字列はシーンが所有し、同種の次の呼び出しまで有効です — 保持するならコピーを |
+| null ハンドル | どの関数も null ハンドルを許容し、クラッシュではなく `SS_ERROR_INVALID_ARGUMENT` を返します。getter は、アニメーションが無いプレイヤーと同じ値を返します。ほとんどはゼロですが、スピード倍率とアルファは `1.0`、`ss_player_is_playing_forward`・`ss_player_sub_frame_enabled`・`ss_player_frame_skip_enabled`・`ss_player_is_visible` は true、パーツの検索（`ss_player_find_part_index`・`ss_player_is_part_hidden`・`ss_player_is_part_skinned_mesh` と、その `_by_index` 版）は `-1` です |
+| 文字列 | 入力は UTF-8 の `const char *`。**出力**の文字列はシーンが所有し、同種の次の呼び出しまで有効です — 保持するならコピーを。1 組だけバッファを共有しています。`ss_player_animation_name` と `ss_player_cellmap_texture_name` は、互いの戻り値を無効にします |
 | サイズ | 常に**描画ピクセル**。ポイントではありません。ディスプレイ倍率は自分で掛けてください |
 
 ## ライフタイム
@@ -81,7 +81,7 @@ title: C API リファレンス
 | `ss_player_seek(player, frame)` | ジャンプ。小数フレーム可 |
 | `ss_player_set_speed_scale(player, speed)` / `ss_player_speed_scale` | 既定 fps の倍率。`0` と負値は停止 |
 | `ss_player_set_frame_rate(player, fps)` / `ss_player_frame_rate` | 既定 fps を置き換える |
-| `ss_player_set_loop_count(player, n)` / `ss_player_loop_count` / `ss_player_remaining_loops` | `n` 回。`-1` / `0` で無限 |
+| `ss_player_set_loop_count(player, n)` / `ss_player_loop_count` / `ss_player_remaining_loops` | `n` 回を設定。`-1` か `0` で無限。読み戻すと無限は `-1` で、`0` はアニメーションが設定されていないことを表します |
 | `ss_player_set_animation_section(player, start, end)` | 再生範囲を制限。`set_animation` の**後**に |
 | `ss_player_set_playback_direction(player, dir, style)` | `0`/`1` = 順/逆、通常/ピンポン |
 | `ss_player_playback_direction` / `ss_player_playback_style` | 読み戻し |

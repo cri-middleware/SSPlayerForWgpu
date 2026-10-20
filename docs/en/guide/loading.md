@@ -216,8 +216,9 @@ An exported Godot project keeps its files in a `.pck`, an Android build in an AP
 player.load_with(&mut my_loader, "res://characters/Ringo.ssab").await?;
 ```
 
-`AssetLoader` is six methods — `reset_base`, `set_base`, `read`, `supply_texture`, `has_texture`, `warn` —
-and the walk's half of the contract is fixed and tested:
+`AssetLoader` is eight methods — `reset_base`, `set_base`, `read`, `supply_texture`, `has_texture` and
+`warn` to write, plus `read_pack` and `texture_key`, which have defaults — and the walk's half of the
+contract is fixed and tested:
 
 1. `reset_base()` first, so one loader serves any number of loads;
 2. `read` gets your `src` **verbatim** — the walk builds no paths and never looks inside it;

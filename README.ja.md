@@ -179,6 +179,7 @@ C++ ビューアは CMake 経由でライブラリを駆動し、その CMake �
 | オプション | 値 | 何をするか |
 |---|---|---|
 | `platform` | `host`（既定）, `web` | `host` は Rust ライブラリと C フェイスをビルドし、`web` は wasm-pack で wasm/js フェイスをビルドします。クロスコンパイルはしないため、`macos`/`windows`/`linux` はホスト自身を指す場合にのみ受け付けます |
+| `arch` | `host`（既定）, `universal` | macOS の `build.sh` のみ。`universal` は Apple の 2 つのターゲットをビルドし、lipo で 1 つのライブラリにまとめます（リリースが配るもの） |
 | `build` | `release`（既定）, `debug` | cargo のプロファイル。`debug` は `wasm-pack --dev` も意味し、`wasm-opt` を飛ばします — そのサイズを数値として引用しないでください |
 | `ffi` | `yes`（既定）, `no` | `host` のみ。`ssplayer-wgpu-ffi` クレートもビルドし、cbindgen で `libs/ssplayer-wgpu-ffi/include/ssplayer_wgpu.h` を再生成します |
 | `deploy` | `yes`（既定）, `no` | `web` のみ。ビルドした npm パッケージを `examples/web/ssplayer-wgpu` へコピーします |

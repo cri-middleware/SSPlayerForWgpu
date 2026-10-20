@@ -21,7 +21,7 @@ The element lives behind its own entry point, so a bundle that only wants the AP
 | `sharedContext(): Promise<SsContextWeb>` | The page's one context — device, pipelines, atlas cache. Call it as often as you like; you get the same one |
 | `restoreSharedDevice(ctx): Promise<void>` | Rebuild everything on a new device after a loss |
 | `setWasmUrl(url)` | Point at the wasm binary explicitly, before the first `sharedContext()` |
-| `defineSsPlayerWebGPUElement()` | Register `<ss-player-webgpu>`. Opt-in, not a side effect of the import |
+| `defineSsPlayerWebGPUElement(tag?)` | Register `<ss-player-webgpu>`, or the element under `tag` to avoid a name clash. Opt-in, not a side effect of the import |
 
 ## `SsContextWeb` — the page
 

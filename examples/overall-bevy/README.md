@@ -3,7 +3,7 @@
 The **Bevy counterpart of the sibling players' `overall` / `webgl-example`
 demos**: one character stepped through the shared sample set, so every SpriteStudio
 feature the player supports can be seen in sequence, in a Bevy app, driven entirely
-through the adapter's three components (`SsPlayer`, `SsTransform`, `SsPlayback`).
+through three of the adapter's components (`SsPlayer`, `SsTransform`, `SsPlayback`).
 
 Where [`../viewer-bevy`](../viewer-bevy) is the free-form development viewer (a
 cast you poke at), this is the scripted, labelled tour — the one to run first to
@@ -48,5 +48,5 @@ it — Bevy has no Unity/Godot-style project format).
 
 ## Related
 
-- [`../../libs/ssplayer-bevy/README.md`](../../libs/ssplayer-bevy/README.md) — the adapter: components, colour, masking, device loss
+- [`../../docs/en/start/bevy.md`](../../docs/en/start/bevy.md) and [`../../docs/en/reference/bevy.md`](../../docs/en/reference/bevy.md) — the adapter: components, colour, masking, device loss
 - [`../viewer-bevy`](../viewer-bevy) — the interactive development viewer

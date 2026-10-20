@@ -221,6 +221,7 @@ a `.ssab`, and it does not need the SDK for anything but the checkout cargo alre
 | Option | Values | What it does |
 |---|---|---|
 | `platform` | `host` (default), `web` | `host` builds the Rust library and the C face; `web` builds the wasm/js face with wasm-pack. It does not cross-compile, so `macos`/`windows`/`linux` are accepted only when they name the host |
+| `arch` | `host` (default), `universal` | macOS only, `build.sh` only: `universal` builds both Apple targets and lipos them into one library, as the release ships |
 | `build` | `release` (default), `debug` | Cargo profile; `debug` also means `wasm-pack --dev`, which skips `wasm-opt` — never quote its size |
 | `ffi` | `yes` (default), `no` | `host` only: also build the `ssplayer-wgpu-ffi` crate, which regenerates `libs/ssplayer-wgpu-ffi/include/ssplayer_wgpu.h` with cbindgen |
 | `deploy` | `yes` (default), `no` | `web` only: copy the built npm package into `examples/web/ssplayer-wgpu` |

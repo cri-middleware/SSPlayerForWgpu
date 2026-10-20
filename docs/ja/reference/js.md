@@ -20,7 +20,7 @@ import { defineSsPlayerWebGPUElement } from '@spritestudio/ssplayer-wgpu/element
 | `sharedContext(): Promise<SsContextWeb>` | ページに 1 つのコンテキスト（デバイス・パイプライン・アトラスキャッシュ）。何度呼んでも同じものが返ります |
 | `restoreSharedDevice(ctx): Promise<void>` | デバイスロスト後、新しいデバイス上ですべてを再構築します |
 | `setWasmUrl(url)` | 最初の `sharedContext()` より前に wasm バイナリの位置を明示します |
-| `defineSsPlayerWebGPUElement()` | `<ss-player-webgpu>` を登録します。import の副作用ではなく opt-in |
+| `defineSsPlayerWebGPUElement(tag?)` | `<ss-player-webgpu>` を登録します。名前の衝突を避けるなら `tag` の名前で登録します。import の副作用ではなく opt-in |
 
 ## `SsContextWeb` — ページ
 

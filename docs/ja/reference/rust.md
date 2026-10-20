@@ -51,6 +51,8 @@ pub const SDK_VERSION: &str;  // リンクしている SpriteStudio-SDK のリ�
 
 ## モジュール
 
+ソースの構成です。公開モジュールは `fit`・`host`・`ffi` の 3 つだけで、それ以外の型はクレートのルートから再エクスポートされています（`ssplayer_wgpu::player::SSPlayer` ではなく `ssplayer_wgpu::SSPlayer`）。
+
 | モジュール | 役割 |
 |---|---|
 | `renderer` | デバイススコープ：パイプライン（初回使用時に構築）、シェーダー、テクスチャマップ |

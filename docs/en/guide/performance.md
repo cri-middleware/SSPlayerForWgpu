@@ -26,7 +26,8 @@ in it, and when no track fade or other track is still moving its pose (see
 One character that moves rebuilds the whole frame, because every character in a scene shares one
 buffer. A call that changes what a character draws — a track or part override, a seek, a new
 placement — rebuilds it once. Writing the same placement, alpha, tint or visibility again costs
-nothing, so a host may write them every frame. `uploaded_bytes` reads `0` on an update that kept
+nothing, and neither does the scene's `set_viewport` with the viewport it already has, so a host may
+write them every frame. `uploaded_bytes` reads `0` on an update that kept
 the frame.
 
 ## Reading the counters
