@@ -3162,11 +3162,14 @@ fn step_slots(node: &mut PlaybackNode, frame_no: f32, delta_secs: f32, node_loop
 
     for (&part_idx, child) in node.instances.iter_mut() {
         let ev = node.context.get_active_event_instance(part_idx as u32);
-        // An independent child runs its own clock at the key's speed, so its own
-        // sub-tree has to be stepped with the same scaling — the parent's raw
-        // delta would run the grandchildren at the wrong rate.
-        let child_delta = delta_secs * ev.speed.abs();
         let r = child.slot.step(ev, &mut child.node.context, frame_no, delta_secs, node_looped);
+        // The child runs at the speed its slot stepped it with, so its own
+        // sub-tree has to be stepped with the same scaling — the parent's raw
+        // delta would run the grandchildren at the wrong rate. Read it from the
+        // slot, not from `ev`: once the parent goes back before an independent
+        // child's first key, `ev` is the implicit key at speed 1 while the slot
+        // keeps the child at the last key's speed.
+        let child_delta = delta_secs * child.slot.get_speed().abs();
 
         // On a transition edge the slot configures the child — section, direction,
         // loop count, and the frame it starts on — but does not start it: play()
