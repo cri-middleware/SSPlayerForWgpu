@@ -7,7 +7,7 @@ not ask it to, this page is why.
 
 | Verb | What it does |
 |---|---|
-| **play** | **Head-out.** Rewinds to the start of the section and re-arms the loop count |
+| **play** | **Head-out.** Rewinds to the start of the section, re-arms the loop count, and starts independent effects and instance children over |
 | **pause** | Holds on the current frame. Idempotent, and the player still counts as playing — a hold is not a stop |
 | **resume** | Lifts a pause, carrying on from the same frame. Idempotent, and a **no-op on a stopped animation** |
 | **stop** | Ends playback. The playhead stays where it stands, so you keep drawing the frame it stopped on |
