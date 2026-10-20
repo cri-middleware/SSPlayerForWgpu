@@ -127,7 +127,7 @@ spawn すれば 5 つとも既定値で付きます。
 | メッセージ | 内容 |
 |---|---|
 | `SsEventMessage` | `entity`、`event: SsEvent` — ユーザーデータ・シグナル・オーディオ |
-| `SsStarted` | `entity` — 開始**エッジ**：`playing` 中のアニメーション・パックの切り替え、初めて `playing` を有効にしたとき、`restart` の加算。再開では立ちません |
+| `SsStarted` | `entity` — 開始**エッジ**：`playing` 中のアニメーション・パックの切り替え、初めて `playing` を有効にしたとき、`SsPlay`、`restart` の加算。再開では立ちません。`transition_ms` が 0 より大きいときのアニメーションの切り替えでも立ちません（再生中のツリーの上でクロスフェードするため） |
 | `SsFinished` | `entity` — 完了**エッジ** |
 | `SsLooped` | `entity` — ループ境界エッジ |
 

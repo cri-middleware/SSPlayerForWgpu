@@ -180,7 +180,7 @@ The texture map is **device-scoped**, so a pack shown five times is uploaded onc
 === "C"
 
     ```c
-    /* `SsTextureRef::key` is already the key: `ss_player_texture_at` resolves it. */
+    /* `ss_texture_ref_t.key` is already the key: `ss_player_texture_at` resolves it. */
     /* Raw RGBA8, width * height * 4 bytes, straight alpha. */
     ss_scene_add_texture(scene, ref.key, rgba, width, height);
 

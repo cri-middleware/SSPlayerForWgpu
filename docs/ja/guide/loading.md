@@ -158,7 +158,7 @@
 === "C"
 
     ```c
-    /* `SsTextureRef::key` は既にキーです（`ss_player_texture_at` が解決して返します） */
+    /* `ss_texture_ref_t.key` は既にキーです（`ss_player_texture_at` が解決して返します） */
     /* 生の RGBA8、width * height * 4 バイト、ストレートアルファ */
     ss_scene_add_texture(scene, ref.key, rgba, width, height);
 

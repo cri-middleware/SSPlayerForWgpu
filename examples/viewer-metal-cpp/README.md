@@ -28,13 +28,9 @@ every referenced pack has to be registered first.
 
 **Reference-mode packs work too, and that is the interesting part.** Their
 atlases stay as sibling files, and where those sit is the `.ssab`'s own business:
-`ss_player_texture_at` reports the path the exporter wrote — relative to the file
-— plus the `key` to register it under and whether it is embedded at all. The
-viewer joins that path with the directory the drop came from and hands the bytes
-to `ss_scene_add_texture_png`, which decodes with the PNG decoder the library
-already carries for embedded packs. So the pack answers *what it needs and from
-where*, and the host only reads files.
-It is the same division of labour the sibling players use.
+`ss_player_load` resolves them against the directory the file was read from, and
+a host whose assets are not files answers the same question itself through
+`ss_player_texture_at` + `ss_scene_add_texture_png`.
 
 ## Build and run
 
@@ -66,9 +62,12 @@ the asset directory to keep the built-in default and still pick a pack.
 
 ## Linking against the library
 
-The viewer links the **cdylib** (`libssplayer_wgpu.dylib`) and sets an rpath to
-cargo's output directory, which keeps the sample short. Shipping an app instead?
-Either copy the dylib next to the binary (and fix up the rpath), or link the
+The viewer links the **cdylib** (`libssplayer_wgpu.dylib`) straight from cargo's
+output directory, with no rpath: cargo leaves the dylib's install name at its
+absolute path under `target/`, which is what the binary records and loads it from.
+That keeps the sample short, and only runs on the machine that built it. Shipping
+an app instead? Either copy the dylib next to the binary and give it an `@rpath`
+install name (the release zip's dylib already has one), or link the
 **staticlib** (`libssplayer_wgpu.a`, built by the same command) and add the
 frameworks wgpu's Metal backend needs.
 

@@ -132,7 +132,7 @@ Player は通過したキーを報告するだけで、鳴らすかどうかは�
 | 座標 | `Option<[f32; 2]>` | `has_point` ＋ `point[2]` | `e.point` |
 | テキスト | `Option<String>` | `has_text` ＋ `text` | `e.text` |
 
-どのイベントも `part_index` とオーサリング時のパーツ名を持つので、「どのパーツが言ったか」を自分で管理する必要はありません。
+どのイベントも `part_index` を持ち、Rust・JavaScript・Bevy ではオーサリング時のパーツ名も持つので、「どのパーツが言ったか」を自分で管理する必要はありません。C のイベントが持つのはインデックスだけなので、`ss_player_part_name(player, part_index)` で名前に変えてください。
 
 ## シグナルのパラメータ
 

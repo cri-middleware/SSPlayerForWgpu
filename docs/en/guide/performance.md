@@ -8,8 +8,8 @@ numbers to answer it with.
 Three things hold whatever you draw:
 
 * **The CPU cost is per part, not per vertex.** There is no vertex buffer: the CPU writes one
-  primitive per part and the vertex stage expands it. A character with 200 parts is 200 small
-  writes.
+  primitive per part and the vertex stage expands it. A character with 200 quad parts is 200 small
+  writes; a mesh part adds a copy of its vertices and indices, with no per-vertex math.
 * **An atlas is uploaded once per device.** The texture map is device-scoped, so the same pack shown
   five times is uploaded once.
 * **A target's whole cast is one render pass.** Every character goes through one `update` and one

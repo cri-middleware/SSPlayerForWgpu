@@ -152,8 +152,9 @@ different statement.
 | Point | `Option<[f32; 2]>` | `has_point` + `point[2]` | `e.point` |
 | Text | `Option<String>` | `has_text` + `text` | `e.text` |
 
-Every event also carries `part_index` and the part's authored name, so "which part said this" needs
-no bookkeeping of your own.
+Every event also carries `part_index`, and on Rust, JavaScript and Bevy the part's authored name, so
+"which part said this" needs no bookkeeping of your own. The C event carries the index alone; turn
+it into the name with `ss_player_part_name(player, part_index)`.
 
 ## Signal parameters
 

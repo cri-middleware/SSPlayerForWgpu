@@ -148,7 +148,7 @@ costs a render pass per frame and a layer the size of the view. See
 | Message | Carries |
 |---|---|
 | `SsEventMessage` | `entity`, `event: SsEvent` — user data, signal or audio |
-| `SsStarted` | `entity` — the start **edge**: a new animation or pack while `playing`, `playing` turned on for the first time, or a bumped `restart`. Not a resume |
+| `SsStarted` | `entity` — the start **edge**: a new animation or pack while `playing`, `playing` turned on for the first time, an `SsPlay`, or a bumped `restart`. Not a resume, and not a new animation with `transition_ms` above 0, which crossfades on the tree that is already playing |
 | `SsFinished` | `entity` — the completion **edge** |
 | `SsLooped` | `entity` — the loop boundary edge |
 
