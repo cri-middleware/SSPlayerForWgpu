@@ -49,7 +49,7 @@ Bevy は 2 つのワールドで描画するので、アダプタもその継ぎ
 
 [Bevy リファレンス](../reference/bevy.md)も参照してください。
 
-## Slint / egui / macroquad / 自作レンダラー
+## Slint / egui / 自作レンダラー
 
 適合作業はありません。これらはデバイスとレンダーパスを渡してくれるので、[借用モデル](./borrow-model.md)が求めるものがそのまま揃っています。デバイスの隣に `SSRenderer` を 1 つ、ターゲットごとに `SSScene` を 1 つ持ち、フレームの中で `update` / `draw` を呼ぶだけです。
 

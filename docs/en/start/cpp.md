@@ -150,7 +150,7 @@ ss_player_t *player = ss_scene_create_player(scene);
 if (ss_player_load(player, "assets/overall/Basic.ssab") != SS_OK) {
     fprintf(stderr, "%s\n", ss_last_error());
 }
-ss_player_set_animation(player, "Basic");
+ss_player_set_animation(player, "anime_1");
 ss_player_play(player);
 
 // ... every frame, in this order:

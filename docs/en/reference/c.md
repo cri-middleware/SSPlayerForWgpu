@@ -17,8 +17,8 @@ no dependencies.
 | Return values | Functions that can fail return `int32_t`: `SS_OK` (0), `SS_ERROR_INVALID_ARGUMENT` (-1), `SS_ERROR_GPU` (-2) |
 | Error text | `ss_last_error()` — the last failure on the calling thread. For logging, not for branching |
 | Versions | `ss_version()` — this library's version. `ss_sdk_version()` — the SpriteStudio-SDK release it links, as its tag, or `local` for an SDK that is not a release. Both static; never free them |
-| Null handles | Every function tolerates a null handle and answers `SS_ERROR_INVALID_ARGUMENT` (or a zero value) rather than crashing |
-| Strings | `const char *` in, UTF-8. Strings *out* are owned by the scene and valid until the next call of the same kind — copy what you keep |
+| Null handles | Every function tolerates a null handle and answers `SS_ERROR_INVALID_ARGUMENT`, or for a getter what a player with no animation reads back, rather than crashing. That is zero for most getters, but `1.0` for the speed scale and alpha, true for `ss_player_is_playing_forward`, `ss_player_sub_frame_enabled`, `ss_player_frame_skip_enabled` and `ss_player_is_visible`, and `-1` for the part lookups (`ss_player_find_part_index`, `ss_player_is_part_hidden`, `ss_player_is_part_skinned_mesh` and their `_by_index` forms) |
+| Strings | `const char *` in, UTF-8. Strings *out* are owned by the scene and valid until the next call of the same kind — copy what you keep. One pair shares a buffer: `ss_player_animation_name` and `ss_player_cellmap_texture_name` each invalidate what the other returned |
 | Sizes | Always **drawable pixels**, never points. Scale by the display factor yourself |
 
 ## Lifetime
@@ -54,7 +54,7 @@ whichever character took its slot.
 | `ss_player_add_ssab(player, name, data, len)` | Register bytes only, for instance parts to find |
 | `ss_player_missing_count(player)` / `ss_player_missing_at(player, i, out)` | What did not arrive. **Not an error** |
 | `ss_player_texture_count(player, pack)` / `ss_player_texture_at(player, pack, i, out)` | What atlases a pack asks for, and where the exporter put them |
-| `ss_scene_add_texture(scene, key, rgba, w, h)` | Supply an atlas as straight-alpha RGBA8, under `SsTextureRef::key` |
+| `ss_scene_add_texture(scene, key, rgba, w, h)` | Supply an atlas as straight-alpha RGBA8, under `ss_texture_ref_t.key` |
 | `ss_scene_add_texture_png(scene, key, data, len)` | ... or as encoded PNG bytes, decoded by the library |
 
 Textures register on the **scene**, because the texture map is device-scoped: every player in the
@@ -87,7 +87,7 @@ nothing. `ss_player_set_cellmap_texture` refuses one the same way.
 | `ss_player_seek(player, frame)` | Jump. Fractional values are honoured |
 | `ss_player_set_speed_scale(player, speed)` / `ss_player_speed_scale` | A multiple of the authored rate. `0` and negatives stop |
 | `ss_player_set_frame_rate(player, fps)` / `ss_player_frame_rate` | Replace the authored rate |
-| `ss_player_set_loop_count(player, n)` / `ss_player_loop_count` / `ss_player_remaining_loops` | `n` cycles; `-1` or `0` forever |
+| `ss_player_set_loop_count(player, n)` / `ss_player_loop_count` / `ss_player_remaining_loops` | Set `n` cycles, or `-1` or `0` for forever. Reading back, forever is `-1`, and `0` means no animation is set |
 | `ss_player_set_animation_section(player, start, end)` | Restrict the playhead. Call it **after** `set_animation` |
 | `ss_player_set_playback_direction(player, dir, style)` | `0`/`1` = forward/backward, normal/ping-pong |
 | `ss_player_playback_direction` / `ss_player_playback_style` | Read them back |

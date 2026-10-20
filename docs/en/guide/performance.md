@@ -8,8 +8,8 @@ numbers to answer it with.
 Three things hold whatever you draw:
 
 * **The CPU cost is per part, not per vertex.** There is no vertex buffer: the CPU writes one
-  primitive per part and the vertex stage expands it. A character with 200 parts is 200 small
-  writes.
+  primitive per part and the vertex stage expands it. A character with 200 quad parts is 200 small
+  writes; a mesh part adds a copy of its vertices and indices, with no per-vertex math.
 * **An atlas is uploaded once per device.** The texture map is device-scoped, so the same pack shown
   five times is uploaded once.
 * **A target's whole cast is one render pass.** Every character goes through one `update` and one
@@ -26,7 +26,8 @@ in it, and when no track fade or other track is still moving its pose (see
 One character that moves rebuilds the whole frame, because every character in a scene shares one
 buffer. A call that changes what a character draws — a track or part override, a seek, a new
 placement — rebuilds it once. Writing the same placement, alpha, tint or visibility again costs
-nothing, so a host may write them every frame. `uploaded_bytes` reads `0` on an update that kept
+nothing, and neither does the scene's `set_viewport` with the viewport it already has, so a host may
+write them every frame. `uploaded_bytes` reads `0` on an update that kept
 the frame.
 
 ## Reading the counters

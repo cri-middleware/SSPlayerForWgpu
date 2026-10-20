@@ -331,7 +331,7 @@ player.setTransform(ox, oy, s, s, 0);
 function frame(dt) {
   surface.frame(dt);                     // update + draw first
   const m = player.partTransform(PART);  // [m00, m01, m10, m11, tx, ty] — animation-local, Y-down
-  if (m) {
+  if (m.length) {                       // empty, never null, for an unknown part
     const wx = s * m[4] + ox;            // compose the player's placement (no rotation here)
     const wy = s * m[5] + oy;
     // world -> canvas CSS pixels: centre of the box, plus the point, over dpr. Y-down, no flip.

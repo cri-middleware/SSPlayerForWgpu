@@ -876,7 +876,8 @@ fn vs_effect(@builtin(vertex_index) vi: u32, @builtin(instance_index) member: u3
     let k = quad_corner(vi % 6u);
     let p = &prims[pi];
     let node = node_of(pi, member);
-    // Particle quads are emitted in world space with vert_stride 2, so Z is zero.
+    // Particle quads are emitted in the effect part's own space with
+    // vert_stride 2, so Z is zero.
     let px = f_arena[(*p).pos_base + k * 2u];
     let py = f_arena[(*p).pos_base + k * 2u + 1u];
 

@@ -289,7 +289,7 @@ player.setTransform(ox, oy, s, s, 0);
 function frame(dt) {
   surface.frame(dt);                     // まず update + draw
   const m = player.partTransform(PART);  // [m00, m01, m10, m11, tx, ty] — アニメーションローカル・Y-down
-  if (m) {
+  if (m.length) {                       // 不明なパーツでは null ではなく空の配列
     const wx = s * m[4] + ox;            // プレイヤの配置を合成（ここでは回転なし）
     const wy = s * m[5] + oy;
     // world -> canvas CSS ピクセル: ボックス中心 ＋ その点、を dpr で割る。Y-down、反転なし。

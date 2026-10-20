@@ -52,6 +52,10 @@ one upload of a pack's atlases. See [The borrow model](../wgpu/borrow-model.md).
 
 ## Modules
 
+How the source is laid out. Only `fit`, `host` and `ffi` are public modules; everything else you
+reach from the crate root, where its types are re-exported (`ssplayer_wgpu::SSPlayer`, not
+`ssplayer_wgpu::player::SSPlayer`).
+
 | Module | Role |
 |---|---|
 | `renderer` | device-scoped: pipelines (built on first use), shaders, the texture map |

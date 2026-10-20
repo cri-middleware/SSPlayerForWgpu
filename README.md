@@ -13,7 +13,7 @@ files, no re-authoring, no engine lock-in.
 
 - **Artist-made motion, not animation code.** Bone rigs, mesh deformation and particle effects are authored visually in SpriteStudio and exported as one `.ssab`. The player plays it, and timeline events and per-part overrides connect it to your game logic.
 - **Blend between motions.** Layer animations on tracks and crossfade between them, so a walk eases into a run instead of snapping — see [Motion blending](./docs/en/guide/motion-blending.md).
-- **It borrows your GPU; it never owns it.** The host owns the wgpu `Device` / `Queue` / `Surface` and lends them per frame, so the player rides inside any wgpu application — your own, egui, macroquad, Bevy — and a scene of many characters shares one upload of each atlas.
+- **It borrows your GPU; it never owns it.** The host owns the wgpu `Device` / `Queue` / `Surface` and lends them per frame, so the player rides inside any wgpu application — your own, egui, Bevy — and a scene of many characters shares one upload of each atlas.
 - **Native graphics on every platform.** One wgpu code path draws through DirectX 12 on Windows, Metal on macOS, Vulkan on Linux and WebGPU in the browser.
 - **Not just Rust.** From C, C++ or Objective-C it is a static library and one header: hand it your `HWND`, `NSView`, `CAMetalLayer`, X11 `Window` or `wl_surface` and call two functions per frame. In the browser it is a WebAssembly build, and in **Bevy**, `ssplayer-bevy` adds three components that draw a character as part of Bevy's own 2D rendering.
 - **Zero-parse loading, SIMD playback.** `.ssab` is a FlatBuffers binary read in place, and poses come from the SDK's `#![no_std]` Rust core with SIMD — the same core every official SpriteStudio player uses.
@@ -91,12 +91,15 @@ bin/include/ssplayer_wgpu.h                              # the C header (cbindge
 bin/LICENSE.md
 bin/LICENSE.ja.md
 bin/THIRD_PARTY_NOTICES.md                               # what to carry into your acknowledgements
-bin/libs/<platform>/<arch>/libssplayer_wgpu.{a,dylib}    # .lib/.dll on Windows
+bin/libs/<platform>/<arch>/libssplayer_wgpu.{a,dylib,so} # .lib/.dll on Windows
 ```
 
-Point your build at those two directories. The C++ viewers under [`examples/`](#-samples) do exactly
-that through CMake and are the shortest working reference — one drives Metal on macOS, one DX12 on
-Windows, one Vulkan on Linux, and each is self-contained enough to copy out whole.
+Point your build at those two directories. The C++ viewers under [`examples/`](#-samples) are the
+shortest working reference — one drives Metal on macOS, one DX12 on Windows, one Vulkan on Linux, and
+each is self-contained enough to copy out whole. Inside this repository they build the library
+themselves: their CMake runs `cargo build -p ssplayer-wgpu-ffi` and links what it leaves in
+`target/<profile>/`, with the header from `libs/ssplayer-wgpu-ffi/include/`. A viewer copied out
+points those two paths at `bin/` instead.
 
 ### Browser (WebGPU)
 
@@ -218,6 +221,7 @@ a `.ssab`, and it does not need the SDK for anything but the checkout cargo alre
 | Option | Values | What it does |
 |---|---|---|
 | `platform` | `host` (default), `web` | `host` builds the Rust library and the C face; `web` builds the wasm/js face with wasm-pack. It does not cross-compile, so `macos`/`windows`/`linux` are accepted only when they name the host |
+| `arch` | `host` (default), `universal` | macOS only, `build.sh` only: `universal` builds both Apple targets and lipos them into one library, as the release ships |
 | `build` | `release` (default), `debug` | Cargo profile; `debug` also means `wasm-pack --dev`, which skips `wasm-opt` — never quote its size |
 | `ffi` | `yes` (default), `no` | `host` only: also build the `ssplayer-wgpu-ffi` crate, which regenerates `libs/ssplayer-wgpu-ffi/include/ssplayer_wgpu.h` with cbindgen |
 | `deploy` | `yes` (default), `no` | `web` only: copy the built npm package into `examples/web/ssplayer-wgpu` |

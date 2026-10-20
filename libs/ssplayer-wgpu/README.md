@@ -8,7 +8,7 @@ SpriteStudio runtime, with WebGPU (wasm-bindgen) and C/C++ (cbindgen) as thin
 wrappers on top. Because it renders through wgpu, one code path covers WebGPU,
 Vulkan, DX12 and Metal. It never owns the device: the host lends its `Device`,
 `Queue` and render pass per frame, so the player rides along inside any wgpu
-application — your own app, egui, macroquad, Bevy.
+application — your own app, egui, Bevy.
 
 The documentation is at <https://cri-middleware.github.io/SSPlayerForWgpu/>. The same pages for this
 version are in this crate's `docs/` as Markdown, readable offline: start at `docs/index.md`; the Rust

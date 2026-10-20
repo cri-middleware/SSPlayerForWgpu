@@ -158,7 +158,7 @@
 === "C"
 
     ```c
-    /* `SsTextureRef::key` は既にキーです（`ss_player_texture_at` が解決して返します） */
+    /* `ss_texture_ref_t.key` は既にキーです（`ss_player_texture_at` が解決して返します） */
     /* 生の RGBA8、width * height * 4 バイト、ストレートアルファ */
     ss_scene_add_texture(scene, ref.key, rgba, width, height);
 
@@ -190,7 +190,7 @@
 player.load_with(&mut my_loader, "res://characters/Ringo.ssab").await?;
 ```
 
-`AssetLoader` は 6 メソッド（`reset_base` / `set_base` / `read` / `supply_texture` / `has_texture` / `warn`）で、走査側の契約は固定されテストされています：
+`AssetLoader` は 8 メソッド（実装するのは `reset_base` / `set_base` / `read` / `supply_texture` / `has_texture` / `warn`、既定の実装があるのは `read_pack` / `texture_key`）で、走査側の契約は固定されテストされています：
 
 1. まず `reset_base()`。1 つのローダーで何度でもロードできるようにするため；
 2. `read` には `src` が**そのまま**渡ります。走査はパスを組み立てず、`src` の中身を覗きません；

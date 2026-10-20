@@ -69,7 +69,8 @@ Where a stencil *is* available it is the cheaper answer, which is why coverage i
 === "Bevy"
 
     Nothing to configure — and it is the **coverage** backend, because Bevy's 2D depth carries no
-    stencil. `SceneStats::coverage_layers` is what that costs.
+    stencil. What that costs is `SceneStats::coverage_layers` on the Rust face; the adapter keeps
+    its scene to itself, so Bevy has no way to read it.
 
 ## The coverage rule that matters
 

@@ -111,8 +111,8 @@ Calls are **serialised**: a player is lifted out of the shared context while it 
 context rejects a second load started before the first settles. Switching packs is usually a user
 gesture, and two in quick succession must switch twice rather than fail — so each waits for the one
 before it, and the last one called is what stays on screen. The returned promise still rejects if
-*that* load fails, and it is yours to catch: only a startup failure reaches the element's own error
-box.
+*that* load fails, and it is yours to catch: a `loadSrc()` you call yourself never reaches the
+element's own error box.
 
 ## Events
 
@@ -177,10 +177,14 @@ playback resumes on the frame it was interrupted on. See [Device loss](../guide/
 
 ## Errors
 
-Anything thrown during startup, loading or a frame is caught: the element logs to the console under
+Anything thrown during startup, a load the element starts itself (for a new `src` or `pack`), an
+animation switch, a fit or a frame is caught: the element logs to the console under
 `[ss-player-webgpu]` and replaces its own content with a plain error box. The message is written as
 text, never as markup — it can carry a URL or a pack name that came off an attribute, and an error
 path is a poor place to start parsing HTML.
+
+A `loadSrc()` called from script is the exception: its promise rejects instead, and the catch is
+yours.
 
 The most common cause is a browser without WebGPU. If you want a designed fallback rather than the
 default box, use [`sharedContext()`](./js.md) directly and `catch`.

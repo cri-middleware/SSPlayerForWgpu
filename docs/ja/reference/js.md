@@ -20,7 +20,7 @@ import { defineSsPlayerWebGPUElement } from '@spritestudio/ssplayer-wgpu/element
 | `sharedContext(): Promise<SsContextWeb>` | ページに 1 つのコンテキスト（デバイス・パイプライン・アトラスキャッシュ）。何度呼んでも同じものが返ります |
 | `restoreSharedDevice(ctx): Promise<void>` | デバイスロスト後、新しいデバイス上ですべてを再構築します |
 | `setWasmUrl(url)` | 最初の `sharedContext()` より前に wasm バイナリの位置を明示します |
-| `defineSsPlayerWebGPUElement()` | `<ss-player-webgpu>` を登録します。import の副作用ではなく opt-in |
+| `defineSsPlayerWebGPUElement(tag?)` | `<ss-player-webgpu>` を登録します。名前の衝突を避けるなら `tag` の名前で登録します。import の副作用ではなく opt-in |
 
 ## `SsContextWeb` — ページ
 
@@ -106,7 +106,7 @@ import { defineSsPlayerWebGPUElement } from '@spritestudio/ssplayer-wgpu/element
 | `setPartColorOverride(part, rgba, blendOp, priority)` / `setPartColorOverrideCorners(...)` / `clearPartColorOverride(part)` | `blendOp` 0–3、`priority` 0–2 |
 | `setPartCellOverride(part, cellmap, cell, priority)` / `clearPartCellOverride(part)` | |
 | `clearAllPartOverrides()` | |
-| `partTransform(part)` / `partTransformByIndex(i)` | `[m00, m01, m10, m11, tx, ty]` |
+| `partTransform(part)` / `partTransformByIndex(i)` | `[m00, m01, m10, m11, tx, ty]`。不明なパーツなら空の配列（`null` ではない） |
 | `isPartHidden(part)` / `isPartSkinnedMesh(part)` / `partCount()` | `isPartHidden` と `isPartSkinnedMesh` は `true`/`false`、不明なパーツなら `undefined` |
 | `isPartHiddenByIndex(i)` / `isPartSkinnedMeshByIndex(i)` | 同じことをパーツインデックス（イベントの `partIndex`、`partNames()` の位置）で。範囲外なら `undefined` |
 | `events()` | `kind` で分類されたプレーンオブジェクト：`'userData'` / `'signal'` / `'audio'`。どれも `frameNo`・`partName` と、発火したソースのハンドル `source` を持つ |
@@ -161,4 +161,4 @@ import { defineSsPlayerWebGPUElement } from '@spritestudio/ssplayer-wgpu/element
 | `speed-scale` | 既定 fps の倍率 |
 | `fit`、`align`、`flip-x`、`flip-y` | オーサリング時のキャンバスを要素にどう合わせるか。既定は `contain` と `center`、`fit="none"` で 1:1 |
 
-`element.loadSrc(src, pack?, animation?, read?)` でスクリプトからパックを差し替えられ、アニメーション名が返ります。`animationstarted`・`animationfinished`・`animationlooped`・`userdata`・`signal`・`audio` を DOM イベントとして送り、パックを読み込むと `load` を送ります。上の属性は置いた後に書き換えても反映されます。モーションブレンディングを含め、`SsPlayerWeb` の機能はすべて `element.player` から使えます。
+`element.loadSrc(src, pack?, animation?, read?)` でスクリプトからパックを差し替えられ、アニメーション名が返ります。`animationstarted`・`animationfinished`・`animationlooped`・`userdata`・`signal`・`audio` を DOM イベントとして送り、パックを読み込むと `load` を送ります。`src`・`pack`・`animation`・`speed-scale` と配置の属性は、置いた後に書き換えても反映されます。`autoplay` はアニメーションを設定するときに、`pause-when-hidden` は要素の接続時に 1 回だけ読みます。モーションブレンディングを含め、`SsPlayerWeb` の機能はすべて `element.player` から使えます。

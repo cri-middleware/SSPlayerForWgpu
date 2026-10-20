@@ -21,7 +21,7 @@ The element lives behind its own entry point, so a bundle that only wants the AP
 | `sharedContext(): Promise<SsContextWeb>` | The page's one context — device, pipelines, atlas cache. Call it as often as you like; you get the same one |
 | `restoreSharedDevice(ctx): Promise<void>` | Rebuild everything on a new device after a loss |
 | `setWasmUrl(url)` | Point at the wasm binary explicitly, before the first `sharedContext()` |
-| `defineSsPlayerWebGPUElement()` | Register `<ss-player-webgpu>`. Opt-in, not a side effect of the import |
+| `defineSsPlayerWebGPUElement(tag?)` | Register `<ss-player-webgpu>`, or the element under `tag` to avoid a name clash. Opt-in, not a side effect of the import |
 
 ## `SsContextWeb` — the page
 
@@ -112,7 +112,7 @@ the calls.
 | `setPartColorOverride(part, rgba, blendOp, priority)` / `setPartColorOverrideCorners(...)` / `clearPartColorOverride(part)` | `blendOp` 0–3, `priority` 0–2 |
 | `setPartCellOverride(part, cellmap, cell, priority)` / `clearPartCellOverride(part)` | |
 | `clearAllPartOverrides()` | |
-| `partTransform(part)` / `partTransformByIndex(i)` | `[m00, m01, m10, m11, tx, ty]` |
+| `partTransform(part)` / `partTransformByIndex(i)` | `[m00, m01, m10, m11, tx, ty]`, or an empty array (never `null`) for an unknown part |
 | `isPartHidden(part)` / `isPartSkinnedMesh(part)` / `partCount()` | `isPartHidden` and `isPartSkinnedMesh` → `true`/`false`, or `undefined` for an unknown part |
 | `isPartHiddenByIndex(i)` / `isPartSkinnedMeshByIndex(i)` | The same by part index — an event's `partIndex`, a slot of `partNames()` — `undefined` out of range |
 | `events()` | Plain objects tagged by `kind`: `'userData'` / `'signal'` / `'audio'`. Each carries `frameNo`, `partName` and `source`, the handle of the source that fired it |
@@ -169,4 +169,4 @@ Documented in full on [its own page](./web-component.md); the attributes, in sho
 | `speed-scale` | A multiple of the authored rate |
 | `fit`, `align`, `flip-x`, `flip-y` | How the authored canvas fits the element: `contain` and `center` by default, `fit="none"` for 1:1 |
 
-`element.loadSrc(src, pack?, animation?, read?)` switches packs from script and resolves to the animation names. It dispatches `animationstarted`, `animationfinished`, `animationlooped`, `userdata`, `signal` and `audio` as DOM events, and `load` once a pack has loaded; the attributes above can be changed on a live element. Everything `SsPlayerWeb` offers, motion blending included, is on `element.player`.
+`element.loadSrc(src, pack?, animation?, read?)` switches packs from script and resolves to the animation names. It dispatches `animationstarted`, `animationfinished`, `animationlooped`, `userdata`, `signal` and `audio` as DOM events, and `load` once a pack has loaded; `src`, `pack`, `animation`, `speed-scale` and the fit attributes can be changed on a live element, while `autoplay` is read when an animation is set up and `pause-when-hidden` once, when the element connects. Everything `SsPlayerWeb` offers, motion blending included, is on `element.player`.

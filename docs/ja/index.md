@@ -78,7 +78,7 @@ Windows のゲームも、macOS のアプリも、4 本の移植版ではなく�
 |---|---|
 | Rust | `ssplayer-wgpu` クレート（git 依存） |
 | Bevy | `ssplayer-bevy` クレート（git 依存） |
-| C / C++ | `ssplayer-wgpu-windows-x86_64.zip` と `ssplayer-wgpu-macos-universal.zip`（`include/` `lib/` `LICENSE.md` `LICENSE.ja.md` `THIRD_PARTY_NOTICES.md`） |
+| C / C++ | `ssplayer-wgpu-windows-x86_64.zip` と `ssplayer-wgpu-macos-universal.zip`（`include/` `lib/` `README.md` `docs/`（このドキュメントの英語版） `LICENSE.md` `LICENSE.ja.md` `THIRD_PARTY_NOTICES.md`） |
 | Web | npm の `@spritestudio/ssplayer-wgpu` |
 
 ## 🗺️ エディタから画面まで

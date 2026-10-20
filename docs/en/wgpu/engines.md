@@ -68,7 +68,7 @@ Three decisions worth copying:
 
 See [the Bevy reference](../reference/bevy.md).
 
-## Slint, egui, macroquad, your own renderer
+## Slint, egui, your own renderer
 
 There is nothing to adapt: these hand you a device and a render pass, which is exactly what the
 [borrow model](./borrow-model.md) asks for. Keep one `SSRenderer` beside your device, one `SSScene`

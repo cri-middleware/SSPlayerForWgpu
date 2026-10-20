@@ -61,14 +61,15 @@ fn setup(mut commands: Commands, asset_server: Res<AssetServer>) {
 }
 ```
 
-`SsTransform` and `SsPlayback` are required components, so spawning `SsPlayer` alone gives you both
-at their defaults.
+`SsPlayer` requires `SsTransform` and `SsPlayback`, which you write, and `SsPlaybackState` and
+`SsTrackState`, which the adapter writes back; spawning `SsPlayer` alone gives you all four at their
+defaults.
 
 | Component | Carries | Cost of changing it |
 |---|---|---|
-| `SsPlayer` | `pack`, `animation` | Rebuilds the playback tree — the allocating one |
+| `SsPlayer` | `pack`, `animation`, `transition_ms` | A new `pack` or `animation` rebuilds the playback tree — the allocating one. With `transition_ms` above 0, a new `animation` crossfades on the tree instead |
 | `SsTransform` | `x`, `y`, `scale_x`, `scale_y`, `rotation` | Free |
-| `SsPlayback` | `playing`, `speed_scale`, `order`, `alpha`, `visible`, `culled`, `restart`, `direction`, `style`, `loop_count`, `frame_rate`, `frame_skip_enabled`, `sub_frame_enabled`, `animation_section` | Free |
+| `SsPlayback` | `playing`, `speed_scale`, `order`, `alpha`, `tint`, `visible`, `culled`, `restart`, `direction`, `style`, `loop_count`, `frame_rate`, `frame_skip_enabled`, `sub_frame_enabled`, `animation_section` | Free |
 
 It is **not** Bevy's `Transform`: that is a 3D affine, and decomposing it into the player's five
 scalars is lossy. If you want the two linked, write the one system that copies across — you keep the

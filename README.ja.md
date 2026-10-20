@@ -11,7 +11,7 @@
 
 - **アニメーションのコードではなく、アーティストが作った動きを。** ボーン・メッシュ変形・パーティクルエフェクトは SpriteStudio でビジュアルに作り込まれ、1 つの `.ssab` として書き出されます。プレイヤーはそれを再生し、タイムラインのイベントとパーツ単位のオーバーライドでゲームロジックにつながります。
 - **モーション同士をブレンド。** アニメーションをトラックに重ね、トラック間でクロスフェードできます。歩きから走りへ、飛ばずになめらかにつながります。詳しくは[モーションブレンディング](./docs/ja/guide/motion-blending.md)を参照してください。
-- **GPU はホストのもの、プレイヤーは借りるだけ。** wgpu の `Device` / `Queue` / `Surface` を所有するのはホストで、フレームごとに貸し出します。そのため自前のアプリでも egui・macroquad・Bevy でも、どの wgpu アプリケーションの内側にも同居でき、多数のキャラクターを載せたシーンでもアトラスのアップロードは 1 回で共有されます。
+- **GPU はホストのもの、プレイヤーは借りるだけ。** wgpu の `Device` / `Queue` / `Surface` を所有するのはホストで、フレームごとに貸し出します。そのため自前のアプリでも egui・Bevy でも、どの wgpu アプリケーションの内側にも同居でき、多数のキャラクターを載せたシーンでもアトラスのアップロードは 1 回で共有されます。
 - **各プラットフォームのネイティブなグラフィックス API で描画。** 1 本の wgpu のコードパスが、Windows では DirectX 12、macOS では Metal、Linux では Vulkan、ブラウザでは WebGPU で描きます。
 - **Rust だけではない。** C・C++・Objective-C からは、静的ライブラリ 1 本とヘッダ 1 枚です。`HWND`・`NSView`・`CAMetalLayer`・X11 の `Window`・`wl_surface` のいずれかを渡し、毎フレーム 2 つの関数を呼ぶだけ。ブラウザでは WebAssembly ビルドとして動き、**Bevy** では `ssplayer-bevy` の 3 つのコンポーネントをエンティティに付けるだけで、キャラクターが Bevy 自身の 2D 描画に組み込まれます。
 - **パース不要の読み込みと SIMD。** `.ssab` は FlatBuffers のバイナリをそのまま読み、ポーズは SDK の `#![no_std]` Rust コアが SIMD で計算します。全公式プレイヤーと同じコアです。
@@ -71,11 +71,10 @@ bin/include/ssplayer_wgpu.h                              # C ヘッダ (cbindgen
 bin/LICENSE.md
 bin/LICENSE.ja.md
 bin/THIRD_PARTY_NOTICES.md                               # 謝辞に載せるべきもの
-bin/libs/<platform>/<arch>/libssplayer_wgpu.{a,dylib}    # Windows では .lib/.dll
+bin/libs/<platform>/<arch>/libssplayer_wgpu.{a,dylib,so} # Windows では .lib/.dll
 ```
 
-ビルド設定をこの 2 つのディレクトリに向けてください。[`examples/`](#-サンプル) 以下の C++ ビューアがまさにそれを CMake で行っており、動く実例としては最短です。macOS では Metal、Windows では DX12、
-Linux では Vulkan を駆動し、それぞれ丸ごとコピーして持ち出せる程度に自己完結しています。
+ビルド設定をこの 2 つのディレクトリに向けてください。[`examples/`](#-サンプル) 以下の C++ ビューアが、動く実例としては最短です。macOS では Metal、Windows では DX12、Linux では Vulkan を駆動し、それぞれ丸ごとコピーして持ち出せる程度に自己完結しています。このリポジトリの中では、ビューアはライブラリを自分でビルドします。CMake が `cargo build -p ssplayer-wgpu-ffi` を実行し、`target/<profile>/` にできたものをリンクし、ヘッダは `libs/ssplayer-wgpu-ffi/include/` から読みます。持ち出したビューアでは、この 2 つのパスを `bin/` に向け直してください。
 
 ### ブラウザ (WebGPU)
 
@@ -180,6 +179,7 @@ C++ ビューアは CMake 経由でライブラリを駆動し、その CMake �
 | オプション | 値 | 何をするか |
 |---|---|---|
 | `platform` | `host`（既定）, `web` | `host` は Rust ライブラリと C フェイスをビルドし、`web` は wasm-pack で wasm/js フェイスをビルドします。クロスコンパイルはしないため、`macos`/`windows`/`linux` はホスト自身を指す場合にのみ受け付けます |
+| `arch` | `host`（既定）, `universal` | macOS の `build.sh` のみ。`universal` は Apple の 2 つのターゲットをビルドし、lipo で 1 つのライブラリにまとめます（リリースが配るもの） |
 | `build` | `release`（既定）, `debug` | cargo のプロファイル。`debug` は `wasm-pack --dev` も意味し、`wasm-opt` を飛ばします — そのサイズを数値として引用しないでください |
 | `ffi` | `yes`（既定）, `no` | `host` のみ。`ssplayer-wgpu-ffi` クレートもビルドし、cbindgen で `libs/ssplayer-wgpu-ffi/include/ssplayer_wgpu.h` を再生成します |
 | `deploy` | `yes`（既定）, `no` | `web` のみ。ビルドした npm パッケージを `examples/web/ssplayer-wgpu` へコピーします |

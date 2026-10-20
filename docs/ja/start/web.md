@@ -66,7 +66,7 @@ defineSsPlayerWebGPUElement(); // <ss-player-webgpu> を登録
 | `speed-scale` | 既定 fps の倍率 |
 | `fit`、`align`、`flip-x`、`flip-y` | オーサリング時のキャンバスを要素にどう合わせるか。既定は `contain` と `center`、`fit="none"` で 1:1 |
 
-`element.loadSrc(src, pack?, animation?, read?)` でスクリプトからパックを差し替えられ、アニメーション名の配列が返ります。`animationstarted`・`animationfinished`・`animationlooped`・`userdata`・`signal`・`audio` を DOM イベントとして送り、パックを読み込むと `load` を送ります。上の属性は置いた後に書き換えても反映されます。要素の登録は import の副作用ではなく **opt-in** なので、API だけ使うバンドルに要素は含まれません。
+`element.loadSrc(src, pack?, animation?, read?)` でスクリプトからパックを差し替えられ、アニメーション名の配列が返ります。`animationstarted`・`animationfinished`・`animationlooped`・`userdata`・`signal`・`audio` を DOM イベントとして送り、パックを読み込むと `load` を送ります。`src`・`pack`・`animation`・`speed-scale` と配置の属性は、置いた後に書き換えても反映されます。`autoplay` はアニメーションを設定するときに、`pause-when-hidden` は要素の接続時に 1 回だけ読みます。要素の登録は import の副作用ではなく **opt-in** なので、API だけ使うバンドルに要素は含まれません。
 
 要素の全体（レイアウト、可視性ゲート、デバイスロスト、要素から Player API に触る方法）は
 [`<ss-player-webgpu>`](../reference/web-component.md) にまとめてあります。

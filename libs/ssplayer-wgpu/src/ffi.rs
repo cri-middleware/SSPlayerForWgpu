@@ -208,7 +208,7 @@ pub struct SsMissingAsset {
     pub name: *const c_char,
 }
 
-/// What kind of thing an `ss_event_t` is; read it before the payload.
+/// What kind of thing an `SsEventData` is; read it before the payload.
 pub const SS_EVENT_USER_DATA: u32 = 0;
 /// See `SS_EVENT_USER_DATA`.
 pub const SS_EVENT_SIGNAL: u32 = 1;
@@ -268,7 +268,7 @@ pub struct SsEventData {
     pub loop_num: i32,
 }
 
-/// Which field of an `ss_signal_param_t` carries the value.
+/// Which field of an `SsSignalParamData` carries the value.
 pub const SS_SIGNAL_VALUE_NONE: u32 = 0;
 /// See `SS_SIGNAL_VALUE_NONE`.
 pub const SS_SIGNAL_VALUE_BOOL: u32 = 1;
@@ -1068,7 +1068,7 @@ pub unsafe extern "C" fn ss_player_missing_count(handle: *mut SsPlayer) -> u32 {
 /// Writes `out` and returns `SS_OK`, or leaves it untouched and reports why.
 ///
 /// # Safety
-/// `out` must point at a writable `ss_missing_asset_t`.
+/// `out` must point at a writable `SsMissingAsset`.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn ss_player_missing_at(handle: *mut SsPlayer, index: u32, out: *mut SsMissingAsset) -> i32 {
     if out.is_null() {
@@ -2384,7 +2384,7 @@ pub unsafe extern "C" fn ss_player_event_count(handle: *mut SsPlayer) -> u32 {
 ///
 /// # Safety
 /// `handle` must be a live handle or null; `out` must point at a writable
-/// `ss_event_t`.
+/// `SsEventData`.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn ss_player_event_at(handle: *mut SsPlayer, index: u32, out: *mut SsEventData) -> i32 {
     if out.is_null() {
@@ -2472,7 +2472,7 @@ pub unsafe extern "C" fn ss_player_event_signal_param_count(handle: *mut SsPlaye
 ///
 /// # Safety
 /// `handle` must be a live handle or null; `out` must point at a writable
-/// `ss_signal_param_t`.
+/// `SsSignalParamData`.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn ss_player_event_signal_param_at(handle: *mut SsPlayer, index: u32, param: u32, out: *mut SsSignalParamData) -> i32 {
     if out.is_null() {

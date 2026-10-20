@@ -478,7 +478,7 @@ static const NSUInteger kMaxPlayers = 6;
             if (_paused) {
                 ss_player_pause(player);
             } else {
-                ss_player_play(player);
+                ss_player_resume(player);
             }
         }
         [self printStatus];

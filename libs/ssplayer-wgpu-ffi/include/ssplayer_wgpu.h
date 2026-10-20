@@ -78,7 +78,7 @@
 #define SS_MAX_CROWD_MEMBERS 4096
 
 /*
- What kind of thing an `ss_event_t` is; read it before the payload.
+ What kind of thing an `SsEventData` is; read it before the payload.
  */
 #define SS_EVENT_USER_DATA 0
 
@@ -93,7 +93,7 @@
 #define SS_EVENT_AUDIO 2
 
 /*
- Which field of an `ss_signal_param_t` carries the value.
+ Which field of an `SsSignalParamData` carries the value.
  */
 #define SS_SIGNAL_VALUE_NONE 0
 
@@ -881,7 +881,7 @@ uint32_t ss_player_missing_count(ss_player_t *handle);
  Writes `out` and returns `SS_OK`, or leaves it untouched and reports why.
 
  # Safety
- `out` must point at a writable `ss_missing_asset_t`.
+ `out` must point at a writable `SsMissingAsset`.
  */
 int32_t ss_player_missing_at(ss_player_t *handle, uint32_t index, SsMissingAsset *out);
 
@@ -1808,7 +1808,7 @@ uint32_t ss_player_event_count(ss_player_t *handle);
 
  # Safety
  `handle` must be a live handle or null; `out` must point at a writable
- `ss_event_t`.
+ `SsEventData`.
  */
 int32_t ss_player_event_at(ss_player_t *handle, uint32_t index, SsEventData *out);
 
@@ -1830,7 +1830,7 @@ uint32_t ss_player_event_signal_param_count(ss_player_t *handle, uint32_t index)
 
  # Safety
  `handle` must be a live handle or null; `out` must point at a writable
- `ss_signal_param_t`.
+ `SsSignalParamData`.
  */
 int32_t ss_player_event_signal_param_at(ss_player_t *handle,
                                         uint32_t index,

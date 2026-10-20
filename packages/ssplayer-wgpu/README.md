@@ -3,7 +3,7 @@
 A **WebGPU** renderer for [SpriteStudio](https://www.webtech.co.jp/spritestudio/)
 animations (`.ssab`), compiled to WebAssembly from the Rust/[wgpu](https://wgpu.rs/) player.
 
-One `GPUDevice` per page, one `SSScene` per canvas, and **any number of characters drawn into one
+One `GPUDevice` per page, one surface (`SsSurfaceWeb`) per canvas, and **any number of characters drawn into one
 canvas in a single render pass** — putting ten characters on screen costs one device, one set of
 pipelines and one atlas upload.
 

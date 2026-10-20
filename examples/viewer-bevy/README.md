@@ -8,7 +8,7 @@ and the [`../viewer-metal-cpp`](../viewer-metal-cpp) / [`../viewer-dx12-cpp`](..
 Like the native viewer, **it shows a cast, not a character.** Bevy owns the
 device; the adapter draws every `SsPlayer` entity into Bevy's own 2d pass, so N
 characters share one target and one pass. Everything on screen is driven through
-the adapter's three components — `SsPlayer`, `SsTransform`, `SsPlayback` — plus
+three of the adapter's components — `SsPlayer`, `SsTransform`, `SsPlayback` — plus
 the `SsTrackCommand` message for the track keys, which is the shortest honest
 answer to "how do I put these in my Bevy game?"
 
@@ -100,6 +100,6 @@ shared repo tree so there is one copy of the data, out of git.
 
 ## Related
 
-- [`../../libs/ssplayer-bevy/README.md`](../../libs/ssplayer-bevy/README.md) — the adapter: components, colour, masking, device loss
-- [`../../libs/ssplayer-wgpu/README.md`](../../libs/ssplayer-wgpu/README.md) — the player crate's API
+- [`../../docs/en/start/bevy.md`](../../docs/en/start/bevy.md) and [`../../docs/en/reference/bevy.md`](../../docs/en/reference/bevy.md) — the adapter: components, colour, masking, device loss
+- [`../../docs/en/reference/rust.md`](../../docs/en/reference/rust.md) — the player crate's API
 - [`../viewer`](../viewer) — the same cast in a native winit host

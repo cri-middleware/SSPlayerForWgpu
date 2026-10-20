@@ -58,13 +58,13 @@ fn setup(mut commands: Commands, asset_server: Res<AssetServer>) {
 }
 ```
 
-`SsTransform` と `SsPlayback` は required component なので、`SsPlayer` だけ spawn すれば残りは既定値で付きます。
+`SsPlayer` の required component は、ホストが書く `SsTransform` と `SsPlayback`、アダプタが書き戻す `SsPlaybackState` と `SsTrackState` の 4 つです。`SsPlayer` だけ spawn すれば、4 つとも既定値で付きます。
 
 | コンポーネント | 持つもの | 変更コスト |
 |---|---|---|
-| `SsPlayer` | `pack`, `animation` | 再生ツリーを再構築します — 唯一アロケーションを伴うもの |
+| `SsPlayer` | `pack`, `animation`, `transition_ms` | `pack` か `animation` を変えると再生ツリーを再構築します — 唯一アロケーションを伴うもの。`transition_ms` が 0 より大きければ、`animation` の変更はツリーの上でのクロスフェードになります |
 | `SsTransform` | `x`, `y`, `scale_x`, `scale_y`, `rotation` | ゼロ |
-| `SsPlayback` | `playing`, `speed_scale`, `order`, `alpha`, `visible`, `culled`, `restart`, `direction`, `style`, `loop_count`, `frame_rate`, `frame_skip_enabled`, `sub_frame_enabled`, `animation_section` | ゼロ |
+| `SsPlayback` | `playing`, `speed_scale`, `order`, `alpha`, `tint`, `visible`, `culled`, `restart`, `direction`, `style`, `loop_count`, `frame_rate`, `frame_skip_enabled`, `sub_frame_enabled`, `animation_section` | ゼロ |
 
 Bevy の `Transform` では**ありません**。あちらは 3D アフィンで、Player の 5 つのスカラーへの分解は非可逆だからです。連動させたい場合はコピーするシステムを 1 つ書いてください。どちらを正とするかはあなたが決められます。
 

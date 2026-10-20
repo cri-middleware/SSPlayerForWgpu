@@ -117,7 +117,7 @@ JavaScript event object as `source`.
 | A tick that crossed no marker | empty |
 | A culled player (`set_culled(true)`) | **empty** — the timeline did not advance, so the player reports nothing rather than repeating the last tick that ran |
 | A hidden player (`set_visible(false)`) | reported as usual — hiding skips the draw, not the timeline |
-| A paused player | empty, for the same reason |
+| A paused or stopped player | empty, since its timeline does not advance — except on the update after a `seek`, which reports the frame it landed on |
 | A player with no animation selected — before the first `set_animation`, or after a `load` | **empty** — there is no tree to tick, so the old pack's last tick is not repeated either |
 
 A host that plays a sound per event therefore cannot hear it twice because a character was culled.
@@ -132,9 +132,9 @@ Player that plays audio itself decides by two rules, and on this one they are th
   `SsPlaybackState::playing_forward`) — it is false on a ping-pong's return leg as well as under a
   backward direction. Hold back the sound, not the event: a subtitle or a rumble keyed to the same
   marker still wants it.
-* **Not for where a seek landed.** A `seek` while playing makes the next update report the events of
-  the frame it landed on. To keep a seek silent, skip the audio of the first update after it. A seek
-  while stopped reports nothing, and the first frame after `play` is meant to sound.
+* **Not for where a seek landed.** A `seek` makes the next update report the events of the frame it
+  landed on, whether the player is playing, paused or stopped. To keep a seek silent, skip the audio
+  of the first update after it. The first frame after `play` is meant to sound.
 
 A sound plays to its end. `pause`, `stop` and a new animation stop the *animation*, not the sounds it
 already started; stop those only when the character itself goes away.
@@ -152,8 +152,9 @@ different statement.
 | Point | `Option<[f32; 2]>` | `has_point` + `point[2]` | `e.point` |
 | Text | `Option<String>` | `has_text` + `text` | `e.text` |
 
-Every event also carries `part_index` and the part's authored name, so "which part said this" needs
-no bookkeeping of your own.
+Every event also carries `part_index`, and on Rust, JavaScript and Bevy the part's authored name, so
+"which part said this" needs no bookkeeping of your own. The C event carries the index alone; turn
+it into the name with `ss_player_part_name(player, part_index)`.
 
 ## Signal parameters
 

@@ -101,7 +101,7 @@ and the web package is on npm.
 |---|---|
 | Rust | the `ssplayer-wgpu` crate, as a git dependency |
 | Bevy | the `ssplayer-bevy` crate, as a git dependency |
-| C / C++ | `ssplayer-wgpu-windows-x86_64.zip` and `ssplayer-wgpu-macos-universal.zip` — `include/`, `lib/`, `LICENSE.md`, `LICENSE.ja.md`, `THIRD_PARTY_NOTICES.md` |
+| C / C++ | `ssplayer-wgpu-windows-x86_64.zip` and `ssplayer-wgpu-macos-universal.zip` — `include/`, `lib/`, `README.md`, `docs/` (these pages, in English), `LICENSE.md`, `LICENSE.ja.md`, `THIRD_PARTY_NOTICES.md` |
 | Web | `@spritestudio/ssplayer-wgpu` on npm |
 
 ## 🗺️ From editor to screen

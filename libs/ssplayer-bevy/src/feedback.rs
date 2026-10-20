@@ -114,8 +114,10 @@ pub struct SsEventMessage {
 /// Raised once, on the first frame a character's animation ran after a start:
 /// a new pack or animation on [`crate::SsPlayer`] while
 /// [`crate::SsPlayback`]`::playing` is on, `playing` turning on for a tree that
-/// has not started yet, or a bumped `restart`. Turning `playing` back on after a
-/// pause resumes, and is not a start.
+/// has not started yet, an [`crate::SsPlay`], or a bumped `restart`. Turning
+/// `playing` back on after a pause resumes, and is not a start; nor is a new
+/// animation with [`crate::SsPlayer::transition_ms`] above zero, which
+/// crossfades on the tree that is already playing.
 #[derive(Message, Clone, Copy, Debug)]
 pub struct SsStarted {
     pub entity: Entity,
