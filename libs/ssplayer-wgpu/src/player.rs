@@ -1398,6 +1398,7 @@ impl SSPlayer {
         self.prev_finished = false;
         self.rebuild = true;
         if let Some(root) = &mut self.root {
+            reset_slots(root);
             root.context.play_with_start_frame(start_frame);
             self.start_pending = true;
         }
@@ -1415,6 +1416,7 @@ impl SSPlayer {
         self.prev_finished = false;
         self.rebuild = true;
         if let Some(root) = &mut self.root {
+            reset_slots(root);
             root.context.play();
             self.start_pending = true;
         }
@@ -3176,6 +3178,11 @@ fn step_slots(node: &mut PlaybackNode, frame_no: f32, delta_secs: f32, node_loop
         // does, so independent playback actually advances.
         if r.transitioned {
             child.node.context.play();
+            // The child starts over from its section head, so its own slots start
+            // over too. Left armed, the grandchildren and effects it keyed in its
+            // last run would read their first key as one they already started and
+            // carry on from where they were instead of starting with the child.
+            reset_slots(&mut child.node);
         }
         // The slot's frame, the transition tick included. Reading the controller
         // back after that play() would put a synced child at its section start for
@@ -3189,6 +3196,24 @@ fn step_slots(node: &mut PlaybackNode, frame_no: f32, delta_secs: f32, node_loop
         // *child's* loop rather than the parent animation's: an independent child
         // runs on its own clock, so that is the edge they must re-fire on.
         step_slots(&mut child.node, child.frame_no, child_delta, r.child_looped);
+    }
+}
+
+/// Clear every slot's memory of the key it last started, under `node` and in
+/// its instance children at every depth, so the next step starts each slot on
+/// its key afresh.
+///
+/// For whenever a node's animation heads out again: a [`SSPlayer::play`], or a
+/// child its slot has just started. Without it, an independent effect or
+/// instance takes its first key for the one it already started and never
+/// starts again.
+fn reset_slots(node: &mut PlaybackNode) {
+    for effect in node.effects.values_mut() {
+        effect.slot.reset();
+    }
+    for child in node.instances.values_mut() {
+        child.slot.reset();
+        reset_slots(&mut child.node);
     }
 }
 
