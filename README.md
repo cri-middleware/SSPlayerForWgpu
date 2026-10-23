@@ -228,6 +228,10 @@ modes, deploying them to `examples/web` as `assets/` (reference, plus its siblin
 `assets_emb/` (embedded, atlas baked in). The tests read `assets/`, so it is a prerequisite for
 `cargo test`, not an optional step.
 
+How the player is put together and why, using your checkout in a host, and checking on real hosts are
+on the docs site's [For contributors](https://cri-middleware.github.io/SSPlayerForWgpu/contributing/)
+pages.
+
 ## 🧭 Repository Layout
 
 A single Cargo workspace. The library is one crate carrying all three faces, which a second crate only
