@@ -2,12 +2,6 @@
 
 どの Face も再生するファイルは同じ **`.ssab`** で、アーティストが作業する `.sspj` から**事前に**コンバートしたものです。**この Player は実行時に一切変換せず、コンバータも同梱しません。**
 
-まず試すだけなら自前のデータは不要です。リポジトリのサンプルはすべて SDK 付属のテストアニメーションで動きます。用意はコマンド 1 つ：
-
-```bash
-./scripts/deploy-examples.sh    # SDK から ssconverter-cli をビルドし、assets/ に変換
-```
-
 ## 自分のデータを変換する
 
 | ツール | 用途 |
@@ -19,6 +13,8 @@
     [SpriteStudio 公式のサンプルデータ](https://www.webtech.co.jp/help/ja/spritestudio7/download/sample/)がそのまま使えます。キャラクターなら [Ringo](https://www.webtech.co.jp/help/ja/spritestudio7/download/sample/#ringo)、エフェクトを含むものなら[パーティクル](https://www.webtech.co.jp/help/ja/spritestudio7/download/sample/#Perticle_sample) が手頃です。ダウンロードした `.sspj` は、上のどちらのツールにもそのまま渡せます。
 
 選び方とパイプラインへの組み込みはポータル側が本家です：[アセットの変換](https://cri-middleware.github.io/SpriteStudio-Docs/ja/overview/conversion/)、[スタンドアロンツールでの変換](https://cri-middleware.github.io/SpriteStudio-Docs/ja/overview/convert-with-a-standalone-tool/)。ここでは繰り返しません。
+
+このリポジトリのチェックアウトでは、サンプルは SDK 付属のテストアニメーションで動きます。`./scripts/deploy-examples.sh` が `assets/` に変換します。
 
 ## 2 つのエクスポートモード
 

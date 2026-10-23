@@ -3,13 +3,6 @@
 Every face plays the same file: a **`.ssab`**, converted ahead of time from the `.sspj` project your
 artist works in. **This player converts nothing at runtime and bundles no converter.**
 
-Nothing of your own is needed to try it first — every sample in the repository runs on the SDK's own
-test animations, produced by one command:
-
-```bash
-./scripts/deploy-examples.sh    # builds ssconverter-cli from the SDK, converts into assets/
-```
-
 ## Converting your own
 
 | Tool | Use it for |
@@ -28,6 +21,9 @@ The portal covers picking one and putting it in a pipeline:
 [Converting Assets](https://cri-middleware.github.io/SpriteStudio-Docs/overview/conversion/) and
 [Standalone conversion tools](https://cri-middleware.github.io/SpriteStudio-Docs/overview/convert-with-a-standalone-tool/).
 That material is the SDK's and is not repeated here.
+
+In a checkout of this repository, the samples run on the SDK's own test animations, which
+`./scripts/deploy-examples.sh` converts into `assets/`.
 
 ## The two export modes
 
