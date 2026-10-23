@@ -193,7 +193,7 @@ local run with the same options builds.
 ## Coding Standards
 
 ### Rust
-- Rendering parity is judged against the WebGL player (`../SSPlayerForWeb/packages/ssplayer-webgl/`), which the drawing code was ported from; consult it before inventing new behaviour.
+- The drawing code was ported from the WebGL player (`../SSPlayerForWeb/packages/ssplayer-webgl/`), and the comments that say so name what each piece came from; read it to see where a port started. How a `.ssab` should draw is the porting guide's, and where the guide is silent, this Player's: the others are read against it (SpriteStudio-SDK `MAINTAINING_PLAYERS.md` §5). Check a change to drawing against the guide, and put the rule it settles into the guide in the same change.
 - Doc comments and the crate READMEs under `libs/` are written in English.
 - `cargo fmt` decides formatting; `rustfmt.toml` is in the repository root.
 - Clippy runs with `-D warnings` over all targets, so a lint is an error.
@@ -343,7 +343,7 @@ cargo test -p ssplayer-wgpu --features ffi --lib
 ## コーディング規約
 
 ### Rust
-- 描画の一致は WebGL 版 Player（`../SSPlayerForWeb/packages/ssplayer-webgl/`）を基準に判断します。描画コードはそこから移植したものなので、新しい挙動を作る前に参照してください。
+- 描画コードは WebGL 版 Player（`../SSPlayerForWeb/packages/ssplayer-webgl/`）から移植したもので、そう書いたコメントが移植元を名指しています。移植の出発点を知るにはそれを読んでください。`.ssab` がどう描かれるべきかを決めるのはポーティングガイドで、ガイドに書いていないところはこの Player です。ほかの Player はこの Player を基準に読まれます（SpriteStudio-SDK の `MAINTAINING_PLAYERS.md` §5）。描き方の変更はガイドに照らして確かめ、それで決まった規則は同じ変更でガイドに書き足してください。
 - doc コメントと `libs/` 以下の各クレートの README は英語で書きます。
 - 整形は `cargo fmt` が決めます。`rustfmt.toml` はリポジトリルートにあります。
 - clippy は全ターゲットに対して `-D warnings` で走るため、lint は警告ではなくエラーです。

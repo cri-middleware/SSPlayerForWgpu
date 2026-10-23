@@ -95,6 +95,11 @@ player, where every host and the C ABI reach it, and the host half belongs in an
 
 ## Distribution & verification
 
+- [ ] **Confirm the three borrowed blend states** — `Mulalpha` and `Mul2` draw with `Mul`'s
+      state and `Screen2` with `Screen`'s (`blend_state` in `renderer.rs`), as SpriteStudio Player
+      for Web and for Flutter do; none of the three has been checked against the editor.
+      Blocked on: a reference render of each.
+
 - [ ] **crates.io** — `ssruntime` and `ssab` are path dependencies into the
       submodule; cargo will not publish a crate that depends on paths only.
       Blocked on: the SDK crates `ssab` and `ssruntime` being published first.

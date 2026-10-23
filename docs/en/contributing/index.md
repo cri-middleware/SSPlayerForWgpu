@@ -150,6 +150,52 @@ Three testing notes:
     on lavapipe against the base's rendering, and fails on any difference, including one you meant;
     then say in the description why the triptychs it uploads (`golden-diff`) are right.
 
+## Using your checkout in a host
+
+Each face takes a checkout the way it takes a release:
+
+- **Rust:** a path dependency, `ssplayer-wgpu = { path = "<checkout>/libs/ssplayer-wgpu" }` (and
+  `ssplayer-bevy` the same way). `ssruntime` and `ssab` come with it, through the submodule. The
+  player borrows the host's device, so the host's `wgpu` must be the version the workspace's
+  `Cargo.toml` names.
+- **C / C++:** `./scripts/build.sh` collects the library and `ssplayer_wgpu.h` into `bin/`
+  (`bin/libs/<platform>/<arch>/`, `bin/include/`); link them as the C++ viewers under `examples/`
+  do.
+- **npm:** build the package, pack it, and install the tarball in the app:
+
+    ```bash
+    ./scripts/build.sh platform=web                  # wasm-pack + tsdown -> packages/ssplayer-wgpu/{wasm,dist}
+    (cd packages/ssplayer-wgpu && pnpm pack)         # -> spritestudio-ssplayer-wgpu-<version>.tgz
+    ```
+
+    Then `npm install <checkout>/packages/ssplayer-wgpu/spritestudio-ssplayer-wgpu-<version>.tgz` in
+    the app. `prepack` (`scripts/verify-publish-artifacts.mjs`) refuses a tarball whose advertised
+    `dist/` or `wasm/` is missing, so a packed tarball is complete.
+
+## Checking on real hosts
+
+What CI and the tests above do not show, and how to look at it:
+
+- **Linux desktops.** CI builds the Vulkan C++ viewer and renders on lavapipe, headless. A Wayland
+  compositor, an Xorg session and interactive resizing need a Linux desktop — a VM with one is
+  enough. Copy the checkout in with `rsync -a --exclude target`, which also carries the submodule
+  without credentials on the VM.
+- **An offscreen check never clears to black.** Counting "non-black" pixels after a black clear makes
+  black artwork read as nothing drawn, and assets often fade out through a black cell. Clear to
+  another colour and count the pixels that differ from it; `tests/render.rs`'s `drawn_pixels` counts
+  non-black after a black clear, so it is not the tool for such assets. Read the viewport from
+  `canvas_size()` after `set_animation()` — before it, it is `None` — and do not treat zero pixels at
+  a low resolution as a defect: a 5×4 px cell can vanish there.
+- **Profiling a frame.** The workspace's release profile strips symbols, so build what you profile
+  with `CARGO_PROFILE_RELEASE_STRIP=none CARGO_PROFILE_RELEASE_DEBUG=line-tables-only` and a
+  `CARGO_TARGET_DIR` of its own, and record with
+  [samply](https://github.com/mstange/samply) (`--save-only --unstable-presymbolicate`). LTO inlines
+  frames away, so read the self time at the leaves with their nearest caller. `deploy-examples.sh`
+  looks for the converter under `SpriteStudio-SDK/target`, so run it with `CARGO_TARGET_DIR` unset.
+- **Before-and-after comparisons alternate.** Build both sides, run them in turn three to five
+  times, and compare ratios and medians: absolute times move by a quarter with the machine's load,
+  and a single GPU timing is bimodal with the GPU's clock state.
+
 ## Releasing
 
 `release.yml` builds every platform; `scripts/build-release.sh` assembles the zips, the npm
