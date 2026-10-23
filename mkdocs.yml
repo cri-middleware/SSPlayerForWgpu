@@ -59,7 +59,7 @@ nav:
   - ⚠️ Limitations & Scope: limitations.md
   - 🔄 Migration:
       - From SS6Player for CPP: migration/from-ss6-cpp.md
-  - 🛠️ For contributors:
-      - Build and verify: contributing/index.md
-      - How the player is put together: contributing/architecture.md
+  - 🛠️ For Player & SDK Developers:
+      - Build Guide: development/build.md
+      - How the Player Is Put Together: development/architecture.md
   - ⚖️ License: license.md

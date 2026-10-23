@@ -61,8 +61,8 @@ scene.draw(&renderer, &mut rpass);
 For the repository as a whole — examples, build scripts, asset generation — see
 the [top-level README](../../README.md) and [CONTRIBUTING.md](../../CONTRIBUTING.md). Unlike the
 other players, this one links the SDK's `ssruntime` and `ssab` as Rust crates through the
-`SpriteStudio-SDK` submodule rather than its released C-API; how to bump it is in
-[Contributing](https://cri-middleware.github.io/SSPlayerForWgpu/contributing/).
+`SpriteStudio-SDK` submodule rather than its released C-API; how to bump it is in the
+[Build Guide](https://cri-middleware.github.io/SSPlayerForWgpu/development/build/).
 
 ## License
 

@@ -66,7 +66,7 @@ Windows のゲームも、macOS のアプリも、4 本の移植版ではなく�
 | **[ガイド](./guide/concepts.md)** | 以降は全員が同じ本文を読みます。コードは言語別タブになっていて、どこかのページで 1 度選べばサイト全体がその言語で表示されます |
 | **[API リファレンス](./reference/rust.md)** | 名前を正確に知りたいとき。Face ごとに 1 ページ |
 | **[wgpu ホスト](./wgpu/borrow-model.md)** | **デバイスを自分で持っている人だけ** — Rust アプリかエンジンアダプタ。C++ / ブラウザの読者はこのセクションに入る必要がありません |
-| **[開発者向け](./contributing/index.md)** | ライブラリの全 Face を手元でビルドする手順と、変更が守るべきルール |
+| **[Player・SDK 開発者向けガイド](./development/build.md)** | ライブラリの全 Face を手元でビルドする手順、変更したプレイヤーをホストで使う方法、プレイヤーの構成 |
 
 本文とは別に、<a href="../api/" target="_blank" rel="noreferrer">Rust API リファレンス</a>（`ssplayer_wgpu` と `ssplayer_bevy` の rustdoc）と <a href="../demo/" target="_blank" rel="noreferrer">WebGPU デモ</a>が同じサイト上に公開されています。ナビゲーションからも辿れます（rustdoc は API リファレンス、デモははじめるの下）。
 

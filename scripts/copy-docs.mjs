@@ -20,7 +20,7 @@
 //
 // Left out of docs/en/:
 //   index.md       the site's home page; the front door stands in for it.
-//   contributing/  building this repository, which a user of the artifact does not do.
+//   development/   building this repository, which a user of the artifact does not do.
 //   not *.md       assets/ holds the site's favicon and nothing a page shows.
 // Everything else is taken by rule, not by list, so a page added to docs/en/ ships
 // without anyone remembering to add it here.
@@ -46,7 +46,7 @@ const src = join(root, 'docs', 'en');
 
 const pages = readdirSync(src, { recursive: true })
   .filter((rel) => rel.endsWith('.md'))
-  .filter((rel) => rel !== 'index.md' && !rel.startsWith(`contributing${sep}`))
+  .filter((rel) => rel !== 'index.md' && !rel.startsWith(`development${sep}`))
   .sort();
 
 function copyPages(out) {

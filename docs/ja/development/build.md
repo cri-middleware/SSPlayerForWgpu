@@ -1,6 +1,6 @@
-# 開発者向け
+# 🛠️ ビルドガイド
 
-このリポジトリのものはすべて 1 台のマシンでビルドできます。新しいクローンが必要とする順に並べた、チェックリスト一式です。
+SpriteStudio Player for wgpu を開発する人と、自分のホストのために改造する人に向けたページです。このリポジトリのものはすべて 1 台のマシンでビルドでき、このページは新しいクローンが必要とする順に並べたチェックリスト一式です。クレートの構成とその理由は[プレイヤーの構成](architecture.md)にあります。
 
 ## ソースを取得する
 
@@ -60,12 +60,10 @@ SDK を上げたら、もう一度実行してください。`.ssab` の形式�
 
 通常の `cargo build` / `clippy --all-targets` / `cargo test` は、以下を**まったくコンパイルしません**。どれも、誰かが意図してビルドするまで静かに腐ります：
 
-1. **`web.rs`** は `web` feature の裏にあり、ネイティブのどのコマンドでもコンパイルされません。触ったら
-   wasm ターゲットをビルドし、Lint もかけてください。
+1. **Web の Face** は `web` feature の裏にあり、ネイティブのどのコマンドでもコンパイルされません。触ったら wasm ターゲットをビルドし、Lint もかけてください。
 2. **TypeScript 層**は wasm-pack が生成した `.d.ts` に対して型付けされているので、`#[wasm_bindgen]`
    メソッドの改名は cargo が通ったまま TS 層を壊します。Web Face の公開面を変えたら型チェックを走らせてください。
-3. **`host.rs` / `ffi.rs`** は `ffi` feature の裏にあり、そのビルドが cbindgen で
-   `libs/ssplayer-wgpu-ffi/include/ssplayer_wgpu.h` を再生成します。**再生成されたヘッダは、それを動かした変更と一緒にコミットしてください。** そして差分を読むこと。cbindgen はクレート内のモジュールレベルの
+3. **C の Face** は `ffi` feature の裏にあり、そのビルドが cbindgen で `ssplayer_wgpu.h` を再生成します。**再生成されたヘッダは、それを動かした変更と一緒にコミットしてください。** そして差分を読むこと。cbindgen はクレート内のモジュールレベルの
    `pub const` をすべて拾います。
 
 ## ドキュメントサイトをビルドする
@@ -117,7 +115,7 @@ cargo test -p ssplayer-wgpu --features ffi --lib
 
 * **レンダリングテストは GPU アダプタが無い環境では自分をスキップします。** そういうマシンでの成功は何も検証していない可能性があります。CI はソフトウェア Vulkan デバイス（Mesa lavapipe）を入れ、アダプタが無ければ失敗させます。ラスタライズを変更したら、リードバックを PNG に落として目で見てください。
 * **性能の変更は前後で計測し、そのとき本物のフレームループを回してください。** `update` とレンダーパスはフレームと同じように交互に実行します。別々のループで測ると、フレームを跨いでキャッシュするものが実際よりずっと良く見えます。`cargo test --test scale -- --ignored` がこのリポジトリのスループット計測で、両方を満たしています（CI のソフトウェア GPU では速度を判定できないため `#[ignore]`）。ホスト側から見えるカウンタは[パフォーマンス](../guide/performance.md)にあります。
-* **ジオメトリに触る前にゴールデンを取ってください。** `tests/golden.rs::golden_corpus`（既定で ignore）は全フィクスチャ／アニメーション／フレーム／ステンシルの組み合わせを描画し、前回の実行とバイト比較します：
+* **ジオメトリに触る前にゴールデンを取ってください。** ゴールデンのコーパスのテスト（既定で ignore）は全フィクスチャ／アニメーション／フレーム／ステンシルの組み合わせを描画し、前回の実行とバイト比較します：
 
     ```bash
     SS_GOLDEN_DIR=/tmp/before cargo test --test golden -- --ignored
@@ -127,7 +125,7 @@ cargo test -p ssplayer-wgpu --features ffi --lib
 
     基準は GPU 固有なので、これはチェックイン済みのゴールデンセットではなく、1 台のマシン上での前後比較ツールです。比較すると `/tmp/after/summary.md` を書き、変わった画像ごとに前・後・差分を並べた画像を `/tmp/after/diff/` に書きます。CI はプルリクエストごとに同じことを lavapipe 上でベースの描画に対して行い、意図した変化も含めて、差があれば失敗します。意図した変化なら、CI がアップロードする並べた画像（`golden-diff`）がなぜ正しいのかを説明に書いてください。
 
-## チェックアウトを自分のホストで使う
+## 変更したプレイヤーを使う
 
 どの Face も、リリースと同じ形でチェックアウトを受け取ります。
 
@@ -140,14 +138,14 @@ cargo test -p ssplayer-wgpu --features ffi --lib
     (cd packages/ssplayer-wgpu && pnpm pack)         # -> spritestudio-ssplayer-wgpu-<version>.tgz
     ```
 
-    そのあと、アプリで `npm install <checkout>/packages/ssplayer-wgpu/spritestudio-ssplayer-wgpu-<version>.tgz` を実行します。`prepack`（`scripts/verify-publish-artifacts.mjs`）は、うたっている `dist/` や `wasm/` が無い tarball を拒むので、pack できた tarball は欠けていません。
+    そのあと、アプリで `npm install <checkout>/packages/ssplayer-wgpu/spritestudio-ssplayer-wgpu-<version>.tgz` を実行します。`prepack` は、うたっている `dist/` や `wasm/` が無い tarball を拒むので、pack できた tarball は欠けていません。
 
 ## 実際のホストで確かめる
 
 CI と上のテストでは見えないものと、その確かめ方です。
 
 - **Linux のデスクトップ。** CI は Vulkan の C++ ビューアをビルドし、lavapipe でヘッドレスに描きます。Wayland のコンポジタ、Xorg のセッション、対話的なリサイズには Linux のデスクトップが要ります。デスクトップのある VM で足ります。チェックアウトは `rsync -a --exclude target` でコピーしてください。サブモジュールも、VM に資格情報を置かずに運べます。
-- **オフスクリーンの確認では黒でクリアしません。** 黒でクリアして「黒でない」画素を数えると、黒い絵が「何も描いていない」に見えます。黒一色のセルでフェードアウトするアセットはよくあります。別の色でクリアし、その色と違う画素を数えてください。`tests/render.rs` の `drawn_pixels` は黒でクリアして黒でないものを数えるので、そういうアセットには使えません。ビューポートは `set_animation()` の**後**に `canvas_size()` から読みます（前は `None` です）。低い解像度で画素数が 0 でも、すぐに不具合とみなさないでください。5×4 px のセルはそこで消えることがあります。
+- **オフスクリーンの確認では黒でクリアしません。** 黒でクリアして「黒でない」画素を数えると、黒い絵が「何も描いていない」に見えます。黒一色のセルでフェードアウトするアセットはよくあります。別の色でクリアし、その色と違う画素を数えてください。レンダリングテスト自身の画素の数え方は黒でクリアして黒でないものを数えるので、そういうアセットには使えません。ビューポートは `set_animation()` の**後**に `canvas_size()` から読みます（前は `None` です）。低い解像度で画素数が 0 でも、すぐに不具合とみなさないでください。5×4 px のセルはそこで消えることがあります。
 - **フレームのプロファイル。** ワークスペースの release プロファイルはシンボルを落とすので、プロファイルするものは `CARGO_PROFILE_RELEASE_STRIP=none CARGO_PROFILE_RELEASE_DEBUG=line-tables-only` と専用の `CARGO_TARGET_DIR` でビルドし、[samply](https://github.com/mstange/samply) で記録します（`--save-only --unstable-presymbolicate`）。LTO がフレームをインライン化して消すので、末端の self time を、いちばん近い呼び出し元と合わせて読みます。`deploy-examples.sh` はコンバータを `SpriteStudio-SDK/target` で探すので、`CARGO_TARGET_DIR` を外して実行してください。
 - **前後の比較は交互に回します。** 両方をビルドし、3〜5 回交互に回して、比と中央値で比べます。絶対的な時間はマシンの負荷で 4 分の 1 ほど動き、GPU の単発の時間は GPU のクロックの状態で二峰になります。
 

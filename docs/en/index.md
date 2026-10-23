@@ -82,7 +82,7 @@ your own is required to try the player first: every sample runs on the SDK's own
 | **[Guide](./guide/concepts.md)** | Everyone, from then on. One text with the code in per-language tabs: pick your language on any page and the whole site follows. |
 | **[API reference](./reference/rust.md)** | When you need the exact name of something. One page per face. |
 | **[wgpu hosts](./wgpu/borrow-model.md)** | Only if you own the device — a Rust application or an engine adapter. A C++ or browser reader never needs this section. |
-| **[For contributors](./contributing/index.md)** | Building every face of the library yourself, and the rules a change has to respect. |
+| **[For Player & SDK Developers](./development/build.md)** | Building every face of the library yourself, using a changed Player in a host, and how the player is put together. |
 
 Two more things are published beside this text rather than inside it: the
 <a href="./api/" target="_blank" rel="noreferrer">Rust API reference</a> (rustdoc for

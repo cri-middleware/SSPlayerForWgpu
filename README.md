@@ -228,9 +228,10 @@ modes, deploying them to `examples/web` as `assets/` (reference, plus its siblin
 `assets_emb/` (embedded, atlas baked in). The tests read `assets/`, so it is a prerequisite for
 `cargo test`, not an optional step.
 
-How the player is put together and why, using your checkout in a host, and checking on real hosts are
-on the docs site's [For contributors](https://cri-middleware.github.io/SSPlayerForWgpu/contributing/)
-pages.
+The docs site's [Build Guide](https://cri-middleware.github.io/SSPlayerForWgpu/development/build/)
+also covers using a changed Player in a host and checking it on real hosts, and
+[How the Player Is Put Together](https://cri-middleware.github.io/SSPlayerForWgpu/development/architecture/)
+gives the layers and the reasons behind them.
 
 ## 🧭 Repository Layout
 

@@ -1,7 +1,9 @@
-# For contributors
+# 🛠️ Build Guide
 
-Everything in this repository can be built on one machine. This page is the whole checklist, in the
-order a fresh clone needs it.
+For whoever works on SpriteStudio Player for wgpu, or changes it for a host of their own. Everything
+in this repository can be built on one machine, and this page is the whole checklist, in the order a
+fresh clone needs it. How the crate is put together, and why, is on
+[How the Player Is Put Together](architecture.md).
 
 ## Get the source
 
@@ -68,13 +70,13 @@ themselves (`deploy-examples.sh when=stale`).
 Ordinary `cargo build`, `clippy --all-targets` and `cargo test` compile **none** of the following.
 Each rots silently until someone builds it deliberately:
 
-1. **`web.rs`** sits behind the `web` feature and is compiled by no native command. Build and lint
-   the wasm target after touching it.
+1. **The web face** sits behind the `web` feature and is compiled by no native command. Build and
+   lint the wasm target after touching it.
 2. **The TypeScript layer** types itself against wasm-pack's generated `.d.ts`, so renaming a
    `#[wasm_bindgen]` method breaks it while cargo stays happy. Run the typecheck after changing the
    web face's public surface.
-3. **`host.rs` / `ffi.rs`** sit behind the `ffi` feature, and that build regenerates
-   `libs/ssplayer-wgpu-ffi/include/ssplayer_wgpu.h` through cbindgen. **Commit the regenerated
+3. **The C face** sits behind the `ffi` feature, and that build regenerates `ssplayer_wgpu.h`
+   through cbindgen. **Commit the regenerated
    header with the change that moved it**, and read the diff: cbindgen sweeps up every module-level
    `pub const` in the crate.
 
@@ -134,8 +136,8 @@ Three testing notes:
   --ignored` is the repository's throughput harness and does both; it is `#[ignore]`d because CI's
   software GPU cannot judge speed. The counters a host sees are in
   [Performance](../guide/performance.md).
-* **Take a golden dump before touching geometry.** `tests/golden.rs::golden_corpus` (ignored by
-  default) renders every fixture/animation/frame/stencil combination and byte-compares it against a
+* **Take a golden dump before touching geometry.** The golden corpus test (ignored by default)
+  renders every fixture/animation/frame/stencil combination and byte-compares it against a
   previous run:
 
     ```bash
@@ -150,7 +152,7 @@ Three testing notes:
     on lavapipe against the base's rendering, and fails on any difference, including one you meant;
     then say in the description why the triptychs it uploads (`golden-diff`) are right.
 
-## Using your checkout in a host
+## Using a changed Player
 
 Each face takes a checkout the way it takes a release:
 
@@ -169,10 +171,10 @@ Each face takes a checkout the way it takes a release:
     ```
 
     Then `npm install <checkout>/packages/ssplayer-wgpu/spritestudio-ssplayer-wgpu-<version>.tgz` in
-    the app. `prepack` (`scripts/verify-publish-artifacts.mjs`) refuses a tarball whose advertised
+    the app. `prepack` refuses a tarball whose advertised
     `dist/` or `wasm/` is missing, so a packed tarball is complete.
 
-## Checking on real hosts
+## Checking against the real host
 
 What CI and the tests above do not show, and how to look at it:
 
@@ -182,8 +184,8 @@ What CI and the tests above do not show, and how to look at it:
   without credentials on the VM.
 - **An offscreen check never clears to black.** Counting "non-black" pixels after a black clear makes
   black artwork read as nothing drawn, and assets often fade out through a black cell. Clear to
-  another colour and count the pixels that differ from it; `tests/render.rs`'s `drawn_pixels` counts
-  non-black after a black clear, so it is not the tool for such assets. Read the viewport from
+  another colour and count the pixels that differ from it; the render tests' own pixel count clears
+  to black and counts non-black, so it is not the tool for such assets. Read the viewport from
   `canvas_size()` after `set_animation()` — before it, it is `None` — and do not treat zero pixels at
   a low resolution as a defect: a 5×4 px cell can vanish there.
 - **Profiling a frame.** The workspace's release profile strips symbols, so build what you profile
