@@ -3,7 +3,7 @@
 [SpriteStudio](https://www.webtech.co.jp/spritestudio/) のアニメーション（`.ssab`）を
 **WebGPU** で再生するレンダラです。Rust / [wgpu](https://wgpu.rs/) 実装のプレイヤーを WebAssembly にコンパイルしたものです。
 
-1ページに `GPUDevice` は1つ、1 canvas に `SSScene` が1つ、そして **1枚の canvas に何体でも載り、
+1ページに `GPUDevice` は1つ、1 canvas にサーフェス（`SsSurfaceWeb`）が1つ、そして **1枚の canvas に何体でも載り、
 1パスで合成されます** — 10体並べても device もパイプラインもアトラスのアップロードも1回きりです。
 
 English version: [README.md](./README.md)
