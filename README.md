@@ -296,8 +296,8 @@ a submodule bump here.
 
 - [SpriteStudio-SDK](https://github.com/cri-middleware/SpriteStudio-SDK) — the core SDK providing
   `ssruntime` and `ssconverter`.
-- [SSPlayerForWeb](https://github.com/cri-middleware/SSPlayerForWeb) — the Web players, including the
-  WebGL renderer this one is judged for rendering parity against.
+- [SSPlayerForWeb](https://github.com/cri-middleware/SSPlayerForWeb) — the Web players, including a
+  WebGL renderer for where WebGPU is missing.
 - [SSConverterGUI](https://github.com/cri-middleware/SSConverterGUI) — desktop GUI tool for converting
   `.sspj` to `.ssab`.
 

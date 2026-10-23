@@ -77,7 +77,7 @@ Bevy の `Transform` では**ありません**。あちらは 3D アフィンで
 SpriteStudio のアトラスは sRGB でオーサリングされ、Player はそのバイト列を渡されたターゲットへそのまま書き込みます（ネイティブや C++ ホストと同じく、色管理は一切しません）。Bevy の**既定の** 2D カメラは
 **sRGB** ターゲットに描画するため、書き込み時にもう一度エンコードされ、キャラクターが目に見えて明るくなりすぎます。
 
-`CompositingSpace::Srgb` を付けると Bevy は非 sRGB（`Rgba8Unorm`）ターゲットを選び、sRGB 空間で合成します。これが Player（および WebGL リファレンス）のモデルと一致します。付いていない sRGB ターゲットに描画した場合、アダプタが 1 度だけ警告します。
+`CompositingSpace::Srgb` を付けると Bevy は非 sRGB（`Rgba8Unorm`）ターゲットを選び、sRGB 空間で合成します。これが Player のモデルと一致します。付いていない sRGB ターゲットに描画した場合、アダプタが 1 度だけ警告します。
 
 !!! warning "HDR は別の話"
     `Hdr` カメラは `Rgba16Float`（リニア光）で描画され、Player の sRGB 空間出力はトーンマッピング的に正しくありません。忠実な色が必要なら、SDR カメラ ＋ `CompositingSpace::Srgb` を使ってください。
