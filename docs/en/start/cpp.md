@@ -14,9 +14,8 @@ functions a frame; it renders through **DirectX 12 on Windows, Metal on macOS an
 
     One consequence: this face **owns its own graphics device**, built on the window you name. It does not draw into a `ID3D12CommandList` or `MTLCommandBuffer` of
     yours. Sharing an engine's device through a C ABI is a
-    [deliberate non-goal](../limitations.md#no-device-sharing-across-the-c-abi), and so far a scene
-    draws only to the window it was created on — rendering into a texture for your engine to
-    composite is not offered yet.
+    [deliberate non-goal](../limitations.md#no-device-sharing-across-the-c-abi), and a scene draws
+    only to the window it was created on, not into a texture for your engine to composite.
 
 ## What you get
 
@@ -193,12 +192,6 @@ cd examples/viewer-vulkan-cpp  && cmake -B build && cmake --build build && ./bui
 
 They run `cargo` themselves, so there is no separate build step — and
 `./scripts/deploy-examples.sh` once, first, for the animation data.
-
-!!! note "The Linux sample has not been run yet"
-    The library builds from source on Linux, and CI builds it on x86_64. The **Vulkan sample**
-    compiles in CI on every pull request, but the runner has no display, so it has never opened a
-    window and its X11 and Wayland paths are unverified — see the
-    [ROADMAP](https://github.com/cri-middleware/SSPlayerForWgpu/blob/main/ROADMAP.md).
 
 ## Next
 

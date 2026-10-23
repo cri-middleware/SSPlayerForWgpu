@@ -85,5 +85,5 @@ embedding is a Rust-only capability by construction, not by omission.
 
 From C the route to compositing would be offscreen rendering plus a shared texture: let the player
 own its device, render into a texture, and bring that texture into your engine by whatever interop
-it already has. The C face does not offer that yet — a scene renders only to the window it was
+it already has. The C face does not offer that — a scene renders only to the window it was
 created on. See [Limitations](../limitations.md#no-device-sharing-across-the-c-abi).

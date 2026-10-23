@@ -5,7 +5,7 @@
 
 | 制約 | 対象 | 詳しくは |
 |---|---|---|
-| C Face は**自分でデバイスを構築し所有し**、渡されたウィンドウにだけ描きます。あなたのレンダーパスへも、今のところテクスチャへも描き込めません | C / C++ | [下記](#no-device-sharing-across-the-c-abi) |
+| C Face は**自分でデバイスを構築し所有し**、渡されたウィンドウにだけ描きます。あなたのレンダーパスへも、テクスチャへも描き込めません | C / C++ | [下記](#no-device-sharing-across-the-c-abi) |
 | **`wgpu` は 30 系に固定**。アプリケーションと Player は 1 つの `wgpu` に解決する必要があります | Rust, Bevy | [前提](./start/rust.md#requirements) |
 | **MSAA はオフ必須**。sRGB ターゲットではアトラスが二重にエンコードされます | Rust, Bevy | [レンダーパスに求められること](./wgpu/borrow-model.md#what-your-render-pass-has-to-be) |
 | **1 キャラクターにつき 1 フレーム 1 回の `update`**。1 つのキャストを 2 つのビューには描けません | Rust, Bevy | [複数ターゲット、1 デバイス](./wgpu/borrow-model.md#several-targets-one-device) |
@@ -26,7 +26,7 @@ C Face は渡されたウィンドウハンドル上に**自分でグラフィ�
 
 wgpu の型には安定した C 表現が無く、境界を越えて渡せるものが存在しません。したがってデバイスを持つエンジンへの組み込みは **Rust 限定**の機能であり、[アダプタクレート](./wgpu/engines.md)として提供されます。
 
-C からエンジン自身の描画と合成するにはオフスクリーン描画＋テクスチャ共有が要りますが、この Face は**まだそれを提供していません**。シーンが描くのは、作成時に渡したウィンドウまたはレイヤーだけです。それまでの経路は Player 専用のウィンドウかレイヤー — 子ウィンドウや、自前のレイヤーツリーに置いた `CAMetalLayer` — です。オフスクリーンのターゲットに何が要るかは [ROADMAP](https://github.com/cri-middleware/SSPlayerForWgpu/blob/main/ROADMAP.md) の項目にあります。
+C からエンジン自身の描画と合成するにはオフスクリーン描画＋テクスチャ共有が要りますが、この Face は**それを提供していません**。シーンが描くのは、作成時に渡したウィンドウまたはレイヤーだけです。経路は Player 専用のウィンドウかレイヤー — 子ウィンドウや、自前のレイヤーツリーに置いた `CAMetalLayer` — です。
 
 ## `Div2` と `Overlay2` は `Mix` で描かれます { #div2-and-overlay2-draw-as-mix }
 
@@ -34,7 +34,7 @@ C からエンジン自身の描画と合成するにはオフスクリーン描
 
 再現できるかは wgpu ではなく計算式の定義次第です。何が要るかは [ROADMAP](https://github.com/cri-middleware/SSPlayerForWgpu/blob/main/ROADMAP.md) の項目にあります。
 
-ほかの 3 つは近いモードのステートを借りて描かれます。`Mulalpha` と `Mul2` は `Mul` として、`Screen2` は `Screen` として描かれます。この 3 つは近似で、エディタとの一致は確認していません。
+ほかの 3 つは近いモードのステートを借りて描かれます。`Mulalpha` と `Mul2` は `Mul` として、`Screen2` は `Screen` として描かれます。この 3 つは近似です。
 
 ## キャラクター全体のアルファはパーツごとに掛かります { #whole-character-alpha-applies-part-by-part }
 

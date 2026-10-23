@@ -7,7 +7,7 @@ and what each face exposes today is the matrix in
 
 | Constraint | Affects | Explained in |
 |---|---|---|
-| The C face **builds and owns its device**, and draws only to the window it was given — not into a render pass of yours, and not yet into a texture | C / C++ | [below](#no-device-sharing-across-the-c-abi) |
+| The C face **builds and owns its device**, and draws only to the window it was given — not into a render pass of yours, and not into a texture | C / C++ | [below](#no-device-sharing-across-the-c-abi) |
 | **`wgpu` is pinned to the 30 line** — your application and the player resolve to one `wgpu` | Rust, Bevy | [Requirements](./start/rust.md#requirements) |
 | **MSAA must be off**, and an sRGB target encodes the atlas a second time | Rust, Bevy | [What your render pass has to be](./wgpu/borrow-model.md#what-your-render-pass-has-to-be) |
 | **One `update` per character per frame** — one cast cannot be drawn into two views | Rust, Bevy | [Several targets, one device](./wgpu/borrow-model.md#several-targets-one-device) |
@@ -33,10 +33,9 @@ Embedding the player in an engine that owns a device is therefore a **Rust-only*
 delivered as [adapter crates](./wgpu/engines.md).
 
 From C, compositing with an engine's own drawing would take offscreen rendering plus a shared
-texture, and this face **does not offer that yet**: a scene renders only to the window or layer it
-was created on. Until it does, the route is a window or layer of the player's own — a child window,
-or a `CAMetalLayer` placed in your layer tree. The [ROADMAP](https://github.com/cri-middleware/SSPlayerForWgpu/blob/main/ROADMAP.md) item
-says what an offscreen target needs.
+texture, and this face **does not offer that**: a scene renders only to the window or layer it was
+created on. The route is a window or layer of the player's own — a child window, or a
+`CAMetalLayer` placed in your layer tree.
 
 ## `Div2` and `Overlay2` draw as `Mix`
 
@@ -47,7 +46,7 @@ Matching them waits on a definition of their maths rather than on wgpu; the
 [ROADMAP](https://github.com/cri-middleware/SSPlayerForWgpu/blob/main/ROADMAP.md) item says what it needs.
 
 Three more are drawn with a neighbour's state: `Mulalpha` and `Mul2` as `Mul`, and `Screen2` as
-`Screen`. These three are approximations and have not been checked against the editor.
+`Screen`. These three are approximations.
 
 ## Whole-character alpha applies part by part
 
