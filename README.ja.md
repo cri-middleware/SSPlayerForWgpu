@@ -114,6 +114,7 @@ npm i @spritestudio/ssplayer-wgpu
 ```rust
 let mut renderer = SSRenderer::new(&device);
 let mut scene = SSScene::new(&device, &SceneConfig { color_format, stencil_format, mask: MaskBackend::Stencil });
+scene.set_viewport(&queue, width as f32, height as f32, /* y_down */ false);
 
 let mut player = SSPlayer::new();
 player.load("assets/overall/Basic.ssab")?;   // pack, atlases and sibling packs, in one call
