@@ -30,8 +30,6 @@
 
 **アプリケーションで使う場合**はこのまま下へ。ホストを選んで、[使い方](#-使い方)へ。最初の 1 体から先（イベント、パーツ単位の上書き、モーションブレンディング、デバイスロストからの復帰）も同じ道の続きで、[ドキュメント](./docs/ja/index.md)にあります。**プレイヤー自体を開発する場合**は[コントリビュート](#-コントリビュート)へ。
 
-> このプレイヤーは公開済みの C-API 経由ではなく `ssruntime` と `ssab` を Rust クレートとして直接リンクするため、SDK は git submodule として入ります。
-
 ### Rust
 
 クレートを git 依存として追加します。submodule のチェックアウトは cargo が行うので、他のツールは要りません:
@@ -97,14 +95,12 @@ npm からインストールします:
 npm i @spritestudio/ssplayer-wgpu
 ```
 
-このリポジトリからビルドする場合:
+このリポジトリからのビルドは[ソースからのビルド](#%EF%B8%8F-ソースからのビルド)にあります。
 
-```bash
-./scripts/build.sh platform=web     # wasm-pack → packages/ssplayer-wgpu/wasm, tsdown → dist
-```
+### その `.ssab` はどこから来るのか
 
-`wasm-pack` に加えて `pnpm` (`corepack enable`) が必要で、そのディレクトリからそのまま publish できる状態になります。同じビルドが [`examples/web`](./examples/web) にも配置されるため、デモは `npm i` で得られるものとまったく同じものを動かしています。wasm 側の実体は `web` フィーチャの下の
-`libs/ssplayer-wgpu/src/web.rs` です。
+アニメーションは SpriteStudio（**7.5 以上**）で制作し、事前に変換します。このプレイヤーは実行時には何も変換せず、コンバータも同梱しません。デスクトップの
+[SSConverterGUI](https://github.com/cri-middleware/SSConverterGUI) か、SDK の `ssconverter-cli` を使ってください。ツールの選び方とビルドパイプラインへの組み込み方は[単体ツールで変換する](https://cri-middleware.github.io/SpriteStudio-Docs/ja/overview/convert-with-a-standalone-tool/)にあります。まず試すだけなら自前の素材は要りません。以下のサンプルは SDK 自身のテストアニメーションで動きます。
 
 ## ⚡ 使い方
 
@@ -131,10 +127,7 @@ C と JavaScript のフェイスは名前が違うだけで同じ形をしてお
 **1 体のキャラクターに複数のアニメーションを重ねられます。** トラックのスタックがセットアップポーズへ順に畳み込まれます。`set_animation` がトラック 0 を決めて構造を担い、その上に `set_track_animation` /
 `set_track_alpha` / `set_track_blend` でオーバーレイを重ねます（下に歩き、上に照準）。`crossfade` を使えばカットなしで別のアニメーションへ移れます。どのフェイスからも使えます。C・JavaScript のフェイスでは名前が違うだけで、Bevy アダプタでは `SsTrackCommand` メッセージで操作します（トラック 0 は、`transition_ms` を設定して `SsPlayer::animation` を替えるとクロスフェードします）。モデルと各 API は[モーションブレンディング](./docs/ja/guide/motion-blending.md)にあります。
 
-### その `.ssab` はどこから来るのか
-
-アニメーションは SpriteStudio（**7.5 以上**）で制作し、事前に変換します。このプレイヤーは実行時には何も変換せず、コンバータも同梱しません。デスクトップの
-[SSConverterGUI](https://github.com/cri-middleware/SSConverterGUI) か、SDK の `ssconverter-cli` を使ってください。ツールの選び方とビルドパイプラインへの組み込み方は[単体ツールで変換する](https://cri-middleware.github.io/SpriteStudio-Docs/ja/overview/convert-with-a-standalone-tool/)にあります。まず試すだけなら自前の素材は要りません。以下のサンプルは SDK 自身のテストアニメーションで動きます。
+**次に読む:** [はじめる](./docs/ja/start/rust.md)（[Bevy](./docs/ja/start/bevy.md)・[C / C++](./docs/ja/start/cpp.md)・[ブラウザ](./docs/ja/start/web.md)） · [再生](./docs/ja/guide/playback.md) · [制約と適用範囲](./docs/ja/limitations.md)
 
 ## 🎬 サンプル
 
