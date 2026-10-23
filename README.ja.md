@@ -185,7 +185,7 @@ cargo を直接使っても構いません。`cargo build -p ssplayer-wgpu-ffi` 
 `ssconverter-cli` をビルドし、テストプロジェクトを**両方の**エクスポートモードで `assets/` へ変換した上で、
 `examples/web` へ `assets/`（参照方式。兄弟の `.png` を伴う）と `assets_emb/`（埋め込み方式。アトラスを焼き込み済み）として配置します。テストは `assets/` を読むため、これは `cargo test` の前提条件であって省略可能な手順ではありません。
 
-プレイヤーの構成とその理由、チェックアウトを自分のホストで使う方法、実際のホストでの確かめ方は、ドキュメントサイトの[開発者向け](https://cri-middleware.github.io/SSPlayerForWgpu/ja/contributing/)のページにあります。
+変更したプレイヤーをホストで使う方法と実際のホストでの確かめ方は、ドキュメントサイトの[ビルドガイド](https://cri-middleware.github.io/SSPlayerForWgpu/ja/development/build/)に、層とその理由は[プレイヤーの構成](https://cri-middleware.github.io/SSPlayerForWgpu/ja/development/architecture/)にあります。
 
 ## 🧭 リポジトリ構成
 

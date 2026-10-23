@@ -36,7 +36,8 @@ faces as thin wrappers.
 | Using it, per face: every API and limitation | the [docs site](./docs/en/) |
 | Install per host, first frame, where to read next; in a crate's or package's README, also working on it | [README.md](./README.md) and each crate's and package's, per `SpriteStudio-SDK/MAINTAINING_PLAYERS.md` |
 | Constraints, build, verify, docs, scripts | [CONTRIBUTING.md](./CONTRIBUTING.md), each script's `--help` |
-| The file map, using a checkout in a host, checking on real hosts, reasons that span files | [docs/en/contributing/](./docs/en/contributing/) |
+| Building every face, using a changed Player in a host, checking on real hosts | the [Build Guide](./docs/en/development/build.md) |
+| How the player is put together, and the reasons that span files | [docs/en/development/architecture.md](./docs/en/development/architecture.md) |
 | Releases, maintainers only | [RELEASING.md](./RELEASING.md) |
 | Plans, and what was measured and declined | [ROADMAP.md](./ROADMAP.md), and [PREVIEW.md](./PREVIEW.md) |
 
