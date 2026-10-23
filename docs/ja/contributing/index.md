@@ -127,6 +127,30 @@ cargo test -p ssplayer-wgpu --features ffi --lib
 
     基準は GPU 固有なので、これはチェックイン済みのゴールデンセットではなく、1 台のマシン上での前後比較ツールです。比較すると `/tmp/after/summary.md` を書き、変わった画像ごとに前・後・差分を並べた画像を `/tmp/after/diff/` に書きます。CI はプルリクエストごとに同じことを lavapipe 上でベースの描画に対して行い、意図した変化も含めて、差があれば失敗します。意図した変化なら、CI がアップロードする並べた画像（`golden-diff`）がなぜ正しいのかを説明に書いてください。
 
+## チェックアウトを自分のホストで使う
+
+どの Face も、リリースと同じ形でチェックアウトを受け取ります。
+
+- **Rust:** path 依存で使います（`ssplayer-wgpu = { path = "<checkout>/libs/ssplayer-wgpu" }`。`ssplayer-bevy` も同じ）。`ssruntime` と `ssab` はサブモジュール経由で一緒に付いてきます。プレイヤーはホストのデバイスを借りるので、ホストの `wgpu` はワークスペースの `Cargo.toml` が指定する版にそろえてください。
+- **C / C++:** `./scripts/build.sh` がライブラリと `ssplayer_wgpu.h` を `bin/` に集めます（`bin/libs/<platform>/<arch>/`、`bin/include/`）。`examples/` の C++ ビューアと同じようにリンクしてください。
+- **npm:** パッケージをビルドして pack し、その tarball をアプリにインストールします。
+
+    ```bash
+    ./scripts/build.sh platform=web                  # wasm-pack + tsdown -> packages/ssplayer-wgpu/{wasm,dist}
+    (cd packages/ssplayer-wgpu && pnpm pack)         # -> spritestudio-ssplayer-wgpu-<version>.tgz
+    ```
+
+    そのあと、アプリで `npm install <checkout>/packages/ssplayer-wgpu/spritestudio-ssplayer-wgpu-<version>.tgz` を実行します。`prepack`（`scripts/verify-publish-artifacts.mjs`）は、うたっている `dist/` や `wasm/` が無い tarball を拒むので、pack できた tarball は欠けていません。
+
+## 実際のホストで確かめる
+
+CI と上のテストでは見えないものと、その確かめ方です。
+
+- **Linux のデスクトップ。** CI は Vulkan の C++ ビューアをビルドし、lavapipe でヘッドレスに描きます。Wayland のコンポジタ、Xorg のセッション、対話的なリサイズには Linux のデスクトップが要ります。デスクトップのある VM で足ります。チェックアウトは `rsync -a --exclude target` でコピーしてください。サブモジュールも、VM に資格情報を置かずに運べます。
+- **オフスクリーンの確認では黒でクリアしません。** 黒でクリアして「黒でない」画素を数えると、黒い絵が「何も描いていない」に見えます。黒一色のセルでフェードアウトするアセットはよくあります。別の色でクリアし、その色と違う画素を数えてください。`tests/render.rs` の `drawn_pixels` は黒でクリアして黒でないものを数えるので、そういうアセットには使えません。ビューポートは `set_animation()` の**後**に `canvas_size()` から読みます（前は `None` です）。低い解像度で画素数が 0 でも、すぐに不具合とみなさないでください。5×4 px のセルはそこで消えることがあります。
+- **フレームのプロファイル。** ワークスペースの release プロファイルはシンボルを落とすので、プロファイルするものは `CARGO_PROFILE_RELEASE_STRIP=none CARGO_PROFILE_RELEASE_DEBUG=line-tables-only` と専用の `CARGO_TARGET_DIR` でビルドし、[samply](https://github.com/mstange/samply) で記録します（`--save-only --unstable-presymbolicate`）。LTO がフレームをインライン化して消すので、末端の self time を、いちばん近い呼び出し元と合わせて読みます。`deploy-examples.sh` はコンバータを `SpriteStudio-SDK/target` で探すので、`CARGO_TARGET_DIR` を外して実行してください。
+- **前後の比較は交互に回します。** 両方をビルドし、3〜5 回交互に回して、比と中央値で比べます。絶対的な時間はマシンの負荷で 4 分の 1 ほど動き、GPU の単発の時間は GPU のクロックの状態で二峰になります。
+
 ## リリース
 
 `release.yml` が全プラットフォームをビルドし、`scripts/build-release.sh` がマトリクスの成果物から zip、npm の tarball、チェックサムを組み立てます。ローカルにマトリクスの代替はありません（Windows と macOS で、それぞれの OS が必要です）。ローカル実行は `gh run download <run-id> -D artifacts` から始めます。

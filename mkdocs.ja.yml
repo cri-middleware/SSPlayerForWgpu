@@ -59,5 +59,7 @@ nav:
   - ⚠️ 制約と適用範囲: limitations.md
   - 🔄 マイグレーション:
       - SS6Player for CPP から: migration/from-ss6-cpp.md
-  - 🛠️ 開発者向け: contributing/index.md
+  - 🛠️ 開発者向け:
+      - ビルドと検証: contributing/index.md
+      - プレイヤーの構成: contributing/architecture.md
   - ⚖️ ライセンス: license.md
