@@ -91,7 +91,7 @@ target it is given — it does no colour management, exactly like the native and
 write, so every character comes out visibly too bright.
 
 `CompositingSpace::Srgb` makes Bevy pick a non-sRGB (`Rgba8Unorm`) target and composite in sRGB
-space — which is the player's model, and the WebGL reference's. The adapter warns once if it finds
+space — which is the player's model. The adapter warns once if it finds
 itself drawing into an sRGB target without it.
 
 !!! warning "HDR is a separate case"

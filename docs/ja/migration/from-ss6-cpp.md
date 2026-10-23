@@ -73,7 +73,7 @@ SSScene -> update(&renderer, &device, &queue, dt, &mut [a, b])
 
 ## 4. 再生
 
-### トラックは無くなり、アニメーションは名前で
+### アニメーションは名前で選ぶ
 
 `IndexGetAnimation("walk")` ＋ `AnimationPlay(track, index, …)` が、`set_animation("walk")` ＋ `play()` になります。
 

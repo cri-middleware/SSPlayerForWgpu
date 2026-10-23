@@ -11,7 +11,7 @@ title: C / C++ ではじめる
     wgpu は「1 つのライブラリで 3 つのグラフィックス API を賄う」ための手段であり、ここでの関わりはそれだけです。**wgpu の型はこの ABI を一切越えず**、ヘッダにも登場しません。渡すのはプラットフォームのウィンドウハンドルで、返ってくるのは `SS_OK` かエラーコードです。
 
     1 点だけ：この Face は**自分でグラフィックスデバイスを持ちます**。あなたの
-    `ID3D12CommandList` や `MTLCommandBuffer` に描き込むわけではありません。エンジンのデバイスを C ABI 経由で共有することは[意図的に対象外](../limitations.md#no-device-sharing-across-the-c-abi)です。また今のところ、シーンが描くのは作成時に渡したウィンドウだけで、エンジン側で合成するためにテクスチャへ描画する機能はまだありません。
+    `ID3D12CommandList` や `MTLCommandBuffer` に描き込むわけではありません。エンジンのデバイスを C ABI 経由で共有することは[意図的に対象外](../limitations.md#no-device-sharing-across-the-c-abi)です。また、シーンが描くのは作成時に渡したウィンドウだけで、エンジン側で合成するためのテクスチャへは描きません。
 
 ## 手に入るもの
 
@@ -168,10 +168,6 @@ cd examples/viewer-vulkan-cpp  && cmake -B build && cmake --build build && ./bui
 
 `cargo` はサンプル側が呼ぶので、別途ビルドする必要はありません。アニメーションデータのために
 `./scripts/deploy-examples.sh` を先に 1 回だけ実行してください。
-
-!!! note "Linux サンプルはまだ実行されていません"
-    ライブラリは Linux 向けにソースからビルドでき、CI は x86_64 でビルドしています。**Vulkan サンプルホスト**はプルリクエストごとに CI でコンパイルされていますが、ランナーにディスプレイが無いため一度もウィンドウを開いたことがなく、X11 / Wayland
-    どちらの経路も未検証です（[ROADMAP](https://github.com/cri-middleware/SSPlayerForWgpu/blob/main/ROADMAP.md)）。
 
 ## 次に読む
 

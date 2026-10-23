@@ -23,24 +23,7 @@ npm i @spritestudio/ssplayer-wgpu
 
 ESM 専用・ランタイム依存なし。wasm バイナリを同梱しており、バンドラ（Vite / webpack 5 / Rollup）は設定なしでアセットとして拾います。
 
-パッケージをビルドしてチェックアウトから入れることもできます。`rustup target add wasm32-unknown-unknown`、[`wasm-pack`](https://rustwasm.github.io/wasm-pack/)、`pnpm`（`corepack enable`）が必要です。
-
-```bash
-git clone --recursive https://github.com/cri-middleware/SSPlayerForWgpu.git
-cd SSPlayerForWgpu
-./scripts/build.sh platform=web          # wasm-pack + tsdown -> packages/ssplayer-wgpu/{wasm,dist}
-cd packages/ssplayer-wgpu && pnpm pack    # -> spritestudio-ssplayer-wgpu-<version>.tgz
-```
-
-アプリ側で `npm i /path/to/spritestudio-ssplayer-wgpu-<version>.tgz`。`prepack` は `dist/` や `wasm/` が欠けた tarball を拒否するので、出来上がった tarball は常に完全です。
-
-**動いているところを見るだけ**なら、あと 1 コマンドです：
-
-```bash
-./scripts/deploy-examples.sh              # アニメーションデータ（1 回だけ）
-./scripts/build.sh platform=web
-(cd examples/web && python3 -m http.server --bind 127.0.0.1)
-```
+動いているところを先に見るなら、[ライブデモ](https://cri-middleware.github.io/SSPlayerForWgpu/demo/)を開いてください。
 
 ## 1 体だけ：カスタム要素
 

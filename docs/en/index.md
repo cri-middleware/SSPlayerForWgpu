@@ -128,6 +128,6 @@ converter. See [Preparing assets](./start/assets.md).
   and every official player.
 - [SpriteStudio-SDK](https://github.com/cri-middleware/SpriteStudio-SDK) — `ssruntime` and `ssab`,
   the shared core this player links directly.
-- [SSPlayerForWeb](https://github.com/cri-middleware/SSPlayerForWeb) — the WebGL player, which is
-  both the rendering-parity reference for this one and the answer where WebGPU is missing.
+- [SpriteStudio Player for Web](https://github.com/cri-middleware/SSPlayerForWeb) — the WebGL player,
+  the answer where WebGPU is missing.
 - [SSConverterGUI](https://github.com/cri-middleware/SSConverterGUI) — desktop converter.

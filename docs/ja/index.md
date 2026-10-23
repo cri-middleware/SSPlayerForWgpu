@@ -102,5 +102,5 @@ flowchart LR
 
 - [SpriteStudio Docs](https://cri-middleware.github.io/SpriteStudio-Docs/ja/) — SDK と全公式 Player のポータル。
 - [SpriteStudio-SDK](https://github.com/cri-middleware/SpriteStudio-SDK) — この Player が直接リンクする共通コア（`ssruntime` / `ssab`）。
-- [SSPlayerForWeb](https://github.com/cri-middleware/SSPlayerForWeb) — WebGL Player。本 Player の描画パリティの基準であり、WebGPU が無い環境での答えでもあります。
+- [SpriteStudio Player for Web](https://github.com/cri-middleware/SSPlayerForWeb) — WebGL Player。WebGPU が無い環境での答えです。
 - [SSConverterGUI](https://github.com/cri-middleware/SSConverterGUI) — デスクトップ版コンバータ。

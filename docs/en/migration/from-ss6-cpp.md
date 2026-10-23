@@ -83,7 +83,7 @@ first `update` — and a missing atlas is **not** an error, it is an entry in
 
 ## 4. Playback
 
-### Tracks are gone; animations are named
+### Animations are selected by name
 
 `IndexGetAnimation("walk")` + `AnimationPlay(track, index, …)` becomes `set_animation("walk")` +
 `play()`.

@@ -39,9 +39,6 @@ Everything after the first character (events, per-part overrides, motion blendin
 device-loss recovery) is the same path further in, in the [documentation](./docs/en/index.md).
 **Working on the player itself?** [Contributing](#-contributing).
 
-> The player links `ssruntime` and `ssab` as Rust crates rather than through a released C-API, so the
-> SDK comes in as a git submodule.
-
 ### Rust
 
 Add the crate as a git dependency. Cargo checks out the submodule for you, and no other tooling is
@@ -122,15 +119,16 @@ Install it from npm:
 npm i @spritestudio/ssplayer-wgpu
 ```
 
-To build it from this repository instead:
+Building it from this repository is in [Building from Source](#%EF%B8%8F-building-from-source).
 
-```bash
-./scripts/build.sh platform=web     # wasm-pack → packages/ssplayer-wgpu/wasm, tsdown → dist
-```
+### Where that `.ssab` comes from
 
-That needs `pnpm` (`corepack enable`) as well as `wasm-pack`, and it publishes from that directory as
-it stands. The same build is staged into [`examples/web`](./examples/web), so the demo drives exactly
-what an `npm i` gets. The wasm side is `libs/ssplayer-wgpu/src/web.rs`, behind the `web` feature.
+Animations are authored in SpriteStudio — **7.5 or later** — and converted ahead of time; this player
+converts nothing at runtime and bundles no converter. Use the desktop
+[SSConverterGUI](https://github.com/cri-middleware/SSConverterGUI), or the SDK's `ssconverter-cli`;
+[Converting with a standalone tool](https://cri-middleware.github.io/SpriteStudio-Docs/overview/convert-with-a-standalone-tool/)
+covers picking one and putting it in a build pipeline. Nothing of your own is needed to try the player
+first — the samples below run on the SDK's own test animations.
 
 ## ⚡ Usage
 
@@ -140,6 +138,7 @@ it in one pass:
 ```rust
 let mut renderer = SSRenderer::new(&device);
 let mut scene = SSScene::new(&device, &SceneConfig { color_format, stencil_format, mask: MaskBackend::Stencil });
+scene.set_viewport(&queue, width as f32, height as f32, /* y_down */ false);
 
 let mut player = SSPlayer::new();
 player.load("assets/overall/Basic.ssab")?;   // pack, atlases and sibling packs, in one call
@@ -163,14 +162,7 @@ the Bevy adapter through the `SsTrackCommand` message, with track 0 crossfading 
 `SsPlayer::animation` changes under a `transition_ms`. The model and the calls are in
 [Motion blending](./docs/en/guide/motion-blending.md).
 
-### Where that `.ssab` comes from
-
-Animations are authored in SpriteStudio — **7.5 or later** — and converted ahead of time; this player
-converts nothing at runtime and bundles no converter. Use the desktop
-[SSConverterGUI](https://github.com/cri-middleware/SSConverterGUI), or the SDK's `ssconverter-cli`;
-[Converting with a standalone tool](https://cri-middleware.github.io/SpriteStudio-Docs/overview/convert-with-a-standalone-tool/)
-covers picking one and putting it in a build pipeline. Nothing of your own is needed to try the player
-first — the samples below run on the SDK's own test animations.
+**Read next:** [Get started](./docs/en/start/rust.md) — or [Bevy](./docs/en/start/bevy.md), [C / C++](./docs/en/start/cpp.md), [the browser](./docs/en/start/web.md) · [Playback](./docs/en/guide/playback.md) · [Limitations & Scope](./docs/en/limitations.md)
 
 ## 🎬 Samples
 
@@ -304,8 +296,8 @@ a submodule bump here.
 
 - [SpriteStudio-SDK](https://github.com/cri-middleware/SpriteStudio-SDK) — the core SDK providing
   `ssruntime` and `ssconverter`.
-- [SSPlayerForWeb](https://github.com/cri-middleware/SSPlayerForWeb) — the Web players, including the
-  WebGL renderer this one is judged for rendering parity against.
+- [SSPlayerForWeb](https://github.com/cri-middleware/SSPlayerForWeb) — the Web players, including a
+  WebGL renderer for where WebGPU is missing.
 - [SSConverterGUI](https://github.com/cri-middleware/SSConverterGUI) — desktop GUI tool for converting
   `.sspj` to `.ssab`.
 
