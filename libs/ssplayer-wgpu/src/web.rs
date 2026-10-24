@@ -1565,10 +1565,11 @@ impl SsPlayerWeb {
 
     /// Restrict playback to `start..=end` of the current animation. Call it
     /// *after* `setAnimation`, which rebuilds the tree and takes the section
-    /// with it.
+    /// with it. Throws, changing nothing, on an end before the start when both
+    /// are inside the animation; an end outside it is the animation's edge.
     #[wasm_bindgen(js_name = setAnimationSection)]
     pub fn set_animation_section(&self, start: i32, end: i32) -> Result<(), JsValue> {
-        with_player!(self, |p| p.set_animation_section(start, end))
+        with_player!(self, |p| p.set_animation_section(start, end).map_err(|e| JsValue::from_str(&format!("setAnimationSection({start}, {end}): {e:?}")))?)
     }
 
     /// `direction`: 0 forward, 1 backward. `style`: 0 normal, 1 ping-pong.

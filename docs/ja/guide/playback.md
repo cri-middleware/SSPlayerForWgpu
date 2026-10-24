@@ -154,11 +154,13 @@
 
 必ず `set_animation` の**後**に設定してください。フレーム番号は、それを測ったアニメーションの中でしか意味を持たず、アニメーションを選び直すとツリーが再構築されて区間も一緒に消えます。
 
+両端を含むので、両端が同じフレームの区間はその 1 フレームに留まります。アニメーションの範囲外の値（`-1` など）を渡すと、その側はアニメーションの端になります。両端が範囲内で終わりが始まりより前なら受け付けず、区間も再生ヘッドもそのままです。Rust は `Err(SSRuntimeError::InvalidParameter)` を返し、C は 0 以外のステータスを返して詳細を `ss_last_error()` に残し、JavaScript は例外を投げ、Bevy は警告を 1 度だけログに出します。
+
 === "Rust"
 
     ```rust
     player.set_animation("walk")?;
-    player.set_animation_section(10, 24);
+    player.set_animation_section(10, 24)?;
     player.play();                          // フレーム 10 から
     player.seek(18.0);                      // 区間内へジャンプ
     ```

@@ -118,6 +118,10 @@ pub struct SsPlayback {
     /// looping and ping-pong turn around inside it; `None` is the whole
     /// animation. Setting or changing it puts the playhead at its start, and it
     /// applies to whichever animation is set up, so change it with `animation`.
+    /// Both ends are included, and an end outside the animation is its edge on
+    /// that side. An end before the start, both inside the animation, is
+    /// refused as [`ssplayer_wgpu::SSPlayer::set_animation_section`] refuses
+    /// it: the adapter warns once, and the section stays as it was.
     pub animation_section: Option<(i32, i32)>,
 }
 

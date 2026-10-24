@@ -1096,7 +1096,11 @@ int32_t ss_player_frame_rate(ss_player_t *handle);
 
 /*
  Restrict playback to `start..=end` of the current animation, so looping and
- ping-pong turn around inside that range.
+ ping-pong turn around inside that range. Both ends are included; an end
+ outside the animation (`-1`, say) stands for the animation's edge on that
+ side. An end before the start, both inside the animation, is refused with
+ the runtime's invalid-parameter code, and the section and the playhead stay
+ as they were.
 
  Call it **after** `ss_player_set_animation`: frame numbers only mean
  something inside the animation they were measured in, and setting an
@@ -1105,7 +1109,7 @@ int32_t ss_player_frame_rate(ss_player_t *handle);
  # Safety
  `handle` must be a live handle or null.
  */
-void ss_player_set_animation_section(ss_player_t *handle, int32_t start, int32_t end);
+int32_t ss_player_set_animation_section(ss_player_t *handle, int32_t start, int32_t end);
 
 /*
  `direction`: 0 forward, 1 backward. `style`: 0 normal, 1 ping-pong. Set as a
