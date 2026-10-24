@@ -80,7 +80,7 @@ the calls.
 | `seek(frame)` / `frameNo()` | Fractional frames are honoured |
 | `setSpeedScale(s)` / `speedScale()` | A multiple of the authored rate. `0` and negatives stop |
 | `setLoopCount(n)` / `loopCount()` / `remainingLoops()` | `n` cycles; `-1` or `0` forever |
-| `setAnimationSection(start, end)` | After `setAnimation` |
+| `setAnimationSection(start, end)` | After `setAnimation`. An end before the start, both in range, throws, changing nothing |
 | `setPlaybackDirection(dir, style)` / `playbackDirection()` / `playbackStyle()` | `0`/`1` each |
 | `setFrameRate(fps)` / `frameRate()` | Replace the authored rate |
 | `setSubFrameEnabled(on)` / `subFrameEnabled()` | Interpolate between authored frames |

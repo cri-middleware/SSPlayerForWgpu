@@ -12,7 +12,7 @@
 //! runtime's enum would have put `-1` on the `ffi` and `js` faces and silently
 //! disagreed with all of them.
 
-use ssplayer_wgpu::{MaskBackend, PlaybackDirection, PlaybackStyle, SSPlayer, SSRenderer, SSScene, SceneConfig};
+use ssplayer_wgpu::{MaskBackend, PlaybackDirection, PlaybackStyle, SSPlayer, SSRenderer, SSRuntimeError, SSScene, SceneConfig};
 
 fn asset_root() -> &'static str {
     concat!(env!("CARGO_MANIFEST_DIR"), "/../../assets")
@@ -102,7 +102,7 @@ fn a_section_narrows_the_played_range() {
     assert!(full > 4, "need room to carve a section");
 
     let start = player.start_frame();
-    player.set_animation_section(start, start + 3);
+    player.set_animation_section(start, start + 3).unwrap();
 
     assert_eq!(player.start_frame(), start);
     assert_eq!(player.end_frame(), start + 3);
@@ -111,10 +111,44 @@ fn a_section_narrows_the_played_range() {
 }
 
 #[test]
+fn a_section_starting_on_the_last_frame_holds_it() {
+    let mut player = loaded();
+    let last = player.end_frame();
+    assert!(last > player.start_frame(), "need more than one frame");
+
+    player.set_animation_section(last, last).unwrap();
+    assert_eq!((player.start_frame(), player.end_frame(), player.total_frames()), (last, last, 1));
+    assert_eq!(player.frame_no(), last as f32, "the playhead moves to the section's start");
+
+    // An end out of range is the animation's edge, which is that same frame.
+    player.set_animation_section(last, -1).unwrap();
+    assert_eq!((player.start_frame(), player.end_frame()), (last, last));
+}
+
+#[test]
+fn a_section_ending_before_it_starts_is_refused_and_changes_nothing() {
+    let mut player = loaded();
+    let (start, last) = (player.start_frame(), player.end_frame());
+    assert!(player.total_frames() > 4, "need room to carve a section");
+
+    player.set_animation_section(start + 1, start + 3).unwrap();
+    player.seek(start as f32 + 2.5);
+    let before = (player.start_frame(), player.end_frame(), player.frame_no());
+
+    assert!(matches!(player.set_animation_section(start + 3, start + 1), Err(SSRuntimeError::InvalidParameter)));
+    assert_eq!((player.start_frame(), player.end_frame(), player.frame_no()), before, "the section and the playhead stay as they were");
+
+    // A refusal needs both ends in range: an end out of range is the
+    // animation's edge on its side, whatever its number.
+    player.set_animation_section(start + 3, -1).unwrap();
+    assert_eq!((player.start_frame(), player.end_frame()), (start + 3, last));
+}
+
+#[test]
 fn selecting_the_animation_already_set_up_does_nothing() {
     let mut player = loaded();
 
-    player.set_animation_section(player.start_frame(), player.start_frame() + 3);
+    player.set_animation_section(player.start_frame(), player.start_frame() + 3).unwrap();
     assert_eq!(player.total_frames(), 4);
 
     // A switch with nothing to switch to. Nothing moves — not the section, not
@@ -134,7 +168,7 @@ fn a_real_switch_drops_the_section_and_keeps_the_rest() {
     let full = player.total_frames();
     assert!(full > 4, "need room to carve a section");
 
-    player.set_animation_section(player.start_frame(), player.start_frame() + 3);
+    player.set_animation_section(player.start_frame(), player.start_frame() + 3).unwrap();
     player.set_speed_scale(2.0);
     player.set_frame_skip_enabled(false);
     player.set_playback_direction(PlaybackDirection::Backward, PlaybackStyle::PingPong);

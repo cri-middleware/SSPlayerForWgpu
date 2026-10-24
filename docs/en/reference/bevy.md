@@ -84,7 +84,7 @@ Free to change, every frame if you like.
 | `frame_rate: i32` | `0` | Replaces the authored rate; `0` keeps it. Prefer `speed_scale` |
 | `frame_skip_enabled: bool` | `true` | Off advances one frame per tick instead of keeping to the wall clock |
 | `sub_frame_enabled: bool` | `true` | Off floors the frame that is drawn |
-| `animation_section: Option<(i32, i32)>` | `None` | Restrict the playhead to `start..=end` of the current animation. Setting it puts the playhead at its start |
+| `animation_section: Option<(i32, i32)>` | `None` | Restrict the playhead to `start..=end` of the current animation. Setting it puts the playhead at its start. An end before the start, both in range, is refused with a warning, once, and the section stays as it was |
 
 `restart` is a generation counter rather than a flag so a host can re-trigger a one-shot at will
 with nothing to clear afterwards, and so two restarts in a row are two restarts.

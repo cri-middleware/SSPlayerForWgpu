@@ -165,11 +165,17 @@ ping-pong turn around inside it.
 Set it **after** `set_animation` — frame numbers only mean something inside the animation they were
 measured in, and selecting an animation rebuilds the tree and takes the section with it.
 
+Both ends are included, so a section whose ends are one frame holds that frame. An end outside the
+animation (`-1`, say) stands for its edge on that side. An end before the start, both inside the
+animation, is refused, and the section and the playhead stay as they were: Rust returns
+`Err(SSRuntimeError::InvalidParameter)`, C a non-zero status with the detail in `ss_last_error()`,
+JavaScript throws, and Bevy logs a warning, once.
+
 === "Rust"
 
     ```rust
     player.set_animation("walk")?;
-    player.set_animation_section(10, 24);
+    player.set_animation_section(10, 24)?;
     player.play();                          // starts at frame 10
     player.seek(18.0);                      // jump inside the section
     ```

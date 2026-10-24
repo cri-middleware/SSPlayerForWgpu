@@ -1606,15 +1606,22 @@ impl SSPlayer {
     /// and ping-pong turn around inside that range. Reflected by
     /// [`SSPlayer::start_frame`] / [`SSPlayer::end_frame`].
     ///
+    /// Both ends are included, so `start == end` holds that one frame. An end
+    /// outside the animation (`-1`, say) stands for the animation's edge on
+    /// that side. An end before the start, both inside the animation, is
+    /// refused with [`SSRuntimeError::InvalidParameter`], and the section and
+    /// the playhead stay as they were.
+    ///
     /// Call it *after* [`SSPlayer::set_animation`]: frame numbers only mean
     /// something inside the animation they were measured in, and setting an
     /// animation rebuilds the tree and takes the section with it.
-    pub fn set_animation_section(&mut self, start: i32, end: i32) {
+    pub fn set_animation_section(&mut self, start: i32, end: i32) -> Result<(), SSRuntimeError> {
         // The playhead may be clamped into the new range.
         self.rebuild = true;
         if let Some(root) = &mut self.root {
-            root.context.set_animation_section(start, end);
+            root.context.set_animation_section(start, end)?;
         }
+        Ok(())
     }
 
     // --- Tracks ------------------------------------------------------------

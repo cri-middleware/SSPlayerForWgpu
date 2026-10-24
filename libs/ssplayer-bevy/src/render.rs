@@ -286,10 +286,14 @@ pub(crate) fn sync_players(mut state: Option<ResMut<SsRenderState>>, extracted: 
             slot.player.set_loop_count(playback.loop_count);
         }
         if slot.section != Some(playback.animation_section) {
+            // Recorded refused or not, so a refused section is reported once
+            // rather than sent again every frame.
             slot.section = Some(playback.animation_section);
             // Out of range is the whole animation, which is what `None` means.
             let (start, end) = playback.animation_section.unwrap_or((-1, -1));
-            slot.player.set_animation_section(start, end);
+            if let Err(err) = slot.player.set_animation_section(start, end) {
+                warn!("ssplayer-bevy: animation_section ({start}, {end}) on {:?} refused ({err:?}); the section stays as it was", slot.animation);
+            }
         }
         slot.player.set_order(playback.order);
         slot.player.set_alpha(playback.alpha);

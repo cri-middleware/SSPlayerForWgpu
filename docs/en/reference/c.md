@@ -88,7 +88,7 @@ nothing. `ss_player_set_cellmap_texture` refuses one the same way.
 | `ss_player_set_speed_scale(player, speed)` / `ss_player_speed_scale` | A multiple of the authored rate. `0` and negatives stop |
 | `ss_player_set_frame_rate(player, fps)` / `ss_player_frame_rate` | Replace the authored rate |
 | `ss_player_set_loop_count(player, n)` / `ss_player_loop_count` / `ss_player_remaining_loops` | Set `n` cycles, or `-1` or `0` for forever. Reading back, forever is `-1`, and `0` means no animation is set |
-| `ss_player_set_animation_section(player, start, end)` | Restrict the playhead. Call it **after** `set_animation` |
+| `ss_player_set_animation_section(player, start, end)` | Restrict the playhead. Call it **after** `set_animation`. An end before the start, both in range, is refused, changing nothing |
 | `ss_player_set_playback_direction(player, dir, style)` | `0`/`1` = forward/backward, normal/ping-pong |
 | `ss_player_playback_direction` / `ss_player_playback_style` | Read them back |
 | `ss_player_set_sub_frame_enabled(player, on)` / `ss_player_sub_frame_enabled` | Interpolate between authored frames |

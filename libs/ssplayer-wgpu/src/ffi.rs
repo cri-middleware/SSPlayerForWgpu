@@ -1351,7 +1351,11 @@ pub unsafe extern "C" fn ss_player_frame_rate(handle: *mut SsPlayer) -> i32 {
 }
 
 /// Restrict playback to `start..=end` of the current animation, so looping and
-/// ping-pong turn around inside that range.
+/// ping-pong turn around inside that range. Both ends are included; an end
+/// outside the animation (`-1`, say) stands for the animation's edge on that
+/// side. An end before the start, both inside the animation, is refused with
+/// the runtime's invalid-parameter code, and the section and the playhead stay
+/// as they were.
 ///
 /// Call it **after** `ss_player_set_animation`: frame numbers only mean
 /// something inside the animation they were measured in, and setting an
@@ -1360,9 +1364,11 @@ pub unsafe extern "C" fn ss_player_frame_rate(handle: *mut SsPlayer) -> i32 {
 /// # Safety
 /// `handle` must be a live handle or null.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn ss_player_set_animation_section(handle: *mut SsPlayer, start: i32, end: i32) {
-    if let Some(player) = unsafe { player(handle) } {
-        player.set_animation_section(start, end);
+pub unsafe extern "C" fn ss_player_set_animation_section(handle: *mut SsPlayer, start: i32, end: i32) -> i32 {
+    let Some(player) = (unsafe { player(handle) }) else { return fail(SS_ERROR_INVALID_ARGUMENT, "player handle is null or destroyed") };
+    match player.set_animation_section(start, end) {
+        Ok(()) => SS_OK,
+        Err(e) => fail(e.as_code(), format!("section {start}..={end}: {e}")),
     }
 }
 

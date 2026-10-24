@@ -74,7 +74,7 @@ import { defineSsPlayerWebGPUElement } from '@spritestudio/ssplayer-wgpu/element
 | `seek(frame)` / `frameNo()` | 小数フレーム可 |
 | `setSpeedScale(s)` / `speedScale()` | 既定 fps の倍率。`0` と負値は停止 |
 | `setLoopCount(n)` / `loopCount()` / `remainingLoops()` | `n` 回。`-1` / `0` で無限 |
-| `setAnimationSection(start, end)` | `setAnimation` の後に |
+| `setAnimationSection(start, end)` | `setAnimation` の後に。両端が範囲内で終わりが始まりより前なら、何も変えずに例外を投げる |
 | `setPlaybackDirection(dir, style)` / `playbackDirection()` / `playbackStyle()` | それぞれ `0` / `1` |
 | `setFrameRate(fps)` / `frameRate()` | 既定 fps を置き換える |
 | `setSubFrameEnabled(on)` / `subFrameEnabled()` | フレーム間を補間 |
