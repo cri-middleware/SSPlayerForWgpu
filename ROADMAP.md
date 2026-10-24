@@ -78,8 +78,8 @@ player, where every host and the C ABI reach it, and the host half belongs in an
       texture and a way for that texture to leave — **undecided** whether that is a
       native shared handle per backend (a DXGI shared handle, an `IOSurface`, Vulkan
       external memory), a CPU readback as the portable floor, or both.
-- [ ] **Self-contained HTML preview** — a Preview button per pack in each host writes
-      one fully inlined HTML file and opens it in the browser, so every host shows the
+- [ ] **Self-contained HTML preview** — a Preview button per pack in each host opens
+      the shell its plugin ships in Chrome on the `.ssab`'s path, so every host shows the
       same preview without an in-editor renderer; every Release carries the shell for a
       plugin to fetch by its tag. Missing: the buttons themselves, which live in the
       Player repositories (design and measurements in [`PREVIEW.md`](./PREVIEW.md)).

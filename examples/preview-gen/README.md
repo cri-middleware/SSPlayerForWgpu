@@ -18,9 +18,11 @@ open=yes             Hand the result to the desktop afterwards
 
 ## What it is for
 
-This is the step behind a host's **Preview** button: gather, inline, write, open. A host
-in another language ports the walk in `src/lib.rs`; nothing here is Rust-specific and
-none of it is in the player, which has no filesystem on every target it builds for.
+This makes the **filled** page: one file that opens anywhere with nothing beside it,
+which is what a bug report can carry — a page a host opened by path reads the reporter's
+files, so its HTML alone reproduces nothing. A tool in another language that wants the
+same file ports the walk in `src/lib.rs`; nothing here is Rust-specific and none of it is
+in the player, which has no filesystem on every target it builds for.
 
 **The gathering is the part worth having.** Substituting two strings is nothing; knowing
 *which* files to substitute means reading the `.ssab`, and getting it wrong is silent:

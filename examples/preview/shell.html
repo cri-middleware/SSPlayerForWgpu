@@ -2,18 +2,19 @@
 <!--
   The self-contained `.ssab` preview shell.
 
-  This file is the SOURCE. `scripts/build-preview.sh` substitutes four markers
+  This file is the SOURCE. `scripts/build-preview.sh` substitutes five markers
   and writes the artifact that actually ships: the wasm-bindgen `no-modules`
-  glue verbatim, the wasm as base64, and the version and date stamps. Each
-  marker is spelled `__SS_<NAME>__` and the build refuses a source that carries
-  one of them twice -- a second mention, here in this comment for instance,
-  would be substituted as well, and a page carrying two copies of the wasm
-  still works, so nothing downstream would catch it.
+  glue verbatim, the wasm as base64, the version and date stamps, and the
+  license notices. Each marker is spelled `__SS_<NAME>__` and the build refuses
+  a source that carries one of them twice -- a second mention, here in this
+  comment for instance, would be substituted as well, and a page carrying two
+  copies of the wasm still works, so nothing downstream would catch it.
 
   Everything else — this markup, this CSS, this script — ships as written. There
-  is no `src`, no `import` and no `fetch` anywhere in the result, because at
-  `file://` an external module script and `fetch` are both blocked and an inline
-  module script is not. See PREVIEW.md.
+  is no `src` and no `import` anywhere in the result, because at `file://` an
+  external module script is blocked and an inline module script is not. The one
+  `fetch` is the URL entrance's, which reads only in a Chrome started with
+  `--allow-file-access-from-files`. See PREVIEW.md.
 -->
 <html lang="en">
 <head>
@@ -52,12 +53,16 @@
   footer { border-top: 1px solid var(--line); color: var(--dim); font-size: 12px; margin-top: auto; }
   .grow { flex: 1 1 auto; }
   .stamp { font-variant-numeric: tabular-nums; color: var(--dim); font-size: 12px; }
+  .badge { border: 1px solid var(--line); border-radius: 999px; padding: 1px 8px; color: var(--dim); font-size: 12px; cursor: help; }
+  .banner { padding: 6px 16px; border-bottom: 1px solid var(--line); color: #b45309; background: color-mix(in srgb, #f59e0b 12%, transparent); }
   select, button {
     font: inherit; color: inherit; background: var(--panel);
     border: 1px solid var(--line); border-radius: 6px; padding: 4px 8px;
   }
+  #pack { max-width: 36ch; }
   button { cursor: pointer; min-width: 36px; }
   button:hover { border-color: var(--accent); }
+  button.link { border: 0; background: none; padding: 0; min-width: 0; color: inherit; text-decoration: underline; }
 
   main { flex: 1 1 auto; display: flex; flex-direction: column; gap: 12px; padding: 16px; min-height: 0; min-width: 0; }
   #stage {
@@ -77,11 +82,12 @@
      the pair inflate each other a little more every resize. */
   canvas { position: absolute; inset: 0; display: block; width: 100%; height: 100%; }
   #drop {
-    position: absolute; inset: 0; display: grid; place-content: center; gap: 6px; text-align: center;
+    position: absolute; inset: 0; display: grid; place-content: center; gap: 6px; text-align: center; padding: 16px;
     background: color-mix(in srgb, var(--panel) 88%, transparent); color: var(--dim);
   }
   #drop.over { outline: 2px dashed var(--accent); outline-offset: -8px; color: var(--ink); }
   #drop strong { display: block; color: var(--ink); font-size: 15px; }
+  #drop span { max-width: 60ch; }
   #drop.hidden { display: none; }
 
   .transport { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
@@ -125,25 +131,30 @@
   .empty { padding: 10px; color: var(--dim); }
   .warn { color: #b45309; }
   code { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
+
+  dialog { width: min(860px, 92vw); max-height: 86vh; padding: 0; border: 1px solid var(--line); border-radius: 10px; background: var(--panel); color: var(--ink); }
+  dialog pre { margin: 0; padding: 16px; max-height: calc(86vh - 56px); overflow: auto; white-space: pre-wrap; overflow-wrap: anywhere; font-size: 12px; }
+  dialog form { display: flex; justify-content: flex-end; padding: 8px 16px; border-top: 1px solid var(--line); }
 </style>
 </head>
 <body>
 
 <header>
-  <strong id="pack">no pack loaded</strong>
-  <label class="grow" style="flex:0 1 auto">
-    <select id="anim" disabled></select>
-  </label>
+  <select id="pack" disabled><option>no pack loaded</option></select>
+  <select id="anim" disabled></select>
+  <button id="reload" title="Read the files again" hidden>↻</button>
   <span class="grow"></span>
+  <span class="badge" title="What the .ssab holds, played by SpriteStudio Player for wgpu. It is not your engine's renderer, and does not aim to match it pixel for pixel.">Reference playback (wgpu)</span>
   <span class="stamp" id="stamp">__SS_VERSION__ · __SS_BUILT__</span>
 </header>
+<div id="mismatch" class="banner" hidden></div>
 
 <main>
   <div id="stage">
     <canvas id="c"></canvas>
     <div id="drop">
       <strong>Drop a <code>.ssab</code> here</strong>
-      <span>Drop its <code>.png</code> atlases and any sibling <code>.ssab</code> with it, in one go.</span>
+      <span>Drop its <code>.png</code> atlases and any sibling <code>.ssab</code> with it, in one go, or the folder that holds them.</span>
     </div>
   </div>
 
@@ -164,12 +175,20 @@
 
 <footer>
   <span id="stats">—</span>
+  <span class="stamp" id="converted"></span>
   <span class="grow"></span>
   <span id="note"></span>
+  <button class="link" id="licenses">Licenses</button>
 </footer>
+
+<dialog id="noticesDialog">
+  <pre id="noticesText"></pre>
+  <form method="dialog"><button>Close</button></form>
+</dialog>
 
 <script id="ssab" type="application/base64"></script>
 <script id="files" type="application/json">{}</script>
+<script id="notices" type="application/json">__SS_NOTICES__</script>
 
 <script>__SS_GLUE__</script>
 <script id="wasm" type="application/base64">__SS_WASM__</script>
@@ -341,59 +360,77 @@ async function show(name) {
   showFrame(start);
 }
 
-const baseName = (path) => path.split(/[\\/]/).pop();
+const params = new URLSearchParams(location.search);
+const fileName = (url) => decodeURIComponent(new URL(url).pathname.split('/').pop());
+const isPack = (url) => /\.ssab$/i.test(new URL(url).pathname);
+const byStem = (a, b) => a.replace(/\.ssab$/i, '').localeCompare(b.replace(/\.ssab$/i, ''));
+const DROP = $('drop').innerHTML;
+
+function overlay(html) {
+  $('drop').innerHTML = html ?? DROP;
+  $('drop').classList.remove('hidden');
+}
+
+/** While a load runs the player is out of its slot, and the tick skips a disabled picker. */
+function busy(on) {
+  $('pack').disabled = on || $('pack').options.length < 2;
+  $('anim').disabled = on || $('anim').options.length === 0;
+}
+
+let choose = () => {};
+
+function listPacks(packs, current) {
+  $('pack').replaceChildren(...packs.map(([url, label]) => new Option(label, url)));
+  $('pack').value = current;
+  $('pack').disabled = packs.length < 2;
+}
+
+function unreadable(url) {
+  overlay(
+    `<strong>Cannot read ${escapeHtml(fileName(url))}</strong>` +
+    '<span>This page reads files by path only in a Chrome started with <code>--allow-file-access-from-files</code>, ' +
+    'which is how an editor\'s Preview button opens it. Opened any other way, drop the <code>.ssab</code> here ' +
+    'with its <code>.png</code> atlases and sibling <code>.ssab</code>, or the folder that holds them.</span>');
+}
 
 /**
- * Load a pack, the sibling packs its instance parts play from, and everybody's
- * atlases — all out of one flat `{ name: bytes }` map.
+ * Every entrance ends in one call: the player's own walk reads the pack, the
+ * sibling packs its instance parts play from and every atlas through `lookup`,
+ * and `missingAssets` names what it did not get.
  *
- * Siblings go in **first**: the main pack's own walk skips a pack the player
- * already has, and an instance part whose pack never arrived draws nothing at
- * all, silently. Registering one tries to fetch its atlases and cannot at
- * `file://`, which is what the console warnings are; the supply loop below is
- * what actually feeds them.
- *
- * `textureRefs` names the files each pack wants, so the page supplies them by
- * name and never computes a hash. They go in on the CONTEXT with
- * `addTextureFromBytes`, not through `setCellmapTexture`: that one is the
- * runtime *override* and would leave the pack claiming an atlas was replaced
- * when it was only supplied.
+ * A file that is not at the path the pack names is looked for by file name
+ * beside the main `.ssab`, the order Unity's importer resolves in, so what
+ * draws in the engine is not missing here.
  */
-async function load(ssab, files, label, initial) {
-  const siblings = [];
-  for (const [name, data] of Object.entries(files)) {
-    if (!name.endsWith('.ssab')) continue;
-    const stem = baseName(name).replace(/\.ssab$/, '');
-    try {
-      await player.addSsab(data, stem, undefined);
-      siblings.push(stem);
-    } catch (error) {
-      note(`could not register ${name}: ${error}`, true);
-    }
+async function open(url, lookup, initial) {
+  busy(true);
+  overlay();
+  const beside = new URL('.', url);
+  let readAny = false;
+  const read = async (wanted) => {
+    let data = await lookup(wanted);
+    const byName = new URL(new URL(wanted).pathname.split('/').pop(), beside).href;
+    if (data == null && byName !== wanted) data = await lookup(byName);
+    readAny ||= data != null;
+    return data ?? null;
+  };
+  try {
+    await player.load(url, read);
+  } catch (error) {
+    busy(false);
+    if (readAny) overlay(`<strong>Could not load ${escapeHtml(fileName(url))}</strong><span>${escapeHtml(error)}</span>`);
+    else unreadable(url);
+    return;
   }
 
-  await player.loadSsab(ssab, undefined, undefined);
-
-  const missing = [];
-  for (const pack of [undefined, ...siblings]) {
-    for (const ref of player.textureRefs(pack)) {
-      if (ref.embedded) continue;
-      const supplied = files[ref.path] ?? files[baseName(ref.path)];
-      if (supplied) ctx.addTextureFromBytes(ref.key, supplied);
-      else if (!missing.includes(ref.path)) missing.push(ref.path);
-    }
-  }
-
-  $('pack').textContent = label;
+  $('drop').classList.add('hidden');
   const names = player.animationNames();
   $('anim').replaceChildren(...names.map((name) => new Option(name, name)));
-  $('anim').disabled = names.length === 0;
-  $('drop').classList.add('hidden');
+  busy(false);
 
-  // `missingAssets()` is a record of what failed at load, not a live list: it
-  // still names atlases that were supplied afterwards. What is actually absent
-  // is what the loop above could not find.
-  note(missing.length ? `no atlas for ${missing.join(', ')} — those parts draw as white silhouettes` : '', missing.length > 0);
+  const gaps = player.missingAssets().map(({ kind, name }) =>
+    kind === 'pack' ? `pack ${name}, whose instance parts draw nothing` : `atlas ${name}, whose parts draw as white silhouettes`);
+  note(gaps.length ? `missing ${gaps.join('; ')}` : '', gaps.length > 0);
 
   if (!names.length) return;
   const wanted = initial && names.includes(initial) ? initial : names[0];
@@ -401,38 +438,106 @@ async function load(ssab, files, label, initial) {
   await show(wanted);
 }
 
+// --- the URL entrance ------------------------------------------------------
+
+// The one `fetch` in this page. At `file://` it reads only in a Chrome started
+// with --allow-file-access-from-files; anywhere else every call rejects.
+const fetchLocal = (url) => fetch(url).catch(() => null);
+const readLocal = async (url) => {
+  const response = await fetchLocal(url);
+  return response?.ok ? response.arrayBuffer() : null;
+};
+
+async function packsBeside(url) {
+  const dir = new URL('.', url);
+  const listing = await (await fetchLocal(dir.href))?.text() ?? '';
+  // One `addRow("name","url",isDir,…)` per entry, both strings JSON-escaped,
+  // served with status 0 rather than 200. A Chrome that changes the page
+  // leaves the open pack the only one listed.
+  const packs = [...listing.matchAll(/addRow\("((?:[^"\\]|\\.)*)","((?:[^"\\]|\\.)*)",0,/g)]
+    .map(([, name, href]) => [new URL(JSON.parse(`"${href}"`), dir).href, JSON.parse(`"${name}"`)])
+    .filter(([href]) => isPack(href))
+    .sort((a, b) => byStem(a[1], b[1]));
+  return packs.some(([href]) => href === url) ? packs : [[url, fileName(url)], ...packs];
+}
+
 /**
- * The hand-drop entrance. Everything dropped together is one bundle: the first
- * `.ssab` is what plays, any others are its siblings, and the rest are atlases.
+ * Open this page again with other query values. A fresh page reads every file
+ * afresh, where loading again in place would keep each atlas the renderer
+ * already holds under that URL, and draw a reconverted pack with the old one.
  */
-async function loadDropped(dropped) {
-  const files = {};
-  let ssab = null, label = '';
-  for (const file of dropped) {
-    const data = new Uint8Array(await file.arrayBuffer());
-    if (file.name.endsWith('.ssab') && !ssab) { ssab = data; label = file.name; }
-    else files[file.name] = data;
+function reopen(changes) {
+  const next = new URL(location.href);
+  for (const [key, value] of Object.entries(changes)) {
+    if (value) next.searchParams.set(key, value);
+    else next.searchParams.delete(key);
   }
-  if (!ssab) { note('no .ssab among the dropped files', true); return; }
-  await load(ssab, files, label);
+  location.replace(next.href);
+}
+
+async function openUrl(src) {
+  const url = new URL(src, location.href).href;
+  choose = (pack) => reopen({ ssab: pack, animation: null });
+  $('reload').hidden = false;
+  listPacks([[url, fileName(url)]], url);
+  await open(url, readLocal, params.get('animation'));
+  listPacks(await packsBeside(url).catch(() => [[url, fileName(url)]]), url);
+}
+
+// --- the bundle entrance: the holes, or one drop -----------------------------
+
+let bundles = 0;
+
+/**
+ * Files filed under a base URL of their own, `[path, bytes | File][]` with
+ * paths from the bundle's root. The renderer keys atlases by URL, so two drops
+ * that both carry a `common.png` must not share a base.
+ */
+async function openBundle(files, main, initial) {
+  const base = new URL(`bundle/${++bundles}/`, location.href);
+  const byUrl = new Map(files.map(([path, data]) => [new URL(path, base).href, data]));
+  const depth = (href) => href.split('/').length;
+  const packs = [...byUrl.keys()].filter(isPack).sort((a, b) => depth(a) - depth(b) || byStem(a, b));
+  if (!packs.length) { note('no .ssab among the dropped files', true); return; }
+
+  const lookup = (url) => byUrl.get(url) ?? null;
+  choose = (pack) => open(pack, lookup);
+  $('reload').hidden = true;
+  const first = main ? new URL(main, base).href : packs[0];
+  listPacks(packs.map((href) => [href, decodeURIComponent(href.slice(base.href.length))]), first);
+  await open(first, lookup, initial);
+}
+
+async function walk(handle, prefix) {
+  if (!handle) return [];
+  if (handle.kind === 'file') return [[prefix + handle.name, await handle.getFile()]];
+  const files = [];
+  for await (const child of handle.values()) files.push(...await walk(child, `${prefix}${handle.name}/`));
+  return files;
 }
 
 // --- boot ----------------------------------------------------------------
+
+$('licenses').addEventListener('click', () => {
+  if (!$('noticesText').textContent) $('noticesText').textContent = JSON.parse($('notices').textContent);
+  $('noticesDialog').showModal();
+});
 
 (async () => {
   try {
     await wasm_bindgen({ module_or_path: bytes($('wasm').textContent) });
   } catch (error) {
-    $('drop').innerHTML = `<strong>Could not start the player</strong><span>${escapeHtml(error)}</span>`;
+    overlay(`<strong>Could not start the player</strong><span>${escapeHtml(error)}</span>`);
     return;
   }
   try {
     ctx = await wasm_bindgen.SsContextWeb.create();
   } catch (error) {
-    $('drop').innerHTML =
+    overlay(
       '<strong>No WebGPU here</strong>' +
-      '<span>This page needs a browser with WebGPU. Chrome and Edge have it; ' +
-      'Safari and Firefox depend on the version.</span>';
+      '<span>This page needs a browser with WebGPU, as Chrome and Edge are. If yours is one, open ' +
+      '<code>chrome://gpu</code> and read the WebGPU line under Graphics Feature Status: a virtual machine or ' +
+      'remote desktop with no GPU passed to it, or a GPU or driver on Chrome\'s blocklist, turns it off.</span>');
     return;
   }
   surface = ctx.createSurface($('c'));
@@ -442,9 +547,24 @@ async function loadDropped(dropped) {
   // number the console can answer.
   window.ssPreview = { ctx, surface, player };
 
+  // The `.ssab` schema version has not moved, so a shell from another SDK
+  // release does not fail on a pack: it quietly draws it as that release does.
+  const converter = params.get('converter');
+  if (converter) {
+    const sdk = ctx.sdkVersion.replace(/^v/, '');
+    const converted = converter.split('+')[0];
+    $('converted').textContent = `converted with SDK ${converter}`;
+    if (converted !== sdk) {
+      $('mismatch').textContent = `Converted with SDK ${converted}, played here as SDK ${sdk}: the two releases can draw the same .ssab differently.`;
+      $('mismatch').hidden = false;
+    }
+  }
+
   $('playPause').addEventListener('click', () => setPlaying(!playing));
   $('restart').addEventListener('click', () => { player.play(); setPlaying(true); });
+  $('pack').addEventListener('change', (e) => choose(e.target.value));
   $('anim').addEventListener('change', (e) => show(e.target.value));
+  $('reload').addEventListener('click', () => reopen({ animation: $('anim').value }));
   $('seek').addEventListener('pointerdown', () => { dragging = true; });
   window.addEventListener('pointerup', () => { dragging = false; });
   $('seek').addEventListener('input', (e) => seekTo(parseFloat(e.target.value)));
@@ -462,21 +582,36 @@ async function loadDropped(dropped) {
   stage.addEventListener('drop', async (e) => {
     e.preventDefault();
     $('drop').classList.remove('over');
-    $('drop').classList.remove('hidden');
-    try { await loadDropped([...e.dataTransfer.files]); }
-    catch (error) { note(String(error), true); }
+    // Taken before the first await, which empties the DataTransfer. At
+    // `file://` only `getAsFileSystemHandle` reads a dropped folder:
+    // `webkitGetAsEntry` hands out entries that throw EncodingError when read.
+    // A browser without it gets the dropped files, and a folder as one empty file.
+    const items = [...e.dataTransfer.items].filter((item) => item.kind === 'file');
+    const handles = items.every((item) => item.getAsFileSystemHandle) ? items.map((item) => item.getAsFileSystemHandle()) : null;
+    const dropped = [...e.dataTransfer.files];
+    try {
+      const files = handles
+        ? (await Promise.all(handles.map(async (handle) => walk(await handle, '')))).flat()
+        : dropped.map((file) => [file.name, file]);
+      await openBundle(files);
+    } catch (error) {
+      note(String(error), true);
+    }
   });
 
   new ResizeObserver(() => fitCanvas()).observe(stage);
   fitCanvas();
 
-  // The pack the generator inlined, if any. Everything it depends on — sibling
-  // packs and atlases alike — arrives in the second hole, keyed by file name.
+  // A host's Preview button names the `.ssab` in the URL. Otherwise the pack
+  // the generator inlined, if any, and everything it depends on — sibling packs
+  // and atlases alike — in the second hole, keyed by the path the pack names.
   const inlined = bytes($('ssab').textContent);
-  if (inlined) {
+  if (params.get('ssab')) {
+    await openUrl(params.get('ssab'));
+  } else if (inlined) {
+    const name = $('ssab').dataset.name || 'inlined.ssab';
     const holed = JSON.parse($('files').textContent || '{}');
-    const files = Object.fromEntries(Object.entries(holed).map(([name, b64]) => [name, bytes(b64)]));
-    await load(inlined, files, $('ssab').dataset.name || 'inlined pack', $('ssab').dataset.animation);
+    await openBundle([[name, inlined], ...Object.entries(holed).map(([path, b64]) => [path, bytes(b64)])], name, $('ssab').dataset.animation);
   }
 
   let previous = performance.now();
