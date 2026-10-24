@@ -3,6 +3,11 @@
 One preview of a chosen animation, reachable from every host, shipped as a **single
 self-contained HTML file opened in the browser**. Not an in-editor renderer.
 
+It is a catalogue of what a `.ssab` holds — its animations, their playback, their events,
+the assets it could not find — played by this Player as a reference. Matching each
+engine's Player is not its aim, and the page says so on screen ("Reference playback
+(wgpu)").
+
 This file is the cold start for that work. Planned and rejected work at large lives in
 [`ROADMAP.md`](./ROADMAP.md); this is the one feature that needed more room than a
 roadmap entry.
@@ -10,34 +15,34 @@ roadmap entry.
 ## Shape
 
 What ships is a **shell**: one HTML file with the wasm and the glue already inlined and
-holes where a pack and its atlases go. The pack's hole is the content of a
-`<script id="ssab" type="application/base64">` element, so the shell is a valid page as
-it stands and opens to "no pack loaded" rather than to an error; a reference pack fills a
-second hole with its atlases (see *Page composition*).
+holes where a pack and its files go. The shell as built has the holes empty, so it is a
+valid page as it stands and opens to "drop a `.ssab` here" rather than to an error.
 
-It has two entrances and one interior:
+It has three entrances and one interior:
 
-- **From a host** — a "Preview" button fills the hole, writes the file to a temp
-  directory, and opens it in the browser.
-- **By hand** — the shell is opened as it ships and a `.ssab` is dropped on it. Nothing
-  else has to be fetched or installed, which is what serves the hosts with no editor to
-  put a button in. `examples/viewer` already plays a dropped pack, so the gesture is not
-  a new one to teach.
+- **From a host** — a "Preview" button opens the shell its plugin ships in Chrome, with
+  the `.ssab`'s path in the URL, and the page reads the pack and everything it depends on
+  itself. No temp file, no base64, no server (see *The URL entrance*).
+- **By hand** — the shell is opened as it ships and a `.ssab` is dropped on it with its
+  atlases and sibling packs, or the folder that holds them. Nothing else has to be fetched
+  or installed, which is what serves the hosts with no editor to put a button in.
+  `examples/viewer` already plays a dropped pack, so the gesture is not a new one to
+  teach.
+- **Filled** — `examples/preview-gen` puts a pack and everything it depends on into the
+  holes, and the result opens anywhere with nothing beside it. It is the form that
+  attaches to a bug report: a page opened by URL reads the reporter's files, so its HTML
+  alone reproduces nothing.
 
 What follows from that shape:
 
 - **One button per pack, not per animation.** The page holds the whole pack and
   `animationNames` returns all of it, so the animation picker belongs in the page. A
   host that has one selected passes it as the initial value; otherwise it passes
-  nothing. No host ever needs to know the animation list.
-- It is a **one-shot dump, not a live view**: no file watching, no following a
-  reconvert, no IPC back to the editor. To see new bytes, press the button again.
-  Converting is a build step, not a preview's job.
-- Because the artifact is one ordinary file, it works offline and **attaches to a bug
-  report**: "renders here, not in my engine" becomes a repro the reporter can send.
-
-A CLI that fills the hole from a command line would be a convenience on top of the npm
-package. Nothing else waits on it.
+  nothing. No host ever needs to know the animation list, and none lists the other packs
+  either: the page offers the ones in the same directory.
+- It is **not a live view**: no file watching, no following the editor's selection, no
+  IPC back to the editor. To see new bytes after a reconvert, press reload in the page,
+  or the button again. Converting is a build step, not a preview's job.
 
 ## Why the preview is not drawn in the inspector
 
@@ -52,6 +57,31 @@ If an in-engine preview is ever wanted, write it as a thin host over the engine'
 a host alongside `Node2D`, and Unity reaches the same place with `PreviewRenderUtility`
 over the shipped graphic. That is a host, not a second renderer. It is not this work.
 
+## The URL entrance
+
+A host's button does one thing: start Chrome on the shell's `file://` URL with three
+query values — the `.ssab`'s `file://` URL, the animation the editor has selected if
+any, and the converter's version (`ss_converter_version()`). The names are in
+[the shell's README](./examples/preview/README.md). It passes no fit or alignment (the
+page fits the authored canvas, *Fitting the canvas*) and no dependencies (the page reads
+them, *Page composition*), so a host never reads the `.ssab` and never computes a hash.
+
+```text
+--user-data-dir=<a profile of its own> --allow-file-access-from-files
+--no-first-run --no-default-browser-check --app=<the shell's URL with the query>
+```
+
+- **Chrome by name, not the default browser.** A flag reaches only a Chrome it starts,
+  never one already running, so the host uses a profile of its own; a second press opens
+  a window in that same instance. macOS: `open -na "Google Chrome" --args …`.
+- **Only the shell, in an app window.** In that profile any `file://` page can read
+  local files, so the host opens nothing else there, and `--app=` leaves no URL bar to
+  open anything else with. The shell loads nothing from outside itself.
+- **Reload is a fresh page.** The renderer keeps an atlas it already holds under its
+  URL, so loading a reconverted pack again in place would draw it with the old atlas.
+  The page's reload button and its pack picker open the page again on new query values
+  instead, which also keeps the URL the whole of the page's state.
+
 ## Verified
 
 Chrome stable, macOS 26.6.2, fresh profile, no flags, page at `file://`.
@@ -65,19 +95,36 @@ Chrome stable, macOS 26.6.2, fresh profile, no flags, page at `file://`.
   fallback to retreat to.
 - Blocked at `file://`: `fetch()` and an external `<script type="module" src=…>`.
   An **inline** `<script type="module">` runs.
+- A dropped `File` reads (`File.arrayBuffer`). A dropped folder reads through
+  `getAsFileSystemHandle()`, subfolders included, while `webkitGetAsEntry()` hands out
+  entries whose `file()` and `readEntries()` throw `EncodingError`; over http both work.
+  Drops injected through the DevTools Protocol (`Input.dispatchDragEvent`), not dragged
+  from the OS.
 
 So: inline everything and `file://` is enough. **No local HTTP server is needed** — and
 one would have to be written twice, in C++ for Godot and C# for Unity, on top of port
 allocation, lifecycle, firewall prompts and a token to keep the local filesystem from
 being readable by anything that can reach the port.
 
-Measured again on the assembled shell, opened as a file with a fresh profile:
-`isSecureContext` and `navigator.gpu` both true, the inlined wasm instantiates, the pack
-in the hole plays (`frameNo` advancing, 1 prim / 1 draw), and the event strip fills.
+**With `--allow-file-access-from-files`** (Chrome 156, a profile of its own, headless and
+windowed alike): a `file://` page reads local files with `fetch`, subfolders included,
+with status 200 and every byte; a file that is not there rejects with `Failed to fetch`;
+a directory answers Chrome's listing page — one `addRow("name","url",isDir,…)` per
+entry — with status 0. Windowed through `open -na "Google Chrome" --args …` shows no
+warning bar.
 
-**A dropped `File` reads at `file://`** — `File.arrayBuffer()` returns the whole file and
-the drop handler loads it (`Sound.ssab`, 3 events found). That was the one item here
-taken on reasoning rather than measurement; it no longer is.
+Measured on the assembled shell:
+
+- `Ringo.ssab` by URL plays with its atlas, opens on the animation the query names, and
+  lists `Ringo_tyu.ssab` beside it. Without the flag, the same URL says it cannot read
+  the pack and offers the drop.
+- A copy of `Ringo.ssab` whose atlas path was rewritten to `x/Rin.png`, with `Rin.png`
+  beside it and no `x/`, draws 26 prims with nothing missing; a fresh page reading by
+  path alone reports `x/Rin.png` missing.
+- The reference `Basic.ssab` and the embedded one, both by URL, draw byte-identical
+  screenshots on the same paused frame (19 prims, 1 draw call).
+- A filled `Instance.ssab` plays with its sibling pack and both atlases, nothing missing,
+  and so does `Instance.ssab` picked out of a dropped `assets/overall` folder.
 
 Unverified: Chrome and Edge on Windows and Linux, Safari 26, Firefox 141.
 
@@ -88,26 +135,26 @@ Unverified: Chrome and Edge on Windows and Linux, Safari 26, Firefox 141.
 ```
 
 It runs wasm-pack over `libs/ssplayer-wgpu-ffi` with `--target no-modules --release
---no-default-features --features web`, and substitutes the glue, the wasm and two stamps
-into `examples/preview/shell.html`.
+--no-default-features --features web`, naming the SDK release in `SSPLAYER_SDK_VERSION`
+as `scripts/build.sh` does, and substitutes the glue, the wasm, two stamps and the
+license notices into `examples/preview/shell.html`.
 
 `scripts/build.sh platform=web` builds the same crate with `--target web`, which emits
 an ES module and therefore cannot load from `file://`. **The preview needs its own
 `no-modules` build**; it does not reuse the npm package's wasm.
 
-Release sizes, after `wasm-opt`: wasm 907,279 B and glue 222,380 B, which make a built
-shell of 1,452,953 B — the fixed cost of every generated page. Whole-file sizes: 1,502,640 B
-for `examples/web/assets_emb/Basic.ssab`, 1,789,384 B for
+Release sizes, after `wasm-opt`: wasm 929,925 B, glue 227,682 B and notices 228,237 B,
+which make a built shell of 1,723,638 B — the fixed cost of every page. Filled pages:
+1,773,325 B for `examples/web/assets_emb/Basic.ssab`, 2,060,069 B for
 `examples/web/assets_emb/Ringo/Ringo.ssab`.
 
 ## Distribution
 
 The shell is a **release artifact of this repository**: every `ssplayer-wgpu` Release
 carries it as `ssplayer-preview.html`, listed in `SHA256SUMS`, built by
-`scripts/build-preview.sh` in the release workflow's web job. It carries the SDK commit it
-was built from.
+`scripts/build-preview.sh` in the release workflow's web job.
 
-It is not committed into the Players. It is generated content of about 1.4 MB, and a
+It is not committed into the Players. It is generated content of about 1.7 MB, and a
 copy in each Player is a copy that drifts; the native binaries are already built rather
 than committed, and the shell travels the same way — each plugin's packaging script
 fetches a pinned release:
@@ -121,82 +168,60 @@ The tag is the pin, so the file name carries no version, like the zips'.
 Player's first door may need a clone, so the shell has to arrive with the plugin rather
 than from a sibling checkout.
 
-**The version stamp is load-bearing.** A shell from another SDK release reads the same
+**It carries its own license notices** — `LICENSE.md` and `THIRD_PARTY_NOTICES.md`,
+behind the page's Licenses link — because it travels alone: as a Release asset and inside
+each Player's package, with the wasm holding wgpu and the rest of the tree.
+
+**The version check is load-bearing.** A shell from another SDK release reads the same
 `.ssab` and draws it as that release does, so a stale shell does not fail — it quietly
-draws something else. The page shows the
-version it was built from, and a host compares it against the version it converted with
-and says so when they differ. Without that, every "the preview disagrees with my engine"
-report has to be re-diagnosed from scratch.
+draws something else. The stamp names the SDK as the converter spells it,
+`<release>+<commit>`. A host puts the converter's version in the URL; the page compares
+the release before the `+` with the one it links (`ctx.sdkVersion`), says so above the
+picture when they differ, and shows the commit without comparing it. Players pin an SDK
+release, so a plugin whose pins agree stays quiet. Without the check, every "the preview
+disagrees with my engine" report has to be re-diagnosed from scratch.
 
 ## Page composition
 
-Inline, in this order, with no external `src` and no `import` anywhere:
+Inline, with no external `src` and no `import` anywhere: the `no-modules` glue
+verbatim, then the wasm as base64 → `wasm_bindgen({ module_or_path: bytes })`.
 
-1. the `no-modules` glue verbatim,
-2. the wasm as base64 → `wasm_bindgen({ module_or_path: bytes })`,
-3. the `.ssab` as base64 → `loadSsab(bytes, undefined, undefined)`.
+Every entrance then ends in one call, `player.load(url, read)`: the player's own walk
+reads the `.ssab`, the sibling packs its instance parts play from and every atlas
+through `read`, and `missingAssets()` names what `read` did not answer. What differs per
+entrance is only `read`:
 
-(3) arrives either already in the `<script id="ssab">` hole or from a dropped file. A
-dropped `File` is read through `File.arrayBuffer`, which is user-initiated and so is not
-the `fetch` path that `file://` blocks — measured, see *Verified*.
+- **By URL** — `fetch`, the page's one call to it, which reads at `file://` only in a
+  Chrome started with the flag. Anywhere else the page says it cannot read the pack.
+- **A drop** — the dropped files, filed under a base URL of the drop's own, by their
+  paths from the drop. The renderer keys atlases by URL, so two drops that both carry a
+  `common.png` must not share a base.
+- **Filled holes** — the same, keyed by the paths the pack names.
 
-### Sibling packs, for the same reason
+**Path, then file name.** A file that is not at the path the pack names is looked for by
+its file name beside the main `.ssab`. That is the order Unity's importer resolves in
+(`ResolveTexturePath`), and wider than Godot's, so what draws in the engine is not
+missing here.
 
-An instance part plays a sub-animation out of **another** `.ssab`, and the page cannot
-fetch it: at `file://` there is nothing to fetch it from, and `loadSsab` given no `src`
-has no base to resolve against. So sibling packs go in the second hole beside the
-atlases, keyed by file name, and the page registers each with `addSsab` **before**
-loading the main pack — the main pack's own walk then skips what is already there.
+### Sibling packs
 
-`SSPack::instance_packs()` is what names them, transitively; it is `textureRefs`'s
-counterpart for playback data. Missing one is the quietest failure in this whole
-document: the instance part simply draws nothing, with no warning and no gap in the
-picture to point at.
-
-Registering a sibling makes the player try to load *its* atlases through the web loader,
-which fails at `file://`. Those console warnings are expected; the supply step below is
-what feeds them.
+An instance part plays a sub-animation out of **another** `.ssab`, at
+`<the pack's directory>/<name>.ssab`. `SSPack::instance_packs()` is what names them,
+transitively; it is `textureRefs`'s counterpart for playback data, and the walk asks
+`read` for each. Missing one is the quietest failure in this whole document: the
+instance part simply draws nothing, with no warning and no gap in the picture to point
+at — so `missingAssets()` names it on screen.
 
 ### Both pack forms, because the editors produce the reference one
 
-An **embedded-mode** pack is one input file: `missingAssets` is empty and the page
-supplies no textures at all, the `web` face having decoded the atlases itself through
-`createImageBitmap`.
+An **embedded-mode** pack is one input file: its atlases arrive inside it, and the
+`web` face decodes them itself through `createImageBitmap`.
 
 That is not what the hosts we are integrating produce. Godot converts with
 `embedded = false` (`ss_importer.cpp`) and so does Unity
 (`SpriteStudioConversionRunner.cs`), so what an editor has on disk is a **reference**
-pack plus sibling `.png` files, and the `.ssab` alone draws nothing. **The shell needs a
-second hole**, holding the atlases as base64 keyed by file name.
-
-The supply path is the documented one, and it is the page's work, not the host's:
-
-```js
-for (const [name, bytes] of siblingPacks) await player.addSsab(bytes, name, undefined);
-await player.loadSsab(ssabBytes, undefined, undefined);
-for (const pack of [undefined, ...siblingNames]) {
-  for (const r of player.textureRefs(pack)) {       // {key, path, embedded}
-    if (r.embedded) continue;
-    await ctx.addTextureFromBytes(r.key, atlasBytesFor(r.path));   // on the CONTEXT
-  }
-}
-```
-
-`textureRefs` names the files, so a generator knows exactly which siblings to inline and
-**a host never computes a hash**. Measured: the reference `Basic.ssab` supplied this way
-draws identically to the embedded one — 58,784 non-transparent pixels, 19 prims, 1 draw
-call, 9,204 bytes uploaded, the same figures on both.
-
-`setCellmapTextureFromBytes` also works and takes a name instead of a key, but it is the
-runtime *override* mechanism: it leaves `isCellmapOverridden` true, claiming the viewer
-replaced an atlas when it only supplied one. `addTextureFromBytes` leaves it false, keeps
-the encoded bytes so `restoreDevice` can rebuild on its own, and is what the doc comment
-on that method describes as the reference pack's route. Prefer it.
-
-**`missingAssets` does not clear when the textures arrive.** It is a record of what failed
-to resolve at load, not a live list, and after a successful supply it still names both
-atlases. Do not put it on screen unfiltered — on a reference pack it would report missing
-textures over a picture that is drawing correctly.
+pack plus sibling `.png` files, and the `.ssab` alone draws nothing. That is why every
+entrance hands the page files and not only a pack.
 
 ## Call sequence
 
@@ -205,7 +230,7 @@ await wasm_bindgen({ module_or_path: wasmBytes });
 const ctx     = await wasm_bindgen.SsContextWeb.create();   // once per page
 const surface = ctx.createSurface(canvas);
 const player  = surface.createPlayer();
-await player.loadSsab(ssabBytes, undefined, undefined);
+await player.load(ssabUrl, read);
 player.setAnimation(name);   // selection and transport are separate calls
 player.play();
 // then per rAF: surface.frame(dt)
@@ -214,14 +239,9 @@ player.play();
 ## What the page can show with no new Rust
 
 `animationNames`, `canvasSize`, `totalFrames`, `frameRate`, `frameNo`, `partCount`,
-`partNames`, `cellmapNames`, `missingAssets`, and the surface's `stats`. UserData and
-Signal arrive as events shaped `{ kind: 'userData' | 'signal', partIndex, … }`.
-
-`missingAssets` needs the qualification in *Page composition* before it reaches the
-screen: it does not clear once the atlases are supplied, so a reference pack reports both
-of them as missing while drawing perfectly. Filter it against what was actually supplied,
-and then it is worth showing — a pack whose atlas really did not arrive should name it
-rather than draw blank.
+`partNames`, `cellmapNames`, `missingAssets`, the surface's `stats`, and the context's
+`sdkVersion`. UserData and Signal arrive as events shaped
+`{ kind: 'userData' | 'signal', partIndex, … }`.
 
 ## The timeline, and why the player grew no event table
 
@@ -277,28 +297,24 @@ Call it again when the element resizes and after the picker changes animation. S
 
 ## Work order
 
-Both halves are built — the shell (`examples/preview/shell.html` +
-`scripts/build-preview.sh`) and the generator (`examples/preview-gen`, which a host in
-another language ports rather than links) — and every Release carries the shell. What is
-left lives in the Player repositories rather than here: each plugin's packaging script
-fetching the shell from a pinned Release, and **the buttons** — convert (or find) the
-`.ssab`, run the gather, write to a temp directory, open it.
+The shell (`examples/preview/shell.html` + `scripts/build-preview.sh`) and the generator
+(`examples/preview-gen`) are built, and every Release carries the shell. What is left
+lives in the Player repositories: each plugin's packaging script fetching the shell from
+a pinned Release, and **the buttons** — find Chrome, build the URL, start it as *The URL
+entrance* says.
 
 ## Out of scope
 
-- Live reload, file watching, or reconverting from the preview.
+- Live reload, file watching, following the editor's selection, or reconverting from
+  the preview.
 - In-inspector thumbnails and project-window previews. A different need — identifying a
   file at a glance rather than inspecting one — and a different mechanism.
 - An HTTP server inside the editor plugins.
-
-## Fallback
-
-If a target cannot use `file://` (site policy, or a default browser with no WebGPU), the
-fallback is the **native** `examples/viewer`, not a server. It is winit + wgpu, so Metal,
-DX12 and Vulkan are chosen automatically and it is one binary rather than one per API,
-and it already plays an arbitrary `.ssab` dropped on the window. What it lacks is command
-line arguments — `find_asset_dir()` hard-codes `assets/overall`. The cost it carries that
-the HTML does not is shipping and signing an executable.
+- **A route for machines without WebGPU** — WebGL, pre-rendered frames, the native
+  viewer. A machine that runs the Unity or Godot editor has the D3D12, Metal or Vulkan
+  that WebGPU sits on; what is left is virtual machines and remote desktops with no GPU
+  passed through, and GPUs or drivers on Chrome's blocklist, too few to pay for keeping
+  a second route. The page says WebGPU is missing and how to check (`chrome://gpu`).
 
 ## Re-running the `file://` check
 
@@ -315,3 +331,7 @@ Check, in order: `isSecureContext`, `navigator.gpu`, `requestAdapter`, `requestD
 `var<storage, read>`, and `WebAssembly.instantiate` over inline bytes. Confirm the two
 negatives as well — `fetch` of a sibling file and an external module script — so a later
 "it works" is not resting on a page that quietly kept fetching.
+
+For the URL entrance, add `--allow-file-access-from-files` and check the positives the
+page relies on: `fetch` of a sibling file and of one in a subfolder (status 200, every
+byte), and of the directory (status 0, Chrome's listing with its `addRow` lines).

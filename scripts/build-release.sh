@@ -227,22 +227,25 @@ FAILED=""
 fail () { FAILED="${FAILED}
   $1"; }
 
-# The preview shell's stamp, holes and self-containment, read from the page.
-# Prints the stamp, or the problems on stderr and fails. A function of its own,
-# because bash 3.2 -- macOS's -- cannot parse a here-document inside $( ).
-#   check_preview <file> <version> <SDK commit>
+# The preview shell's stamp, holes, notices and self-containment, read from the
+# page. Prints the stamp, or the problems on stderr and fails. A function of its
+# own, because bash 3.2 -- macOS's -- cannot parse a here-document inside $( ).
+#   check_preview <file> <version> <SDK release> <SDK commit>
 check_preview () {
-  node - "$1" "$2" "$3" <<'JS'
-const [file, version, sdk] = process.argv.slice(2);
+  node - "$1" "$2" "$3" "$4" <<'JS'
+const [file, version, release, sdk] = process.argv.slice(2);
 const page = require('fs').readFileSync(file, 'utf8');
 const problems = [];
 const stamp = (page.match(/<span class="stamp" id="stamp">([^<]*)<\/span>/) || [])[1];
-const parts = stamp && stamp.match(/^ssplayer-wgpu (\S+) \u00b7 SDK ([0-9a-f]{7,40}) \u00b7 \d{4}-\d{2}-\d{2}$/);
-if (!parts) problems.push(`its stamp is ${JSON.stringify(stamp ?? null)}, not "ssplayer-wgpu <version> \u00b7 SDK <commit> \u00b7 <date>"`);
+const parts = stamp && stamp.match(/^ssplayer-wgpu (\S+) \u00b7 SDK (\S+)\+([0-9a-f]{7}) \u00b7 \d{4}-\d{2}-\d{2}$/);
+if (!parts) problems.push(`its stamp is ${JSON.stringify(stamp ?? null)}, not "ssplayer-wgpu <version> \u00b7 SDK <release>+<commit> \u00b7 <date>"`);
 else {
   if (parts[1] !== version) problems.push(`it is stamped ${parts[1]}, where this checkout says ${version}`);
-  if (!sdk.startsWith(parts[2])) problems.push(`it was built against SDK ${parts[2]}, where this checkout pins ${sdk.slice(0, 12)}`);
+  if (parts[2] !== release.replace(/^v/, '')) problems.push(`it links SDK ${parts[2]}, where the other artifacts link ${release}`);
+  if (!sdk.startsWith(parts[3])) problems.push(`it was built against SDK ${parts[3]}, where this checkout pins ${sdk.slice(0, 12)}`);
 }
+const notices = (page.match(/<script id="notices" type="application\/json">([^<]*)<\/script>/) || [])[1] || '';
+if (!/Third-Party Notices/.test(notices)) problems.push('it carries no third-party notices');
 const left = page.match(/__SS_[A-Z]+__/g);
 if (left) problems.push(`it still holds ${[...new Set(left)].join(', ')}, which the build substitutes`);
 const wasm = (page.match(/<script id="wasm" type="application\/base64">([^<]*)<\/script>/) || [])[1] || '';
@@ -404,17 +407,19 @@ if [ "$SDK" = "local" ]; then
 fi
 echo "   $SDK, in every artifact"
 
-# The preview shell names its SDK by commit rather than by tag -- the stamp is
-# what a host compares against the converter it used (PREVIEW.md) -- so it is
-# checked against the commit this checkout pins, which the tree records whether
-# or not the submodule is checked out. It must carry the version being
-# released, have every hole the build fills filled and the pack's left empty,
-# and load nothing from outside itself: a page that does works over http:// and
-# fails at file://, which is the only way it is opened. build-preview.sh refuses
-# such a page as well; this is the file that ships.
+# The preview shell names its SDK as the converter does, release and commit --
+# the page compares the release with the converter version a host hands it
+# (PREVIEW.md) -- so the release is checked against the one every other
+# artifact links, and the commit against the one this checkout pins, which the
+# tree records whether or not the submodule is checked out. It must carry the
+# version being released and its notices, have every hole the build fills
+# filled and the pack's left empty, and load nothing from outside itself: a
+# page that does works over http:// and fails at file://, which is the only way
+# it is opened. build-preview.sh refuses such a page as well; this is the file
+# that ships.
 step "checking the preview shell"
 SDK_COMMIT="$(git -C "$ROOT_DIR" rev-parse HEAD:SpriteStudio-SDK)"
-if ! STAMP="$(check_preview "$IN/$PREVIEW/$SHELL_HTML" "$VERSION" "$SDK_COMMIT")"; then
+if ! STAMP="$(check_preview "$IN/$PREVIEW/$SHELL_HTML" "$VERSION" "$SDK" "$SDK_COMMIT")"; then
   echo "$APP: $PREVIEW/$SHELL_HTML is not the shell of this release" >&2
   exit 1
 fi

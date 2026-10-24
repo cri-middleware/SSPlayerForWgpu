@@ -442,12 +442,13 @@ jobs:
 
       # The preview shell (examples/preview/shell.html) is the js face's other
       # consumer, and nothing else builds it: examples/preview-gen's tests fill
-      # a fake one. build-preview.sh refuses a page that loads anything from
-      # outside itself or calls a method the glue does not define, so building it
-      # is the check. Debug, as the package above: the no-modules target differs
-      # only in what wasm-bindgen writes, so cargo reuses that build and this
-      # costs a few seconds, and the cache the weekly run writes stays the one
-      # PRs restore. release.yml builds the release one.
+      # a fake one. build-preview.sh refuses a page that loads a script from
+      # outside itself, fetches anywhere but its URL entrance, or calls a method
+      # the glue does not define, so building it is the check. Debug, as the
+      # package above: the no-modules target differs only in what wasm-bindgen
+      # writes, so cargo reuses that build and this costs a few seconds, and the
+      # cache the weekly run writes stays the one PRs restore. release.yml builds
+      # the release one.
       - name: Build the preview shell
         run: ./scripts/build-preview.sh build=debug out="$RUNNER_TEMP/ssplayer-preview.html"
 

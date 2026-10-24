@@ -1,16 +1,16 @@
 //! Filling the preview shell: a pack, everything it depends on, and two holes.
 //!
 //! The shell (`examples/preview/shell.html`, built by `scripts/build-preview.sh`)
-//! is a complete page with nothing in it. This is the other half — the step a
-//! host's "Preview" button runs: gather what the pack needs, base64 it, and put
-//! it in the holes.
+//! is a complete page with nothing in it. This is the other half: gather what
+//! the pack needs, base64 it, and put it in the holes, for a page that opens
+//! anywhere with nothing beside it.
 //!
 //! **The gathering is the part worth having.** Substituting two strings is
 //! nothing; knowing *which* files to substitute means reading the `.ssab`, and
 //! getting it wrong is silent — a missing atlas draws white silhouettes and a
 //! missing sibling pack draws nothing at all where an instance part should be.
 //! [`SSPack::textures`] and [`SSPack::instance_packs`] are the two read-outs
-//! that answer it, and this walk is what a host in another language ports.
+//! that answer it, and this walk is what a tool in another language ports.
 //!
 //! It is deliberately **not** in the player: the player has no filesystem on
 //! every target it builds for, and a tool that writes HTML has no business in a

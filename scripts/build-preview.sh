@@ -13,12 +13,12 @@
 # platform=web` builds `--target web` for the npm package. Two targets, two
 # artifacts, no shared output. Everything else in the page (markup, CSS, the
 # page's own script) lives in examples/preview/shell.html and ships verbatim;
-# this script only substitutes four markers into it.
+# this script only substitutes five markers into it.
 #
 # The version stamp is load-bearing rather than decoration. The `.ssab` schema
 # is still moving at version 1, so a stale shell does not fail -- it quietly
-# draws something else. A host compares what the page reports against the
-# version it converted with. See PREVIEW.md.
+# draws something else. The page compares the SDK release it links against the
+# converter version a host puts in its URL. See PREVIEW.md.
 set -euo pipefail
 
 APP="$(basename "$0")"
@@ -56,7 +56,12 @@ SHELL_SRC="$ROOT_DIR/examples/preview/shell.html"
 WORK="$(mktemp -d)"
 trap 'rm -rf "$WORK"' EXIT
 
-echo "$APP: building the no-modules wasm ($BUILD)"
+# The SDK release the wasm links, named the way build.sh names it: the page
+# reads it back as `ctx.sdkVersion` and compares it with the converter's.
+SDK_VERSION="$(git -C "$ROOT_DIR/SpriteStudio-SDK" describe --tags --exact-match --match 'v[0-9]*' 2>/dev/null || echo local)"
+export SSPLAYER_SDK_VERSION="$SDK_VERSION"
+
+echo "$APP: building the no-modules wasm ($BUILD, SDK $SDK_VERSION)"
 wasm-pack build "$ROOT_DIR/libs/ssplayer-wgpu-ffi" \
   --target no-modules --"$BUILD" \
   --out-name ssplayer_wgpu --out-dir "$WORK/pkg" \
@@ -66,9 +71,9 @@ GLUE="$WORK/pkg/ssplayer_wgpu.js"
 WASM="$WORK/pkg/ssplayer_wgpu_bg.wasm"
 
 # --- the stamp ------------------------------------------------------------
-# The player's version, and the SDK commit it was built against: the submodule
-# is a commit rather than a release, so the commit is the only thing that
-# identifies what converted-data version this page agrees with.
+# The player's version, and the SDK as `ss_converter_version()` spells it --
+# the release, `+`, the first seven characters of the commit -- so the stamp
+# reads the same as the converter version a host shows beside it.
 #
 # The version is the one cargo resolves, not a line read out of a manifest: the
 # crate inherits it from the workspace, and reading `version = "..."` from its
@@ -77,8 +82,9 @@ WASM="$WORK/pkg/ssplayer_wgpu_bg.wasm"
 VERSION="$(cargo metadata --no-deps --format-version 1 --manifest-path "$ROOT_DIR/Cargo.toml" |
   python3 -c 'import json, sys; print(next(p["version"] for p in json.load(sys.stdin)["packages"] if p["name"] == "ssplayer-wgpu"))')"
 [ -n "$VERSION" ] || { echo "$APP: cargo metadata reported no version for ssplayer-wgpu" >&2; exit 1; }
-SDK="$(git -C "$ROOT_DIR/SpriteStudio-SDK" rev-parse --short HEAD 2>/dev/null || echo unknown)"
-STAMP="ssplayer-wgpu $VERSION · SDK $SDK"
+SDK_COMMIT="$(git -C "$ROOT_DIR/SpriteStudio-SDK" rev-parse HEAD 2>/dev/null | cut -c1-7 || true)"
+[ -n "$SDK_COMMIT" ] || { echo "$APP: SpriteStudio-SDK is not checked out" >&2; exit 1; }
+STAMP="ssplayer-wgpu $VERSION · SDK ${SDK_VERSION#v}+$SDK_COMMIT"
 BUILT="$(date -u +%Y-%m-%d)"
 
 # --- substitute -----------------------------------------------------------
@@ -86,34 +92,46 @@ BUILT="$(date -u +%Y-%m-%d)"
 # megabyte, and both carry every character sed would treat as a replacement
 # escape.
 mkdir -p "$(dirname "$OUT")"
-python3 - "$SHELL_SRC" "$GLUE" "$WASM" "$OUT" "$STAMP" "$BUILT" <<'PY'
-import base64, pathlib, re, sys
+python3 - "$SHELL_SRC" "$GLUE" "$WASM" "$OUT" "$STAMP" "$BUILT" "$ROOT_DIR/LICENSE.md" "$ROOT_DIR/THIRD_PARTY_NOTICES.md" <<'PY'
+import base64, json, pathlib, re, sys
 
-shell, glue, wasm, out, stamp, built = sys.argv[1:7]
-page = pathlib.Path(shell).read_text(encoding="utf-8")
-for marker, value in (
-    ("__SS_GLUE__", pathlib.Path(glue).read_text(encoding="utf-8")),
-    ("__SS_WASM__", base64.b64encode(pathlib.Path(wasm).read_bytes()).decode("ascii")),
-    ("__SS_VERSION__", stamp),
-    ("__SS_BUILT__", built),
-):
-    # Exactly one, never "at least one": a second mention -- in a comment, say --
-    # would be substituted too, and two copies of the wasm is a page twice the
-    # size that still works, so nothing downstream would notice.
-    found = page.count(marker)
-    if found != 1:
-        raise SystemExit(f"{marker} appears {found} times in {shell}; it must appear exactly once")
-    page = page.replace(marker, value)
-
-# Nothing of OURS may reach outside the file: at file:// `fetch` and an external
-# script are both blocked, and a slip would fail only on the machine that opened
-# the artifact, never here. The glue is exempt from the `fetch` check on purpose
-# -- wasm-bindgen carries a fetch path for loading by URL, and passing the bytes
-# in is exactly what stops it being taken.
+shell, glue, wasm, out, stamp, built, license, notices = sys.argv[1:9]
 own = pathlib.Path(shell).read_text(encoding="utf-8")
-for forbidden in ("fetch(", "import(", "XMLHttpRequest"):
+
+# The page carries its own notices, since it travels alone: as a Release asset
+# and inside each Player's package. A JSON string with every `<` escaped, so no
+# license text can close the <script> that holds it.
+text = pathlib.Path(license).read_text(encoding="utf-8") + "\n\n" + pathlib.Path(notices).read_text(encoding="utf-8")
+values = {
+    "__SS_GLUE__": pathlib.Path(glue).read_text(encoding="utf-8"),
+    "__SS_WASM__": base64.b64encode(pathlib.Path(wasm).read_bytes()).decode("ascii"),
+    "__SS_VERSION__": stamp,
+    "__SS_BUILT__": built,
+    "__SS_NOTICES__": json.dumps(text, ensure_ascii=False).replace("<", "\\u003c"),
+}
+# Exactly one, never "at least one": a second mention -- in a comment, say --
+# would be substituted too, and two copies of the wasm is a page twice the size
+# that still works, so nothing downstream would notice. One pass over the
+# source, so a marker's spelling inside a substituted value stays as it is.
+for marker in sorted(set(re.findall(r"__SS_[A-Z]+__", own)) | set(values)):
+    found = own.count(marker)
+    if marker not in values or found != 1:
+        raise SystemExit(f"{marker} appears {found} times in {shell}; it must be one of {', '.join(values)} and appear exactly once")
+page = re.sub(r"__SS_[A-Z]+__", lambda match: values[match.group(0)], own)
+
+# Nothing of OURS may reach outside the file unasked: at file:// an external
+# script is blocked, and so is `fetch` unless Chrome was started with
+# --allow-file-access-from-files, so a slip would fail only on the machine that
+# opened the artifact, never here. The one `fetch` is the URL entrance's, which
+# a host opens in exactly that Chrome. The glue is exempt on purpose --
+# wasm-bindgen carries a fetch path for loading by URL, and passing the bytes in
+# is exactly what stops it being taken.
+for forbidden in ("import(", "XMLHttpRequest"):
     if forbidden in own:
         raise SystemExit(f"{shell} contains {forbidden!r}, which cannot work at file://")
+fetches = len(re.findall(r"\bfetch\(", own))
+if fetches != 1:
+    raise SystemExit(f"{shell} calls fetch {fetches} times; the URL entrance's one call is the only one that works at file://")
 if "<script" in page and " src=" in page.split("<script", 1)[1][:200]:
     raise SystemExit("the assembled page loads a script by src, which cannot work at file://")
 
@@ -140,4 +158,5 @@ PY
 SIZE="$(wc -c < "$OUT" | tr -d ' ')"
 echo "$APP: done -> $OUT ($(( SIZE / 1024 )) KiB, $STAMP)"
 echo "$APP: open it directly -- no server, no install. Drop a .ssab on it."
+echo "$APP: or open it as a host does, by path: see examples/preview/README.md."
 echo "$APP: a generator fills the <script id=\"ssab\"> hole to ship a pack inside it."
