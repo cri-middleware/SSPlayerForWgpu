@@ -22,18 +22,24 @@ the constraints a change most often breaks are in [CONTRIBUTING.md](./CONTRIBUTI
 
 wgpu is a GPU API, not a UI toolkit, so this splits in two: the portable half belongs in the
 player, where every host and the C ABI reach it, and the host half belongs in an adapter crate.
+Hit testing, UI states and reduced motion follow the SDK porting guide's
+[UI integration page](https://github.com/cri-middleware/SpriteStudio-SDK/blob/HEAD/libs/ssruntime/docs/50_features/80_ui_integration.md).
 
-- [ ] **Part rect read-out and hit testing** — `part_transform` reports where a part is
+- [ ] **Part outline read-out and hit testing** — `part_transform` reports where a part is
       but nothing reports how big it is, so a host cannot turn a part into a clickable
-      region. `part_rect` over the `PartState` fields the runtime delivers every frame
-      (`size_x` / `size_y`, `anchor`, `pivot`) and the part transform, then
-      `hit_test_part(x, y)` over that in player-local coordinates, is C-ABI shaped and
-      needs no GPU work, so every adapter crate inherits it.
+      region. `part_quad`, built as the SDK guide recommends (a cell part's drawn corners, a
+      Mesh part's vertex box, a Shape's size around its pivot), then
+      `hit_test_part(x, y, parts)` over that in player-local coordinates, answering from the
+      parts the host names (every part with an outline when it names none), is C-ABI shaped
+      and needs no GPU work, so every adapter crate inherits it.
 - [ ] **Bevy UI (`Node`)** — `ssplayer-bevy` gives Bevy a player in the world; a player inside
       Bevy's UI tree is a different thing — it has to size from `ComputedNode`, respect the UI
-      camera's stacking and clipping, and answer `Interaction` picking. The part rect above
+      camera's stacking and clipping, and answer picking through `Hovered` / `Pressed`
+      (`Interaction` is deprecated in Bevy 0.20). The part outline above
       and `SSPlayer::fit_into` — which `ssplayer-bevy` does not wire — are what it would be
-      built on, and it is the only Rust UI target that costs nothing new to reach.
+      built on, and it is the only Rust UI target that costs nothing new to reach. The UI
+      states and reduced motion belong in the same adapter crate, over a label-section call
+      (`set_animation_section_by_label`) the player does not have yet.
 
 ## Expressiveness
 
