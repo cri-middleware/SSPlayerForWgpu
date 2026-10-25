@@ -38,8 +38,9 @@ Hit testing, UI states and reduced motion follow the SDK porting guide's
       (`Interaction` is deprecated in Bevy 0.20). The part outline above
       and `SSPlayer::fit_into` — which `ssplayer-bevy` does not wire — are what it would be
       built on, and it is the only Rust UI target that costs nothing new to reach. The UI
-      states and reduced motion belong in the same adapter crate, over a label-section call
-      (`set_animation_section_by_label`) the player does not have yet.
+      states, the selected state (from `Checked`) and reduced motion belong in the same adapter
+      crate, over a label-section call (`set_animation_section_by_label`) the player does not
+      have yet.
 
 ## Expressiveness
 
