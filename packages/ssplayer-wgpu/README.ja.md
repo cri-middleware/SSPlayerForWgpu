@@ -30,7 +30,7 @@ defineSsPlayerWebGPUElement(); // <ss-player-webgpu> を登録
 <ss-player-webgpu src="/assets/Basic.ssab" autoplay style="width:360px;height:360px"></ss-player-webgpu>
 ```
 
-1 枚の canvas に複数体を載せるには、要素の中身の API を使います（ページに `sharedContext()`、canvas ごとにサーフェス、キャラクターごとにプレイヤー）。`.ssab` は SpriteStudio（7.5 以上）のプロジェクトから [SSConverterGUI](https://github.com/cri-middleware/SSConverterGUI) か SDK の `ssconverter-cli` で作ります。参照出力も埋め込み出力も読み込めます。
+1 枚の canvas に複数体を載せるには、要素の中身の API を使います（ページに `sharedContext()`、canvas ごとにサーフェス、キャラクターごとにプレイヤー）。`.ssab` は SpriteStudio（7.6 以上）のプロジェクトから [SSConverterGUI](https://github.com/cri-middleware/SSConverterGUI) か SDK の `ssconverter-cli` で作ります。参照出力も埋め込み出力も読み込めます。
 
 **次に読む:** [Web ではじめる](https://cri-middleware.github.io/SSPlayerForWgpu/ja/start/web/) ·
 [`<ss-player-webgpu>`](https://cri-middleware.github.io/SSPlayerForWgpu/ja/reference/web-component/) ·
