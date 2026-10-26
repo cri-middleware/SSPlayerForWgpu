@@ -18,30 +18,6 @@ the constraints a change most often breaks are in [CONTRIBUTING.md](./CONTRIBUTI
 - [ ] **Integration shader gaps** — `map0` / `map1` secondary textures, shader
       parts combined with a mask, and parts other than Normal.
 
-## UI integration
-
-wgpu is a GPU API, not a UI toolkit, so this splits in two: the portable half belongs in the
-player, where every host and the C ABI reach it, and the host half belongs in an adapter crate.
-Hit testing, UI states and reduced motion follow the SDK porting guide's
-[UI integration page](https://github.com/cri-middleware/SpriteStudio-SDK/blob/HEAD/libs/ssruntime/docs/50_features/80_ui_integration.md).
-
-- [ ] **Part outline read-out and hit testing** — `part_transform` reports where a part is
-      but nothing reports how big it is, so a host cannot turn a part into a clickable
-      region. `part_quad`, built as the SDK guide recommends (a cell part's drawn corners, a
-      Mesh part's vertex box, a Shape's size around its pivot), then
-      `hit_test_part(x, y, parts)` over that in player-local coordinates, answering from the
-      parts the host names (every part with an outline when it names none), is C-ABI shaped
-      and needs no GPU work, so every adapter crate inherits it.
-- [ ] **Bevy UI (`Node`)** — `ssplayer-bevy` gives Bevy a player in the world; a player inside
-      Bevy's UI tree is a different thing — it has to size from `ComputedNode`, respect the UI
-      camera's stacking and clipping, and answer picking through `Hovered` / `Pressed`
-      (`Interaction` is deprecated in Bevy 0.20). The part outline above
-      and `SSPlayer::fit_into` — which `ssplayer-bevy` does not wire — are what it would be
-      built on, and it is the only Rust UI target that costs nothing new to reach. The UI
-      states, the selected state (from `Checked`) and reduced motion belong in the same adapter
-      crate, over a label-section call (`set_animation_section_by_label`) the player does not
-      have yet.
-
 ## Expressiveness
 
 - [ ] **One mask backend, once Bevy's 2d pass carries a stencil** — both backends exist
@@ -148,6 +124,28 @@ Hit testing, UI states and reduced motion follow the SDK porting guide's
   boundary; engine embedding is a Rust-only capability, delivered as adapter
   crates. From C the route would be offscreen rendering plus a shared texture, which
   waits on *An offscreen target on the C face* above.
+- **UI integration on the C, JavaScript and element faces.** The SDK porting guide's
+  [UI integration page](https://github.com/cri-middleware/SpriteStudio-SDK/blob/HEAD/libs/ssruntime/docs/50_features/80_ui_integration.md)
+  hangs hit testing, UI states and reduced motion on a UI toolkit's button, and none of
+  these faces has a toolkit to integrate with: wgpu is a GPU API, a C/C++ engine brings
+  its own UI, and on a page the DOM is the toolkit. `<ss-player-webgpu>` follows the Web
+  Player's `<ss-player>`, which leaves UI to the page for the same reason
+  ([its non-goal](https://github.com/cri-middleware/SSPlayerForWeb/blob/HEAD/ROADMAP.md#deliberate-non-goals)).
+  A host that uses a player as a button answers clicks with its own box and plays a
+  state's frames with `set_animation_section`; what that leaves out is a click limited
+  to the artwork, since `part_transform` reports where a part is but nothing reports its
+  outline. Revisit on a concrete case that a box cannot serve.
+- **A Bevy UI adapter.** `ssplayer-bevy` puts a player in the world; one inside Bevy's
+  UI tree — sized from `ComputedNode`, answering picking through `Hovered` / `Pressed`,
+  and taking the UI states, the selected state (from `Checked`) and reduced motion —
+  would be a crate of its own. The player plays in the render world, and only playback
+  state and events come back to the main world, a frame late (`feedback.rs`), so part
+  outlines would need a read-back that only marked players pay for. The node would need
+  drawing into, through a texture per node, since the adapter draws into the first view
+  alone. And the player would need two Rust-only read-outs it lacks — a part outline and
+  the labels of an `SSPack` — while the C and JavaScript faces stay without them. Bevy's
+  UI API also moves with each release (`Interaction` is deprecated in 0.20). It waits on
+  a concrete request.
 - **The GL backend.** The renderer pulls its vertices from storage buffers bound
   to the vertex stage, which GL exposes only from 4.3 / GLES 3.1 and WebGL not at
   all. No GL adapter is selected or verified anywhere: the instance takes
@@ -157,7 +155,6 @@ Hit testing, UI states and reduced motion follow the SDK porting guide's
   integration point is a texture, so the route needs no crate: draw through the Rust
   API into a texture you own — the host opens the render pass, so its target can be
   any texture — and hand that texture to the toolkit. A first-class adapter crate
-  waits on a concrete request; Bevy UI above is the Rust UI target that is actually
-  asked for.
+  waits on a concrete request.
 - **A WebGL fallback.** `ssplayer-webgl` is maintained and is the answer for
   environments without WebGPU.

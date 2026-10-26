@@ -80,9 +80,9 @@ across the SpriteStudio Player family.
 === "Bevy"
 
     ```rust
-    // Not wired into the adapter yet. `SsTransform` places a player in world
+    // Not wired into the adapter. `SsTransform` places a player in world
     // units, and a fit needs the view's pixel size, which only the render world
-    // knows — that is the first half of "Bevy UI" in the roadmap.
+    // knows.
     ```
 
 ## The box it fits
