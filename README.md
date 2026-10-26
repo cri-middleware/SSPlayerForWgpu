@@ -123,7 +123,7 @@ Building it from this repository is in [Building from Source](#%EF%B8%8F-buildin
 
 ### Where that `.ssab` comes from
 
-Animations are authored in SpriteStudio — **7.5 or later** — and converted ahead of time; this player
+Animations are authored in SpriteStudio — **7.6 or later** — and converted ahead of time; this player
 converts nothing at runtime and bundles no converter. Use the desktop
 [SSConverterGUI](https://github.com/cri-middleware/SSConverterGUI), or the SDK's `ssconverter-cli`;
 [Converting with a standalone tool](https://cri-middleware.github.io/SpriteStudio-Docs/overview/convert-with-a-standalone-tool/)

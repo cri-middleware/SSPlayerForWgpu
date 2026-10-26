@@ -36,7 +36,7 @@ defineSsPlayerWebGPUElement(); // registers <ss-player-webgpu>
 ```
 
 For many characters in one canvas, use the API the element wraps: `sharedContext()` for the page, a
-surface per canvas, a player per character. The `.ssab` comes from a SpriteStudio project (7.5 or
+surface per canvas, a player per character. The `.ssab` comes from a SpriteStudio project (7.6 or
 later) through [SSConverterGUI](https://github.com/cri-middleware/SSConverterGUI) or the SDK's
 `ssconverter-cli`; reference and embedded exports both load.
 

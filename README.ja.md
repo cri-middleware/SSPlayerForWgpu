@@ -99,7 +99,7 @@ npm i @spritestudio/ssplayer-wgpu
 
 ### その `.ssab` はどこから来るのか
 
-アニメーションは SpriteStudio（**7.5 以上**）で制作し、事前に変換します。このプレイヤーは実行時には何も変換せず、コンバータも同梱しません。デスクトップの
+アニメーションは SpriteStudio（**7.6 以上**）で制作し、事前に変換します。このプレイヤーは実行時には何も変換せず、コンバータも同梱しません。デスクトップの
 [SSConverterGUI](https://github.com/cri-middleware/SSConverterGUI) か、SDK の `ssconverter-cli` を使ってください。ツールの選び方とビルドパイプラインへの組み込み方は[単体ツールで変換する](https://cri-middleware.github.io/SpriteStudio-Docs/ja/overview/convert-with-a-standalone-tool/)にあります。まず試すだけなら自前の素材は要りません。以下のサンプルは SDK 自身のテストアニメーションで動きます。
 
 ## ⚡ 使い方
