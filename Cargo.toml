@@ -59,7 +59,7 @@ ssplayer-wgpu = { path = "libs/ssplayer-wgpu" }
 # makes that a compile error in CI rather than something to remember. npm would
 # call this a peerDependency; cargo has no such thing, so the supported range is
 # stated here and in the adapter's README.
-bevy = { version = "0.20", default-features = false }
+bevy = { version = "0.20.1", default-features = false }
 # Versions centralized here so core, the viewer, and the wasm build never drift.
 # Pinned to the 30 line to stay compatible with Slint's `unstable-wgpu-30`: a
 # host that composes a Slint UI and this player on one device needs the exact
