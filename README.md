@@ -11,11 +11,10 @@ files, no re-authoring, no engine lock-in.
 
 ## ✨ Why use SpriteStudio with wgpu?
 
-- **Artist-made motion, not animation code.** Bone rigs, mesh deformation and particle effects are authored visually in SpriteStudio and exported as one `.ssab`. The player plays it, and timeline events and per-part overrides connect it to your game logic.
+- **Bring your characters — and whole scenes — to life, with no animation code.** Breathing and blinking, swaying hair and clothes, flashy slash and magic effects, even cutscenes and UI: bone rigs, mesh deformation and particle effects are authored visually in SpriteStudio and exported as one `.ssab`. The player plays it, and timeline events and per-part overrides connect it to your game logic.
 - **Blend between motions.** Layer animations on tracks and crossfade between them, so a walk eases into a run instead of snapping — see [Motion blending](./docs/en/guide/motion-blending.md).
 - **It borrows your GPU; it never owns it.** The host owns the wgpu `Device` / `Queue` / `Surface` and lends them per frame, so the player rides inside any wgpu application — your own, egui, Bevy — and a scene of many characters shares one upload of each atlas.
-- **Native graphics on every platform.** One wgpu code path draws through DirectX 12 on Windows, Metal on macOS, Vulkan on Linux and WebGPU in the browser.
-- **Not just Rust.** From C, C++ or Objective-C it is a static library and one header: hand it your `HWND`, `NSView`, `CAMetalLayer`, X11 `Window` or `wl_surface` and call two functions per frame. In the browser it is a WebAssembly build, and in **Bevy**, `ssplayer-bevy` adds three components that draw a character as part of Bevy's own 2D rendering.
+- **Use it from Rust, Bevy, C/C++ or the browser.** In **Bevy**, `ssplayer-bevy` adds three components that draw a character as part of Bevy's own 2D rendering. From C, C++ or Objective-C it is a static library and one header: hand it your `HWND`, `NSView`, `CAMetalLayer`, X11 `Window` or `wl_surface` and call two functions per frame. In the browser it is a WebAssembly build. Wherever it runs, one wgpu code path draws through the platform's native graphics API — DirectX 12 on Windows, Metal on macOS, Vulkan on Linux, WebGPU in the browser.
 - **Zero-parse loading, SIMD playback.** `.ssab` is a FlatBuffers binary read in place, and poses come from the SDK's `#![no_std]` Rust core with SIMD — the same core every official SpriteStudio player uses.
 
 ## 📚 Documentation
