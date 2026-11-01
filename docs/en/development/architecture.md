@@ -15,7 +15,39 @@ behave — is written once, in the SDK's
 The runtime is the SDK's `ssruntime` crate, linked as a path dependency into the `SpriteStudio-SDK`
 submodule together with `ssab`, the `.ssab` schema. It advances the timeline and hands back each
 frame as a draw plan and flat buffers; the `ssplayer-wgpu` crate draws that plan with wgpu, on a
-device the host owns.
+device the host owns. An arrow is a call:
+
+```mermaid
+---
+config:
+  flowchart:
+    wrappingWidth: 400
+---
+flowchart TD
+    subgraph faces ["Faces — each one a host"]
+        rust["Rust<br/>the API itself"]
+        c["C · NativeHost<br/>ssplayer-wgpu-ffi"]
+        js["JS · WebGPU<br/>@spritestudio/ssplayer-wgpu"]
+        bevy["Bevy<br/>ssplayer-bevy"]
+    end
+    subgraph crate ["ssplayer-wgpu"]
+        scene["SSScene<br/>one per render target"]
+        player["SSPlayer<br/>one per character"]
+        renderer["SSRenderer<br/>one per device"]
+        pack["SSPack<br/>one loaded .ssab"]
+    end
+    rt["ssruntime · ssab<br/>crates in the SDK submodule"]
+    gpu["Device · queue · target<br/>lent by the host each frame"]
+    rust --> scene
+    c --> scene
+    js --> scene
+    bevy --> scene
+    scene -->|update| player
+    player --> pack
+    player --> rt
+    scene -->|"pipelines · atlases"| renderer
+    scene -->|draw| gpu
+```
 
 ### Three types, split by how long their resources live
 
