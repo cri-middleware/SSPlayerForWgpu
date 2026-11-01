@@ -65,6 +65,8 @@ themselves (`deploy-examples.sh when=stale`).
 | Vulkan C++ viewer (Linux) | `cd examples/viewer-vulkan-cpp && cmake -B build && cmake --build build && ./build/ssviewer-vulkan` |
 | Web demo | `./scripts/build.sh platform=web && (cd examples/web && python3 -m http.server --bind 127.0.0.1)` |
 
+`./scripts/build.sh --help` lists every option of the script. `build=debug` passes `--dev` to wasm-pack, which skips `wasm-opt`, so quote package sizes from a release build only.
+
 ## Three blind spots to know about
 
 Ordinary `cargo build`, `clippy --all-targets` and `cargo test` compile **none** of the following.
