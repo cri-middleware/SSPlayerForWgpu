@@ -4,6 +4,8 @@
 
 **Professional 2D animation for Rust — one wgpu renderer, from a native window to the browser to a C++ host.**
 
+▶️ **[Try the live WebGPU demo in your browser](https://cri-middleware.github.io/SSPlayerForWgpu/demo/)** — SpriteStudio animations rendered with WebGPU, with nothing to install.
+
 A high-performance player for **[SpriteStudio](https://www.webtech.co.jp/spritestudio/)**
 animations (`.ssab`), built on [wgpu](https://wgpu.rs/). Animate the sprite art you already have
 (PNG / WebP) in a dedicated editor, then play the finished animation in your application — no video
@@ -20,8 +22,7 @@ files, no re-authoring, no engine lock-in.
 ## 📚 Documentation
 
 - [**Documentation site**](https://cri-middleware.github.io/SSPlayerForWgpu/) — start here: one path per
-  host (Rust / Bevy / C・C++ / WebGPU), a shared guide, the API reference for every face, and the
-  live WebGPU demo. Its source is [`docs/en/`](./docs/en/index.md) in the repository
+  host (Rust / Bevy / C・C++ / WebGPU), a shared guide and the API reference for every face. Its source is [`docs/en/`](./docs/en/index.md) in the repository
 - [**日本語ドキュメント**](https://cri-middleware.github.io/SSPlayerForWgpu/ja/) — the same site
   ([`docs/ja/`](./docs/ja/index.md) in the repository)
 - [**Limitations & Scope**](./docs/en/limitations.md) — what this player draws today, and what it leaves to the host
@@ -36,7 +37,7 @@ files, no re-authoring, no engine lock-in.
 **Using it in your application?** Read on — pick your host, then [Usage](#-usage).
 Everything after the first character (events, per-part overrides, motion blending,
 device-loss recovery) is the same path further in, in the [documentation](./docs/en/index.md).
-**Working on the player itself?** [Contributing](#-contributing).
+**Working on the player itself?** [CONTRIBUTING.md](./CONTRIBUTING.md), the [Build Guide](./docs/en/development/build.md) — which also covers using a changed player in a host and checking it on real hosts — and [How the Player Is Put Together](./docs/en/development/architecture.md) for the layers and the reasons behind them.
 
 ### Rust
 
@@ -118,7 +119,7 @@ Install it from npm:
 npm i @spritestudio/ssplayer-wgpu
 ```
 
-Building it from this repository is in [Building from Source](#%EF%B8%8F-building-from-source).
+Building it from this repository is covered in the [Build Guide](./docs/en/development/build.md).
 
 ### Where that `.ssab` comes from
 
@@ -198,112 +199,12 @@ Running one by hand, as in the table, needs the generated animation data first:
 The C++ viewers drive the library through CMake, which runs cargo itself, so they need no separate build
 step.
 
-## 🛠️ Building from Source
-
-`scripts/build.sh` (`build.ps1` on Windows) builds the **library** and nothing else — it never converts
-a `.ssab`, and it does not need the SDK for anything but the checkout cargo already did.
-
-```bash
-./scripts/build.sh                            # = platform=host build=release
-./scripts/build.sh platform=web build=debug   # wasm + npm package, deployed into examples/web
-./scripts/build.sh --help                     # every option
-```
-
-| Option | Values | What it does |
-|---|---|---|
-| `platform` | `host` (default), `web` | `host` builds the Rust library and the C face; `web` builds the wasm/js face with wasm-pack. It does not cross-compile, so `macos`/`windows`/`linux` are accepted only when they name the host |
-| `arch` | `host` (default), `universal` | macOS only, `build.sh` only: `universal` builds both Apple targets and lipos them into one library, as the release ships |
-| `build` | `release` (default), `debug` | Cargo profile; `debug` also means `wasm-pack --dev`, which skips `wasm-opt` — never quote its size |
-| `ffi` | `yes` (default), `no` | `host` only: also build the `ssplayer-wgpu-ffi` crate, which regenerates `libs/ssplayer-wgpu-ffi/include/ssplayer_wgpu.h` with cbindgen |
-| `deploy` | `yes` (default), `no` | `web` only: copy the built npm package into `examples/web/ssplayer-wgpu` |
-
-Cargo works directly too — `cargo build -p ssplayer-wgpu-ffi` is the same thing without the
-collect step. Requirements are Rust 1.99+, a GPU backend supported by wgpu 30, and for the web face
-`wasm-pack`, `pnpm` and `rustup target add wasm32-unknown-unknown`.
-
-**`scripts/deploy-examples.sh`** is the other half, and owns the playback data end to end: it builds
-`ssconverter-cli` from the SDK submodule and converts the test projects into `assets/` in **both** export
-modes, deploying them to `examples/web` as `assets/` (reference, plus its sibling `.png`) and
-`assets_emb/` (embedded, atlas baked in). The tests read `assets/`, so it is a prerequisite for
-`cargo test`, not an optional step.
-
-The docs site's [Build Guide](https://cri-middleware.github.io/SSPlayerForWgpu/development/build/)
-also covers using a changed Player in a host and checking it on real hosts, and
-[How the Player Is Put Together](https://cri-middleware.github.io/SSPlayerForWgpu/development/architecture/)
-gives the layers and the reasons behind them.
-
-## 🧭 Repository Layout
-
-A single Cargo workspace. The library is one crate carrying all three faces, which a second crate only
-builds into binaries; everything else is a host that drives it.
-
-```mermaid
-flowchart TD
-    sspj[".sspj"] -->|ssconverter| ssab[".ssab"]
-    ssab ==>|feeds| crate
-
-    subgraph lib ["libs/"]
-        crate["ssplayer-wgpu<br/>SSRenderer / SSScene / SSPlayer"]
-        bevy["ssplayer-bevy<br/>SsPlayer / SsTransform / SsPlayback"]
-        crate --> bevy
-    end
-
-    subgraph npm ["packages/"]
-        pkg["@spritestudio/ssplayer-wgpu<br/>wasm + ts layer"]
-    end
-
-    subgraph hosts ["examples/ — hosts that own the device and lend it"]
-        viewer["viewer<br/>Rust, winit"]
-        web["web<br/>WebGPU, &lt;ss-player-webgpu&gt;"]
-        metal["viewer-metal-cpp<br/>C++, Metal"]
-        dx12["viewer-dx12-cpp<br/>C++, DX12"]
-        vulkan["viewer-vulkan-cpp<br/>C++, Vulkan"]
-        bevyhosts["viewer-bevy / overall-bevy<br/>Bevy"]
-    end
-
-    crate -->|rs| viewer
-    crate -->|js: wasm-bindgen| pkg
-    pkg --> web
-    crate -->|ffi: cbindgen| metal
-    crate -->|ffi: cbindgen| dx12
-    crate -->|ffi: cbindgen| vulkan
-    bevy -->|rs| bevyhosts
-```
-
-| Path | What |
-|---|---|
-| [`libs/ssplayer-wgpu/`](./libs/ssplayer-wgpu) | crate `ssplayer-wgpu` — the player, a plain `rlib`, with the `web` and `ffi` faces behind features |
-| [`libs/ssplayer-wgpu-ffi/`](./libs/ssplayer-wgpu-ffi) | crate `ssplayer-wgpu-ffi` — emits those two faces as `staticlib` / `cdylib` (the C ABI CMake hosts link, and the wasm `wasm-pack` builds) and regenerates `include/ssplayer_wgpu.h`. Not distributed on its own: its outputs ship in the release zips and the npm package |
-| [`libs/ssplayer-bevy/`](./libs/ssplayer-bevy) | crate `ssplayer-bevy` — the Bevy adapter. Its own crate, so the player never depends on an engine; see its README for the Bevy line it tracks |
-| [`packages/ssplayer-wgpu/`](./packages/ssplayer-wgpu) | npm package `@spritestudio/ssplayer-wgpu` — the wasm plus the TypeScript layer over it (`.` and `./element`). Published from where it sits; `wasm/` and `dist/` are gitignored build outputs |
-| [`examples/`](./examples) | one host per environment; see [Samples](#-samples) |
-| `scripts/build.sh` / `.ps1` | builds the library for one platform, collecting it into `bin/` |
-| `scripts/deploy-examples.sh` / `.ps1` | converts the SDK's test projects into `assets/` and deploys both export modes to `examples/web` |
-| `scripts/run-example.sh` / `.ps1`, `run-web.sh` / `.ps1` | take a fresh checkout to a running sample, converting and building only what is missing or what an SDK bump left stale |
-| `bin/` | collected library artifacts. Gitignored |
-| `SpriteStudio-SDK/` | the SDK, as a git submodule — `ssruntime` and `ssab` are path dependencies into it |
-
-The crates are versioned independently, because they track different things: the player tracks the
-SDK, the Bevy adapter tracks Bevy's release line, and the viewers are development hosts rather than
-products.
-
-## 🤝 Contributing
-
-[CONTRIBUTING.md](./CONTRIBUTING.md) is the guide — the constraints, how to report a bug, how to set
-the environment up, and the full matrix of what to run before opening a pull request.
-[ROADMAP.md](./ROADMAP.md) is what is planned and what was deliberately declined.
-
-The SDK is a submodule, so a change that needs `ssruntime` or `ssab` is a pull request there followed by
-a submodule bump here.
-
 ## 🔗 Related Repositories
 
-- [SpriteStudio-SDK](https://github.com/cri-middleware/SpriteStudio-SDK) — the core SDK providing
-  `ssruntime` and `ssconverter`.
-- [SSPlayerForWeb](https://github.com/cri-middleware/SSPlayerForWeb) — the Web players, including a
-  WebGL renderer for where WebGPU is missing.
-- [SSConverterGUI](https://github.com/cri-middleware/SSConverterGUI) — desktop GUI tool for converting
-  `.sspj` to `.ssab`.
+- [SpriteStudio Docs](https://cri-middleware.github.io/SpriteStudio-Docs/) — the portal for the SDK and every official player
+- [SpriteStudio-SDK](https://github.com/cri-middleware/SpriteStudio-SDK) — the core SDK providing `ssruntime` and `ssconverter`
+- [SSPlayerForWeb](https://github.com/cri-middleware/SSPlayerForWeb) — the Web players, including a WebGL renderer for where WebGPU is missing
+- [SSConverterGUI](https://github.com/cri-middleware/SSConverterGUI) — desktop GUI tool for converting `.sspj` to `.ssab` without a player
 
 ## 📄 License
 

@@ -56,6 +56,8 @@ SDK を上げたら、もう一度実行してください。`.ssab` の形式�
 | Vulkan C++ ビューア（Linux） | `cd examples/viewer-vulkan-cpp && cmake -B build && cmake --build build && ./build/ssviewer-vulkan` |
 | Web デモ | `./scripts/build.sh platform=web && (cd examples/web && python3 -m http.server --bind 127.0.0.1)` |
 
+スクリプトの選択肢は `./scripts/build.sh --help` が一覧します。`build=debug` は wasm-pack に `--dev` を渡し、`wasm-opt` を通さないので、パッケージのサイズは release ビルドのものだけを引用してください。
+
 ## 知っておくべき 3 つの死角
 
 通常の `cargo build` / `clippy --all-targets` / `cargo test` は、以下を**まったくコンパイルしません**。どれも、誰かが意図してビルドするまで静かに腐ります：
