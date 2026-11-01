@@ -6,7 +6,39 @@ SpriteStudio の Player に共通すること（再生・モーションブレ�
 
 ## 層
 
-ランタイムは SDK の `ssruntime` クレートで、`.ssab` のスキーマの `ssab` と一緒に、`SpriteStudio-SDK` サブモジュールへの path 依存でリンクします。ランタイムはタイムラインを進め、各フレームを描画計画と平らなバッファとして返します。`ssplayer-wgpu` クレートはその計画を、ホストが持つデバイスの上で wgpu で描きます。
+ランタイムは SDK の `ssruntime` クレートで、`.ssab` のスキーマの `ssab` と一緒に、`SpriteStudio-SDK` サブモジュールへの path 依存でリンクします。ランタイムはタイムラインを進め、各フレームを描画計画と平らなバッファとして返します。`ssplayer-wgpu` クレートはその計画を、ホストが持つデバイスの上で wgpu で描きます。矢印は呼び出しです。
+
+```mermaid
+---
+config:
+  flowchart:
+    wrappingWidth: 400
+---
+flowchart TD
+    subgraph faces ["Face（それぞれがホスト）"]
+        rust["Rust<br/>API そのもの"]
+        c["C · NativeHost<br/>ssplayer-wgpu-ffi"]
+        js["JS · WebGPU<br/>@spritestudio/ssplayer-wgpu"]
+        bevy["Bevy<br/>ssplayer-bevy"]
+    end
+    subgraph crate ["ssplayer-wgpu"]
+        scene["SSScene<br/>描画先ごと"]
+        player["SSPlayer<br/>キャラクターごと"]
+        renderer["SSRenderer<br/>デバイスごと"]
+        pack["SSPack<br/>読み込んだ .ssab"]
+    end
+    rt["ssruntime · ssab<br/>SDK サブモジュールのクレート"]
+    gpu["デバイス · キュー · 描画先<br/>ホストが毎フレーム貸す"]
+    rust --> scene
+    c --> scene
+    js --> scene
+    bevy --> scene
+    scene -->|update| player
+    player --> pack
+    player --> rt
+    scene -->|"パイプライン · アトラス"| renderer
+    scene -->|draw| gpu
+```
 
 ### リソースの寿命で分けた 3 つの型
 
