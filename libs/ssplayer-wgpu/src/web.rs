@@ -605,8 +605,8 @@ impl SsContextWeb {
         crate::VERSION.to_owned()
     }
 
-    /// The SpriteStudio-SDK release whose runtime this build links: its tag,
-    /// or `local` for an SDK built from a commit that is not a release. The
+    /// The SpriteStudio-SDK version whose runtime this build links, written as
+    /// its release tag (`v7.0.0`), or `local` from a plain `cargo build`. The
     /// package carries the same string in `wasm/VERSION`.
     #[wasm_bindgen(getter, js_name = sdkVersion)]
     pub fn sdk_version(&self) -> String {

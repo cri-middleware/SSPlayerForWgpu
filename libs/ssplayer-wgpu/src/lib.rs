@@ -73,8 +73,7 @@ pub use web::{SsContextWeb, SsPlayerWeb, SsSurfaceWeb};
 /// This player's version, `ssplayer-wgpu`'s own.
 pub const VERSION: &str = env!("CARGO_PKG_VERSION");
 
-/// The SpriteStudio-SDK release whose runtime this build links, as its tag,
-/// or `local` for an SDK built from a commit that is not a release.
-/// `scripts/build.sh` names it from the submodule's tag; a plain
-/// `cargo build` says `local`.
+/// The SpriteStudio-SDK version whose runtime this build links, written as
+/// its release tag (`v7.0.0`). `scripts/build.sh` names it from the
+/// submodule's version; a plain `cargo build` says `local`.
 pub const SDK_VERSION: &str = env!("SSPLAYER_SDK_VERSION");
