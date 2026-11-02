@@ -323,6 +323,7 @@ jobs:
             packages/ssplayer-wgpu/dist
             packages/ssplayer-wgpu/wasm
             packages/ssplayer-wgpu/docs
+            packages/ssplayer-wgpu/skills
             packages/ssplayer-wgpu/package.json
             packages/ssplayer-wgpu/README.md
             packages/ssplayer-wgpu/README.ja.md
