@@ -83,9 +83,21 @@ git switch main && git pull --ff-only &&
 
 ### 5. Run the release
 
+Run the block that fits. npm cannot stage a package it does not have yet, so the run that releases the package's first version — the first release — adds `-f publish_npm=false`, and step 7 publishes it by hand.
+
+Once npm has the package:
+
 ```bash
 VERSION=<version>                                 # the version from step 1
 RUN=$(gh workflow run release.yml --ref main -f versions="ssplayer-wgpu@${VERSION:?}" | sed 's|.*/||')
+gh run watch "${RUN:?}" --exit-status
+```
+
+For the package's first version:
+
+```bash
+VERSION=<version>                                 # the version from step 1
+RUN=$(gh workflow run release.yml --ref main -f versions="ssplayer-wgpu@${VERSION:?}" -f publish_npm=false | sed 's|.*/||')
 gh run watch "${RUN:?}" --exit-status
 ```
 
@@ -96,8 +108,6 @@ git fetch origin --tags
 git log --oneline -1 origin/main                  # chore(release): ssplayer-wgpu@<version>
 gh release list --json tagName,isDraft -q '.[] | select(.isDraft) | .tagName'   # its draft
 ```
-
-npm cannot stage a package it does not have yet, so the run that releases the package's first version — the first release — adds `-f publish_npm=false`, and step 7 publishes it by hand.
 
 ### 6. Check the draft
 
@@ -318,9 +328,21 @@ git switch main && git pull --ff-only &&
 
 ### 5. リリースを実行する
 
+当てはまる方のブロックを実行します。npm はまだ無いパッケージを stage できないので、パッケージの最初のバージョンを出す run（初回のリリースがそうです）には `-f publish_npm=false` を足し、手順 7 で手作業で publish します。
+
+npm にパッケージがあるとき:
+
 ```bash
 VERSION=<version>                                 # 手順 1 で決めたバージョン
 RUN=$(gh workflow run release.yml --ref main -f versions="ssplayer-wgpu@${VERSION:?}" | sed 's|.*/||')
+gh run watch "${RUN:?}" --exit-status
+```
+
+パッケージの最初のバージョンのとき:
+
+```bash
+VERSION=<version>                                 # 手順 1 で決めたバージョン
+RUN=$(gh workflow run release.yml --ref main -f versions="ssplayer-wgpu@${VERSION:?}" -f publish_npm=false | sed 's|.*/||')
 gh run watch "${RUN:?}" --exit-status
 ```
 
@@ -331,8 +353,6 @@ git fetch origin --tags
 git log --oneline -1 origin/main                  # chore(release): ssplayer-wgpu@<バージョン>
 gh release list --json tagName,isDraft -q '.[] | select(.isDraft) | .tagName'   # できた下書き
 ```
-
-npm はまだ無いパッケージを stage できないので、パッケージの最初のバージョンを出す run（初回のリリースがそうです）には `-f publish_npm=false` を足し、手順 7 で手作業で publish します。
 
 ### 6. 下書きを確かめる
 
