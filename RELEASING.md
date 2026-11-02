@@ -14,7 +14,7 @@ An agent can run every block. A person sorts the scan's summary in step 4 and de
 
 ### 1. Decide the version
 
-Look at what the player gained since its previous tag. The SDK it ships is the commit of the `SpriteStudio-SDK` submodule — `ssruntime` and `ssab` are path dependencies into it — so point the submodule at the SDK release first, in an ordinary pull request into `main`; the release stops on a submodule that is not on an SDK release tag. The first release names the version the player already has, `7.0.0-beta.1`.
+Look at what the player gained since its previous tag. The SDK it ships is the commit of the `SpriteStudio-SDK` submodule — `ssruntime` and `ssab` are path dependencies into it — and the player names it by that commit's version. The first release names the version the player already has, `7.0.0-beta.1`.
 
 ```bash
 git fetch origin --tags
@@ -244,7 +244,7 @@ git checkout "${TAG:?}" &&
 
 ### 1. バージョンを決める
 
-前回のタグから Player が何を得たかを見ます。同梱する SDK は `SpriteStudio-SDK` submodule のコミットです（`ssruntime` と `ssab` はこの submodule へのパス依存）。先に、通常のプルリクエストで `main` の submodule を SDK のリリースに合わせておきます。submodule が SDK のリリースタグの上に無いと、リリースは止まります。初回のリリースでは、Player がいま持っているバージョン `7.0.0-beta.1` をそのまま指定します。
+前回のタグから Player が何を得たかを見ます。同梱する SDK は `SpriteStudio-SDK` submodule のコミットです（`ssruntime` と `ssab` はこの submodule へのパス依存）。Player はそのコミットのバージョンで SDK を名乗ります。初回のリリースでは、Player がいま持っているバージョン `7.0.0-beta.1` をそのまま指定します。
 
 ```bash
 git fetch origin --tags

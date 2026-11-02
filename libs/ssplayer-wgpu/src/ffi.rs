@@ -496,8 +496,8 @@ pub extern "C" fn ss_version() -> *const c_char {
     concat!(env!("CARGO_PKG_VERSION"), "\0").as_ptr().cast()
 }
 
-/// The SpriteStudio-SDK release whose runtime this library links: its tag,
-/// or `local` for an SDK built from a commit that is not a release. The
+/// The SpriteStudio-SDK version whose runtime this library links, written as
+/// its release tag (`v7.0.0`), or `local` from a plain `cargo build`. The
 /// release zips carry the same string in `lib/VERSION`.
 ///
 /// The string is static and owned by the library. Never null.

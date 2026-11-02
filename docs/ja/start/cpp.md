@@ -20,7 +20,7 @@ title: C / C++ ではじめる
 | `include/ssplayer_wgpu.h` | ヘッダ 1 枚。C99、依存なし。cbindgen が生成 |
 | `lib/libssplayer_wgpu.a`（MSVC では `ssplayer_wgpu.lib`） | 静的ライブラリ |
 | `lib/libssplayer_wgpu.dylib`（macOS のみ） | 共有ライブラリ。署名・公証済み。ライブラリをリンクせずに読み込むホスト向け |
-| `lib/VERSION` | ライブラリがリンクしている SpriteStudio-SDK のリリースのタグ。`ss_sdk_version()` が返すものと同じ |
+| `lib/VERSION` | ライブラリがリンクしている SpriteStudio-SDK のバージョン（リリースのタグの形）。`ss_sdk_version()` が返すものと同じ |
 | `LICENSE.md` | BSD-3-Clause |
 | `LICENSE.ja.md` | その参考訳 |
 | `THIRD_PARTY_NOTICES.md` | ライブラリに組み込まれた Rust クレートのライセンス。謝辞に載せるべきもの |

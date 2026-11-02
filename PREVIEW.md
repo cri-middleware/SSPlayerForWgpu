@@ -135,7 +135,7 @@ Unverified: Chrome and Edge on Windows and Linux, Safari 26, Firefox 141.
 ```
 
 It runs wasm-pack over `libs/ssplayer-wgpu-ffi` with `--target no-modules --release
---no-default-features --features web`, naming the SDK release in `SSPLAYER_SDK_VERSION`
+--no-default-features --features web`, naming the SDK version in `SSPLAYER_SDK_VERSION`
 as `scripts/build.sh` does, and substitutes the glue, the wasm, two stamps and the
 license notices into `examples/preview/shell.html`.
 

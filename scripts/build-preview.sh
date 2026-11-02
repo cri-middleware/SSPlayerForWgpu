@@ -56,9 +56,10 @@ SHELL_SRC="$ROOT_DIR/examples/preview/shell.html"
 WORK="$(mktemp -d)"
 trap 'rm -rf "$WORK"' EXIT
 
-# The SDK release the wasm links, named the way build.sh names it: the page
+# The SDK version the wasm links, named the way build.sh names it: the page
 # reads it back as `ctx.sdkVersion` and compares it with the converter's.
-SDK_VERSION="$(git -C "$ROOT_DIR/SpriteStudio-SDK" describe --tags --exact-match --match 'v[0-9]*' 2>/dev/null || echo local)"
+[ -f "$ROOT_DIR/SpriteStudio-SDK/Cargo.toml" ] || { echo "$APP: SpriteStudio-SDK is not checked out" >&2; exit 1; }
+SDK_VERSION="v$("$ROOT_DIR/SpriteStudio-SDK/scripts/release-version.sh")" || exit 1
 export SSPLAYER_SDK_VERSION="$SDK_VERSION"
 
 echo "$APP: building the no-modules wasm ($BUILD, SDK $SDK_VERSION)"

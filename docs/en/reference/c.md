@@ -16,7 +16,7 @@ no dependencies.
 |---|---|
 | Return values | Functions that can fail return `int32_t`: `SS_OK` (0), `SS_ERROR_INVALID_ARGUMENT` (-1), `SS_ERROR_GPU` (-2) |
 | Error text | `ss_last_error()` — the last failure on the calling thread. For logging, not for branching |
-| Versions | `ss_version()` — this library's version. `ss_sdk_version()` — the SpriteStudio-SDK release it links, as its tag, or `local` for an SDK that is not a release. Both static; never free them |
+| Versions | `ss_version()` — this library's version. `ss_sdk_version()` — the SpriteStudio-SDK version it links, written as its release tag (`v7.0.0`), or `local` for a build without `scripts/build.sh`. Both static; never free them |
 | Null handles | Every function tolerates a null handle and answers `SS_ERROR_INVALID_ARGUMENT`, or for a getter what a player with no animation reads back, rather than crashing. That is zero for most getters, but `1.0` for the speed scale and alpha, true for `ss_player_is_playing_forward`, `ss_player_sub_frame_enabled`, `ss_player_frame_skip_enabled` and `ss_player_is_visible`, and `-1` for the part lookups (`ss_player_find_part_index`, `ss_player_is_part_hidden`, `ss_player_is_part_skinned_mesh` and their `_by_index` forms) |
 | Strings | `const char *` in, UTF-8. Strings *out* are owned by the scene and valid until the next call of the same kind — copy what you keep. One pair shares a buffer: `ss_player_animation_name` and `ss_player_cellmap_texture_name` each invalidate what the other returned |
 | Sizes | Always **drawable pixels**, never points. Scale by the display factor yourself |

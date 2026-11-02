@@ -341,7 +341,7 @@ for p in $NATIVE; do
   else
     [ -f "$dir/libs/$os/$arch/$lib" ] || fail "$p/libs/$os/$arch/$lib is missing (the static library this platform ships)"
     [ -z "$shared" ] || [ -f "$dir/libs/$os/$arch/$shared" ] || fail "$p/libs/$os/$arch/$shared is missing (the shared library this platform ships)"
-    [ -f "$dir/libs/$os/$arch/VERSION" ] || fail "$p/libs/$os/$arch/VERSION is missing (the SDK release the library links)"
+    [ -f "$dir/libs/$os/$arch/VERSION" ] || fail "$p/libs/$os/$arch/VERSION is missing (the SDK version the library links)"
     [ -f "$dir/include/ssplayer_wgpu.h" ] || fail "$p/include/ssplayer_wgpu.h is missing"
     [ -f "$dir/LICENSE.md" ] || fail "$p/LICENSE.md is missing"
     [ -f "$dir/LICENSE.ja.md" ] || fail "$p/LICENSE.ja.md is missing"
@@ -354,7 +354,7 @@ else
   [ -f "$IN/$WEB/wasm/ssplayer_wgpu_bg.wasm" ] || fail "$WEB/wasm/ssplayer_wgpu_bg.wasm is missing (the wasm-pack output)"
   [ -f "$IN/$WEB/dist/index.js" ] || fail "$WEB/dist/index.js is missing (the js layer was not built)"
   [ -f "$IN/$WEB/package.json" ] || fail "$WEB/package.json is missing"
-  [ -f "$IN/$WEB/wasm/VERSION" ] || fail "$WEB/wasm/VERSION is missing (the SDK release the wasm links)"
+  [ -f "$IN/$WEB/wasm/VERSION" ] || fail "$WEB/wasm/VERSION is missing (the SDK version the wasm links)"
   [ -f "$IN/$WEB/THIRD_PARTY_NOTICES.md" ] || fail "$WEB/THIRD_PARTY_NOTICES.md is missing (the package's files list it)"
   [ -f "$IN/$WEB/docs/README.md" ] || fail "$WEB/docs/README.md is missing (the documentation build.sh platform=web copies)"
   [ -f "$IN/$WEB/$WEB_SKILL/SKILL.md" ] || fail "$WEB/$WEB_SKILL/SKILL.md is missing (the agent skill build.sh platform=web copies)"
@@ -387,10 +387,9 @@ for p in $NATIVE; do
 done
 echo "   identical in all $(echo $NATIVE | wc -w | tr -d ' ') native artifacts"
 
-# Each platform names the SpriteStudio-SDK release it links in VERSION, and a
-# release ships one: a platform that disagrees built another commit. `local` is
-# an SDK built from a commit that is not a release, which a release does not ship.
-step "checking every platform links the same SDK release"
+# Each platform names the SpriteStudio-SDK version it links in VERSION, and a
+# release ships one: a platform that disagrees built another commit.
+step "checking every platform links the same SDK version"
 SDK="$(cat "$IN/$WEB/wasm/VERSION")"
 for p in $NATIVE; do
   v="$(cat "$IN/$p/libs/${p%%-*}/${p#*-}/VERSION")"
@@ -400,11 +399,6 @@ for p in $NATIVE; do
     exit 1
   fi
 done
-if [ "$SDK" = "local" ]; then
-  echo "$APP: the SDK the artifacts link is not a release (VERSION says local)" >&2
-  echo "$APP: point the SpriteStudio-SDK submodule at the SDK's release tag first" >&2
-  exit 1
-fi
 echo "   $SDK, in every artifact"
 
 # The preview shell names its SDK as the converter does, release and commit --
