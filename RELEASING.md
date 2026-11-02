@@ -29,8 +29,13 @@ Steps 4 and 5 take the decision in place of their `<version>`.
 
 Write what the player gained under `## [Unreleased]` in `libs/ssplayer-wgpu/CHANGELOG.md`, in Keep a Changelog's sections (`### Added`, `### Changed`, `### Fixed`, `### Removed`), regenerate `THIRD_PARTY_NOTICES.md` for the dependencies the release ships, and merge both into `main` with a pull request. The release turns `## [Unreleased]` into `## [<version>] - <date>`, and stops before any platform builds when there is nothing there.
 
+On the same branch, bring the dependencies up to date first, in a commit of its own, since the notices are made from them: `cargo update` moves `Cargo.lock`, which the libraries and the wasm are built from, and `pnpm update` the npm package's tools, to the newest versions their ranges allow. Cargo reads `ssruntime` and `ssab` from the submodule, so the block initializes it first. A new major version changes code, and goes in an ordinary pull request of its own rather than here.
+
 ```bash
 git switch -c release-notes origin/main
+git submodule update --init SpriteStudio-SDK &&
+  cargo update && pnpm --dir packages/ssplayer-wgpu update
+git commit -m "chore(deps): update within their ranges" -- Cargo.lock packages/ssplayer-wgpu/pnpm-lock.yaml packages/ssplayer-wgpu/package.json   # nothing to commit when nothing moved
 # write under ## [Unreleased] in libs/ssplayer-wgpu/CHANGELOG.md
 ./scripts/generate-licenses.sh                    # -> THIRD_PARTY_NOTICES.md
 git add libs/ssplayer-wgpu/CHANGELOG.md THIRD_PARTY_NOTICES.md
@@ -259,8 +264,13 @@ git log --oneline ${prev:+"$prev.."}origin/main
 
 Player が得たものを `libs/ssplayer-wgpu/CHANGELOG.md` の `## [Unreleased]` の下に、Keep a Changelog の節（`### Added`・`### Changed`・`### Fixed`・`### Removed`）で書き、リリースが同梱する依存に合わせて `THIRD_PARTY_NOTICES.md` を作り直し、両方をプルリクエストで `main` にマージします。リリースは `## [Unreleased]` を `## [<version>] - <date>` に書き換えます。`## [Unreleased]` が空なら、どのプラットフォームもビルドせずに止まります。
 
+同じブランチで、先に依存を最新にして単独のコミットにします。表記はこの依存から作るためです。`cargo update` はライブラリと wasm のビルドに使う `Cargo.lock` を、`pnpm update` は npm パッケージのツールを、範囲が許すいちばん新しい版に上げます。cargo は `ssruntime` と `ssab` を submodule から読むので、ブロックは先に submodule を初期化します。メジャーバージョンを上げるのはコードの変更なので、ここではなく通常のプルリクエストで行います。
+
 ```bash
 git switch -c release-notes origin/main
+git submodule update --init SpriteStudio-SDK &&
+  cargo update && pnpm --dir packages/ssplayer-wgpu update
+git commit -m "chore(deps): update within their ranges" -- Cargo.lock packages/ssplayer-wgpu/pnpm-lock.yaml packages/ssplayer-wgpu/package.json   # 何も動かなければコミットするものは無い
 # libs/ssplayer-wgpu/CHANGELOG.md の ## [Unreleased] の下に書く
 ./scripts/generate-licenses.sh                    # -> THIRD_PARTY_NOTICES.md
 git add libs/ssplayer-wgpu/CHANGELOG.md THIRD_PARTY_NOTICES.md
