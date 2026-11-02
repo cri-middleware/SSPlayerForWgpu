@@ -323,6 +323,7 @@ jobs:
             packages/ssplayer-wgpu/dist
             packages/ssplayer-wgpu/wasm
             packages/ssplayer-wgpu/docs
+            packages/ssplayer-wgpu/skills
             packages/ssplayer-wgpu/package.json
             packages/ssplayer-wgpu/README.md
             packages/ssplayer-wgpu/README.ja.md
@@ -482,7 +483,9 @@ jobs:
             exit 0
           fi
           dist_tag="$(scripts/npm-dist-tag.sh "$name" "$version")"
-          if ! out="$(npm stage publish release-dist/*.tgz --tag "$dist_tag" --access public 2>&1)"; then
+          # The ./ keeps npm from reading `release-dist/<file>.tgz` as a GitHub
+          # owner/repo shorthand, which it then tries to clone.
+          if ! out="$(npm stage publish ./release-dist/*.tgz --tag "$dist_tag" --access public 2>&1)"; then
             echo "$out"
             if grep -qE "409 Conflict.*previously (published|staged) version \"${version}\"" <<< "$out"; then
               echo "::notice::${name}@${version} is already staged — skipping."
