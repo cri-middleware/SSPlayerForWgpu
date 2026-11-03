@@ -81,18 +81,23 @@ generation-tagged slots for the handles the hosts hand out.
 `examples/` has a host for each face: `hello` (the smallest Rust host), `viewer` and the Bevy
 viewers, the Metal, DX12 and Vulkan C++ viewers, and `web`.
 
+`ssplayer-bevy` is an adapter crate beside the three faces (Rust, C, JS) that `CONTRIBUTING.md`
+keeps in step; it draws through the Rust API.
+
 ## Why it is built the way it is
 
 Each reason here spans files; the code it concerns carries the detail in its comments.
 
 **The player borrows; the host owns.** A game engine already has a device, a queue and a frame of
-its own, so the player takes all three as loans (`SSRenderer`, `SSScene`, `SSPlayer`). That is why
-one crate draws into a bare viewer, a browser canvas and Bevy alike, and why the types split by
+its own, so the player takes all three as loans. That is why one crate draws into a bare viewer, a
+browser canvas and Bevy alike, and why its types (`SSRenderer`, `SSScene`, `SSPlayer`) split by
 resource lifetime: what is valid for the device, for one target, and for one character.
 
 **A pack holds no GPU texture.** Textures belong to the host's asset lifecycle — in Bevy,
 `Assets<Image>` and the render world's `GpuImage` — so an `SSPack` describes the textures it needs
-and hands over their pixels, and whoever owns GPU memory registers them with the renderer.
+and hands over their pixels, and whoever owns GPU memory registers them with the renderer. The
+renderer's texture map is device-scoped, so two scenes on one device draw the same packs from one
+atlas upload; `libs/ssplayer-wgpu/tests/pack.rs::scenes_share_one_renderer` pins that.
 
 **The CPU does not transform corners.** Each drawn part's slice of the runtime's flat arrays is
 copied into the frame arena, with one primitive record per part saying where its geometry sits, and
@@ -104,10 +109,16 @@ converts them and calls `NativeHost` or `SSPlayer`; behaviour lives behind those
 API gets it too. The swapchain steps the C face and each web canvas share are kept in one place for
 the same reason: a fix that reached one copy of two is what it prevents.
 
-**Two mask backends.** The host's stencil (`MaskBackend::Stencil`) limits nesting to 8 bits; the
-coverage bitmap the player rasterises for itself lifts that limit and needs no stencil attachment,
-which a host such as Bevy's 2D pass does not have. Both stop at 96 writers across a player's
-instance tree, as the Godot Player does. A mask feature goes into both.
+**Two mask backends.** The host's stencil (`MaskBackend::Stencil`) needs a stencil attachment on
+every pass; the coverage bitmap the player rasterises for itself (`MaskBackend::Coverage`) needs
+none, which is what a host without one, such as Bevy's 2D pass, uses. Both stop at 96 writers across
+a player's instance tree, as the Godot Player does, so a `.ssab` draws the same under either. A mask
+feature goes into both.
+
+**A loader reads before it rebases.** The walk behind `load` hands `AssetLoader::read` the `src` it
+was given verbatim, and only then calls `set_base(src)`, so `src` is read before any base derived
+from it exists and "resolve `src` against itself" cannot be expressed. That order is the safety
+property, and `libs/ssplayer-wgpu/tests/loader_contract.rs` holds it.
 
 **The drawing code came from the WebGL player, and the rules come from the porting guide.** The
 blend table, the PartsColor program, the integration shaders and the mask planner were ported from

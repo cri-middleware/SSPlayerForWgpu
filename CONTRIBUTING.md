@@ -21,7 +21,8 @@ Please refer to [CODE_OF_CONDUCT.md](./CODE_OF_CONDUCT.md).
 
 ### Technical Constraints & Guiding Principles
 A change that breaks one of this player's invariants will be asked to change
-rather than the invariant. The five that catch newcomers most often:
+rather than the invariant. The five that catch newcomers most often (bare paths such as `tests/…`,
+`ffi.rs`, `host.rs` and `player.rs` are inside `libs/ssplayer-wgpu/`, its `src/` and `tests/`):
 
 - **The player never owns wgpu state.** `Device` / `Queue` / `Surface` /
   `SSRenderer` belong to the host and are lent per frame. Any API that takes
@@ -117,8 +118,9 @@ cargo build -p ssplayer-wgpu-ffi          # regenerates the C header
 cargo test -p ssplayer-wgpu --features ffi --lib
 ```
 
-No default command compiles `src/ffi.rs` or `src/host.rs`, which is why the C
-face takes three lines of its own; `src/web.rs` needs the `web` feature on wasm32,
+A command scoped to the player (`-p ssplayer-wgpu`) compiles neither `src/ffi.rs` nor `src/host.rs`,
+and the workspace-wide commands above reach them only through `ssplayer-wgpu-ffi`'s default feature,
+which is why the C face takes three lines of its own; `src/web.rs` needs the `web` feature on wasm32,
 which is why the web face takes two. **`ssplayer-wgpu-ffi` is the crate that
 regenerates the header** — its `build.rs` runs cbindgen; building
 `-p ssplayer-wgpu --features ffi` compiles the module but regenerates nothing.
@@ -161,8 +163,8 @@ in the description why the triptychs it uploads (`golden-diff`) are right.
 
 **Measure before and after any performance change, and drive a real frame loop while doing it.**
 `SSScene::stats()` reports primitives, draw calls, bytes uploaded, how much of the draw list is
-mergeable, and GPU pass time when the device has `Features::TIMESTAMP_QUERY`; both viewers print
-it. `tests/scale.rs` interleaves `update` with the render pass, because timing them in separate
+mergeable, and GPU pass time when the device has `Features::TIMESTAMP_QUERY`; the native viewer
+(`examples/viewer`) and the three C++ viewers print it. `tests/scale.rs` interleaves `update` with the render pass, because timing them in separate
 loops flatters anything that caches across frames. GPU time is read back a frame or two late by
 design; do not add a stall to make it current.
 
@@ -194,7 +196,7 @@ local run with the same options builds.
 ## Coding Standards
 
 ### Rust
-- The drawing code was ported from the WebGL player (`../SSPlayerForWeb/packages/ssplayer-webgl/`), and the comments that say so name what each piece came from; read it to see where a port started. How a `.ssab` should draw is the porting guide's, and where the guide is silent, this Player's: the others are read against it (SpriteStudio-SDK `MAINTAINING_PLAYERS.md` §5). Check a change to drawing against the guide, and put the rule it settles into the guide in the same change.
+- The drawing code was ported from the WebGL player ([`ssplayer-webgl`](https://github.com/cri-middleware/SSPlayerForWeb/tree/HEAD/packages/ssplayer-webgl) in SSPlayerForWeb), and the comments that say so name what each piece came from; read it to see where a port started. How a `.ssab` should draw is the SDK's [Player Porting Guide](https://github.com/cri-middleware/SpriteStudio-SDK/tree/HEAD/libs/ssruntime/docs)'s, and where the guide is silent, this Player's: the others are read against it (SpriteStudio-SDK `MAINTAINING_PLAYERS.md` §5). Check a change to drawing against the guide, and put the rule it settles into the guide in the same change.
 - Doc comments and the crate READMEs under `libs/` are written in English.
 - `cargo fmt` decides formatting; `rustfmt.toml` is in the repository root.
 - Clippy runs with `-D warnings` over all targets, so a lint is an error.
@@ -240,13 +242,13 @@ SSPlayerForWgpu にご関心をお寄せいただき、ありがとうござい�
 ## 貢献する方法
 
 ### 技術的制約と設計原則
-不変条件を破る変更は、不変条件側ではなく変更側を直していただくことになります。特に見落とされやすいのは次の 5 つです。
+不変条件を破る変更は、不変条件側ではなく変更側を直していただくことになります。特に見落とされやすいのは次の 5 つです（`tests/…` や `ffi.rs`・`host.rs`・`player.rs` のようなディレクトリ無しのパスは、`libs/ssplayer-wgpu/` の `src/` と `tests/` の中にあります）。
 
 - **プレイヤーは wgpu の状態を所有しません。** `Device` / `Queue` / `Surface` / `SSRenderer` はホストのもので、フレームごとに貸し出されます。これらの所有権を取る API は誤りで、**`SSPlayer` に wgpu 型のフィールドを持たせてはいけません**。「1 canvas = 1 player」に戻らないのはこの規則のおかげです。
 - **頂点バッファはありません。** ランタイムの SoA 配列をシーンのアリーナへ memcpy し、頂点ステージが `@builtin(vertex_index)` から展開します。CPU が書くのはパーツごとに `Prim` 1 つで、メッシュパーツは頂点をコピーしてインデックスにタグを付けるだけです。機能を足すときは `Prim` に載せてください。頂点ごとの CPU 処理を復活させないこと。
 - **再生中は毎フレームのヒープ確保をしません。** `FrameChunk::reset` はバッファを空にしても容量を残し、GPU バッファは伸びるだけです。毎フレーム使うバッファを足すときは chunk に置いてください。1 体のプレイヤーのウォークだけが使うものは、そのプレイヤーの `Walk` に置きます。定常フレームでプレイヤー自身がヒープ確保をすると `tests/allocations.rs` が失敗します。
-- **SDK との分離。** アニメーションのロジックは `SpriteStudio-SDK` submodule (`ssruntime`・`ssab`) にあります。アルゴリズムやコアロジックの変更は**あちらへの**プルリクエストと、こちらでの submodule 更新の組で行います。このリポジトリはレンダラーと、ホストに面した 3 つのフェイスです。
-- **3 つのフェイスは歩調を揃えます。** API の本体は Rust で、C (`cbindgen`) と JavaScript (`wasm-bindgen`) はその薄いラッパーです。`ffi.rs` にロジックは置きません（引数検証・型変換・エラーコード対応のみ）。必要なものは `host.rs` か `player.rs` に置き、Rust API 側にも行き渡らせてください。
+- **SDK との分離。** アニメーションのロジックは `SpriteStudio-SDK` submodule (`ssruntime`・`ssab`) にあります。アルゴリズムやコアロジックの変更は**あちらへの**プルリクエストと、こちらでの submodule 更新の組で行います。このリポジトリはレンダラーと、ホストに面した 3 つの Face です。
+- **3 つの Face は歩調を揃えます。** API の本体は Rust で、C (`cbindgen`) と JavaScript (`wasm-bindgen`) はその薄いラッパーです。`ffi.rs` にロジックは置きません（引数検証・型変換・エラーコード対応のみ）。必要なものは `host.rs` か `player.rs` に置き、Rust API 側にも行き渡らせてください。
 
 依存関係の変更を提案する前に、あと 2 点。**wgpu は 30 系に固定**されています（Cargo ワークスペースは wgpu を 1 つしか解決せず、Slint の UI がこのプレイヤーと 1 デバイス上で同居するためです）。また **`ssplayer-wgpu` にエンジンを登場させないでください** — `ssplayer-bevy` のようなアダプタは `libs/` 以下の別クレートです。
 
@@ -255,7 +257,7 @@ SSPlayerForWgpu にご関心をお寄せいただき、ありがとうござい�
 
 - 明確で説明的なタイトル
 - 再現手順
-- 環境（OS、GPU とドライバ、wgpu のバックエンド、使用していたフェイス — Rust / Bevy / C・C++ / WebGPU）
+- 環境（OS、GPU とドライバ、wgpu のバックエンド、使用していた Face — Rust / Bevy / C・C++ / WebGPU）
 - 期待する挙動と実際の挙動
 
 描画のバグは、スクリーンショットと再現する `.ssab` があると対応がはるかに容易になります。SDK のテストプロジェクトで再現する場合はどれかをお知らせください。こちらに既にある素材です。
@@ -275,7 +277,7 @@ SSPlayerForWgpu にご関心をお寄せいただき、ありがとうござい�
 ### 前提条件
 - **Rust 1.99 以降**と、wgpu 30 が対応する GPU バックエンド（Vulkan / Metal / DX12 / WebGPU）。GPU ドライバの無い Linux では、Mesa のソフトウェア Vulkan（lavapipe、`mesa-vulkan-drivers`）で足ります。描画するテストはアダプタが無いと早期 return して `ok` と報告するので、代わりに `tests/gpu_adapter.rs` が失敗してそれを知らせます
 - **SDK submodule。** `ssruntime` と `ssab` は `SpriteStudio-SDK/` への path 依存なので、`--recursive` 付きで clone する（または `git submodule update --init` を実行する）必要があります
-- web フェイスの場合のみ: `wasm-pack`、`pnpm`（`corepack enable`）、`rustup target add wasm32-unknown-unknown`
+- Web の Face の場合のみ: `wasm-pack`、`pnpm`（`corepack enable`）、`rustup target add wasm32-unknown-unknown`
 
 ### ビルドと実行
 ```bash
@@ -283,7 +285,7 @@ git clone --recursive https://github.com/cri-middleware/SSPlayerForWgpu.git
 cd SSPlayerForWgpu
 
 ./scripts/deploy-examples.sh    # SDK のテストプロジェクトを assets/ へ変換
-./scripts/build.sh              # ライブラリと C フェイスを bin/ へ収集
+./scripts/build.sh              # ライブラリと C Face を bin/ へ収集
 cargo run -p ssplayer-wgpu-viewer
 ```
 
@@ -293,15 +295,15 @@ cargo run -p ssplayer-wgpu-viewer
 ```bash
 cargo fmt --all -- --check
 cargo clippy --workspace --all-targets -- -D warnings
-cargo test --workspace                    # needs deploy-examples.sh first
+cargo test --workspace                    # 先に deploy-examples.sh が必要
 cargo build -p ssplayer-wgpu --target wasm32-unknown-unknown --no-default-features --features web
 cargo clippy -p ssplayer-wgpu --target wasm32-unknown-unknown --no-default-features --features web -- -D warnings
 cargo clippy -p ssplayer-wgpu --features ffi --all-targets -- -D warnings
-cargo build -p ssplayer-wgpu-ffi          # regenerates the C header
+cargo build -p ssplayer-wgpu-ffi          # C ヘッダも再生成されます
 cargo test -p ssplayer-wgpu --features ffi --lib
 ```
 
-既定のコマンドでは `src/ffi.rs` も `src/host.rs` もコンパイルされないため、C フェイスは 3 行を要します。`src/web.rs` は wasm32 向けに `web` feature を付けたときだけコンパイルされるため、web フェイスは 2 行を要します。**ヘッダを再生成するのは `ssplayer-wgpu-ffi` クレート**で、その `build.rs` が cbindgen を実行します。`-p ssplayer-wgpu --features ffi` のビルドはモジュールをコンパイルしますが、再生成は行いません。`libs/ssplayer-wgpu-ffi/include/ssplayer_wgpu.h` はコミットされる生成物なので、変更が出たらコミットしてください。CI は `git diff --exit-code` で確認しています。
+プレイヤーに範囲を絞ったコマンド（`-p ssplayer-wgpu`）では `src/ffi.rs` も `src/host.rs` もコンパイルされず、上のワークスペース全体のコマンドがそこへ届くのは `ssplayer-wgpu-ffi` の既定の feature を通してだけなので、C の Face は 3 行を要します。`src/web.rs` は wasm32 向けに `web` feature を付けたときだけコンパイルされるため、Web の Face は 2 行を要します。**ヘッダを再生成するのは `ssplayer-wgpu-ffi` クレート**で、その `build.rs` が cbindgen を実行します。`-p ssplayer-wgpu --features ffi` のビルドはモジュールをコンパイルしますが、再生成は行いません。`libs/ssplayer-wgpu-ffi/include/ssplayer_wgpu.h` はコミットされる生成物なので、変更が出たらコミットしてください。CI は `git diff --exit-code` で確認しています。
 
 `clippy --fix` を使うときは、先に自分の編集を `git add` してから `--allow-staged` を付けてください。`--allow-dirty` は使いません。clippy の修正が unstaged に残るので、自分の編集と分けてレビューできます。
 
@@ -328,7 +330,7 @@ cargo test -p ssplayer-wgpu --features ffi --lib
 
 **GPU へのジオメトリの渡り方を変える変更では、その前後でゴールデンダンプを取ってください。** `tests/golden.rs::golden_corpus` は `#[ignore]` 付きのテストで、フィクスチャ・アニメーション・フレーム・ステンシルのすべての組み合わせを描画します。`SS_GOLDEN_DIR=/tmp/before cargo test --test golden -- --ignored` を実行し、続いて `SS_GOLDEN_DIR=/tmp/after SS_GOLDEN_COMPARE=/tmp/before` を付けて再実行します。基準は GPU ごとに異なるため、同じマシンで取ったものでなければなりません。これは変更の前後を比べる道具であって、チェックインされたゴールデンセットではありません。比較は `/tmp/after/summary.md` を書き出し、変化した画像ごとに変更前・変更後・差分の 3 枚組を `/tmp/after/diff/` に書き出します。CI の golden ジョブは、すべてのプルリクエストで同じことを lavapipe 上でベースの描画に対して行い、差分が 1 つでもあれば、意図した差分であっても失敗します。意図した差分のときは、アップロードされる 3 枚組（`golden-diff`）が正しい理由を説明に書いてください。
 
-**性能に関わる変更では前後で計測し、その間は実際のフレームループを回してください。** `SSScene::stats()` は、プリミティブ数、ドローコール数、アップロードしたバイト数、描画リストのうちマージできる割合、そしてデバイスが `Features::TIMESTAMP_QUERY` を持つ場合は GPU パスの時間を報告します。どちらのビューアもこれを表示します。`tests/scale.rs` は `update` とレンダーパスを交互に実行します。別々のループで計測すると、フレームをまたいでキャッシュするものが実際より速く見えるからです。GPU 時間は設計上 1〜2 フレーム遅れて読み戻されます。最新の値にするためにストールを足さないでください。
+**性能に関わる変更では前後で計測し、その間は実際のフレームループを回してください。** `SSScene::stats()` は、プリミティブ数、ドローコール数、アップロードしたバイト数、描画リストのうちマージできる割合、そしてデバイスが `Features::TIMESTAMP_QUERY` を持つ場合は GPU パスの時間を報告します。ネイティブビューア（`examples/viewer`）と 3 つの C++ ビューアがこれを表示します。`tests/scale.rs` は `update` とレンダーパスを交互に実行します。別々のループで計測すると、フレームをまたいでキャッシュするものが実際より速く見えるからです。GPU 時間は設計上 1〜2 フレーム遅れて読み戻されます。最新の値にするためにストールを足さないでください。
 
 ### ドキュメント
 
@@ -345,7 +347,7 @@ cargo test -p ssplayer-wgpu --features ffi --lib
 ## コーディング規約
 
 ### Rust
-- 描画コードは WebGL 版 Player（`../SSPlayerForWeb/packages/ssplayer-webgl/`）から移植したもので、そう書いたコメントが移植元を名指しています。移植の出発点を知るにはそれを読んでください。`.ssab` がどう描かれるべきかを決めるのはポーティングガイドで、ガイドに書いていないところはこの Player です。ほかの Player はこの Player を基準に読まれます（SpriteStudio-SDK の `MAINTAINING_PLAYERS.md` §5）。描き方の変更はガイドに照らして確かめ、それで決まった規則は同じ変更でガイドに書き足してください。
+- 描画コードは WebGL 版 Player（SSPlayerForWeb の [`ssplayer-webgl`](https://github.com/cri-middleware/SSPlayerForWeb/tree/HEAD/packages/ssplayer-webgl)）から移植したもので、そう書いたコメントが移植元を名指しています。移植の出発点を知るにはそれを読んでください。`.ssab` がどう描かれるべきかを決めるのは SDK の [Player 移植ガイド](https://github.com/cri-middleware/SpriteStudio-SDK/tree/HEAD/libs/ssruntime/docs)で、ガイドに書いていないところはこの Player です。ほかの Player はこの Player を基準に読まれます（SpriteStudio-SDK の `MAINTAINING_PLAYERS.md` §5）。描き方の変更はガイドに照らして確かめ、それで決まった規則は同じ変更でガイドに書き足してください。
 - doc コメントと `libs/` 以下の各クレートの README は英語で書きます。
 - 整形は `cargo fmt` が決めます。`rustfmt.toml` はリポジトリルートにあります。
 - clippy は全ターゲットに対して `-D warnings` で走るため、lint は警告ではなくエラーです。
@@ -354,9 +356,9 @@ cargo test -p ssplayer-wgpu --features ffi --lib
 ### WGSL
 - 頂点ステージの座標計算は、`mat4 * vec4` ではなく意図的にスカラーの累算になっています。「きれいに」書き直すと FMA の contraction を招き、ビット一致のゴールデン比較が壊れます。そのままにしてください。
 
-### C・JavaScript フェイス
+### C・JavaScript Face
 - 生成されたヘッダと wasm バインディングはソースではなく出力です。Rust 側を変更して再生成してください。
-- 複数のフェイスに存在する名前は、どのフェイスでも同じ語幹を保ちます。その具体的な内容は SDK の [Player API conventions](https://github.com/cri-middleware/SpriteStudio-SDK/blob/HEAD/libs/ssruntime/docs/20_design/30_api_conventions.md) にあり、全公式 Player に適用されます。
+- 複数の Face に存在する名前は、どの Face でも同じ語幹を保ちます。その具体的な内容は SDK の [Player API conventions](https://github.com/cri-middleware/SpriteStudio-SDK/blob/HEAD/libs/ssruntime/docs/20_design/30_api_conventions.md) にあり、全公式 Player に適用されます。
 
 ---
 このプロジェクトに貢献することで、あなたの貢献がプロジェクトの [LICENSE.md](./LICENSE.md)（参考訳: [LICENSE.ja.md](./LICENSE.ja.md)）の下でライセンスされることに同意したものとみなされます。

@@ -1,6 +1,10 @@
 # 🛠️ ビルドガイド
 
-SpriteStudio Player for wgpu を開発する人と、自分のホストのために改造する人に向けたページです。このリポジトリのものはすべて 1 台のマシンでビルドでき、このページは新しいクローンが必要とする順に並べたチェックリスト一式です。クレートの構成とその理由は[プレイヤーの構成](architecture.md)にあります。
+SpriteStudio Player for wgpu を開発する人と、自分のホストのために改造する人に向けたページです。ライブラリのすべての Face は 1 つのチェックアウトから 1 台のマシンでビルドでき（Metal・DX12・Vulkan のビューアはそれぞれの OS が要ります）、このページは新しいクローンが必要とする順に並べたチェックリスト一式です。クレートの構成とその理由は[プレイヤーの構成](architecture.md)にあります。
+
+## 必要なもの
+
+Rust のツールチェイン、SDK のサブモジュール、Web の Face に要るツールは、`CONTRIBUTING.md` の[前提条件](https://github.com/cri-middleware/SSPlayerForWgpu/blob/main/CONTRIBUTING.md#prerequisites)にあります。C++ ビューアにはさらに CMake と C++17 のコンパイラ、このドキュメントサイトには Python 3 が要ります。
 
 ## ソースを取得する
 
@@ -32,7 +36,9 @@ Player が released zip 内の安定 C API を通して SDK と話すのに対�
 サブモジュールから `ssconverter-cli` をビルドし、SDK のテストプロジェクトを `assets/` に変換して、**両方の**エクスポートモードを `examples/web` に配置します。**テストは `assets/` を読む**ので、これは
 `cargo test` の前提であって省略可能な手順ではありません。
 
-SDK を上げたら、もう一度実行してください。`.ssab` の形式は SDK に従うので、別の SDK コミットで変換したデータはランタイムを panic させることがあります。`run-example.sh` と `build-pages.sh` はこれを自分で確かめます（`deploy-examples.sh when=stale`）。
+SDK を上げたら、もう一度実行してください。`.ssab` の形式は SDK に従うので、別の SDK コミットで変換したデータはランタイムを panic させることがあります。`run-example.sh`（clone したての状態からサンプルを動かすスクリプト）と `build-pages.sh` はこれを自分で確かめます（`deploy-examples.sh when=stale`）。
+
+Windows では、このページが挙げるスクリプトの `.ps1` 版を使います（`scripts\deploy-examples.ps1`、`scripts\build.ps1` など。選択肢は同じ `key=value` 形式です）。スクリプトとその `.ps1` は一緒に変更します。CI は、すべての `.ps1` が構文として通り、`--help` と未知の選択肢に `.sh` と同じ答えを返すかを確かめます。
 
 ## 全 Face をビルドする
 
@@ -47,26 +53,24 @@ SDK を上げたら、もう一度実行してください。`.ssab` の形式�
 | **C Face**（＋ヘッダ再生成） | `cargo build -p ssplayer-wgpu-ffi` |
 | C ハンドルの寿命テスト | `cargo test -p ssplayer-wgpu --features ffi --lib` |
 | npm パッケージ（wasm ＋ TS 層） | `./scripts/build.sh platform=web` — `pnpm` と `wasm-pack` が必要 |
-| TS 層の型チェック | `cd packages/ssplayer-wgpu && pnpm run typecheck` |
+| TS 層の型チェック（npm パッケージのビルドの後） | `cd packages/ssplayer-wgpu && pnpm run typecheck` |
 | 最小の Rust ホスト | `cargo run -p ssplayer-wgpu-hello` |
 | ネイティブビューア | `cargo run -p ssplayer-wgpu-viewer` |
 | Bevy ビューア | `cargo run -p ssplayer-bevy-overall` / `-p ssplayer-bevy-viewer` |
 | Metal C++ ビューア（macOS） | `cd examples/viewer-metal-cpp && cmake -B build && cmake --build build && ./build/ssviewer-metal` |
-| DX12 C++ ビューア（Windows） | `cd examples\viewer-dx12-cpp; cmake -B build; cmake --build build --config Release` |
+| DX12 C++ ビューア（Windows） | `cd examples\viewer-dx12-cpp; cmake -B build; cmake --build build --config Release; .\build\Release\ssviewer-dx12.exe` |
 | Vulkan C++ ビューア（Linux） | `cd examples/viewer-vulkan-cpp && cmake -B build && cmake --build build && ./build/ssviewer-vulkan` |
-| Web デモ | `./scripts/build.sh platform=web && (cd examples/web && python3 -m http.server --bind 127.0.0.1)` |
+| Web デモ | `./scripts/build.sh platform=web && (cd examples/web && python3 -m http.server --bind 127.0.0.1)` の後、`http://localhost:8000` を開く |
 
 スクリプトの選択肢は `./scripts/build.sh --help` が一覧します。`build=debug` は wasm-pack に `--dev` を渡し、`wasm-opt` を通さないので、パッケージのサイズは release ビルドのものだけを引用してください。
 
 ## 知っておくべき 3 つの死角
 
-通常の `cargo build` / `clippy --all-targets` / `cargo test` は、以下を**まったくコンパイルしません**。どれも、誰かが意図してビルドするまで静かに腐ります：
+通常の `cargo build` / `clippy --all-targets` / `cargo test` は、以下の 1 つ目と 2 つ目を**まったくコンパイルしません**。3 つ目も、既定で feature を有効にする `ssplayer-wgpu-ffi` を通してコンパイルされるだけで、`-p ssplayer-wgpu` で範囲を絞ったコマンドではコンパイルされません。どれも、誰かが意図してビルドするまで静かに腐ります：
 
 1. **Web の Face** は `web` feature の裏にあり、ネイティブのどのコマンドでもコンパイルされません。触ったら wasm ターゲットをビルドし、Lint もかけてください。
-2. **TypeScript 層**は wasm-pack が生成した `.d.ts` に対して型付けされているので、`#[wasm_bindgen]`
-   メソッドの改名は cargo が通ったまま TS 層を壊します。Web Face の公開面を変えたら型チェックを走らせてください。
-3. **C の Face** は `ffi` feature の裏にあり、そのビルドが cbindgen で `ssplayer_wgpu.h` を再生成します。**再生成されたヘッダは、それを動かした変更と一緒にコミットしてください。** そして差分を読むこと。cbindgen はクレート内のモジュールレベルの
-   `pub const` をすべて拾います。
+2. **TypeScript 層**は wasm-pack が生成した `.d.ts` に対して型付けされているので、`#[wasm_bindgen]` メソッドの改名は cargo が通ったまま TS 層を壊します。Web Face の公開面を変えたら型チェックを走らせてください。
+3. **C の Face** は `ffi` feature の裏にあります。`ssplayer-wgpu-ffi` をビルドすると（ワークスペース全体を対象にしたコマンドはそうします）cbindgen で `ssplayer_wgpu.h` が再生成されます。**再生成されたヘッダは、それを動かした変更と一緒にコミットしてください。** そして差分を読むこと。cbindgen はクレート内のモジュールレベルの `pub const` をすべて拾います。
 
 ## ドキュメントサイトをビルドする
 
@@ -94,13 +98,13 @@ SDK を上げたら、もう一度実行してください。`.ssab` の形式�
 | | |
 |---|---|
 | [`CONTRIBUTING.md`](https://github.com/cri-middleware/SSPlayerForWgpu/blob/main/CONTRIBUTING.md) | 変更が守るべき制約と、その検証方法。自明でない変更の前に読んでください |
-| [`ROADMAP.md`](https://github.com/cri-middleware/SSPlayerForWgpu/blob/main/ROADMAP.md) | 計画済み・未検証・意図的に採用しなかったもの |
+| [`ROADMAP.md`](https://github.com/cri-middleware/SSPlayerForWgpu/blob/main/ROADMAP.md) | 計画済みのもの・意図的に採用しなかったもの |
 | [SDK の Player 移植ガイド](https://github.com/cri-middleware/SpriteStudio-SDK/tree/HEAD/libs/ssruntime/docs) | 再生セマンティクス（Brain）はここが正典です。このリポジトリに複製してはいけません |
 | このドキュメント | 読者向けのガイド。パッケージ README は npm と GitHub の玄関として残ります |
 
 ## 変更を検証する
 
-CI と同じ順の一通りは：
+CI が全プルリクエストで走らせる Rust の確認の一通りは（wasm の行は CI では別のジョブで、C++ ビューア・npm パッケージ・プレビューシェルにはそれぞれ専用の確認があります）：
 
 ```bash
 cargo fmt --all -- --check
@@ -111,12 +115,15 @@ cargo clippy -p ssplayer-wgpu --target wasm32-unknown-unknown --no-default-featu
 cargo clippy -p ssplayer-wgpu --features ffi --all-targets -- -D warnings
 cargo build -p ssplayer-wgpu-ffi                          # C ヘッダも再生成されます
 cargo test -p ssplayer-wgpu --features ffi --lib
+git diff --exit-code -- libs/ssplayer-wgpu-ffi/include/ssplayer_wgpu.h   # コミット済みのヘッダが最新か
 ```
+
+CI は `Cargo.toml` が宣言する Rust のバージョン（`rust-version`）で `cargo check --workspace --locked` も実行するので、それより新しい API は手元の stable で通っても CI で失敗します。
 
 テストについて 3 点：
 
-* **レンダリングテストは GPU アダプタが無い環境では自分をスキップします。** そういうマシンでの成功は何も検証していない可能性があります。CI はソフトウェア Vulkan デバイス（Mesa lavapipe）を入れ、アダプタが無ければ失敗させます。ラスタライズを変更したら、リードバックを PNG に落として目で見てください。
-* **性能の変更は前後で計測し、そのとき本物のフレームループを回してください。** `update` とレンダーパスはフレームと同じように交互に実行します。別々のループで測ると、フレームを跨いでキャッシュするものが実際よりずっと良く見えます。`cargo test --test scale -- --ignored` がこのリポジトリのスループット計測で、両方を満たしています（CI のソフトウェア GPU では速度を判定できないため `#[ignore]`）。ホスト側から見えるカウンタは[パフォーマンス](../guide/performance.md)にあります。
+* **レンダリングテストは GPU アダプタが無い環境では早期 return し、`ok` と報告します。** そういうマシンでは何も検証していません。それを知らせるために失敗するのは `tests/gpu_adapter.rs` だけです。CI はソフトウェア Vulkan デバイス（Mesa lavapipe）を入れ、アダプタが無ければ失敗させます。ラスタライズを変更したら、リードバックを PNG に落として目で見てください。
+* **性能の変更は前後で計測し、そのとき本物のフレームループを回してください。** `update` とレンダーパスはフレームと同じように交互に実行します。別々のループで測ると、フレームを跨いでキャッシュするものが実際よりずっと良く見えます。`cargo test --release --test scale -- --ignored --nocapture` がこのリポジトリのスループット計測で、両方を満たしています（計測であって検証ではないので `#[ignore]`）。ホスト側から見えるカウンタは[パフォーマンス](../guide/performance.md)にあります。
 * **ジオメトリに触る前にゴールデンを取ってください。** ゴールデンのコーパスのテスト（既定で ignore）は全フィクスチャ／アニメーション／フレーム／ステンシルの組み合わせを描画し、前回の実行とバイト比較します：
 
     ```bash
@@ -132,7 +139,7 @@ cargo test -p ssplayer-wgpu --features ffi --lib
 どの Face も、リリースと同じ形でチェックアウトを受け取ります。
 
 - **Rust:** path 依存で使います（`ssplayer-wgpu = { path = "<checkout>/libs/ssplayer-wgpu" }`。`ssplayer-bevy` も同じ）。`ssruntime` と `ssab` はサブモジュール経由で一緒に付いてきます。プレイヤーはホストのデバイスを借りるので、ホストの `wgpu` はワークスペースの `Cargo.toml` が指定する版にそろえてください。
-- **C / C++:** `./scripts/build.sh` がライブラリと `ssplayer_wgpu.h` を `bin/` に集めます（`bin/libs/<platform>/<arch>/`、`bin/include/`）。`examples/` の C++ ビューアと同じようにリンクしてください。
+- **C / C++:** `./scripts/build.sh` がライブラリと `ssplayer_wgpu.h` を `bin/` に集めます（`bin/libs/<platform>/<arch>/`、`bin/include/`）。自分のプロジェクトのライブラリとインクルードのパスをそこへ向けてください。`examples/` の C++ ビューアは `bin/` を読みません。その CMake が `cargo build -p ssplayer-wgpu-ffi` を実行して `target/<profile>/` をリンクします。
 - **npm:** パッケージをビルドして pack し、その tarball をアプリにインストールします。
 
     ```bash

@@ -47,7 +47,7 @@ Entity A -> Draw()   （個別のバッファ転送とドロー）
 Entity B -> Draw()   （個別のバッファ転送とドロー）
 
 [本 Player]
-SSScene -> update(&renderer, &device, &queue, dt, &mut [a, b])
+SSScene -> update(&mut renderer, &device, &queue, dt, &mut [a, b])
         -> draw(&renderer, &mut rpass)      // 1 パス、共有ジオメトリアリーナ
 ```
 
@@ -127,7 +127,7 @@ SSScene -> update(&renderer, &device, &queue, dt, &mut [a, b])
 | *(描画順は呼び出し順)* | `set_order(i32)` | `ss_player_set_order` | シーン内で昇順 |
 | *(なし)* | `set_visible(bool)` | `ss_player_set_visible` | 非表示は描画だけをスキップ。タイムラインは進みます |
 | *(なし)* | `set_culled(bool)` | `ss_player_set_culled` | カリングは**タイムラインの前進もスキップ**。画面外のキャラクター用 |
-| `CanvasGet()` | `canvas_size()` | `ss_player_canvas_size` | |
+| *(なし)* | `canvas_size()` | `ss_player_canvas_size` | |
 
 ### ループ回数
 
@@ -206,7 +206,7 @@ SSScene -> update(&renderer, &device, &queue, dt, &mut [a, b])
 | `CellChangeParts(id, map, cell, …)` | `set_part_cell_override(part, cellmap, cell, priority)` | `ss_player_set_part_cell_override` |
 | *(相当なし)* | `set_part_color_override(part, rgba, blend_op, priority)` | `ss_player_set_part_color_override` |
 | *(相当なし)* | `clear_all_part_overrides()` | `ss_player_clear_all_part_overrides` |
-| `PartGetTransform(id, …)` | `part_transform(part)` | `ss_player_part_transform` |
+| *(相当なし)* | `part_transform(part)` | `ss_player_part_transform` |
 
 セルマップとセルはインデックスではなく**文字列**で指定します。また、各オーバーライドは[優先度](../guide/part-overrides.md#blend-op-and-priority)を持ち、それがどれだけの期間生きるかを決めます。
 
@@ -219,23 +219,25 @@ SSScene -> update(&renderer, &device, &queue, dt, &mut [a, b])
     #include <Entity/ss6player_entity.h>
     #include <Project/ss6player_project.h>
 
-    SpriteStudio6::SystemBootUp();
+    SpriteStudio6::SettingSystem settingSystem;
+    SpriteStudio6::SystemBootUp(settingSystem);
 
     SpriteStudio6::Project project;
-    project.BootUp(dataSsfb2, sizeSsfb2);
+    project.BootUp(dataSsfb2);
     for (int i = 0; i < project.CountGetTexture(); i++) {
         /* 画像は自分で読み込んでから： */
         project.TextureSet(i, myTexture);
     }
 
     SpriteStudio6::Entity entity;
-    entity.BootUp(&project, 0);
+    entity.BootUp(project);
+    entity.PackSet(0);
     entity.AnimationPlay(0, entity.IndexGetAnimation("walk"), 0);
 
     /* 毎フレーム */
     SpriteStudio6::SystemProcessMainPre();
-    entity.Update(deltaTime);
-    entity.Draw(matrixWorld);
+    entity.Update(deltaTime, SpriteStudio6::Library::KindMasking::FOLLOW_DATA);
+    entity.Draw(commandList, matrixProjection, matrixView, matrixWorld);
     SpriteStudio6::SystemProcessMainPost();
     SpriteStudio6::SystemProcessRenderPost();
     ```
