@@ -144,7 +144,7 @@ The rest of the matrix:
 | DX12 C++ viewer (Windows) | `cd examples\viewer-dx12-cpp; cmake -B build; cmake --build build --config Release; .\build\Release\ssviewer-dx12.exe` |
 | Vulkan C++ viewer (Linux) | `cd examples/viewer-vulkan-cpp && cmake -B build && cmake --build build && ./build/ssviewer-vulkan` — `--x11` / `--wayland` picks the window path |
 | Preview shell | `./scripts/build-preview.sh`, then open `bin/ssplayer-preview.html` as a file, not over a server |
-| Preview opened by path, as a host's button does | the command in [`examples/preview/README.md`](./examples/preview/README.md#opening-it-by-path) |
+| Preview opened by path | the command in [`examples/preview/README.md`](./examples/preview/README.md#opening-it-by-path) |
 | Preview with a pack in it | `cargo run -p ssplayer-preview-gen -- pack=assets/Ringo/Ringo.ssab open=yes` |
 | npm package | `./scripts/build.sh platform=web` — needs `pnpm` (`corepack enable`) and `wasm-pack` |
 | js layer typecheck | `cd packages/ssplayer-wgpu && pnpm run typecheck`, after a `platform=web` build |
@@ -321,7 +321,7 @@ cargo test -p ssplayer-wgpu --features ffi --lib
 | DX12 C++ ビューア（Windows） | `cd examples\viewer-dx12-cpp; cmake -B build; cmake --build build --config Release; .\build\Release\ssviewer-dx12.exe` |
 | Vulkan C++ ビューア（Linux） | `cd examples/viewer-vulkan-cpp && cmake -B build && cmake --build build && ./build/ssviewer-vulkan` — `--x11` / `--wayland` でウィンドウの経路を選びます |
 | プレビューシェル | `./scripts/build-preview.sh` の後、`bin/ssplayer-preview.html` をサーバ経由ではなくファイルとして開きます |
-| ホストのボタンと同じく、パスで開くプレビュー | [`examples/preview/README.md`](./examples/preview/README.md#opening-it-by-path) のコマンド |
+| パスで開くプレビュー | [`examples/preview/README.md`](./examples/preview/README.md#opening-it-by-path) のコマンド |
 | パック入りのプレビュー | `cargo run -p ssplayer-preview-gen -- pack=assets/Ringo/Ringo.ssab open=yes` |
 | npm パッケージ | `./scripts/build.sh platform=web` — `pnpm`（`corepack enable`）と `wasm-pack` が必要です |
 | js レイヤの型チェック | `cd packages/ssplayer-wgpu && pnpm run typecheck`（`platform=web` のビルドの後） |
