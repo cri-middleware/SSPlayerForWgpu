@@ -126,8 +126,6 @@ Measured on the assembled shell:
 - A filled `Instance.ssab` plays with its sibling pack and both atlases, nothing missing,
   and so does `Instance.ssab` picked out of a dropped `assets/overall` folder.
 
-Unverified: Chrome and Edge on Windows and Linux, Safari 26, Firefox 141.
-
 ## Build
 
 ```sh

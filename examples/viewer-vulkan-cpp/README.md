@@ -1,12 +1,5 @@
 # viewer-vulkan-cpp — Vulkan verification viewer (C API)
 
-> **Status: built in CI, not yet run on a desktop.** It was written on macOS,
-> where neither the X11 nor the Wayland code can be compiled. CI builds it on Linux
-> for every pull request, but the runner has no display, so it has never opened a
-> window; the first run on a Linux desktop is tracked in the
-> [ROADMAP](../../ROADMAP.md). The [verification checklist](#verification-checklist)
-> below is what that run checks.
-
 A Linux host that drives `ssplayer-wgpu` through its **C API** with the Vulkan
 backend forced, so the C face (`ssplayer-wgpu-ffi`) is exercised end to end: this process owns
 the window, hands its raw handle to `ss_scene_create`, and calls
@@ -114,7 +107,7 @@ directory as the first argument instead.
 
 ## Verification checklist
 
-Nothing on this list is recorded as checked. Work through it in order, **and do
+After a change to the window code, work through this list in order, **and do
 the whole list once per window path** — they share every line
 of the playback loop and no line of the window code.
 

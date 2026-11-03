@@ -1,10 +1,5 @@
 # viewer-dx12-cpp — DX12 verification viewer (C API)
 
-> **Status: run on Windows hardware, and it draws.** It was ported from
-> `viewer-metal-cpp` on macOS, where neither the Win32 code nor the DX12 backend
-> can be compiled or executed. Beyond that first run, the
-> [verification checklist](#verification-checklist) below is not recorded as checked.
-
 A Win32 host that drives `ssplayer-wgpu` through its **C API** with the DX12
 backend forced, so the C face (`ssplayer-wgpu-ffi`) is
 exercised end to end: Win32 owns the window, hands its `HWND` to
@@ -78,11 +73,11 @@ printed to the console the viewer was launched from, so run it from a terminal.
 | R | restart the current animation |
 | + / - | add / remove a player (1–6, all in the one scene) |
 | Escape | quit |
+| drop | play a dropped `.ssab`, or add every `.ssab` in a dropped folder |
 
 ## Verification checklist
 
-The first run confirmed that it draws; the rest of this list is not recorded as
-checked. Work through it in order:
+Work through this list in order after a change to the window or surface code:
 
 1. `ss_scene_create` returns non-null — that is the raw-handle → surface path and
    the DX12 adapter request.

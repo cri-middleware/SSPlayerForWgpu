@@ -16,9 +16,8 @@ git submodule update --init          # once
 cargo run -p ssplayer-wgpu-viewer
 ```
 
-It starts on `assets/overall` with two characters. `cargo run -p ssplayer-wgpu-viewer -- <dir>`
-plays a different asset directory, and dropping a `.ssab` file — or a folder of
-them — onto the window plays your own assets. Drop the whole folder when a pack
+It starts on `assets/overall` with two characters. Dropping a `.ssab` file — or a
+folder of them — onto the window plays your own assets. Drop the whole folder when a pack
 has external instance references: those resolve by pack name, so every referenced
 pack has to be registered first.
 
@@ -77,8 +76,12 @@ Three details worth copying:
 | X | toggle `set_culled` on the focused character — culled, its clock stops |
 | `[` / `]` | lower / raise `set_alpha` on the focused character |
 | F | flip the Y axis (Y-up ↔ Y-down projection) |
+| K | toggle the mask backend: stencil / coverage |
 | Escape | quit |
 | drop | play a dropped `.ssab`, or add every `.ssab` in a dropped folder |
+
+The track keys — `C`, `S`, `A`, `Y`, `0`–`4`, `,` / `.`, `T`, `E` — are listed in
+[Motion blending](../../docs/en/guide/motion-blending.md#see-it).
 
 **Stack mode is the one that shows the interesting behaviour.** Characters only
 interact where they overlap, so a row of them looks the same as a single one. Put
@@ -97,6 +100,6 @@ and the pipelines belong to the device-scoped renderer.
 
 ## Related
 
-- [`libs/ssplayer-wgpu/README.md`](../../libs/ssplayer-wgpu/README.md) — the crate's API
+- [The Rust API reference](../../docs/en/reference/rust.md) — the crate's API
 - [`../web`](../web) — the same player in a browser
 - [`../viewer-metal-cpp`](../viewer-metal-cpp) / [`../viewer-dx12-cpp`](../viewer-dx12-cpp) — the C API in a C++ host

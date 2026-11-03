@@ -68,7 +68,8 @@ read-back frame.
 
 The cast, layout, pack/animation switching, focus, visibility, alpha, order and
 drop all behave as they do in [`../viewer`](../viewer), and so do the track keys.
-**One of the native viewer's keys is deliberately absent: K (mask backend).**
+**Two of the native viewer's keys are absent: K (mask backend), deliberately, and X
+(`set_culled`), which this viewer does not bind.**
 Bevy's 2d depth is `Depth32Float`, which carries no stencil, so the adapter always
 selects the player's coverage-bitmap backend. There is no stencil path to toggle
 to. (Masks still work; that is the point of the coverage backend.)
