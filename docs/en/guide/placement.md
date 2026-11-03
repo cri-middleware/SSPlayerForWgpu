@@ -6,8 +6,8 @@ wants: a panel, a card or a preview pane is a box of a size the layout decided, 
 has to end up inside it.
 
 `fitInto` is that step. Give it the box and it computes the placement, then writes it through the
-same seam as [`setTransform`](./concepts.md) — so there is nothing new to draw and nothing extra per
-frame.
+same seam as `setTransform` (pixels from the view's centre, `y` downward) — so there is nothing new
+to draw and nothing extra per frame.
 
 ```
    fit: contain              fit: cover               fit: none
@@ -134,8 +134,9 @@ one scale across a pack, read the canvas once after the first `setAnimation` and
 === "Bevy"
 
     ```rust
-    // See above — the box is reachable from the Rust API on the render-world
-    // player, but the adapter exposes no component for it yet.
+    // Not exposed on Bevy: the authored canvas is read inside the render world,
+    // which gameplay code cannot reach. Work the scale out from your own box and
+    // write it to `SsTransform`.
     ```
 
 !!! note "A pivot is not a bounding box"
@@ -158,7 +159,7 @@ it, so calling it every frame is also fine if that is simpler than tracking chan
 
 ## When it does not fit
 
-A **collapsed box** (zero width or height), an **animation that is not set up**, and `fit: none` all
+A **collapsed box** (a `width` or `height` of 0, or a `frame` with no area), an **animation that is not set up**, and `fit: none` all
 take the same path: no fit, origin at the view's centre, scale 1 before your own `scale`. None of
 them is an error — a host that lays out a box before it has measured it gets its animation back the
 moment the box has a size.

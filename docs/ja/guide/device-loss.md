@@ -20,12 +20,15 @@ flowchart LR
 
 再生状態（現在フレーム、ループ回数、再生制御）は CPU 側にあり、どこへも行っていません。巻き戻りません。
 
+`SSRenderer::set_texture`（Rust）や `addTextureFromBitmap`（JavaScript）で登録したテクスチャの復帰はホストの仕事です。ピクセルは誰も保持していないので、レンダラーの復元後に登録し直してください。`Retention::Retain` の `upload_texture`、`addTexture`、`addTextureFromBytes`、`ss_scene_add_texture*`、`load` が取ってきたものは自動で戻り、埋め込みアトラスは手順 3 で `.ssab` から再びデコードされます。
+
 ## Face ごと
 
 === "Rust"
 
     ```rust
-    // 新しいデバイス上で、この順に：
+    // 失ったことは Device::set_device_lost_callback で分かります。
+    // 新しいアダプタとデバイスを取り直し、この順に：
     renderer.restore_device(&device, &queue);
     scene.restore_device(&device, &queue);
     for player in &mut players {
@@ -64,8 +67,22 @@ flowchart LR
 
     復帰は Bevy 自身の復帰に乗ります。新しいデバイスで Bevy が `RenderStartup` を再実行してレンダラーが作り直され、キャラクターは次のフレームにメインワールドから読み直されます。
 
-    **opt-in が必要です。** Bevy の既定のエラーハンドラはデバイスロストで*終了*するので、
-    `RenderErrorPolicy::Recover` を返す `RenderErrorHandler` を入れてください。
+    **opt-in が必要です。** Bevy の既定のエラーハンドラはデバイスロストで*終了*します。`DeviceLost` に `RenderErrorPolicy::Recover(RenderCreation::default())` を返す `RenderErrorHandler` を入れてください：
+
+    ```rust
+    use bevy::render::{
+        error_handler::{ErrorType, RenderErrorHandler, RenderErrorPolicy},
+        settings::RenderCreation,
+    };
+
+    app.insert_resource(RenderErrorHandler(|error, main_world, render_world| {
+        if matches!(error.ty, ErrorType::DeviceLost) {
+            RenderErrorPolicy::Recover(RenderCreation::default())
+        } else {
+            (RenderErrorHandler::default().0)(error, main_world, render_world) // Bevy の既定：ログを出して終了
+        }
+    }));
+    ```
 
 ## 復帰できないもの
 
@@ -75,9 +92,9 @@ flowchart LR
 
 ## テストする
 
-「今デバイスを失え」と言うポータブルな方法はありません。ブラウザならコンソールから `device.destroy()` が最も近く、デスクトップならドライバのリセットや、実行中の discrete / integrated GPU 切り替えで起こせます。出荷前に一度は試してください。扱わなかった場合、他人のマシンで**固まったウィンドウや真っ白なウィンドウ**として現れます。
+「今デバイスを失え」と言うポータブルな方法はなく、JavaScript の Face は `destroy()` を呼べるようにページの `GPUDevice` を渡してもいません。ドライバのリセットや、実行中の discrete / integrated GPU 切り替えでデバイスは失われます。ネイティブのホストでもブラウザのタブでも同じです。出荷前に一度は試してください。扱わなかった場合、他人のマシンで**固まったウィンドウや真っ白なウィンドウ**として現れます。
 
 ## 次に読む
 
 * [借用モデル](../wgpu/borrow-model.md) — なぜ復帰がこの形なのか
-* [パフォーマンス](./performance.md) — 再構築が効いたか確認できるカウンタ
+* [パフォーマンス](./performance.md) — フレームのカウンタ

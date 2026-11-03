@@ -26,7 +26,7 @@ textures yourself.
 
     ```js
     const player = surface.createPlayer();
-    await player.load('/assets/Instance.ssab');   // the only asynchronous call
+    await player.load('/assets/Instance.ssab');   // asynchronous: fetches the pack and its atlases
     player.setAnimation('anime_1');
     player.play();
     ```
@@ -66,14 +66,15 @@ relative to.
 So: keep an exported pack and its atlases together, and pass the path to the `.ssab` — not to a
 directory, and not to an atlas.
 
-## Nothing is on the GPU when `load` returns
+## What is on the GPU when `load` returns
 
-The borrow model lends no device until the frame starts, so a load reads bytes and stops there. What
-it read is decoded and uploaded by the **first `update`**, on exactly the timeline an embedded
-atlas has always taken.
+On the Rust and C faces the borrow model lends no device until the frame starts, so a load reads
+bytes and stops there. What it read is decoded and uploaded by the **first `update`**, on exactly
+the timeline an embedded atlas has always taken. So immediately after a load, the renderer does not
+know a texture's size yet; ask after the first frame.
 
-So immediately after a load, the renderer does not know a texture's size yet. Ask after the first
-frame.
+On the JavaScript face the page's context holds the device from the start, so
+`await player.load(...)` resolves with the atlases it fetched already decoded and uploaded.
 
 ## What did not arrive: `missing`, not an error
 
@@ -139,17 +140,22 @@ beside the `.ssab`, is better served by one `load` with a reader: see [In a brow
 === "JavaScript"
 
     ```js
-    await player.loadSsab(bytes, 'Character', new URL('/assets/Character.ssab', location.href).href);
-    await player.addSsab(other, 'Effect', baseUrl);
+    await player.loadSsab(bytes, null, new URL('/assets/Character.ssab', location.href).href);
+    await player.addSsab(other, null, baseUrl);
     ```
 
-Registering a sibling pack *before* the load also works: the walk skips a pack the player already
-has.
+The name you register a sibling pack under is the name its instance parts refer to — the one the
+exporter wrote into the `.ssab` — so `loadSsab` and `addSsab` take `null` to keep it. Register
+siblings before `set_animation`, which is when the tree looks them up. Registering a sibling pack
+*before* the load also works: the walk skips a pack the player already has.
 
-!!! warning "Re-registering never changes what is already playing"
+!!! warning "Registering a sibling never changes what is already playing"
     A playback tree is bound to the pack it was built from. Registering a new pack under a name the
     live tree is playing retires the old one rather than dropping it — what is on screen keeps
     playing, and the replacement is what the **next** `set_animation` builds from.
+
+    Loading is different: `load_ssab` (`ss_player_load_ssab`, `loadSsab`) selects the new pack and
+    drops the playing tree, so call `set_animation` again.
 
 ## Supplying textures yourself
 
@@ -158,7 +164,7 @@ fetch you already made — hand them over **keyed by the image, not by the cell 
 The texture map is **device-scoped**, so a pack shown five times is uploaded once.
 
 !!! warning "A cell map's hash names a slot, not an image"
-    Adobe Animate writes `spritemap1.png` for every project it exports, so two packs from two
+    Some tools name the atlas `spritemap1.png` in every project they export, so two packs from two
     projects ask for the same cell map hash and mean two different atlases. Register by that hash
     and the second pack looks already-supplied: its own pixels are dropped and its parts draw the
     first pack's atlas. Ask the player for the key instead — it answers with an identity for the
@@ -180,12 +186,15 @@ The texture map is **device-scoped**, so a pack shown five times is uploaded onc
 === "C"
 
     ```c
-    /* `ss_texture_ref_t.key` is already the key: `ss_player_texture_at` resolves it. */
-    /* Raw RGBA8, width * height * 4 bytes, straight alpha. */
-    ss_scene_add_texture(scene, ref.key, rgba, width, height);
-
-    /* Or hand over encoded PNG bytes and let the library decode. */
-    ss_scene_add_texture_png(scene, ref.key, png_bytes, png_len);
+    ss_texture_ref_t ref;
+    for (uint32_t i = 0; i < ss_player_texture_count(player, NULL); i++) {
+        if (ss_player_texture_at(player, NULL, i, &ref) != SS_OK || ref.embedded) continue;
+        /* Read <the .ssab's directory>/ref.path yourself; ref.key is already the key. */
+        /* Raw RGBA8, width * height * 4 bytes, straight alpha: */
+        ss_scene_add_texture(scene, ref.key, rgba, width, height);
+        /* or the encoded PNG bytes, decoded by the library: */
+        /* ss_scene_add_texture_png(scene, ref.key, png_bytes, png_len); */
+    }
     ```
 
 === "JavaScript"
@@ -224,9 +233,8 @@ contract is fixed and tested:
 2. `read` gets your `src` **verbatim** — the walk builds no paths and never looks inside it;
 3. *then* `set_base(src)` once, and every path after that is a **bare name** relative to it.
 
-The read-then-rebase order is the safety property: `src` is read before any base derived from it
-exists, so "resolve `src` against itself" is not expressible. Resolving is your job, because only
-you know whether you are holding a filesystem path, a URL or an archive key.
+Resolving is your job, because only you know whether you are holding a filesystem path, a URL or an
+archive key.
 
 !!! note "Do not reach for `std::fs` instead"
     It compiles on wasm32 and fails at runtime, and it cannot open a file that is inside an archive.
@@ -243,11 +251,15 @@ That is how a page plays a dropped folder: file its contents under URLs of your 
 load from there.
 
 ```js
-// One base per drop. Atlases are keyed by URL, so a second folder under the first
-// one's base would find a same-named atlas already loaded and draw the first one's.
-const base = new URL(`dropped/${++drops}/`, location.href);
-const files = new Map(dropped.map(({ path, file }) => [new URL(path, base).href, file]));
-await player.load(new URL('Ringo/Ringo.ssab', base).href, (url) => files.get(url));
+let drops = 0;
+
+async function playDropped(dropped) {   // [{ path, file }, …] from the drop event
+  // One base per drop. Atlases are keyed by URL, so a second folder under the first
+  // one's base would find a same-named atlas already loaded and draw the first one's.
+  const base = new URL(`dropped/${++drops}/`, location.href);
+  const files = new Map(dropped.map(({ path, file }) => [new URL(path, base).href, file]));
+  await player.load(new URL('Ringo/Ringo.ssab', base).href, (url) => files.get(url));
+}
 ```
 
 `loadSsab`, `addSsab` and the element's `loadSrc` take the same `read` as their last argument. The

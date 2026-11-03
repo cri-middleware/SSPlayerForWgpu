@@ -13,7 +13,8 @@ Three things hold whatever you draw:
 * **An atlas is uploaded once per device.** The texture map is device-scoped, so the same pack shown
   five times is uploaded once.
 * **A target's whole cast is one render pass.** Every character goes through one `update` and one
-  pass, so a second character costs a playback tree and nothing on the GPU.
+  pass, so a second character adds its playback tree and its own parts to the frame, and no pass,
+  pipeline or atlas upload.
 
 ## A scene with nothing moving
 
@@ -65,12 +66,16 @@ the frame.
 | `gpu_pass_time_ns` | GPU time for the last timed pass | ✅ | ✅ | ✅ |
 
 The fastest way to see these on your own content is to drop a `.ssab` on
-`cargo run -p ssplayer-wgpu-viewer`: both native viewers print them every second.
+`cargo run -p ssplayer-wgpu-viewer`, run in a clone of the repository after
+`./scripts/deploy-examples.sh`; it keeps printing them as it plays. The C++ viewers print the C
+counters on start and on key presses.
 
 `gpu_pass_time_ns` needs a device created with the timestamp-query feature — in a browser, one the
 browser granted `timestamp-query` to. Without it you get `None` / `0` / `undefined` and the other
 counters still work. It arrives a frame or two late, because reading it sooner would mean stalling
-the pipeline.
+the pipeline. On the Rust face the host also attaches `SSScene::timestamp_writes()` to its render
+pass and calls `SSScene::resolve_timestamps(&mut encoder)` after it; the C and JavaScript faces do
+both for you.
 
 ## What costs the most
 

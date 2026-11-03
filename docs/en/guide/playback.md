@@ -7,7 +7,7 @@ not ask it to, this page is why.
 
 | Verb | What it does |
 |---|---|
-| **play** | **Head-out.** Rewinds to the start of the section, re-arms the loop count, and starts independent effects and instance children over |
+| **play** | **Head-out.** Rewinds to the start of the section (the whole animation unless you set one, below; the end when playing backward), re-arms the loop count, and starts independent effects and instance children over |
 | **pause** | Holds on the current frame. Idempotent, and the player still counts as playing — a hold is not a stop |
 | **resume** | Lifts a pause, carrying on from the same frame. Idempotent, and a **no-op on a stopped animation** |
 | **stop** | Ends playback. The playhead stays where it stands, so you keep drawing the frame it stopped on |
@@ -256,6 +256,11 @@ not the *read*.
 
 Turn sub-frame off for a deliberately stepped, "on-twos" look; turn frame skip off when you need
 exactly one frame advanced per update, whatever the elapsed time.
+
+| | Rust | C | JavaScript | Bevy |
+|---|---|---|---|---|
+| Sub-frame | `set_sub_frame_enabled(false)` | `ss_player_set_sub_frame_enabled(player, false)` | `setSubFrameEnabled(false)` | `SsPlayback::sub_frame_enabled` |
+| Frame skip | `set_frame_skip_enabled(false)` | `ss_player_set_frame_skip_enabled(player, false)` | `setFrameSkipEnabled(false)` | `SsPlayback::frame_skip_enabled` |
 
 ## Next
 

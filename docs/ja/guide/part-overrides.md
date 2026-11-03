@@ -29,8 +29,7 @@
     player.setPartVisibilityOverrideByIndex(index, true, false);
     ```
 
-インデックスは `set_animation` のときに**一度だけ**引いて保持してください。名前の照合はハッシュですが、探索自体はパーツ列を歩きます。パックが持つものは `part_names()` / `ss_player_part_count` ＋ 名前取得 /
-`partNames()` で列挙できます。
+インデックスは `set_animation` のときに**一度だけ**引いて保持してください。名前の照合はハッシュですが、探索自体はパーツ列を歩きます。パックが持つものは `part_names()` / `ss_player_part_name`（0 から null が返るまで歩きます。`ss_player_part_count` は最初の update まで 0 です）/ `partNames()` で列挙できます。
 
 ## 表示
 
@@ -72,7 +71,7 @@ set_part_visibility_override(part, hide, cascade)
 
 `cellmap_names()` と `cell_names(cellmap)` で選択肢を列挙できるので、UI にハードコードせずに提示できます。
 
-セルマップがバインドする*テクスチャ*そのものを差し替える（1パーツのセルではなく、そのセルマップを使う全パーツにまたがる衣装・パレット変更）には、[テクスチャ差し替え](./texture-replacement.md)を参照してください。
+セルマップがバインドする*テクスチャ*そのものを差し替える（1 パーツのセルではなく、そのセルマップを使う全パーツにまたがる衣装・パレット変更）には、[テクスチャ差し替え](./texture-replacement.md)を参照してください。
 
 ## カラー
 
@@ -87,7 +86,7 @@ set_part_visibility_override(part, hide, cascade)
     // 0xRRGGBBAA
     player.set_part_color_override("body", 0xff0000_80, BlendOp::Mix, OverridePriority::Permanent)?;
 
-    // 四隅、それぞれ [r, g, b, a]
+    // 四隅。それぞれ [r, g, b, a]。順序は左上・右上・左下・右下
     player.set_part_color_override_corners("cape", corners, BlendOp::Mix, OverridePriority::Permanent)?;
 
     player.clear_part_color_override("body")?;
@@ -99,6 +98,8 @@ set_part_visibility_override(part, hide, cascade)
     ```c
     /* rgba, blend_op（0 = mix）, priority（2 = 恒久） */
     ss_player_set_part_color_override(player, "body", 0xff000080u, 0, 2);
+    /* corners: 16 バイト、4 x [r, g, b, a]。左上・右上・左下・右下 */
+    ss_player_set_part_color_override_corners(player, "cape", corners, 0, 2);
     ss_player_clear_part_color_override(player, "body");
     ss_player_clear_all_part_overrides(player);
     ```
@@ -107,6 +108,7 @@ set_part_visibility_override(part, hide, cascade)
 
     ```js
     player.setPartColorOverride('body', 0xff000080, 0 /* mix */, 2 /* 恒久 */);
+    player.setPartColorOverrideCorners('cape', corners /* Uint8Array(16) */, 0, 2);
     player.clearPartColorOverride('body');
     player.clearAllPartOverrides();
     ```
@@ -124,11 +126,17 @@ set_part_visibility_override(part, hide, cascade)
 
 | 優先度 | Rust | 数値 | いつまで生きるか |
 |---|---|---|---|
-| 次のキーフレームまで | `OverridePriority::OverwriteOnNextKeyframe` | `0` | アニメーションがその属性を次に駆動するまで — つまりアニメーションが触れていないフレームでだけ現れます |
-| 次のアニメーションまで | `OverridePriority::HoldUntilNextAnimation`（既定） | `1` | 別のアニメーションが選択されるまで |
-| 恒久 | `OverridePriority::Permanent` | `2` | パックが変わるまで。アニメーション切り替えを跨いで残ります |
+| 次のキーフレームまで | `OverridePriority::OverwriteOnNextKeyframe` | `0` | アニメーションがその属性の次のキーに届くまで。届いた時点で破棄され、ループしても戻りません（そのキーが無ければ、そのアニメーションの間は残ります） |
+| 次のアニメーションまで | `OverridePriority::HoldUntilNextAnimation`（既定） | `1` | `set_animation` で別のアニメーションが選ばれるまで（トラック 0 のクロスフェードでは消えません） |
+| 恒久 | `OverridePriority::Permanent` | `2` | パックが変わるまで。`set_animation` もクロスフェードも跨いで残ります |
 
 衣装の選択なら `Permanent`、モーションと共に終わる状態なら `HoldUntilNextAnimation`、アニメーションが何か言った瞬間に譲るべき微調整なら `OverwriteOnNextKeyframe` を選びます。
+
+オーバーライドにはアニメーションが要ります。`set_animation` の後で呼び、前には呼ばないでください。`set_animation` は表示のオーバーライドをすべて消し、カラーとセルのオーバーライドも `Permanent` 以外はすべて消します。
+
+!!! note "オーバーライドが届くパーツ"
+
+    カラーは Normal パーツだけ、セルは Normal パーツと Mask パーツ、表示はどのパーツにも効きます。それ以外の種類のパーツ（NULL・メッシュ・インスタンスなど）にカラーやセルを設定しても呼び出しは成功しますが、描画は変わりません。どのオーバーライドも、インスタンスパーツの中のサブアニメーションには届きません。サブアニメーションのパーツはパーツ一覧に無いので、名前も解決されません。
 
 ## キャラクター全体の tint とアルファ { #whole-character-tint-and-alpha }
 
@@ -230,7 +238,7 @@ Rust Face では、レイヤーを描くのは `encode_offscreen` です。こ�
 
     上の `hand_r` がまさに罠です。**ボーンにバインドされたメッシュパーツ**（手や顔などの変形パーツ）は、頂点がボーンのスキニングで描かれる一方、パーツ*自身*の変換はセットアップ時のノード位置（多くはキャラクターのルート付近）に留まります。そのため、こうしたパーツに対する `part_transform` は絵ではなくルート付近を返し、追従させた対象はルートに吸い寄せられます。
 
-    メッシュパーツの位置に追従させたいときは、SpriteStudio 側でその位置に **NULL パーツ**（ボーンポイント／空パーツ）を1つ置き、そのパーツに追従させてください。ボーン（armature）やジョイントパーツでも同様です
+    メッシュパーツの位置に追従させたいときは、SpriteStudio 側でその位置に **NULL パーツ**（ボーンポイント／空パーツ）を 1 つ置き、そのパーツに追従させてください。ボーン（armature）やジョイントパーツでも同様です
     — いずれも描画される頂点が実際に追う変換を持っています。
 
     どのパーツが該当するかを問い合わせれば、「追従先」ピッカーで注意表示や淡色化ができます。**リジッド**（変形のみ）メッシュは正常に追従でき `false` を返します（メッシュ以外のパーツも同様）。
@@ -258,15 +266,15 @@ Rust Face では、レイヤーを描くのは `encode_offscreen` です。こ�
 
 ## パーツに追従させる
 
-追従用のオブジェクトを取り付ける、という仕組みはありません。プレイヤはパーツの姿勢を**渡す**だけで、それを使って自分の対象を毎フレーム置くのは**あなた**です。これは意図的で、同じ読み取り値で DOM オーバーレイにも、別 canvas にも、自前の描画パスの矩形にも追従させられ、プレイヤはシーングラフではなくレンダラのままでいられます。ルールは2つ: **update の後**に読むこと、そして**自分の空間へ合成する**こと。
+追従用のオブジェクトを取り付ける、という仕組みはありません。プレイヤはパーツの姿勢を**渡す**だけで、それを使って自分の対象を毎フレーム置くのは**あなた**です。これは意図的で、同じ読み取り値で DOM オーバーレイにも、別 canvas にも、自前の描画パスの矩形にも追従させられ、プレイヤはシーングラフではなくレンダラのままでいられます。ルールは 2 つ: **update の後**に読むこと、そして**自分の空間へ合成する**こと。
 
-`part_transform` は**アニメーションローカル・Y-down** 空間の 6 要素アフィンです。画面に届かせるには、レンダラと同じ2つの変換 — プレイヤ自身の配置、次に投影 — を通します:
+`part_transform` は**アニメーションローカル・Y-down** 空間の 6 要素アフィンです。画面に届かせるには、レンダラと同じ 2 つの変換 — プレイヤ自身の配置、次に投影 — を通します:
 
 ```
 画面  ←  投影  ←  プレイヤの set_transform  ←  part_transform
 ```
 
-パーツのピボットは並進の対 `(tx, ty)` — 6 数字の最後の2つです。
+パーツのピボットは並進の対 `(tx, ty)` — 6 数字の最後の 2 つです。
 
 !!! note "姿勢に skew は含まれません"
     パーツの **skew**（SpriteStudio のせん断）はパーツ単位の頂点変形で、そのパーツ自身の描画ジオメトリに適用され、ノードのトランスフォームには乗りません。また子パーツにも継承されません。したがって
@@ -286,7 +294,10 @@ const dpr = window.devicePixelRatio || 1;
 const s = 0.6, ox = 0, oy = 120 * dpr;   // プレイヤの配置: setTransform(ox, oy, s, s, 0)
 player.setTransform(ox, oy, s, s, 0);
 
-function frame(dt) {
+let last = performance.now();
+function frame(now) {
+  const dt = Math.min((now - last) / 1000, 0.05);   // 秒。rAF が渡すのはミリ秒
+  last = now;
   surface.frame(dt);                     // まず update + draw
   const m = player.partTransform(PART);  // [m00, m01, m10, m11, tx, ty] — アニメーションローカル・Y-down
   if (m.length) {                       // 不明なパーツでは null ではなく空の配列
@@ -298,7 +309,10 @@ function frame(dt) {
   }
   requestAnimationFrame(frame);
 }
+requestAnimationFrame(frame);
 ```
+
+canvas のバッキングサイズが CSS サイズ × `devicePixelRatio`（`canvas.width = Math.round(canvas.clientWidth * dpr)`）であること、そして `marker` が canvas と同じ位置指定ボックスの中で `position: absolute` であることを前提にしています。
 
 `setTransform` を一度も呼ばなければ、プレイヤは中央・等倍なので `wx = m[4]`, `wy = m[5]` に単純化されます。
 
@@ -308,11 +322,11 @@ function frame(dt) {
 
 投影とビューポートは既にあなたが持っているので、surface 固有の処理はありません: 投影 × プレイヤのルート変換
 × パーツアフィン を掛け合わせ（`SSScene` がしているのと同じ）、その結果でマーカーのジオメトリを置きます。
-6 数字はどの面でも同じ `[m00, m01, m10, m11, tx, ty]` で、`ss_player_part_transform` はそれを `float[6]` に書き込みます。
+6 数字はどの Face でも同じ `[m00, m01, m10, m11, tx, ty]` で、`ss_player_part_transform` はそれを `float[6]` に書き込みます。
 
 ### Bevy
 
-未提供です。Bevy アダプタは配置・再生・イベントは露出しますが、パーツ単位の姿勢は出していないため、現状組み込みのパーツ追従経路はありません。
+Bevy では提供していません。Bevy アダプタは配置・再生・イベントは露出しますが、パーツ単位の姿勢も上のオーバーライドも出していないため、パーツ追従の経路はありません。
 
 ## 次に読む
 

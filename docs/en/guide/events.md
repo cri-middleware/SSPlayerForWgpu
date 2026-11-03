@@ -185,6 +185,10 @@ place when something else started playback — the Bevy adapter plays whatever a
 `SsPlayer`. A `play` on a culled character is reported by the first tick that runs once it is
 unculled, and one that `stop` or `set_animation` overtook before any tick ran is not reported.
 
+`<ss-player-webgpu>` runs the frame loop for you, so there you listen instead: the three edges arrive
+as the DOM events `animationstarted`, `animationfinished` and `animationlooped`, and the timeline
+events as `userdata`, `signal` and `audio` (see the [web component reference](../reference/web-component.md)).
+
 ## Next
 
 * [Part overrides](./part-overrides.md) — changing what a part draws, often in response to an event

@@ -11,7 +11,8 @@ change what *one part* draws; this replaces *a whole texture*.
 ## Naming what to replace
 
 You address a texture by **cell map name** — the SpriteStudio name, without the `.ssce` extension —
-or by a **TextureChange target**'s file name. Both are what a draw resolves through, and both are
+or by the file name of a **TextureChange target** — the texture an authored TextureChange key
+switches a part to (see the tip below). Both are what a draw resolves through, and both are
 enumerable so a UI can offer the choices rather than hard-coding them. Passing no pack selects the
 **main pack**.
 
@@ -41,14 +42,15 @@ enumerable so a UI can offer the choices rather than hard-coding them. Passing n
 === "Bevy"
 
     ```rust
-    // The names come from the pack; discover them through the Rust API on the
-    // render-world player, or read them off your source `.ssae` in the editor.
+    // Bevy has no call that lists them. Use the cell map names from your SpriteStudio
+    // project (no `.ssce`), and the image file name for a TextureChange target.
     ```
 
 ## Replacing and restoring
 
-A replacement is straight-alpha RGBA8, the same form a loaded atlas is; it is premultiplied on the
-way to the GPU for you. **Restoring** points the cell map back at its original atlas — which was
+On Rust and C a replacement is straight-alpha RGBA8, the same form a loaded atlas is; it is
+premultiplied on the way to the GPU for you. On JavaScript you pass encoded bytes the browser
+decodes, or a premultiplied `ImageBitmap`. **Restoring** points the cell map back at its original atlas — which was
 never touched, so nothing is reloaded.
 
 === "Rust"
@@ -121,8 +123,8 @@ never touched, so nothing is reloaded.
     ```
 
 The swap is a **per-character** costume: another character playing the same pack is unaffected, and
-an instance part's sub-animation (it plays from its own pack) does not inherit it — set it there too
-if you want it.
+an instance part's sub-animation (it plays from its own pack) does not inherit it — to replace it there
+too, pass that pack's name instead of `None` / `NULL` / `null` (Bevy reaches only the main pack).
 
 ## What to watch
 
@@ -150,6 +152,13 @@ if you want it.
 On Rust and C the replacement reaches the GPU on the **next update** — the borrow model lends the
 player no device before then — so the swap shows from the following frame. It survives selecting
 another animation, because it lives with the character, not with the current animation tree.
+
+!!! note "After a device loss"
+
+    On the Rust (`set_cellmap_texture`) and C paths the player keeps the pixels, so the replacement
+    comes back by itself. A texture you registered yourself — a `TextureView` on the Rust face, an
+    `ImageBitmap` or bytes on JavaScript — is not kept: apply the replacement again once the device is
+    restored. `<ss-player-webgpu>` restores the device but does not re-apply it.
 
 ## Next
 

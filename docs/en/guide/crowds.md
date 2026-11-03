@@ -1,9 +1,10 @@
 # Crowds
 
 A crowd is one character drawn at many placements: one playhead, one evaluation of the animation,
-one upload of its geometry and one character's draw calls, however many members it has. Its CPU
-cost stays where one character's is as the crowd grows, where the same number of characters costs
-that many updates. The GPU still draws every member's pixels.
+one upload of its geometry and one character's draw calls, however many members it has. Each member
+adds only a placement record per node of the instance tree (counted in `uploaded_bytes`) and the
+GPU work of its pixels, so the CPU cost stays close to one character's, where the same number of
+characters costs that many updates.
 
 === "Rust"
 
@@ -67,8 +68,10 @@ member draws exactly what no crowd does. A crowd holds up to 4096 members (`MAX_
 `SS_MAX_CROWD_MEMBERS`): the Rust face and Bevy leave the rest out, the C face refuses a longer list
 with `SS_ERROR_INVALID_ARGUMENT`, and JavaScript throws.
 
-The members are copied in. Set them again every frame to move them; on the Rust face and Bevy,
-doing so allocates nothing unless the crowd grows.
+The members are copied in. Set them again every frame to move them. On the Rust face and Bevy an
+unchanged crowd costs nothing and nothing is allocated unless the crowd grows; on the C and
+JavaScript faces every call rebuilds the frame, so set a crowd that has not moved only when it
+changes.
 
 ## What members share
 
