@@ -63,12 +63,15 @@ git switch main && git pull --ff-only && git submodule update --init &&
 
 A dry run builds every platform with the version applied and checks the result, and commits, tags, releases and stages nothing. It signs and notarizes the macOS library as the release will, so a secret that has expired fails here first; without the secrets it leaves the library ad-hoc signed and says so in a warning. Its zips, tarball and preview shell stay on the run (`ssplayer-wgpu-release-dist`); the block downloads them into `qa/<run ID>`, and fails when the run did.
 
+The block's last command looks for that warning and must print nothing, because the release in step 5 requires the signature and stops instead. If it prints anything, no change on `main` fixes it: the organization's signing secrets are not reaching this repository. An organization owner decides which repositories they reach, and on GitHub Free they cannot reach a private one. Run the block again once they do.
+
 ```bash
 VERSION=<version>                                 # the version from step 1
 RUN=$(gh workflow run release.yml --ref main -f versions="ssplayer-wgpu@${VERSION:?}" -f dry_run=true | sed 's|.*/||')
 gh run watch "${RUN:?}" --exit-status
 gh run download "${RUN:?}" -n ssplayer-wgpu-release-dist -D "qa/$RUN"
-gh run view "${RUN:?}" --exit-status > /dev/null  # the block fails when the run did
+gh run view "${RUN:?}" --exit-status > /dev/null &&  # the block fails when the run did
+  ! gh run view "${RUN:?}" --log | grep 'Not set:' | grep -v 'echo '   # must print nothing
 ```
 
 Scan `main` too, for code that carries someone else's copyright or license. `provenance.yml` runs ScanCode, which finds copyright and license notices, and keeps its report and a summary on the run (`provenance`); the block downloads them into `qa/<run ID>` and prints the summary. **A person sorts what the summary lists.** A notice of the earlier SpriteStudio Players and SDK marks our own code. A notice of a library this repository bundles must be listed in `THIRD_PARTY_NOTICES.md`. Anything else is rewritten, unless its license, read at its source, is compatible with BSD-3-Clause and the code keeps the notice that license asks for. Make any fix by a pull request into `main` before step 5, and run the block again.
@@ -308,12 +311,15 @@ git switch main && git pull --ff-only && git submodule update --init &&
 
 dry run は、バージョンを適用して全プラットフォームをビルドし、結果を検査します。コミットもタグも Release も作らず、npm への stage もしません。macOS のライブラリはリリースと同じように署名・公証するので、期限の切れた secret はここで先に失敗します。secret が無ければ、ライブラリを ad-hoc 署名のまま残し、警告でそう伝えます。zip と tarball、プレビューのシェルは run に残ります（`ssplayer-wgpu-release-dist`）。ブロックはそれを `qa/<run ID>` にダウンロードし、run が失敗していればブロックも失敗します。
 
+ブロックの最後のコマンドはその警告を探すもので、何も出力されてはいけません。手順 5 のリリースは署名を必須にしていて、そこで止まることになるためです。何か出力されたら、`main` をどう変えても直りません。組織の署名用の secret がこのリポジトリに届いていません。どのリポジトリに届けるかは組織のオーナーが決めますが、GitHub Free では private のリポジトリには届けられません。届くようになったら、このブロックをもう一度実行します。
+
 ```bash
 VERSION=<version>                                 # 手順 1 で決めたバージョン
 RUN=$(gh workflow run release.yml --ref main -f versions="ssplayer-wgpu@${VERSION:?}" -f dry_run=true | sed 's|.*/||')
 gh run watch "${RUN:?}" --exit-status
 gh run download "${RUN:?}" -n ssplayer-wgpu-release-dist -D "qa/$RUN"
-gh run view "${RUN:?}" --exit-status > /dev/null  # run が失敗していればブロックも失敗する
+gh run view "${RUN:?}" --exit-status > /dev/null &&  # run が失敗していればブロックも失敗する
+  ! gh run view "${RUN:?}" --log | grep 'Not set:' | grep -v 'echo '   # 何も出力されないこと
 ```
 
 `main` で、他者の著作権やライセンスの付いたコードが無いかも検査します。`provenance.yml` は ScanCode で著作権表示とライセンスの記述を見つけ、報告と一覧を run に残します（`provenance`）。ブロックはそれを `qa/<run ID>` にダウンロードし、一覧を表示します。**一覧は人が仕分けます。** 以前の SpriteStudio の Player・SDK の表示が付いたコードは、自社のコードです。このリポジトリが同梱するライブラリの表示は、`THIRD_PARTY_NOTICES.md` に載っていなければなりません。それ以外は書き直します。残せるのは、出所で確かめたライセンスが BSD-3-Clause と両立し、そのライセンスが求める表示をコードに残すときだけです。直すときは、手順 5 の前にプルリクエストで `main` を直し、このブロックをもう一度実行します。
