@@ -508,7 +508,7 @@ impl SsContextWeb {
         Ok(SsSurfaceWeb { ctx: Rc::clone(&self.inner), id })
     }
 
-    /// Supply a texture by hash from **raw straight-alpha RGBA**.
+    /// Supply a texture under a `textureRefs` entry's `key`, from **raw straight-alpha RGBA**.
     ///
     /// Device-scoped, so it covers every canvas and every player at once — which
     /// is exactly why it is here and not on a surface or a player.
@@ -521,7 +521,7 @@ impl SsContextWeb {
     /// Throws, uploading nothing, when `rgba` is not `width * height * 4` bytes or
     /// the device cannot hold the texture (past its `max_texture_dimension_2d`).
     #[wasm_bindgen(js_name = addTexture)]
-    pub fn add_texture(&self, hash: u32, rgba: &[u8], width: u32, height: u32) -> Result<(), JsValue> {
+    pub fn add_texture(&self, key: u32, rgba: &[u8], width: u32, height: u32) -> Result<(), JsValue> {
         let ctx = &mut *self.inner.borrow_mut();
         let WebContext { renderer, device, queue, encoded_textures, .. } = ctx;
         if let Some(why) = texture_extent_error(device, (width, height)) {
@@ -531,14 +531,14 @@ impl SsContextWeb {
         if rgba.len() != (width as usize) * (height as usize) * 4 {
             return Err(JsValue::from_str(&format!("{} bytes do not fill a {width}x{height} RGBA8 texture", rgba.len())));
         }
-        // One hash, one supplier: whichever path registered it last owns the
+        // One key, one supplier: whichever path registered it last owns the
         // recovery too, so the other's retained source must go.
-        encoded_textures.remove(&hash);
-        renderer.upload_texture(device, queue, hash, rgba, (width, height), Retention::Retain);
+        encoded_textures.remove(&key);
+        renderer.upload_texture(device, queue, key, rgba, (width, height), Retention::Retain);
         Ok(())
     }
 
-    /// Supply a texture by hash from **encoded image bytes** (PNG) — the main
+    /// Supply a texture under its `key` from **encoded image bytes** (PNG) — the main
     /// texture path of this face.
     ///
     /// Both `.ssab` forms end here. An embedded pack's atlases come from
@@ -552,11 +552,11 @@ impl SsContextWeb {
     /// The bytes are kept (they are the encoded image, not the pixels) so
     /// [`SsContextWeb::restore_device`] can rebuild this texture on its own.
     #[wasm_bindgen(js_name = addTextureFromBytes)]
-    pub async fn add_texture_from_bytes(&self, hash: u32, bytes: Vec<u8>) -> Result<(), JsValue> {
-        upload_encoded(&self.inner, hash, Rc::from(bytes)).await
+    pub async fn add_texture_from_bytes(&self, key: u32, bytes: Vec<u8>) -> Result<(), JsValue> {
+        upload_encoded(&self.inner, key, Rc::from(bytes)).await
     }
 
-    /// Supply a texture by hash from an `ImageBitmap` the **page** decoded.
+    /// Supply a texture under its `key` from an `ImageBitmap` the **page** decoded.
     ///
     /// For a host with its own asset pipeline — the analogue of
     /// [`crate::SSRenderer::set_texture`] and of the WebGL player's
@@ -572,14 +572,14 @@ impl SsContextWeb {
     /// Throws, registering nothing, for a bitmap the device cannot hold — past
     /// its `max_texture_dimension_2d`, or closed.
     #[wasm_bindgen(js_name = addTextureFromBitmap)]
-    pub fn add_texture_from_bitmap(&self, hash: u32, bitmap: &web_sys::ImageBitmap) -> Result<(), JsValue> {
+    pub fn add_texture_from_bitmap(&self, key: u32, bitmap: &web_sys::ImageBitmap) -> Result<(), JsValue> {
         let ctx = &mut *self.inner.borrow_mut();
-        ctx.set_texture_from_bitmap(hash, bitmap)?;
-        ctx.encoded_textures.remove(&hash);
+        ctx.set_texture_from_bitmap(key, bitmap)?;
+        ctx.encoded_textures.remove(&key);
         Ok(())
     }
 
-    /// Whether an atlas is already registered for `hash`.
+    /// Whether an atlas is already registered for `key`.
     ///
     /// The texture map is device-scoped, so this answers for the
     /// whole page: it is how a caller keeps "N players of one pack decode its
@@ -587,8 +587,8 @@ impl SsContextWeb {
     /// player-side flush gets that for free (it filters before the decode); a
     /// page supplying textures itself has to ask.
     #[wasm_bindgen(js_name = hasTexture)]
-    pub fn has_texture(&self, hash: u32) -> bool {
-        self.inner.borrow().renderer.texture_size(hash).is_some()
+    pub fn has_texture(&self, key: u32) -> bool {
+        self.inner.borrow().renderer.texture_size(key).is_some()
     }
 
     /// Whether the browser has taken the WebGPU device away. While
@@ -1105,7 +1105,7 @@ impl SsPlayerWeb {
 impl SsPlayerWeb {
     /// Register + select a `.ssab`, **and load the textures it needs**.
     ///
-    /// The shape of `SS6PlayerForGodot`'s `setSSABResource`, which loads the
+    /// The shape of SpriteStudio Player for Godot's `setSSABResource`, which loads the
     /// pack's textures before returning and leaves `setAnimation` a pure
     /// selection. Texture loading belongs to initialisation, not to animation
     /// selection: switching
@@ -1261,7 +1261,7 @@ impl SsPlayerWeb {
     ///
     /// `key` is what the renderer is keyed by, not the slot the pack names the
     /// atlas by. The two differ whenever two packs could name one atlas alike,
-    /// which Adobe Animate's `spritemap1.png` does for every project it exports —
+    /// which a tool naming every project's atlas `spritemap1.png` does —
     /// registering by the slot is how a page ends up drawing another project's
     /// atlas, which is why the slot is not handed out here.
     #[wasm_bindgen(js_name = textureRefs)]

@@ -64,7 +64,7 @@ pub struct EmbeddedTexture {
     /// A slot **inside this pack**, not an identity for the image: hand it to
     /// [`crate::SSPlayer::texture_key`] for what [`crate::SSRenderer`] is keyed
     /// by. The two differ whenever two packs could name one atlas alike, which
-    /// every Adobe Animate export does with `spritemap1.png`.
+    /// a tool that names every project's atlas `spritemap1.png` does.
     pub slot: u32,
     /// Straight-alpha RGBA8, `width * height * 4` bytes.
     pub rgba: Vec<u8>,
@@ -91,7 +91,7 @@ pub struct EmbeddedImage<'a> {
     /// A slot **inside this pack**, not an identity for the image: hand it to
     /// [`crate::SSPlayer::texture_key`] for what [`crate::SSRenderer`] is keyed
     /// by. The two differ whenever two packs could name one atlas alike, which
-    /// every Adobe Animate export does with `spritemap1.png`.
+    /// a tool that names every project's atlas `spritemap1.png` does.
     pub slot: u32,
     /// The encoded image exactly as the exporter embedded it.
     pub bytes: &'a [u8],
@@ -114,7 +114,7 @@ pub struct TextureRef {
     /// [`SSPack::textures`]).
     ///
     /// A slot **inside this pack**, not an identity for the image — two packs
-    /// from two Adobe Animate projects both name theirs `spritemap1`. Hand it to
+    /// from two projects one tool exported can both name theirs `spritemap1`. Hand it to
     /// [`crate::SSPlayer::texture_key`] for what [`crate::SSRenderer`] is keyed
     /// by, which is what a host supplying its own pixels registers under.
     pub slot: u32,

@@ -283,8 +283,8 @@ typedef struct {
      The key `ss_scene_add_texture` / `ss_scene_add_texture_png` expects for
      this image.
 
-     An identity for the **image**, not for the cellmap that names it: Adobe
-     Animate writes `spritemap1.png` for every project it exports, so two packs
+     An identity for the **image**, not for the cellmap that names it: some
+     tools name the atlas `spritemap1.png` in every project they export, so two packs
      name their atlas alike, and a key that was only the cellmap's hash left the
      second drawing the first one's atlas. Two packs that really do share a file
      still share this, and so still share one upload.
@@ -714,8 +714,9 @@ int32_t ss_player_add_ssab(ss_player_t *handle, const char *pack_name, const uin
 int32_t ss_player_load_ssab(ss_player_t *handle, const char *pack_name, const uint8_t *data, size_t len);
 
 /*
- Supply a texture for a reference-mode pack, keyed by the fnv1a hash the
- runtime reports in `DrawBatch.texture_hash`. `rgba` is
+ Supply a texture for a reference-mode pack under `ss_texture_ref_t.key` — what
+ `ss_player_texture_at` reports for the atlas. It identifies the image, not the
+ cell map hash in `DrawBatch.texture_hash`. `rgba` is
  straight-alpha RGBA8, `width * height * 4` bytes; it is premultiplied on the
  way to the GPU.
 
@@ -732,7 +733,7 @@ int32_t ss_player_load_ssab(ss_player_t *handle, const char *pack_name, const ui
  `rgba` must point at `width * height * 4` readable bytes. It is not retained.
  */
 int32_t ss_scene_add_texture(ss_scene_t *scene,
-                             uint32_t hash,
+                             uint32_t key,
                              const uint8_t *rgba,
                              uint32_t width,
                              uint32_t height);
@@ -752,7 +753,7 @@ int32_t ss_scene_add_texture(ss_scene_t *scene,
  # Safety
  `data` must point at `len` readable bytes. It is not retained.
  */
-int32_t ss_scene_add_texture_png(ss_scene_t *scene, uint32_t hash, const uint8_t *data, size_t len);
+int32_t ss_scene_add_texture_png(ss_scene_t *scene, uint32_t key, const uint8_t *data, size_t len);
 
 /*
  How many atlases a registered pack asks for. `pack_name` null
