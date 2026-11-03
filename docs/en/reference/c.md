@@ -14,10 +14,12 @@ no dependencies.
 
 | | |
 |---|---|
-| Return values | Functions that can fail return `int32_t`: `SS_OK` (0), `SS_ERROR_INVALID_ARGUMENT` (-1), `SS_ERROR_GPU` (-2) |
+| Buffers you pass in | Read during the call and not retained: `data`, `rgba`, `members`, `corners` and strings may be freed or reused when it returns |
+| Threads | On macOS, `ss_scene_create` and the `NSView` / `CAMetalLayer` it is given belong to the main thread |
+| Return values | Functions that can fail return `int32_t`: `SS_OK` (0), `SS_ERROR_INVALID_ARGUMENT` (-1), `SS_ERROR_GPU` (-2), or, when the runtime refuses a request (an unreadable `.ssab`, an unknown animation or part, a bad section), its own positive code (1–7 or 99). Test against `SS_OK`, not a specific code |
 | Error text | `ss_last_error()` — the last failure on the calling thread. For logging, not for branching |
 | Versions | `ss_version()` — this library's version. `ss_sdk_version()` — the SpriteStudio-SDK version it links, written as its release tag (`v7.0.0`), or `local` for a build without `scripts/build.sh`. Both static; never free them |
-| Null handles | Every function tolerates a null handle and answers `SS_ERROR_INVALID_ARGUMENT`, or for a getter what a player with no animation reads back, rather than crashing. That is zero for most getters, but `1.0` for the speed scale and alpha, true for `ss_player_is_playing_forward`, `ss_player_sub_frame_enabled`, `ss_player_frame_skip_enabled` and `ss_player_is_visible`, and `-1` for the part lookups (`ss_player_find_part_index`, `ss_player_is_part_hidden`, `ss_player_is_part_skinned_mesh` and their `_by_index` forms) |
+| Null handles | Every function tolerates a null handle and answers `SS_ERROR_INVALID_ARGUMENT`, or for a getter what a player with no animation reads back, rather than crashing. That is zero for most getters, but `1.0` for the speed scale and alpha, true for `ss_player_is_playing_forward`, `ss_player_sub_frame_enabled`, `ss_player_frame_skip_enabled` and `ss_player_is_visible`, `0xFFFFFF` for `ss_player_tint`, and `-1` for the part lookups (`ss_player_find_part_index`, `ss_player_is_part_hidden`, `ss_player_is_part_skinned_mesh` and their `_by_index` forms) |
 | Strings | `const char *` in, UTF-8. Strings *out* are owned by the scene and valid until the next call of the same kind — copy what you keep. One pair shares a buffer: `ss_player_animation_name` and `ss_player_cellmap_texture_name` each invalidate what the other returned |
 | Sizes | Always **drawable pixels**, never points. Scale by the display factor yourself |
 
@@ -52,7 +54,7 @@ whichever character took its slot.
 | `ss_player_load(player, path)` | The one call: pack, atlases, sibling packs |
 | `ss_player_load_ssab(player, name, data, len)` | Register bytes and select that pack |
 | `ss_player_add_ssab(player, name, data, len)` | Register bytes only, for instance parts to find |
-| `ss_player_missing_count(player)` / `ss_player_missing_at(player, i, out)` | What did not arrive. **Not an error** |
+| `ss_player_missing_count(player)` / `ss_player_missing_at(player, i, out)` | What did not arrive. **Not an error**. `kind` is `SS_MISSING_TEXTURE` (0, an atlas: its parts draw as silhouettes) or `SS_MISSING_PACK` (1, a sibling pack: its instance parts do not appear); `name` is the path or pack name |
 | `ss_player_texture_count(player, pack)` / `ss_player_texture_at(player, pack, i, out)` | What atlases a pack asks for, and where the exporter put them |
 | `ss_scene_add_texture(scene, key, rgba, w, h)` | Supply an atlas as straight-alpha RGBA8, under `ss_texture_ref_t.key` |
 | `ss_scene_add_texture_png(scene, key, data, len)` | ... or as encoded PNG bytes, decoded by the library |
@@ -124,7 +126,7 @@ parameter's `value_type` is one of `SS_SIGNAL_VALUE_NONE` / `_BOOL` / `_INDEX` /
 
 | | |
 |---|---|
-| `ss_player_set_transform(player, x, y, sx, sy, rotation)` | Position, scale, rotation |
+| `ss_player_set_transform(player, x, y, sx, sy, rotation)` | Position in pixels from the view centre (`y` measured **downward**), scale, rotation in radians |
 | `ss_player_reset_transform(player)` | Back to the identity: centred, unscaled, unrotated |
 | `ss_player_fit_into(player, width, height, &placement, &placed)` | Fit the animation into a box and write the transform; `placed` may be null |
 | `ss_placement_default(&placement)` | Fill an `SsPlacement` before changing it — **a zeroed one has scale 0** |
@@ -202,7 +204,7 @@ Commands return a status. A read of a track or source that does not exist answer
 
 ## Not on this face
 
-Drawing into a render pass you own is Rust-only — this face builds and owns its device. See [Scopes and names](../guide/concepts.md#what-each-face-can-do)
+Drawing into a render pass you own is not offered on this face: it builds and owns its device. Only the Rust face, and the Bevy adapter built on it, draw into a pass they are lent. See [Scopes and names](../guide/concepts.md#what-each-face-can-do)
 for the full matrix, and
 [Limitations](../limitations.md#no-device-sharing-across-the-c-abi) for why device sharing is not
 offered here.

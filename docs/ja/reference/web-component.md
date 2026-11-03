@@ -11,7 +11,8 @@
 import { defineSsPlayerWebGPUElement } from '@spritestudio/ssplayer-wgpu/element';
 
 defineSsPlayerWebGPUElement();                    // <ss-player-webgpu>
-defineSsPlayerWebGPUElement('my-ss-player');      // ... 独自の名前で
+// ... または、代わりに独自の名前で（1 つのクラスは 1 つの名前でしか登録できません）：
+// defineSsPlayerWebGPUElement('my-ss-player');
 ```
 
 登録は **import の副作用ではなく opt-in** なので、[JavaScript API](./js.md) だけを使うバンドルに要素は含まれません。呼び出しは冪等で、`tag` 引数は、既定名で別の SpriteStudio Player が登録済みのページのためにあります。

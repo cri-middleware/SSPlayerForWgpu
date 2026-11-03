@@ -9,8 +9,10 @@ below. This page is the map.
 
 ```js
 import { sharedContext, restoreSharedDevice, setWasmUrl } from '@spritestudio/ssplayer-wgpu';
-import { defineSsPlayerWebGPUElement } from '@spritestudio/ssplayer-wgpu/element';
+import { SsPlayerWebGPUElement, defineSsPlayerWebGPUElement } from '@spritestudio/ssplayer-wgpu/element';
 ```
+
+`read` is an `SsAssetReader`: `(url: string) => SsAssetBytes | Promise<SsAssetBytes>`, with `SsAssetBytes` = `ArrayBuffer | Uint8Array | Blob | null | undefined`. Both types, and `SsPlayerWebGPUElement` (the element's class), are exported. `SsContextWeb.create()` builds a context of its own, i.e. a second device; call `sharedContext()` instead.
 
 The element lives behind its own entry point, so a bundle that only wants the API never carries it.
 
@@ -28,9 +30,9 @@ The element lives behind its own entry point, so a bundle that only wants the AP
 | | |
 |---|---|
 | `createSurface(canvas)` | One per `<canvas>` |
-| `addTexture(key, rgba, width, height)` | Supply an atlas as raw RGBA8, under a `textureRefs` entry's `key` |
+| `addTexture(key, rgba, width, height)` | Supply an atlas as raw **straight-alpha** RGBA8, under a `textureRefs` entry's `key` |
 | `addTextureFromBytes(key, bytes): Promise` | ... from encoded bytes, decoded by the browser |
-| `addTextureFromBitmap(key, imageBitmap)` | ... from an `ImageBitmap` you already have |
+| `addTextureFromBitmap(key, imageBitmap)` | ... from an `ImageBitmap` you already have. It must be **premultiplied** (`createImageBitmap(blob, { premultiplyAlpha: 'premultiply' })`) |
 | `hasTexture(key)` | Whether the cache already holds one |
 | `isDeviceLost()` / `restoreDevice()` | See [Device loss](../guide/device-loss.md) |
 | `surfaceCount()` | Diagnostic |
@@ -40,6 +42,8 @@ The element lives behind its own entry point, so a bundle that only wants the AP
 device cannot hold the texture: wider or taller than its `max_texture_dimension_2d`, a closed
 `ImageBitmap`, or — for `addTexture` — `rgba` that is not `width * height * 4` bytes. The `FromBytes`
 forms reject for the same reasons.
+
+Textures supplied from an `ImageBitmap` (`addTextureFromBitmap`, `setCellmapTexture`, `setCellmapTextureFromBytes`) are not kept across a device loss: supply or apply them again after `restoreSharedDevice`. `addTexture`, `addTextureFromBytes` and a pack's own atlases are rebuilt for you.
 
 ## `SsSurfaceWeb` — one canvas
 
@@ -51,24 +55,24 @@ forms reject for the same reasons.
 | `setGroupAlpha(on)` / `groupAlpha()` | Fade each faded player as one layer. See [Whole-character tint and alpha](../guide/part-overrides.md#whole-character-tint-and-alpha) |
 | `stats()` | `{ players, prims, drawCalls, uploadedBytes, mergeableDraws, redundantTextureBinds, groupLayers, gpuPassTimeNs? }` |
 | `playerCount()` | Diagnostic |
-| `destroy()` | Explicit and idempotent — dropping the JS reference would leave a swapchain behind |
+| `destroy()` | Explicit and idempotent. It releases the swapchain **and every player on the canvas**; dropping the JS reference would leave a swapchain behind |
 
 ## `SsPlayerWeb` — one character
 
-**Loading** — the `load` family is the only asynchronous part of the API, and a player takes **one
-load at a time**: starting a second before the first settles is rejected, so `await` it or chain
+**Loading** — apart from `setCellmapTextureFromBytes`, the `load` family is the only asynchronous part of a player,
+and a player takes **one load at a time**: starting a second before the first settles is rejected, so `await` it or chain
 the calls.
 
 | | |
 |---|---|
 | `load(src, read?): Promise` | Pack, atlases, sibling packs — from a URL. `read(url)` answers in place of `fetch`; see [In a browser](../guide/loading.md#in-a-browser) |
-| `loadSsab(bytes, pack?, baseUrl?, read?): Promise` | Register bytes and select that pack |
-| `addSsab(bytes, pack?, baseUrl?, read?): Promise` | Register bytes only |
-| `missingAssets()` | What did not arrive. **Not a rejection** |
-| `textureRefs(pack?)` / `embeddedTextures(pack?)` | What atlases a pack asks for |
+| `loadSsab(bytes, pack?, baseUrl?, read?): Promise` | Register bytes, select that pack, and load its atlases and sibling packs (resolved against `baseUrl`) |
+| `addSsab(bytes, pack?, baseUrl?, read?): Promise` | The same without selecting it, for instance parts to find |
+| `missingAssets()` | What did not arrive, as `{ kind: 'texture' \| 'pack', name, slot }[]`. **Not a rejection** |
+| `textureRefs(pack?)` / `embeddedTextures(pack?)` | What atlases a pack asks for: `{ key, path, embedded }[]` (`path` relative to the `.ssab`'s URL) / `{ key, bytes }[]` |
 | `animationNames()` / `partNames()` / `cellmapNames()` / `cellNames(cellmap)` | What the pack offers |
 | `currentAnimation()` | The one set up, or `undefined` |
-| `canvasSize()` | The authored canvas |
+| `canvasSize()` | The authored canvas, `[width, height]`, or an empty array before an animation is set |
 
 **Transport** — see [Playback and transport](../guide/playback.md).
 
@@ -93,7 +97,7 @@ the calls.
 
 | | |
 |---|---|
-| `setTransform(x, y, scaleX, scaleY, rotation)` / `resetTransform()` | |
+| `setTransform(x, y, scaleX, scaleY, rotation)` / `resetTransform()` | Position in pixels from the canvas centre (`y` measured downward), scale, rotation in radians. Without a call the character sits centred and unscaled |
 | `fitInto(width, height, options?)` | Fit the animation into a box and write the transform. Returns `{ x, y, scaleX, scaleY }`; an unknown `fit` or `align` throws. See [Fitting into a box](../guide/placement.md) |
 | `canvasRect()` | The box `fitInto` fits when no `frame` is given: `{ x, y, width, height }`, or `undefined` before `setAnimation` |
 | `setOrder(n)` / `order()` | Draw order within the canvas, ascending |
@@ -153,7 +157,7 @@ The track stack: tracks fold onto the setup pose in ascending order, track 0 bei
 | `addTrackSource(track, name, weight)` | Lay another animation beside it, mixed by weight; returns its handle |
 | `setSourceWeight` / `setSourceFrame` / `setSourceEventThreshold`, and the reads without `set` | One source's weight, playhead and event threshold |
 
-A read of a track or source that does not exist answers `undefined`; a command on one throws.
+A read of a track or source that does not exist answers `undefined` (`isTrackFinished` and `trackJustLooped` answer `false`); a command on one throws.
 
 ## `<ss-player-webgpu>` { #ss-player-webgpu }
 
