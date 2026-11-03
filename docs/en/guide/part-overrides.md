@@ -34,8 +34,9 @@ form skips a lookup.
     ```
 
 Resolve the index **once**, when you set the animation, and keep it: names are matched by hash but
-the lookup still walks the part list. `part_names()` / `ss_player_part_count` + the name accessors /
-`partNames()` enumerate what a pack has.
+the lookup still walks the part list. `part_names()` / `ss_player_part_name` (walk it from 0 until it
+returns null; `ss_player_part_count` reads 0 until the first update) / `partNames()` enumerate what
+a pack has.
 
 ## Visibility
 
@@ -97,7 +98,7 @@ one colour for the whole part, or one per corner for a gradient.
     // 0xRRGGBBAA
     player.set_part_color_override("body", 0xff0000_80, BlendOp::Mix, OverridePriority::Permanent)?;
 
-    // Four corners, each [r, g, b, a]
+    // Four corners, [r, g, b, a] each, in the order left-top, right-top, left-bottom, right-bottom
     player.set_part_color_override_corners("cape", corners, BlendOp::Mix, OverridePriority::Permanent)?;
 
     player.clear_part_color_override("body")?;
@@ -109,6 +110,8 @@ one colour for the whole part, or one per corner for a gradient.
     ```c
     /* rgba, blend_op (0 = mix), priority (2 = permanent) */
     ss_player_set_part_color_override(player, "body", 0xff000080u, 0, 2);
+    /* corners: 16 bytes, 4 x [r, g, b, a], left-top, right-top, left-bottom, right-bottom */
+    ss_player_set_part_color_override_corners(player, "cape", corners, 0, 2);
     ss_player_clear_part_color_override(player, "body");
     ss_player_clear_all_part_overrides(player);
     ```
@@ -117,6 +120,7 @@ one colour for the whole part, or one per corner for a gradient.
 
     ```js
     player.setPartColorOverride('body', 0xff000080, 0 /* mix */, 2 /* permanent */);
+    player.setPartColorOverrideCorners('cape', corners /* Uint8Array(16) */, 0, 2);
     player.clearPartColorOverride('body');
     player.clearAllPartOverrides();
     ```
@@ -135,13 +139,23 @@ about how long the override lives**, which is the part most people get wrong on 
 
 | Priority | Rust | Wire | Lives until |
 |---|---|---|---|
-| Until the next keyframe | `OverridePriority::OverwriteOnNextKeyframe` | `0` | the animation next drives that attribute — so it shows only on frames the animation leaves alone |
-| Until the next animation | `OverridePriority::HoldUntilNextAnimation` (default) | `1` | another animation is set up |
-| Permanent | `OverridePriority::Permanent` | `2` | the pack changes — it survives animation switches |
+| Until the next keyframe | `OverridePriority::OverwriteOnNextKeyframe` | `0` | the animation's next key on that attribute, which drops the override for good (a loop does not bring it back); with no such key it lasts for the animation |
+| Until the next animation | `OverridePriority::HoldUntilNextAnimation` (default) | `1` | `set_animation` selects another animation (a track-0 crossfade does not clear it) |
+| Permanent | `OverridePriority::Permanent` | `2` | the pack changes — it survives `set_animation` and crossfades |
 
 Pick `Permanent` for a costume choice, `HoldUntilNextAnimation` for a state that ends with the
 motion, `OverwriteOnNextKeyframe` for a nudge that should yield the moment the animator says
 something.
+
+Overrides need an animation: call them after `set_animation`, never before. `set_animation` clears
+every visibility override, and every colour and cell override except `Permanent`.
+
+!!! note "Which parts an override reaches"
+
+    Colour: Normal parts only. Cell: Normal and Mask parts. Visibility: any part. A colour or cell
+    override on any other kind of part (null, mesh, instance, …) returns success and changes nothing.
+    None of them reach into an instance part's sub-animation: its parts are not in the part list, so
+    their names do not resolve.
 
 ## Whole-character tint and alpha
 
@@ -328,7 +342,10 @@ const dpr = window.devicePixelRatio || 1;
 const s = 0.6, ox = 0, oy = 120 * dpr;   // the player's own placement: setTransform(ox, oy, s, s, 0)
 player.setTransform(ox, oy, s, s, 0);
 
-function frame(dt) {
+let last = performance.now();
+function frame(now) {
+  const dt = Math.min((now - last) / 1000, 0.05);   // seconds; rAF hands you milliseconds
+  last = now;
   surface.frame(dt);                     // update + draw first
   const m = player.partTransform(PART);  // [m00, m01, m10, m11, tx, ty] — animation-local, Y-down
   if (m.length) {                       // empty, never null, for an unknown part
@@ -340,7 +357,12 @@ function frame(dt) {
   }
   requestAnimationFrame(frame);
 }
+requestAnimationFrame(frame);
 ```
+
+This assumes the canvas's backing size is its CSS size times `devicePixelRatio`
+(`canvas.width = Math.round(canvas.clientWidth * dpr)`), and that `marker` is `position: absolute`
+in the same positioned box as the canvas.
 
 If you never call `setTransform`, the player is centred and unscaled, so it collapses to
 `wx = m[4]`, `wy = m[5]`.
@@ -357,8 +379,8 @@ on every face; `ss_player_part_transform` writes them into a `float[6]`.
 
 ### Bevy
 
-Not yet exposed. The Bevy adapter surfaces placement, playback and events, but not per-part poses, so
-there is no built-in part-follow path there today.
+Not exposed on Bevy. The adapter surfaces placement, playback and events, but neither per-part poses
+nor the overrides above, so there is no part-follow path there.
 
 ## Next
 

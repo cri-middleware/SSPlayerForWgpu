@@ -23,12 +23,19 @@ exist on the new device before anything can hand it a texture.
 Playback state — the current frame, the loop count, transport — is CPU-side and never went
 anywhere. Nothing rewinds.
 
+A texture you registered with `SSRenderer::set_texture` (Rust) or `addTextureFromBitmap`
+(JavaScript) is yours to repair: nothing keeps its pixels, so register it again once the renderer
+is restored. Textures from `upload_texture` with `Retention::Retain`, `addTexture`,
+`addTextureFromBytes`, `ss_scene_add_texture*` and everything `load` fetched come back on their
+own, and embedded atlases are decoded again from the `.ssab` in step 3.
+
 ## Per face
 
 === "Rust"
 
     ```rust
-    // On a new device, in this order:
+    // wgpu reports the loss through Device::set_device_lost_callback. Request a new
+    // adapter and device, then, in this order:
     renderer.restore_device(&device, &queue);
     scene.restore_device(&device, &queue);
     for player in &mut players {
@@ -71,8 +78,24 @@ anywhere. Nothing rewinds.
     Recovery rides Bevy's own: on a new device Bevy re-runs `RenderStartup`, which rebuilds the
     renderer, and the characters reload from the main world on the next frame.
 
-    **You must opt in.** Bevy's default error handler *quits* on device loss, so install a
-    `RenderErrorHandler` that returns `RenderErrorPolicy::Recover` for it.
+    **You must opt in.** Bevy's default error handler *quits* on device loss. Install a
+    `RenderErrorHandler` that answers a `DeviceLost` error with
+    `RenderErrorPolicy::Recover(RenderCreation::default())`:
+
+    ```rust
+    use bevy::render::{
+        error_handler::{ErrorType, RenderErrorHandler, RenderErrorPolicy},
+        settings::RenderCreation,
+    };
+
+    app.insert_resource(RenderErrorHandler(|error, main_world, render_world| {
+        if matches!(error.ty, ErrorType::DeviceLost) {
+            RenderErrorPolicy::Recover(RenderCreation::default())
+        } else {
+            (RenderErrorHandler::default().0)(error, main_world, render_world) // Bevy's own: log and quit
+        }
+    }));
+    ```
 
 ## What is not recoverable
 
@@ -84,12 +107,12 @@ format, and the scene rebuilds its pipelines on the frame that happens — mask 
 
 ## Testing it
 
-There is no portable "lose the device now" call. In a browser, `device.destroy()` from the console
-is the closest thing; on a desktop, a driver reset or switching the discrete/integrated GPU while
-running does it. Try it once before shipping: unhandled, this shows up as a frozen or blank window
+There is no portable "lose the device now" call, and the JavaScript face does not hand out the
+page's `GPUDevice` to call `destroy()` on. A driver reset, or switching the discrete/integrated GPU
+while running, loses the device — under a native host and in a browser tab alike. Try it once before shipping: unhandled, this shows up as a frozen or blank window
 on someone else's machine.
 
 ## Next
 
 * [The borrow model](../wgpu/borrow-model.md) — why recovery has this shape
-* [Performance](./performance.md) — the counters that tell you the rebuild worked
+* [Performance](./performance.md) — the frame counters

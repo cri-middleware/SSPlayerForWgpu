@@ -74,7 +74,8 @@ faces as thin wrappers.
     `SSRenderer`, so `texture_size(hash)` is `None` right after it. `std::fs` cannot stand in for the
     loader: it compiles on wasm32 and fails at runtime. Only an unreadable `.ssab` is an `Err`; the rest
     comes back from `missing_assets()`.
-*   **Three faces compile under no default command** — `web.rs` behind `web`, the C face behind `ffi`, the
-    npm layer against wasm-pack's `.d.ts`. Build all three after touching public API.
+*   **Three faces need building on purpose** — `web.rs` behind `web` on wasm32, the C face behind `ffi`
+    (workspace-wide commands reach it only through `ssplayer-wgpu-ffi`'s default), the npm layer against
+    wasm-pack's `.d.ts`. Build all three after touching public API.
 *   **When changing rasterisation, dump the readback to a PNG and look at it**; pixel counts alone have
     hidden real regressions.

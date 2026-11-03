@@ -30,7 +30,8 @@ ssplayer-bevy = { git = "https://github.com/cri-middleware/SSPlayerForWgpu" }
 
 It pulls `ssplayer-wgpu` in; you do not depend on both. To vendor the source instead, point at
 `libs/ssplayer-bevy` inside a checkout of this repository and run
-`git submodule update --init --recursive` there.
+`git submodule update --init --recursive` there. If your own project is a Cargo workspace and the
+checkout sits inside it, list it under `exclude`, as on the [Rust path](./rust.md#install).
 
 ## A whole app
 
@@ -79,7 +80,7 @@ choice of which is authoritative.
 
 The pack loads through Bevy's `AssetServer`, so `"Ringo/Ringo.ssab"` is an asset path: put the
 converted `.ssab` and the images beside it under your app's `assets/` folder, as the converter wrote
-them. The character appears once the pack and its atlases have loaded — never a frame drawn without
+them ([Preparing assets](./assets.md); `Ringo` is in the official sample data). The character appears once the pack and its atlases have loaded — never a frame drawn without
 them — and characters sharing a pack share one copy of it and one texture per atlas. With Bevy's
 `file_watcher` feature, reconverting in SpriteStudio rebuilds the character from the new file.
 
@@ -105,9 +106,12 @@ animation. To restart one from its head, bump `SsPlayback::restart` — any chan
 generation counter, so a host re-triggers a one-shot by incrementing it, with nothing to clear
 afterwards.
 
-Playback runs in the render world, so what it produces comes back through two surfaces:
+Playback runs in the render world, so what it produces comes back two ways, polled and as messages:
 
 ```rust
+use ssplayer_bevy::{SsEvent, SsEventMessage};
+
+// added with .add_systems(Update, play_sounds)
 fn play_sounds(mut events: MessageReader<SsEventMessage>) {
     for message in events.read() {
         if let SsEvent::Audio(audio) = &message.event {
@@ -124,7 +128,7 @@ fn play_sounds(mut events: MessageReader<SsEventMessage>) {
 | `SsEventMessage` | `MessageReader` | timeline events — user data, signals, audio cues |
 | `SsStarted` / `SsFinished` / `SsLooped` | `MessageReader` | the one-shot start, completion and loop edges |
 
-Both surfaces are **one frame behind**: what you read this frame is what playback produced last
+Both are **one frame behind**: what you read this frame is what playback produced last
 frame, because it ran in the render world after last frame's `Update`.
 
 ## Masks, and device loss
@@ -135,8 +139,9 @@ the draw stays inside Bevy's own pass; the cost is one extra render pass per mas
 frame. See [Masks](../guide/masks.md).
 
 Device loss recovers by riding Bevy's own recovery, but **you must opt in**: Bevy's default error
-handler *quits* on device loss. Install a `RenderErrorHandler` returning `RenderErrorPolicy::Recover`
-— see [Device loss](../guide/device-loss.md).
+handler *quits* on device loss. Install a `RenderErrorHandler` that answers a `DeviceLost` error with
+`RenderErrorPolicy::Recover(RenderCreation::default())` — [Device loss](../guide/device-loss.md) has
+the handler.
 
 ## Run the samples
 

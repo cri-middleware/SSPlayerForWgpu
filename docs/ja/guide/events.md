@@ -155,6 +155,8 @@ Rust では `SignalValue` enum、JavaScript ではそのままの値です。
 
 開始エッジを立てるのは `play` または `play_from` の後に最初に走った tick で、**`resume` では立ちません**（`resume` は続きから進めるだけで、開始ではありません）。自分で `play` を呼んだ直後なら、呼び出し側はもう知っています。役に立つのは再生を始めたのが自分以外のとき — たとえば Bevy アダプタは `SsPlayer` に渡されたアニメーションを自動で再生します。カリング中のキャラクターに対する `play` はカリングを解いて最初に走った tick が報告し、tick が走る前に `stop` や `set_animation` が追い越した `play` は報告されません。
 
+`<ss-player-webgpu>` はフレームループを自分で回すので、そこではイベントを待ち受けます。3 つのエッジは DOM イベント `animationstarted`・`animationfinished`・`animationlooped` として、タイムラインのイベントは `userdata`・`signal`・`audio` として届きます（[Web コンポーネントのリファレンス](../reference/web-component.md)を参照）。
+
 ## 次に読む
 
 * [パーツオーバーライド](./part-overrides.md) — パーツが描くものを変える（多くはイベントに応じて）

@@ -15,7 +15,7 @@ are the ones an `npm i` gets, not a second copy that can drift.
 - `rustup target add wasm32-unknown-unknown`
 - [`wasm-pack`](https://rustwasm.github.io/wasm-pack/)
 - `pnpm` (`corepack enable`) — the package's js layer is TypeScript, built by tsdown
-- A WebGPU-capable browser (Chrome / Edge 113+, Safari 26+, or Firefox 141+)
+- A WebGPU-capable browser (Chrome / Edge 113+, Safari 26+, or Firefox 141+, on a supported platform)
 
 ## Build & run
 
@@ -70,9 +70,6 @@ the pivot the artist set, so Ringo, who stands on his origin, lands inside the b
 with no page code. `part-follow.html` drives the context directly and does the same
 with `fitInto`, keeping the placement it wrote to map the followed part.
 
-`build=debug` passes `--dev` to wasm-pack, which skips `wasm-opt` — the result is
-several times larger, so never quote its size.
-
 ## Usage
 
 ### Single character — the `<ss-player-webgpu>` element
@@ -126,7 +123,7 @@ const surface = ctx.createSurface(canvas);    // once per canvas
 const player  = surface.createPlayer();       // as many as you like
 
 await player.load('assets/Basic.ssab');       // pack + assets (see below)
-player.setAnimation('idle');                  // selecting allocates …
+player.setAnimation('anime_1');               // selecting allocates …
 player.play();                                // … starting does not
 player.setTransform(x, y, scaleX, scaleY, rotation);
 player.setOrder(1);                           // lower draws first
@@ -141,7 +138,7 @@ player.destroy(); surface.destroy();          // explicit — they live in the c
 either export mode, and any sibling `.ssab` its instance parts play from,
 transitively. `src` is a URL or a path, absolute or relative to the document.
 
-Same shape as `SS6PlayerForGodot`'s `setSSABResource` (`_loadTextures` +
+Same shape as SpriteStudio Player for Godot's `setSSABResource` (`_loadTextures` +
 `_load_external_ssabs`) and `ssplayer-core`'s `load(ssabUrl)`. Assets belong to
 initialisation, so `setAnimation` stays a pure, **synchronous** selection —
 switching motions must not carry a promise.
@@ -184,7 +181,7 @@ Three context-level paths remain for hosts that supply their own images:
 raw straight-alpha RGBA. `player.textureRefs()` / `player.embeddedTextures()`
 answer what a pack needs, if you would rather load it yourself — each entry's
 `key` is what to register under. It is an identity for the *image*, which a cell
-map's name is not: every Adobe Animate export calls its atlas `spritemap1.png`,
+map's name is not: some tools call the atlas `spritemap1.png` in every project they export,
 so two projects on one page would otherwise collide on one key and the second
 would draw the first one's atlas.
 

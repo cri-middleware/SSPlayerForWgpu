@@ -66,9 +66,17 @@ player API from it — in [`<ss-player-webgpu>`](../reference/web-component.md).
 
 ## Many characters: the API the element wraps
 
+The surface draws at the canvas's pixel size (`width` × `height`; 300 × 150 if you set neither), so
+size it, and call `surface.resize(width, height)` when you change it:
+
+```html
+<canvas id="stage" width="960" height="540"></canvas>
+```
+
 ```js
 import { sharedContext } from '@spritestudio/ssplayer-wgpu';
 
+const canvas = document.getElementById('stage');
 const ctx = await sharedContext();            // one per page — device + pipelines + atlas cache
 const surface = ctx.createSurface(canvas);    // one per canvas — projection + frame arena
 
@@ -94,7 +102,7 @@ const loop = (now) => {
 requestAnimationFrame(loop);
 ```
 
-**The `load` family is the only asynchronous part of the player API.** It fetches the pack, its
+**The `load` family and `setCellmapTextureFromBytes` are the only asynchronous parts of the player API.** It fetches the pack, its
 atlases from both texture tables, and transitively the sibling `.ssab` files its instance parts play
 from. Anything that did not arrive comes back from `missingAssets()` rather than throwing.
 `setAnimation()` and every transport call are synchronous.

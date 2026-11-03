@@ -24,7 +24,7 @@
 
     ```js
     const player = surface.createPlayer();
-    await player.load('/assets/Instance.ssab');   // 唯一の非同期呼び出し
+    await player.load('/assets/Instance.ssab');   // 非同期: パックとアトラスを取得する
     player.setAnimation('anime_1');
     player.play();
     ```
@@ -56,11 +56,11 @@
 
 つまり：エクスポートしたパックとアトラスは同じ場所に置き、渡すのは `.ssab` のパス（ディレクトリでもアトラスでもなく）にしてください。
 
-## `load` が返った時点で GPU には何もありません
+## `load` が返った時点で GPU に何があるか
 
-借用モデルではフレームが始まるまでデバイスが貸し出されないため、ロードはバイト列を読むところで止まります。読んだものは**最初の `update`** でデコードされ、アップロードされます。これは埋め込みアトラスが従来からたどってきたタイミングとまったく同じです。
+Rust と C の Face では、借用モデルによってフレームが始まるまでデバイスが貸し出されないため、ロードはバイト列を読むところで止まります。読んだものは**最初の `update`** でデコードされ、アップロードされます。これは埋め込みアトラスが従来からたどってきたタイミングとまったく同じです。そのため、ロード直後の時点ではレンダラーはまだテクスチャのサイズを知りません。最初のフレームより後に問い合わせてください。
 
-そのため、ロード直後の時点ではレンダラーはまだテクスチャのサイズを知りません。最初のフレームより後に問い合わせてください。
+JavaScript の Face ではページのコンテキストが最初からデバイスを持つので、`await player.load(...)` が解決した時点で、取得したアトラスはデコードされ、アップロードされています。
 
 ## 届かなかったもの：エラーではなく `missing`
 
@@ -122,14 +122,16 @@
 === "JavaScript"
 
     ```js
-    await player.loadSsab(bytes, 'Character', new URL('/assets/Character.ssab', location.href).href);
-    await player.addSsab(other, 'Effect', baseUrl);
+    await player.loadSsab(bytes, null, new URL('/assets/Character.ssab', location.href).href);
+    await player.addSsab(other, null, baseUrl);
     ```
 
-兄弟パックをロード**前**に登録しておくこともできます。既に持っているパックは走査がスキップします。
+兄弟パックを登録する名前は、インスタンスパーツが参照する名前、つまりエクスポータが `.ssab` に書き込んだ名前です。`loadSsab` と `addSsab` は名前に `null` を渡すとその名前のままになります。兄弟パックは、ツリーが探す `set_animation` の前に登録してください。兄弟パックをロード**前**に登録しておくこともできます。既に持っているパックは走査がスキップします。
 
-!!! warning "再登録は、いま再生中のものを変えません"
+!!! warning "兄弟パックの登録は、いま再生中のものを変えません"
     再生ツリーは、それを構築したパックに紐づいています。再生中のツリーが使っている名前で新しいパックを登録すると、古いパックは破棄されずに退役します。画面上のものはそのまま再生を続け、差し替えたものは**次の** `set_animation` が構築の元にします。
+
+    ロードは別です。`load_ssab`（`ss_player_load_ssab`・`loadSsab`）は新しいパックを選択して再生中のツリーを捨てるので、`set_animation` を呼び直してください。
 
 ## テクスチャを自前で供給する { #supplying-textures-yourself }
 
@@ -137,10 +139,7 @@
 5 体で表示してもアップロードは 1 回です。
 
 !!! warning "セルマップのハッシュが指すのはスロットであって画像ではありません"
-    Adobe Animate はどのプロジェクトを書き出しても `spritemap1.png` という名前を付けるため、別プロジェクトの
-    2 つのパックが同じセルマップハッシュを要求しながら別のアトラスを意味します。そのハッシュで登録すると
-    2 つ目のパックは「もう供給済み」に見え、自分のピクセルは捨てられてパーツが 1 つ目のアトラスを描きます。キーは Player に聞いてください。画像そのものを指す値が返るので、本当に同じファイルを共有している
-    2 パックは今まで通り 1 回のアップロードで済みます。
+    ツールによっては、どのプロジェクトを書き出してもアトラスに `spritemap1.png` という名前を付けるため、別プロジェクトの 2 つのパックが同じセルマップハッシュを要求しながら別のアトラスを意味します。そのハッシュで登録すると 2 つ目のパックは「もう供給済み」に見え、自分のピクセルは捨てられてパーツが 1 つ目のアトラスを描きます。キーは Player に聞いてください。画像そのものを指す値が返るので、本当に同じファイルを共有している 2 パックは今まで通り 1 回のアップロードで済みます。
 
 === "Rust"
 
@@ -158,12 +157,15 @@
 === "C"
 
     ```c
-    /* `ss_texture_ref_t.key` は既にキーです（`ss_player_texture_at` が解決して返します） */
-    /* 生の RGBA8、width * height * 4 バイト、ストレートアルファ */
-    ss_scene_add_texture(scene, ref.key, rgba, width, height);
-
-    /* あるいはエンコード済み PNG を渡してデコードさせる */
-    ss_scene_add_texture_png(scene, ref.key, png_bytes, png_len);
+    ss_texture_ref_t ref;
+    for (uint32_t i = 0; i < ss_player_texture_count(player, NULL); i++) {
+        if (ss_player_texture_at(player, NULL, i, &ref) != SS_OK || ref.embedded) continue;
+        /* <.ssab のディレクトリ>/ref.path は自分で読む。ref.key は既にキー */
+        /* 生の RGBA8、width * height * 4 バイト、ストレートアルファ: */
+        ss_scene_add_texture(scene, ref.key, rgba, width, height);
+        /* あるいはエンコード済み PNG をライブラリにデコードさせる: */
+        /* ss_scene_add_texture_png(scene, ref.key, png_bytes, png_len); */
+    }
     ```
 
 === "JavaScript"
@@ -196,23 +198,27 @@ player.load_with(&mut my_loader, "res://characters/Ringo.ssab").await?;
 2. `read` には `src` が**そのまま**渡ります。走査はパスを組み立てず、`src` の中身を覗きません；
 3. *その後で* `set_base(src)` が 1 回だけ呼ばれ、以降のパスはすべてそこからの**裸の名前**です。
 
-「読んでから base を張る」順序が安全性の要です。`src` はそれ由来の base が存在するより前に読まれるので、「`src` を `src` 自身に対して解決する」という状態が表現できません。解決するのはあなたの仕事です。手元にあるのがファイルパスなのか URL なのかアーカイブのキーなのかを知っているのはあなただけだからです。
+解決するのはあなたの仕事です。手元にあるのがファイルパスなのか URL なのかアーカイブのキーなのかを知っているのはあなただけだからです。
 
 !!! note "代わりに `std::fs` を使わないでください"
     wasm32 でもコンパイルは通り、実行時に失敗します。アーカイブ内のファイルも開けません。この継ぎ目はまさにその 2 つのために存在します。
 
 ### ブラウザでは { #in-a-browser }
 
-Web フェイスは URL の解決を自分で行うので、差し替えるのは `fetch` だけです。`load` に `read(url)` を渡すと、走査が求めるファイル（`.ssab`、そのアトラス、兄弟パック）はすべてそちらから取られます。渡されるのは、fetch なら使ったはずの絶対 URL です。`ArrayBuffer`・`Uint8Array`・`Blob` のどれかを返し、持っていないファイルには `null` を返します。
+Web の Face は URL の解決を自分で行うので、差し替えるのは `fetch` だけです。`load` に `read(url)` を渡すと、走査が求めるファイル（`.ssab`、そのアトラス、兄弟パック）はすべてそちらから取られます。渡されるのは、fetch なら使ったはずの絶対 URL です。`ArrayBuffer`・`Uint8Array`・`Blob` のどれかを返し、持っていないファイルには `null` を返します。
 
 ドロップされたフォルダはこの形で再生します。中身を自分で決めた URL の下に並べ、そこから読み込みます。
 
 ```js
-// ドロップごとに base を分ける。アトラスは URL で識別されるので、
-// 同じ base に 2 つ目のフォルダを置くと、同名のアトラスが読み込み済みと見なされ、1 つ目の絵で描かれる。
-const base = new URL(`dropped/${++drops}/`, location.href);
-const files = new Map(dropped.map(({ path, file }) => [new URL(path, base).href, file]));
-await player.load(new URL('Ringo/Ringo.ssab', base).href, (url) => files.get(url));
+let drops = 0;
+
+async function playDropped(dropped) {   // ドロップイベントから得た [{ path, file }, …]
+  // ドロップごとに base を分ける。アトラスは URL で識別されるので、
+  // 同じ base に 2 つ目のフォルダを置くと、同名のアトラスが読み込み済みと見なされ、1 つ目の絵で描かれる。
+  const base = new URL(`dropped/${++drops}/`, location.href);
+  const files = new Map(dropped.map(({ path, file }) => [new URL(path, base).href, file]));
+  await player.load(new URL('Ringo/Ringo.ssab', base).href, (url) => files.get(url));
+}
 ```
 
 `loadSsab`・`addSsab`・要素の `loadSrc` も、最後の引数に同じ `read` を取ります。<a href="../../demo/" target="_blank" rel="noreferrer">WebGPU デモ</a>は、ドロップされたフォルダをこの方法で再生しています。

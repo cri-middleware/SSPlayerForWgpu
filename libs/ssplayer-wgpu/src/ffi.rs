@@ -165,8 +165,8 @@ pub struct SsTextureRef {
     /// The key `ss_scene_add_texture` / `ss_scene_add_texture_png` expects for
     /// this image.
     ///
-    /// An identity for the **image**, not for the cellmap that names it: Adobe
-    /// Animate writes `spritemap1.png` for every project it exports, so two packs
+    /// An identity for the **image**, not for the cellmap that names it: some
+    /// tools name the atlas `spritemap1.png` in every project they export, so two packs
     /// name their atlas alike, and a key that was only the cellmap's hash left the
     /// second drawing the first one's atlas. Two packs that really do share a file
     /// still share this, and so still share one upload.
@@ -796,8 +796,9 @@ unsafe fn load_pack(handle: *mut SsPlayer, pack_name: *const c_char, data: *cons
     }
 }
 
-/// Supply a texture for a reference-mode pack, keyed by the fnv1a hash the
-/// runtime reports in `DrawBatch.texture_hash`. `rgba` is
+/// Supply a texture for a reference-mode pack under `ss_texture_ref_t.key` — what
+/// `ss_player_texture_at` reports for the atlas. It identifies the image, not the
+/// cell map hash in `DrawBatch.texture_hash`. `rgba` is
 /// straight-alpha RGBA8, `width * height * 4` bytes; it is premultiplied on the
 /// way to the GPU.
 ///
@@ -813,7 +814,7 @@ unsafe fn load_pack(handle: *mut SsPlayer, pack_name: *const c_char, data: *cons
 /// # Safety
 /// `rgba` must point at `width * height * 4` readable bytes. It is not retained.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn ss_scene_add_texture(scene: *mut SsScene, hash: u32, rgba: *const u8, width: u32, height: u32) -> i32 {
+pub unsafe extern "C" fn ss_scene_add_texture(scene: *mut SsScene, key: u32, rgba: *const u8, width: u32, height: u32) -> i32 {
     let Some(scene) = (unsafe { scene.as_mut() }) else { return fail(SS_ERROR_INVALID_ARGUMENT, "scene is null") };
     if rgba.is_null() {
         return fail(SS_ERROR_INVALID_ARGUMENT, "texture is empty");
@@ -823,7 +824,7 @@ pub unsafe extern "C" fn ss_scene_add_texture(scene: *mut SsScene, hash: u32, rg
     }
     // Inside the device's limit, so the product cannot overflow.
     let len = (width as usize) * (height as usize) * 4;
-    scene.host.upload_texture(hash, unsafe { std::slice::from_raw_parts(rgba, len) }, width, height);
+    scene.host.upload_texture(key, unsafe { std::slice::from_raw_parts(rgba, len) }, width, height);
     SS_OK
 }
 
@@ -841,12 +842,12 @@ pub unsafe extern "C" fn ss_scene_add_texture(scene: *mut SsScene, hash: u32, rg
 /// # Safety
 /// `data` must point at `len` readable bytes. It is not retained.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn ss_scene_add_texture_png(scene: *mut SsScene, hash: u32, data: *const u8, len: usize) -> i32 {
+pub unsafe extern "C" fn ss_scene_add_texture_png(scene: *mut SsScene, key: u32, data: *const u8, len: usize) -> i32 {
     let Some(scene) = (unsafe { scene.as_mut() }) else { return fail(SS_ERROR_INVALID_ARGUMENT, "scene is null") };
     if data.is_null() || len == 0 {
         return fail(SS_ERROR_INVALID_ARGUMENT, "image is empty");
     }
-    match scene.host.upload_texture_encoded(hash, unsafe { std::slice::from_raw_parts(data, len) }) {
+    match scene.host.upload_texture_encoded(key, unsafe { std::slice::from_raw_parts(data, len) }) {
         Ok(()) => SS_OK,
         Err(msg) => fail(SS_ERROR_INVALID_ARGUMENT, msg),
     }

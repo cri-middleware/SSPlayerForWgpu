@@ -131,8 +131,8 @@ pub trait AssetLoader {
 
     /// Which renderer key `path`'s image belongs under.
     ///
-    /// **A cellmap hash names a slot inside one `.ssab`, not an image.** Adobe
-    /// Animate writes `spritemap1.png` for every project it exports, so two packs
+    /// **A cellmap hash names a slot inside one `.ssab`, not an image.** Some
+    /// tools name the atlas `spritemap1.png` in every project they export, so two packs
     /// from two projects ask for one hash and mean two different atlases; keyed by
     /// the hash alone, the second registration is skipped as "already held" and
     /// that pack silently draws the first one's atlas. Resolving `path` the way
@@ -1856,7 +1856,8 @@ impl SSPlayer {
     // A track can carry more than one animation, mixed by `weight` — a walk and a
     // run on track 0 blended by the character's speed. Each one is a *source*,
     // named by the handle these return; handles stay valid until the source is
-    // released (a crossfade completing, `clear_track`, `set_animation`).
+    // released (a crossfade completing, `clear_track`, `set_track_animation` on
+    // its track, `set_animation`).
 
     /// The source carrying `track`'s animation — the one `set_track_animation`,
     /// `crossfade` or `set_animation` put there.
@@ -2568,7 +2569,7 @@ impl SSPlayer {
     /// Where a pack's cellmap registers in the renderer's texture map.
     ///
     /// [`TextureRef::slot`] names a *slot inside one `.ssab`*, and two packs from
-    /// two Adobe Animate projects both call theirs `spritemap1`. The renderer's
+    /// two projects one tool exported can both call theirs `spritemap1`. The renderer's
     /// map is device-scoped — that is what keeps N players of one pack to one
     /// upload — so the player assigns each atlas a key that identifies the image
     /// and translates every draw batch through it. This is that translation, and

@@ -233,8 +233,8 @@ if [ "$PLATFORM" = "host" ]; then
   ( cd "$ROOT_DIR" && cargo build -p ssplayer-wgpu-ffi --no-default-features --features embedded $PROFILE_FLAG )
 
   if [ "$FFI" = "yes" ]; then
-    # No default command compiles src/ffi.rs or src/host.rs, so the C face rots
-    # silently unless it is built explicitly. build.rs runs cbindgen in the same
+    # A command scoped to the player compiles neither src/ffi.rs nor src/host.rs,
+    # so the C face is built explicitly here. build.rs runs cbindgen in the same
     # pass, which is what keeps include/ssplayer_wgpu.h in step with the API.
     echo ">> cargo build -p ssplayer-wgpu-ffi ($BUILD) — regenerates include/ssplayer_wgpu.h"
     # shellcheck disable=SC2086

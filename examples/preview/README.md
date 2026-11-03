@@ -75,8 +75,8 @@ The shell as built has both empty. A generator fills them to ship a pack inside 
 
 The second hole is **everything the pack depends on**, keyed by the path the pack names
 it by: its atlases and the sibling `.ssab` packs its instance parts play from.
-`textureRefs()` and `instancePacks()` are what name them, so nobody computes a hash or
-guesses a path; `examples/preview-gen` is the reference walk.
+`SSPack::textures` and `SSPack::instance_packs` are what name them (`textureRefs()` is the js
+face's counterpart of the first), so nobody computes a hash or guesses a path; `examples/preview-gen` is the reference walk.
 
 Dropping by hand works the same way: drop the `.ssab` **together with** its `.png` files
 and any sibling packs, in one gesture, or the folder that holds them. Every `.ssab` in the

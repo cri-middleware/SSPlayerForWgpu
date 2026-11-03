@@ -12,10 +12,12 @@ title: C API リファレンス
 
 | | |
 |---|---|
-| 戻り値 | 失敗しうる関数は `int32_t`：`SS_OK`（0）、`SS_ERROR_INVALID_ARGUMENT`（-1）、`SS_ERROR_GPU`（-2） |
+| 渡すバッファ | 呼び出しの間だけ読まれ、保持されません。`data`・`rgba`・`members`・`corners`・文字列は、戻った時点で解放・再利用して構いません |
+| スレッド | macOS では `ss_scene_create` と、それに渡す `NSView` / `CAMetalLayer` はメインスレッドのものです |
+| 戻り値 | 失敗しうる関数は `int32_t`：`SS_OK`（0）、`SS_ERROR_INVALID_ARGUMENT`（-1）、`SS_ERROR_GPU`（-2）。ランタイムが要求（読めない `.ssab`、存在しないアニメーションやパーツ、不正な区間）を拒否したときは、ランタイム自身の正の値（1〜7 か 99）を返します。判定は特定の値ではなく `SS_OK` との比較で行ってください |
 | エラーテキスト | `ss_last_error()` — 呼び出しスレッドで最後に起きた失敗。ログ用であり、分岐用ではありません |
 | バージョン | `ss_version()` — このライブラリのバージョン。`ss_sdk_version()` — リンクしている SpriteStudio-SDK のバージョン。リリースのタグの形（`v7.0.0`）で、`scripts/build.sh` を通さないビルドなら `local`。どちらも静的な文字列で、解放しません |
-| null ハンドル | どの関数も null ハンドルを許容し、クラッシュではなく `SS_ERROR_INVALID_ARGUMENT` を返します。getter は、アニメーションが無いプレイヤーと同じ値を返します。ほとんどはゼロですが、スピード倍率とアルファは `1.0`、`ss_player_is_playing_forward`・`ss_player_sub_frame_enabled`・`ss_player_frame_skip_enabled`・`ss_player_is_visible` は true、パーツの検索（`ss_player_find_part_index`・`ss_player_is_part_hidden`・`ss_player_is_part_skinned_mesh` と、その `_by_index` 版）は `-1` です |
+| null ハンドル | どの関数も null ハンドルを許容し、クラッシュではなく `SS_ERROR_INVALID_ARGUMENT` を返します。getter は、アニメーションが無いプレイヤーと同じ値を返します。ほとんどはゼロですが、スピード倍率とアルファは `1.0`、`ss_player_is_playing_forward`・`ss_player_sub_frame_enabled`・`ss_player_frame_skip_enabled`・`ss_player_is_visible` は true、`ss_player_tint` は `0xFFFFFF`（白）、パーツの検索（`ss_player_find_part_index`・`ss_player_is_part_hidden`・`ss_player_is_part_skinned_mesh` と、その `_by_index` 版）は `-1` です |
 | 文字列 | 入力は UTF-8 の `const char *`。**出力**の文字列はシーンが所有し、同種の次の呼び出しまで有効です — 保持するならコピーを。1 組だけバッファを共有しています。`ss_player_animation_name` と `ss_player_cellmap_texture_name` は、互いの戻り値を無効にします |
 | サイズ | 常に**描画ピクセル**。ポイントではありません。ディスプレイ倍率は自分で掛けてください |
 
@@ -49,7 +51,7 @@ title: C API リファレンス
 | `ss_player_load(player, path)` | 1 呼び出しでパック・アトラス・兄弟パック |
 | `ss_player_load_ssab(player, name, data, len)` | バイト列を登録し、そのパックを選択対象にする |
 | `ss_player_add_ssab(player, name, data, len)` | 登録のみ（インスタンスパーツ用） |
-| `ss_player_missing_count(player)` / `ss_player_missing_at(player, i, out)` | 届かなかったもの。**エラーではありません** |
+| `ss_player_missing_count(player)` / `ss_player_missing_at(player, i, out)` | 届かなかったもの。**エラーではありません**。`kind` は `SS_MISSING_TEXTURE`（0、アトラス：そのパーツはシルエットで描かれる）か `SS_MISSING_PACK`（1、兄弟パック：それを再生するインスタンスパーツは表示されない）。`name` はパスかパック名 |
 | `ss_player_texture_count(player, pack)` / `ss_player_texture_at(player, pack, i, out)` | パックが要求するアトラスと、エクスポータが書いた位置 |
 | `ss_scene_add_texture(scene, key, rgba, w, h)` | ストレートアルファ RGBA8 でアトラスを供給（`ss_texture_ref_t.key` で） |
 | `ss_scene_add_texture_png(scene, key, data, len)` | エンコード済み PNG を渡してライブラリにデコードさせる |
@@ -116,7 +118,7 @@ title: C API リファレンス
 
 | | |
 |---|---|
-| `ss_player_set_transform(player, x, y, sx, sy, rotation)` | 位置・スケール・回転 |
+| `ss_player_set_transform(player, x, y, sx, sy, rotation)` | 位置（ビューの中心からのピクセル、`y` は**下向き**が正）・スケール・回転（ラジアン） |
 | `ss_player_reset_transform(player)` | 恒等の配置（中央、等倍、回転なし）に戻します |
 | `ss_player_fit_into(player, width, height, &placement, &placed)` | アニメーションを箱に収め、そのトランスフォームを書き込みます。`placed` は null でも構いません |
 | `ss_placement_default(&placement)` | `SsPlacement` を変更する前に既定値で埋めます — **ゼロ初期化ではスケールが 0 になります** |
@@ -138,7 +140,7 @@ title: C API リファレンス
 | `ss_player_part_count` / `ss_player_find_part_index` | 列挙と解決 |
 | `ss_player_part_transform(player, part, out)`（＋ `_by_index`） | float 6 個：`[m00, m01, m10, m11, tx, ty]`、アニメーションローカルの Y-down |
 | `ss_player_is_part_hidden(player, part)`（＋ `_by_index`） | 表示中のフレームで `1` 非表示、`0` 表示、`-1` は不明なパーツかアニメーション未設定 |
-| `ss_player_is_part_skinned_mesh(player, part)`（＋ `_by_index`） | `1` skinned、`0` not、`-1` は不明なパーツかパック未バインド |
+| `ss_player_is_part_skinned_mesh(player, part)`（＋ `_by_index`） | `1` スキンメッシュ、`0` スキンメッシュではない、`-1` は不明なパーツかパック未バインド |
 | `ss_player_set_part_visibility_override(player, part, hide, cascade)`（＋ `_by_index` / `clear_`） | キーフレームの非表示はカスケードしないので、サブツリーを隠す唯一の方法です |
 | `ss_player_set_part_color_override(player, part, rgba, blend_op, priority)`（＋ `_corners` / `_by_index` / `clear_`） | `blend_op` 0–3、`priority` 0–2 |
 | `ss_player_set_part_cell_override(player, part, cellmap, cell, priority)`（＋ `_by_index` / `clear_`） | 別の画像を描く |
@@ -188,4 +190,4 @@ GPU に届きます。[テクスチャ差し替え](../guide/texture-replacement
 
 ## この Face に無いもの
 
-自分が持つレンダーパスへの描画は Rust だけです。この Face はデバイスを自分で構築し所有します。全体像は[スコープと名前の対応](../guide/concepts.md#what-each-face-can-do)、デバイス共有を提供しない理由は[制限事項](../limitations.md#no-device-sharing-across-the-c-abi)を参照してください。
+自分が持つレンダーパスへの描画はこの Face にはありません。この Face はデバイスを自分で構築し所有します。レンダーパスを借りて描けるのは Rust Face と、その上に作られた Bevy アダプタだけです。全体像は[スコープと名前の対応](../guide/concepts.md#what-each-face-can-do)、デバイス共有を提供しない理由は[制限事項](../limitations.md#no-device-sharing-across-the-c-abi)を参照してください。

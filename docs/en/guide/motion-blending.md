@@ -1,8 +1,8 @@
 # Motion blending
 
 Play several animations on one character at once, and move between them without a cut. A walk
-underneath, an aim overlay on top, a one-shot reaction crossfading in — from files an animator
-authored separately.
+underneath, an aim overlay on top, a one-shot reaction crossfading in — from animations an
+animator authored separately, as long as they are in the same `.ssab`.
 
 !!! info "On every face"
     The examples here are `SSPlayer`'s Rust API. The C face has the same calls as `ss_player_*`,
@@ -126,8 +126,8 @@ player.set_source_weight(run, t)?;
   weight or below with `set_source_event_threshold`. The outgoing side of a crossfade has its own,
   per track: `set_track_outgoing_event_threshold(track, 0.5)` keeps it firing through the first half
   of the fade (the default, infinity, silences it from the start).
-* A handle stays valid until its source is released: a crossfade completing, `clear_track`, or
-  `set_animation`.
+* A handle stays valid until its source is released: a crossfade completing, `clear_track`,
+  `set_track_animation` on its track, or `set_animation`.
 
 ## Starting in step with track 0
 
@@ -188,9 +188,9 @@ if player.is_track_finished(2) {
 }
 ```
 
-`track_just_looped(track)` is the per-update pulse, as `just_looped` is for track 0. Neither track
-above 0 finishing nor looping is an edge the player raises for you; only track 0's end is
-`just_finished`.
+`track_just_looped(track)` is the per-update pulse for a track's loop, as `just_looped` is for
+track 0. A finished track is a state, `is_track_finished(track)`, with no edge of its own; only
+track 0's end is `just_finished`.
 
 The tracks keep a character moving after track 0 has finished, but only while one of them still
 moves its pose: a fade in progress, or an animation that plays at a speed and a weight above 0 on a
@@ -229,7 +229,7 @@ Query what is up there with `track_count()`, `track_alpha(track)`, `track_blend(
 `track_sync(track)`, `track_frame(track)`, `track_speed(track)`, `track_loop_count(track)` and the
 other `track_*` reads.
 
-## Two limits
+## Three limits
 
 * **Instance children are not layered.** A part that plays another pack's animation runs its own
   playback context, driven by its slot on the root's frame. Tracks apply to the character whose
@@ -237,6 +237,8 @@ other `track_*` reads.
   of child across a crossfade on track 0.
 * A track's **alpha** is its strength. Where several animations share one track, a source's
   *weight* only sets proportions among them — it is not a second volume control.
+* **One pack only.** Every track plays animations of the pack `set_animation` selected from; an
+  animation in another `.ssab` cannot be laid on a track.
 
 ## See it
 
@@ -265,4 +267,4 @@ same keys.
 ## Next
 
 * [Playback and transport](./playback.md) — the transport that drives track 0
-* [Performance](./performance.md) — what a second and third track cost
+* [Performance](./performance.md) — when a scene with tracks counts as moving, and the frame counters

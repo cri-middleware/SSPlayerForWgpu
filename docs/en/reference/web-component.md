@@ -14,7 +14,8 @@ of pipelines and one atlas upload**.
 import { defineSsPlayerWebGPUElement } from '@spritestudio/ssplayer-wgpu/element';
 
 defineSsPlayerWebGPUElement();                    // <ss-player-webgpu>
-defineSsPlayerWebGPUElement('my-ss-player');      // ... or under a name of your own
+// ... or, instead, under a name of your own (one class registers under one name):
+// defineSsPlayerWebGPUElement('my-ss-player');
 ```
 
 Registration is **opt-in, not a side effect of the import**, so a bundle that only wants the

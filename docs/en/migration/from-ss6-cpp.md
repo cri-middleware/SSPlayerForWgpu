@@ -53,7 +53,7 @@ Entity A -> Draw()   (its own buffer upload and draw)
 Entity B -> Draw()   (its own buffer upload and draw)
 
 [this player]
-SSScene -> update(&renderer, &device, &queue, dt, &mut [a, b])
+SSScene -> update(&mut renderer, &device, &queue, dt, &mut [a, b])
         -> draw(&renderer, &mut rpass)      // one pass, one shared geometry arena
 ```
 
@@ -141,7 +141,7 @@ first `update` — and a missing atlas is **not** an error, it is an entry in
 | *(draw order was call order)* | `set_order(i32)` | `ss_player_set_order` | Ascending, within the scene |
 | *(none)* | `set_visible(bool)` | `ss_player_set_visible` | Hiding skips the draw; the timeline keeps running |
 | *(none)* | `set_culled(bool)` | `ss_player_set_culled` | Culling **skips the timeline advance** as well, for an off-screen character |
-| `CanvasGet()` | `canvas_size()` | `ss_player_canvas_size` | |
+| *(none)* | `canvas_size()` | `ss_player_canvas_size` | |
 
 ### Loop counts
 
@@ -227,7 +227,7 @@ are *overrides* with an explicit lifetime.
 | `CellChangeParts(id, map, cell, …)` | `set_part_cell_override(part, cellmap, cell, priority)` | `ss_player_set_part_cell_override` |
 | *(none)* | `set_part_color_override(part, rgba, blend_op, priority)` | `ss_player_set_part_color_override` |
 | *(none)* | `clear_all_part_overrides()` | `ss_player_clear_all_part_overrides` |
-| `PartGetTransform(id, …)` | `part_transform(part)` | `ss_player_part_transform` |
+| *(none)* | `part_transform(part)` | `ss_player_part_transform` |
 
 Cell maps and cells are named by **string** here, not by index — and every override carries a
 [priority](../guide/part-overrides.md#blend-op-and-priority) that says how long it lives.
@@ -241,23 +241,25 @@ Cell maps and cells are named by **string** here, not by index — and every ove
     #include <Entity/ss6player_entity.h>
     #include <Project/ss6player_project.h>
 
-    SpriteStudio6::SystemBootUp();
+    SpriteStudio6::SettingSystem settingSystem;
+    SpriteStudio6::SystemBootUp(settingSystem);
 
     SpriteStudio6::Project project;
-    project.BootUp(dataSsfb2, sizeSsfb2);
+    project.BootUp(dataSsfb2);
     for (int i = 0; i < project.CountGetTexture(); i++) {
         /* load the image yourself, then: */
         project.TextureSet(i, myTexture);
     }
 
     SpriteStudio6::Entity entity;
-    entity.BootUp(&project, 0);
+    entity.BootUp(project);
+    entity.PackSet(0);
     entity.AnimationPlay(0, entity.IndexGetAnimation("walk"), 0);
 
     /* every frame */
     SpriteStudio6::SystemProcessMainPre();
-    entity.Update(deltaTime);
-    entity.Draw(matrixWorld);
+    entity.Update(deltaTime, SpriteStudio6::Library::KindMasking::FOLLOW_DATA);
+    entity.Draw(commandList, matrixProjection, matrixView, matrixWorld);
     SpriteStudio6::SystemProcessMainPost();
     SpriteStudio6::SystemProcessRenderPost();
     ```

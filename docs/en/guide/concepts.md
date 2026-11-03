@@ -34,8 +34,9 @@ flowchart TD
 | **Character** | the playback tree, transform, draw order, visibility, alpha | character on screen |
 
 The consequence that matters in practice: **a character holds no GPU resource at all**. Ten
-characters in one target share one atlas upload, one set of pipelines and one render pass. Putting
-a second character on screen costs a playback tree and nothing else.
+characters in one target share one atlas upload, one set of pipelines and one render pass. A second
+character on screen adds its playback tree and its own parts to the frame, and no pass, pipeline
+or atlas upload of its own.
 
 ## The same three, named per face
 
@@ -87,17 +88,18 @@ The shape is identical: **advance everything, then draw everything, once.**
     // main_transparent_pass_2d, once per frame.
     ```
 
-**Pass every character of a target through one update.** Splitting them across two updates or two
-passes is what turns one atlas upload into two — and, where masks are involved, lets one
-character's mask clip the next.
+**Pass every character of a target through one update.** A second `update` on the same target
+starts a new frame and replaces what the first one built, so only the last call's characters are
+drawn; a character handed to two targets' updates in one frame advances twice.
 
 Draw order inside a target is `set_order`, ascending. It is a plain integer, not a tree.
 
 ## What each face can do
 
-The library is one; the faces expose different amounts of it. Nothing here is a permanent
-boundary except the last row, since the C and JavaScript faces own their render pass by design — see the [ROADMAP](https://github.com/cri-middleware/SSPlayerForWgpu/blob/main/ROADMAP.md)
-for what is planned.
+The library is one; the faces expose different amounts of it. A dash is not a promise. The coverage
+row is a boundary by design: the C and JavaScript faces own their render pass and its stencil, and
+coverage exists only for a pass with no stencil to lend. The [ROADMAP](https://github.com/cri-middleware/SSPlayerForWgpu/blob/main/ROADMAP.md) lists what is
+planned.
 
 | | Rust | C | JavaScript | Bevy |
 |---|:--:|:--:|:--:|:--:|
@@ -123,7 +125,7 @@ back from the `SsTrackState` component, since the playback trees live in the ren
 
 ## Two calls, not one: selecting and starting
 
-On every face, **choosing an animation and starting it are separate**:
+On Rust, C and JavaScript, **choosing an animation and starting it are separate**:
 
 === "Rust"
 
@@ -149,7 +151,8 @@ On every face, **choosing an animation and starting it are separate**:
 === "Bevy"
 
     ```rust
-    // Setting SsPlayer::animation rebuilds the tree; SsPlayback::playing is the transport.
+    // Setting SsPlayer::animation rebuilds the tree and, while SsPlayback::playing is true
+    // (the default), plays it from the head; playing = false holds the first frame.
     ```
 
 That split is deliberate: switching motions is frequent and must not carry an allocation you did

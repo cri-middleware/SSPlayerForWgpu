@@ -1,9 +1,16 @@
 # 🛠️ Build Guide
 
-For whoever works on SpriteStudio Player for wgpu, or changes it for a host of their own. Everything
-in this repository can be built on one machine, and this page is the whole checklist, in the order a
-fresh clone needs it. How the crate is put together, and why, is on
+For whoever works on SpriteStudio Player for wgpu, or changes it for a host of their own. Every face
+of the library builds from one checkout on one machine (the Metal, DX12 and Vulkan viewers each
+need their own operating system), and this page is the whole checklist, in the order a fresh clone
+needs it. How the crate is put together, and why, is on
 [How the Player Is Put Together](architecture.md).
+
+## What you need
+
+The Rust toolchain, the SDK submodule and the web face's tools are listed under
+[Prerequisites](https://github.com/cri-middleware/SSPlayerForWgpu/blob/main/CONTRIBUTING.md#prerequisites) in `CONTRIBUTING.md`. The C++ viewers
+add CMake and a C++17 compiler, and this documentation site adds Python 3.
 
 ## Get the source
 
@@ -40,8 +47,13 @@ deploys **both** export modes into `examples/web`. **The tests read `assets/`**,
 prerequisite for `cargo test`, not an optional step.
 
 Run it again after the SDK moves: the `.ssab` format follows the SDK, and data that another SDK
-commit converted can make the runtime panic. `run-example.sh` and `build-pages.sh` check for that
-themselves (`deploy-examples.sh when=stale`).
+commit converted can make the runtime panic. `run-example.sh` (which takes a fresh checkout to a
+running sample) and `build-pages.sh` check for that themselves (`deploy-examples.sh when=stale`).
+
+On Windows, run the `.ps1` twin of each script this page names (`scripts\deploy-examples.ps1`,
+`scripts\build.ps1`, …); the options are the same `key=value` words. A script and its twin change
+together, and CI checks that every `.ps1` parses and answers `--help` and an unknown option as its
+`.sh` does.
 
 ## Build every face
 
@@ -56,31 +68,33 @@ themselves (`deploy-examples.sh when=stale`).
 | **C face** (+ header regeneration) | `cargo build -p ssplayer-wgpu-ffi` |
 | C handle lifetimes | `cargo test -p ssplayer-wgpu --features ffi --lib` |
 | npm package (wasm + TS layer) | `./scripts/build.sh platform=web` — needs `pnpm` and `wasm-pack` |
-| TS layer typecheck | `cd packages/ssplayer-wgpu && pnpm run typecheck` |
+| TS layer typecheck (after the npm package build) | `cd packages/ssplayer-wgpu && pnpm run typecheck` |
 | Smallest Rust host | `cargo run -p ssplayer-wgpu-hello` |
 | Native viewer | `cargo run -p ssplayer-wgpu-viewer` |
 | Bevy viewers | `cargo run -p ssplayer-bevy-overall` / `-p ssplayer-bevy-viewer` |
 | Metal C++ viewer (macOS) | `cd examples/viewer-metal-cpp && cmake -B build && cmake --build build && ./build/ssviewer-metal` |
-| DX12 C++ viewer (Windows) | `cd examples\viewer-dx12-cpp; cmake -B build; cmake --build build --config Release` |
+| DX12 C++ viewer (Windows) | `cd examples\viewer-dx12-cpp; cmake -B build; cmake --build build --config Release; .\build\Release\ssviewer-dx12.exe` |
 | Vulkan C++ viewer (Linux) | `cd examples/viewer-vulkan-cpp && cmake -B build && cmake --build build && ./build/ssviewer-vulkan` |
-| Web demo | `./scripts/build.sh platform=web && (cd examples/web && python3 -m http.server --bind 127.0.0.1)` |
+| Web demo | `./scripts/build.sh platform=web && (cd examples/web && python3 -m http.server --bind 127.0.0.1)`, then open `http://localhost:8000` |
 
 `./scripts/build.sh --help` lists every option of the script. `build=debug` passes `--dev` to wasm-pack, which skips `wasm-opt`, so quote package sizes from a release build only.
 
 ## Three blind spots to know about
 
-Ordinary `cargo build`, `clippy --all-targets` and `cargo test` compile **none** of the following.
-Each rots silently until someone builds it deliberately:
+A plain `cargo build`, `clippy --all-targets` or `cargo test` compiles **neither of the first two**
+of the following, and the third only by way of `ssplayer-wgpu-ffi`, which switches its feature on by
+default (a command scoped with `-p ssplayer-wgpu` does not). Each rots silently until someone builds
+it deliberately:
 
 1. **The web face** sits behind the `web` feature and is compiled by no native command. Build and
    lint the wasm target after touching it.
 2. **The TypeScript layer** types itself against wasm-pack's generated `.d.ts`, so renaming a
    `#[wasm_bindgen]` method breaks it while cargo stays happy. Run the typecheck after changing the
    web face's public surface.
-3. **The C face** sits behind the `ffi` feature, and that build regenerates `ssplayer_wgpu.h`
-   through cbindgen. **Commit the regenerated
-   header with the change that moved it**, and read the diff: cbindgen sweeps up every module-level
-   `pub const` in the crate.
+3. **The C face** sits behind the `ffi` feature, and building `ssplayer-wgpu-ffi` (a workspace-wide
+   command does) regenerates `ssplayer_wgpu.h` through cbindgen. **Commit the regenerated header with
+   the change that moved it**, and read the diff: cbindgen sweeps up every module-level `pub const`
+   in the crate.
 
 ## Build the documentation site
 
@@ -108,13 +122,14 @@ The site is Markdown plus two grafts, and needs no cargo for the prose half:
 | | |
 |---|---|
 | [`CONTRIBUTING.md`](https://github.com/cri-middleware/SSPlayerForWgpu/blob/main/CONTRIBUTING.md) | The constraints a change must respect, and how to verify one. Read it before a non-trivial change |
-| [`ROADMAP.md`](https://github.com/cri-middleware/SSPlayerForWgpu/blob/main/ROADMAP.md) | What is planned, what is unverified, and what was deliberately declined |
+| [`ROADMAP.md`](https://github.com/cri-middleware/SSPlayerForWgpu/blob/main/ROADMAP.md) | What is planned, and what was deliberately declined |
 | [SDK Player Porting Guide](https://github.com/cri-middleware/SpriteStudio-SDK/tree/HEAD/libs/ssruntime/docs) | Playback semantics — the "Brain" — are canonically documented there, not here, and must not be duplicated into this repository |
 | These docs | The reader-facing guide. Package READMEs stay the front door on npm and GitHub |
 
 ## Verifying a change
 
-A full pass, in the order CI runs it:
+A full pass of the Rust checks CI runs on every pull request (the wasm lines are a separate job
+there, and the C++ viewers, the npm package and the preview shell have their own):
 
 ```bash
 cargo fmt --all -- --check
@@ -125,19 +140,23 @@ cargo clippy -p ssplayer-wgpu --target wasm32-unknown-unknown --no-default-featu
 cargo clippy -p ssplayer-wgpu --features ffi --all-targets -- -D warnings
 cargo build -p ssplayer-wgpu-ffi                          # also regenerates the C header
 cargo test -p ssplayer-wgpu --features ffi --lib
+git diff --exit-code -- libs/ssplayer-wgpu-ffi/include/ssplayer_wgpu.h   # the committed header is current
 ```
+
+CI also runs `cargo check --workspace --locked` with the Rust version `Cargo.toml` declares
+(`rust-version`), so an API newer than that fails there even where your stable passes.
 
 Three testing notes:
 
-* **Rendering tests skip themselves when no GPU adapter is present**, so a green run on such a
-  machine may have verified nothing. CI installs a software Vulkan device (Mesa lavapipe) and fails
+* **The rendering tests return early when no GPU adapter is present** and report `ok`, so on such a
+  machine they verify nothing; `tests/gpu_adapter.rs` is the one test that fails to say so. CI installs a software Vulkan device (Mesa lavapipe) and fails
   hard if none is found. When you change rasterisation, dump the readback to a PNG and look at it.
 * **Measure a performance change before and after, and drive a real frame loop while doing it.**
   Interleave `update` with the render pass exactly as a frame does: timing them in separate loops
-  makes anything that caches across frames look far better than it is. `cargo test --test scale --
-  --ignored` is the repository's throughput harness and does both; it is `#[ignore]`d because CI's
-  software GPU cannot judge speed. The counters a host sees are in
-  [Performance](../guide/performance.md).
+  makes anything that caches across frames look far better than it is.
+  `cargo test --release --test scale -- --ignored --nocapture` is the repository's throughput
+  harness and does both; it is `#[ignore]`d because it is a measurement, not an assertion. The
+  counters a host sees are in [Performance](../guide/performance.md).
 * **Take a golden dump before touching geometry.** The golden corpus test (ignored by default)
   renders every fixture/animation/frame/stencil combination and byte-compares it against a
   previous run:
@@ -163,8 +182,9 @@ Each face takes a checkout the way it takes a release:
   player borrows the host's device, so the host's `wgpu` must be the version the workspace's
   `Cargo.toml` names.
 - **C / C++:** `./scripts/build.sh` collects the library and `ssplayer_wgpu.h` into `bin/`
-  (`bin/libs/<platform>/<arch>/`, `bin/include/`); link them as the C++ viewers under `examples/`
-  do.
+  (`bin/libs/<platform>/<arch>/`, `bin/include/`); point your project's library and include paths
+  there. The C++ viewers under `examples/` do not read `bin/`: their CMake runs
+  `cargo build -p ssplayer-wgpu-ffi` and links `target/<profile>/`.
 - **npm:** build the package, pack it, and install the tarball in the app:
 
     ```bash

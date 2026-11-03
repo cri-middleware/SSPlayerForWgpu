@@ -27,7 +27,7 @@ files, no re-authoring, no engine lock-in.
   ([`docs/ja/`](./docs/ja/index.md) in the repository)
 - [**Limitations & Scope**](./docs/en/limitations.md) — what this player draws today, and what it leaves to the host
 - [**Migrating from SS6Player for CPP**](./docs/en/migration/from-ss6-cpp.md)
-- [**ROADMAP**](./ROADMAP.md) — what is implemented, what is planned, and what was deliberately declined
+- [**ROADMAP**](./ROADMAP.md) — what is planned, and what was deliberately declined
 - [**For AI assistants**](https://cri-middleware.github.io/SSPlayerForWgpu/llms.txt) — these docs as Markdown: `llms.txt` indexes the pages and `llms-full.txt` holds all of them in one file; the npm package carries the same pages in its `docs/` folder and as an Agent Skill in `skills/` ([installing the skill](https://cri-middleware.github.io/SpriteStudio-Docs/overview/ai-assistants/))
 - [**SpriteStudio Docs (portal)**](https://cri-middleware.github.io/SpriteStudio-Docs/) — the SDK and every
   official player in one place
@@ -101,7 +101,13 @@ points those two paths at `bin/` instead.
 ### Browser (WebGPU)
 
 The browser face is an npm package, [`@spritestudio/ssplayer-wgpu`](./packages/ssplayer-wgpu) — the
-wasm plus a small TypeScript layer over it:
+wasm plus a small TypeScript layer over it. Install it from npm:
+
+```bash
+npm i @spritestudio/ssplayer-wgpu
+```
+
+…and import what you need:
 
 ```js
 import { sharedContext } from '@spritestudio/ssplayer-wgpu';           // the page's device
@@ -113,12 +119,6 @@ per canvas, any number of characters in one pass — and the custom element is t
 convenience wrapper over them, in its own entry point so a bundle that does not use it does not carry
 it. [Get started on the web](./docs/en/start/web.md) is the JavaScript-facing guide.
 
-Install it from npm:
-
-```bash
-npm i @spritestudio/ssplayer-wgpu
-```
-
 Building it from this repository is covered in the [Build Guide](./docs/en/development/build.md).
 
 ### Where that `.ssab` comes from
@@ -127,8 +127,11 @@ Animations are authored in SpriteStudio — **7.6 or later** — and converted a
 converts nothing at runtime and bundles no converter. Use the desktop
 [SSConverterGUI](https://github.com/cri-middleware/SSConverterGUI), or the SDK's `ssconverter-cli`;
 [Converting with a standalone tool](https://cri-middleware.github.io/SpriteStudio-Docs/overview/convert-with-a-standalone-tool/)
-covers picking one and putting it in a build pipeline. Nothing of your own is needed to try the player
-first — the samples below run on the SDK's own test animations.
+covers picking one and putting it in a build pipeline. No `.sspj` of your own yet? SpriteStudio's
+[official sample data](https://www.webtech.co.jp/help/ja/spritestudio7/download/sample/) works as-is (the page is
+Japanese only; the downloads are language-neutral) — [Ringo](https://www.webtech.co.jp/help/ja/spritestudio7/download/sample/#ringo)
+is a good character — and feeds either tool above. The samples below, which need a checkout, run on
+the SDK's own test animations.
 
 ## ⚡ Usage
 
@@ -141,7 +144,7 @@ let mut scene = SSScene::new(&device, &SceneConfig { color_format, stencil_forma
 scene.set_viewport(&queue, width as f32, height as f32, /* y_down */ false);
 
 let mut player = SSPlayer::new();
-player.load("assets/overall/Basic.ssab")?;   // pack, atlases and sibling packs, in one call
+player.load("assets/overall/Basic.ssab")?;   // any converted .ssab: pack, atlases and sibling packs, in one call
 player.set_animation("anime_1")?;
 player.play();
 
@@ -175,10 +178,10 @@ the device is lent, and how assets get in.
 | [`examples/hello`](./examples/hello) | Rust, winit — the smallest host, one character | `cargo run -p ssplayer-wgpu-hello` |
 | [`examples/viewer`](./examples/viewer) | Rust, winit — the development viewer, a live cast | `cargo run -p ssplayer-wgpu-viewer` |
 | [`examples/web`](./examples/web) | WebGPU in a browser | `./scripts/run-web.sh` |
-| [`examples/cdn`](./examples/cdn) | WebGPU in a browser, the npm package straight from jsDelivr — no build step | `cd examples/cdn && python3 -m http.server --bind 127.0.0.1` |
-| [`examples/viewer-metal-cpp`](./examples/viewer-metal-cpp) | C++ on Metal, macOS | `cmake -B build && cmake --build build && ./build/ssviewer-metal` |
-| [`examples/viewer-dx12-cpp`](./examples/viewer-dx12-cpp) | C++ on DX12, Windows | `cmake -B build; cmake --build build --config Release; .\build\Release\ssviewer-dx12.exe` |
-| [`examples/viewer-vulkan-cpp`](./examples/viewer-vulkan-cpp) | C++ on Vulkan, Linux — X11 and Wayland in one binary | `cmake -B build && cmake --build build && ./build/ssviewer-vulkan` |
+| [`examples/cdn`](./examples/cdn) | WebGPU in a browser, the npm package straight from jsDelivr — no build step | `cp assets/Ringo_emb/Ringo.ssab examples/cdn/ && (cd examples/cdn && python3 -m http.server --bind 127.0.0.1)` |
+| [`examples/viewer-metal-cpp`](./examples/viewer-metal-cpp) | C++ on Metal, macOS | `cd examples/viewer-metal-cpp && cmake -B build && cmake --build build && ./build/ssviewer-metal` |
+| [`examples/viewer-dx12-cpp`](./examples/viewer-dx12-cpp) | C++ on DX12, Windows | `cd examples\viewer-dx12-cpp; cmake -B build; cmake --build build --config Release; .\build\Release\ssviewer-dx12.exe` |
+| [`examples/viewer-vulkan-cpp`](./examples/viewer-vulkan-cpp) | C++ on Vulkan, Linux — X11 and Wayland in one binary | `cd examples/viewer-vulkan-cpp && cmake -B build && cmake --build build && ./build/ssviewer-vulkan` |
 | [`examples/viewer-bevy`](./examples/viewer-bevy) | Bevy — the adapter's development viewer, a live cast | `cargo run -p ssplayer-bevy-viewer` |
 | [`examples/overall-bevy`](./examples/overall-bevy) | Bevy — the scripted feature tour | `cargo run -p ssplayer-bevy-overall` |
 
@@ -186,7 +189,7 @@ From a fresh checkout, one script converts the data on its first run and then st
 `hello` unless you name another (`.ps1` on Windows):
 
 ```bash
-./scripts/run-example.sh                  # example=viewer / viewer-bevy / overall-bevy / web
+./scripts/run-example.sh example=viewer   # or viewer-bevy / overall-bevy / web
 ./scripts/run-web.sh                      # the browser demo: builds the package if missing, serves and opens it
 ```
 

@@ -175,9 +175,9 @@ if ($opts.platform -eq "host") {
         Invoke-Checked "cargo build" { & cargo build -p ssplayer-wgpu-ffi --no-default-features --features embedded @profileArgs }
 
         if ($opts.ffi -eq "yes") {
-            # No default command compiles src/ffi.rs or src/host.rs, so the C face
-            # rots silently unless it is built explicitly. build.rs runs cbindgen in
-            # the same pass, which is what keeps include/ssplayer_wgpu.h in step
+            # A command scoped to the player compiles neither src/ffi.rs nor
+            # src/host.rs, so the C face is built explicitly here. build.rs runs
+            # cbindgen in the same pass, which is what keeps include/ssplayer_wgpu.h in step
             # with the API.
             Write-Host ">> cargo build -p ssplayer-wgpu-ffi ($($opts.build)) - regenerates include/ssplayer_wgpu.h"
             Invoke-Checked "cargo build -p ssplayer-wgpu-ffi" { & cargo build -p ssplayer-wgpu-ffi @profileArgs }

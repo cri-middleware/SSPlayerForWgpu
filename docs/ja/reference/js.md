@@ -8,8 +8,10 @@ title: JavaScript API リファレンス
 
 ```js
 import { sharedContext, restoreSharedDevice, setWasmUrl } from '@spritestudio/ssplayer-wgpu';
-import { defineSsPlayerWebGPUElement } from '@spritestudio/ssplayer-wgpu/element';
+import { SsPlayerWebGPUElement, defineSsPlayerWebGPUElement } from '@spritestudio/ssplayer-wgpu/element';
 ```
+
+`read` は `SsAssetReader` です：`(url: string) => SsAssetBytes | Promise<SsAssetBytes>`。`SsAssetBytes` は `ArrayBuffer | Uint8Array | Blob | null | undefined`。この 2 つの型と、要素のクラス `SsPlayerWebGPUElement` は export されています。`SsContextWeb.create()` は独自のコンテキスト（= 2 つ目のデバイス）を作るので、呼ぶのは `sharedContext()` にしてください。
 
 要素は独立したエントリポイントにあるので、API だけを使うバンドルに要素は含まれません。
 
@@ -27,15 +29,17 @@ import { defineSsPlayerWebGPUElement } from '@spritestudio/ssplayer-wgpu/element
 | | |
 |---|---|
 | `createSurface(canvas)` | `<canvas>` ごとに 1 つ |
-| `addTexture(key, rgba, width, height)` | 生の RGBA8 でアトラスを供給（`textureRefs` の `key` で） |
+| `addTexture(key, rgba, width, height)` | 生の **straight-alpha** RGBA8 でアトラスを供給（`textureRefs` の `key` で） |
 | `addTextureFromBytes(key, bytes): Promise` | エンコード済みバイト列から（ブラウザがデコード） |
-| `addTextureFromBitmap(key, imageBitmap)` | 既にある `ImageBitmap` から |
+| `addTextureFromBitmap(key, imageBitmap)` | 既にある `ImageBitmap` から。**premultiplied** でなければなりません（`createImageBitmap(blob, { premultiplyAlpha: 'premultiply' })`） |
 | `hasTexture(key)` | キャッシュに既にあるか |
 | `isDeviceLost()` / `restoreDevice()` | [デバイスロスト](../guide/device-loss.md)を参照 |
 | `surfaceCount()` | 診断用 |
-| `version` / `sdkVersion` | この Player のバージョンと、リンクしている SpriteStudio-SDK のバージョン（リリースのタグの形。`scripts/build.sh` を通さないビルドなら `local`）。読み取り専用。カスタム要素からは `element.ctx` で届く |
+| `version` / `sdkVersion` | この Player のバージョンと、リンクしている SpriteStudio-SDK のバージョン。後者はリリースのタグの形（`v7.0.0`）で、`scripts/build.sh` を通さないビルドなら `local` です。読み取り専用。カスタム要素からは `element.ctx` で届く |
 
 `addTexture`・`addTextureFromBitmap`・`setCellmapTexture` は、デバイスが保持できないテクスチャに対して何も変えずに例外を投げます。幅か高さが `max_texture_dimension_2d` を超える場合、閉じた `ImageBitmap` の場合、`addTexture` で `rgba` が `width * height * 4` バイトでない場合です。`FromBytes` 版も同じ理由で reject します。
+
+`ImageBitmap` から供給したテクスチャ（`addTextureFromBitmap`・`setCellmapTexture`・`setCellmapTextureFromBytes`）は、デバイスロストをまたいで保持されません。`restoreSharedDevice` の後でもう一度供給（適用）してください。`addTexture`・`addTextureFromBytes` で渡したものと、パック自身のアトラスは自動で復元されます。
 
 ## `SsSurfaceWeb` — キャンバス 1 枚
 
@@ -47,22 +51,22 @@ import { defineSsPlayerWebGPUElement } from '@spritestudio/ssplayer-wgpu/element
 | `setGroupAlpha(on)` / `groupAlpha()` | フェード中のプレイヤーをそれぞれ 1 枚のレイヤーとしてフェード。[キャラクター全体の tint とアルファ](../guide/part-overrides.md#whole-character-tint-and-alpha)を参照 |
 | `stats()` | `{ players, prims, drawCalls, uploadedBytes, mergeableDraws, redundantTextureBinds, groupLayers, gpuPassTimeNs? }` |
 | `playerCount()` | 診断用 |
-| `destroy()` | 明示的かつ冪等。JS 参照を捨てるだけではスワップチェーンが残ります |
+| `destroy()` | 明示的かつ冪等。スワップチェーンと**キャンバス上の全プレイヤー**を解放します。JS 参照を捨てるだけではスワップチェーンが残ります |
 
 ## `SsPlayerWeb` — キャラクター 1 体
 
-**ロード** — 非同期なのは `load` 系だけで、1 つのプレイヤーが同時に走らせられるロードは **1 本**です。前のロードが完了する前に次を始めると reject されるので、`await` するか呼び出しを直列につないでください。
+**ロード** — プレイヤーで非同期なのは `load` 系と `setCellmapTextureFromBytes` だけで、1 つのプレイヤーが同時に走らせられるロードは **1 本**です。前のロードが完了する前に次を始めると reject されるので、`await` するか呼び出しを直列につないでください。
 
 | | |
 |---|---|
 | `load(src, read?): Promise` | URL からパック・アトラス・兄弟パックを。`read(url)` を渡すと `fetch` の代わりにそれが答えます（[ブラウザでは](../guide/loading.md#in-a-browser)） |
-| `loadSsab(bytes, pack?, baseUrl?, read?): Promise` | バイト列を登録し、選択対象にする |
-| `addSsab(bytes, pack?, baseUrl?, read?): Promise` | 登録のみ |
-| `missingAssets()` | 届かなかったもの。**reject ではありません** |
-| `textureRefs(pack?)` / `embeddedTextures(pack?)` | パックが要求するアトラス |
+| `loadSsab(bytes, pack?, baseUrl?, read?): Promise` | バイト列を登録して選択対象にし、アトラスと兄弟パックも読み込む（`baseUrl` を基準に解決） |
+| `addSsab(bytes, pack?, baseUrl?, read?): Promise` | 選択はせずに同じことを行う（インスタンスパーツが見つけられるように） |
+| `missingAssets()` | 届かなかったもの。`{ kind: 'texture' \| 'pack', name, slot }[]`。**reject ではありません** |
+| `textureRefs(pack?)` / `embeddedTextures(pack?)` | パックが要求するアトラス。`{ key, path, embedded }[]`（`path` は `.ssab` の URL からの相対）/ `{ key, bytes }[]` |
 | `animationNames()` / `partNames()` / `cellmapNames()` / `cellNames(cellmap)` | パックが持つもの |
 | `currentAnimation()` | 設定中のアニメーション。無ければ `undefined` |
-| `canvasSize()` | オーサリング時のキャンバス |
+| `canvasSize()` | オーサリング時のキャンバス。`[width, height]`。アニメーション設定前は空の配列 |
 
 **再生制御** — [再生と再生制御](../guide/playback.md)を参照。
 
@@ -87,7 +91,7 @@ import { defineSsPlayerWebGPUElement } from '@spritestudio/ssplayer-wgpu/element
 
 | | |
 |---|---|
-| `setTransform(x, y, scaleX, scaleY, rotation)` / `resetTransform()` | |
+| `setTransform(x, y, scaleX, scaleY, rotation)` / `resetTransform()` | 位置（キャンバスの中心からのピクセル、`y` は下向きが正）・スケール・回転（ラジアン）。呼ばなければ中央に等倍で置かれます |
 | `fitInto(width, height, options?)` | アニメーションを箱に収め、そのトランスフォームを書き込みます。戻り値は `{ x, y, scaleX, scaleY }`。未知の `fit` / `align` は例外になります。[ボックスへのフィット](../guide/placement.md)を参照 |
 | `canvasRect()` | `frame` を渡さないときに `fitInto` が収める箱。`{ x, y, width, height }`、`setAnimation` 前は `undefined` |
 | `setOrder(n)` / `order()` | キャンバス内の描画順（昇順） |
@@ -145,7 +149,7 @@ import { defineSsPlayerWebGPUElement } from '@spritestudio/ssplayer-wgpu/element
 | `addTrackSource(track, name, weight)` | 別のアニメーションを横に載せ、weight で混ぜる。ハンドルを返す |
 | `setSourceWeight` / `setSourceFrame` / `setSourceEventThreshold` と、`set` の無い取得 | ソース 1 つの weight・再生位置・イベントのしきい値 |
 
-存在しないトラックやソースを読むと `undefined` が返り、操作すると例外を投げます。
+存在しないトラックやソースを読むと `undefined` が返ります（`isTrackFinished` と `trackJustLooped` は `false`）。操作すると例外を投げます。
 
 ## `<ss-player-webgpu>` { #ss-player-webgpu }
 

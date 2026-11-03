@@ -13,7 +13,7 @@ title: Rust ではじめる
 
 | | |
 |---|---|
-| Rust | 1.99 以降、edition 2024 |
+| Rust | 1.99 以降 |
 | wgpu | **30** 系 — アプリと Player は 1 つの `wgpu` に解決される必要があるため、メジャーが違うとコンパイルエラーになります |
 
 ## 導入 { #install }
@@ -32,9 +32,7 @@ ssplayer-wgpu = { git = "https://github.com/cri-middleware/SSPlayerForWgpu" }
 ssplayer-wgpu = { path = "third_party/SSPlayerForWgpu/libs/ssplayer-wgpu" }
 ```
 
-このパスは workspace ではなく 1 クレートなので、あなたの workspace にそのまま収まります。チェックアウト先で
-`git submodule update --init --recursive` を忘れずに — Player 自身の `SpriteStudio-SDK` サブモジュールが
-path 依存になっており、これが無いと `ssruntime` / `ssab` を解決できません。
+このパスは workspace ではなく 1 クレートです。自分のプロジェクトが Cargo の workspace で、チェックアウト先がその中にある場合は、`exclude` に入れてください（`exclude = ["third_party/SSPlayerForWgpu"]`）。入れないと、cargo は Player の `workspace = true` のフィールドを自分の workspace に対して解決し、``error inheriting `edition` from workspace root manifest`` で止まります。チェックアウト先で `git submodule update --init --recursive` を忘れずに — Player 自身の `SpriteStudio-SDK` サブモジュールが path 依存になっており、これが無いと `ssruntime` / `ssab` を解決できません。
 
 ## 3 つのオブジェクト
 
@@ -47,6 +45,8 @@ path 依存になっており、これが無いと `ssruntime` / `ssab` を解�
 詳しくは[スコープと名前の対応](../guide/concepts.md)、設計理由は[借用モデル](../wgpu/borrow-model.md)。
 
 ## 初期化（1 回）
+
+サンプルが読み込む `.ssab` は事前にコンバートしたものです。`.sspj` からの作り方は[アセットの準備](./assets.md)にあり、公式のサンプルデータなら自前のプロジェクトは要りません。
 
 ```rust
 use ssplayer_wgpu::{MaskBackend, SSPlayer, SSRenderer, SSScene, SceneConfig};
@@ -104,7 +104,7 @@ let mut rpass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
 let draw_calls = scene.draw(&renderer, &mut rpass);
 ```
 
-そのターゲットの**全キャラクターを 1 回の `update` に渡し、1 パスで描画してください**。10 体でもアトラスアップロード 1 回・パイプライン 1 セットで済むのはそのためです。前後関係は `SSPlayer::set_order` の昇順です。
+そのターゲットの**全キャラクターを 1 回の `update` に渡し、1 パスで描画してください**。同じターゲットへの 2 回目の `update` は新しいフレームを始め、1 回目が作ったものを置き換えます。前後関係は `SSPlayer::set_order` の昇順です。
 
 パスが守るべきことは 4 つ：
 

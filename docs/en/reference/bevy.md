@@ -17,7 +17,8 @@ app.add_plugins(SsPlayerPlugin);
 ```
 
 It adds the extract, prepare and draw systems, and owns the device-scoped renderer and the
-target-scoped scene inside the render world. Nothing else is required.
+target-scoped scene inside the render world. Add it after `DefaultPlugins`; without the render app it
+logs an error and does nothing. Nothing else is required.
 
 The camera, however, needs two things: `Msaa::Off` (the player's pipelines are single-sampled) and
 `CompositingSpace::Srgb` (or every character is visibly too bright).
@@ -36,7 +37,7 @@ The camera, however, needs two things: `Msaa::Off` (the player's pipelines are s
 track 0 is refused, so what it names and what track 0 plays never part.
 
 `SsTransform`, `SsPlayback`, `SsPlaybackState` and `SsTrackState` are **required components**, so
-spawning `SsPlayer` alone gives you all five at their defaults.
+spawning `SsPlayer` alone gives you the other four at their defaults.
 
 ### `SsPack` — the `.ssab` as an asset
 
@@ -78,7 +79,7 @@ Free to change, every frame if you like.
 | `visible: bool` | `true` | False skips the draw; the timeline keeps running |
 | `culled: bool` | `false` | True skips **the timeline advance** as well as the draw — for an off-screen character |
 | `restart: u32` | `0` | **Bump it** (any change of value) to replay from the head, re-arming the loop count |
-| `direction: PlaybackDirection` | `Forward` | Which way the playhead walks |
+| `direction: PlaybackDirection` | `Forward` | Which way the playhead walks: `Forward` or `Backward` |
 | `style: PlaybackStyle` | `Normal` | `Normal` wraps at the far end, `PingPong` turns back |
 | `loop_count: i32` | `-1` | Cycles before stopping; `-1` or `0` loops for ever. A change re-arms the count |
 | `frame_rate: i32` | `0` | Replaces the authored rate; `0` keeps it. Prefer `speed_scale` |
@@ -169,7 +170,8 @@ Sent together in one frame they apply as play, stop, seek.
 
 `SsTrackCommand { entity, command }` performs one operation on the character's track stack;
 `command` is a `TrackCommand`, each variant the `SSPlayer` call of the same name — `SetAnimation`,
-`Crossfade`, `FadeTrack`, `CancelFade`, `Clear`, `SetAlpha`, `SetBlend`, `SetSync`, `SetFrame`,
+`Crossfade`, `FadeTrack`, `CancelFade`, `Clear`, `SetAlpha`, `SetBlend` (`TrackBlend::Mix` or
+`Additive`), `SetSync` (`TrackSync::Free` or `Start`), `SetFrame`,
 `SetSpeed`, `SetFrameRate`, `SetFrameSkipEnabled`, `SetPlaybackDirection`, `SetLoopCount`,
 `SetOutgoingEventThreshold`, `AddSource`, `SetSourceWeight`, `SetSourceFrame`,
 `SetSourceEventThreshold`. `SetAnimation` and `Crossfade` are refused on track 0, which
@@ -257,5 +259,5 @@ stencil; the cost is one extra render pass per masking character per frame
 ([Masks](../guide/masks.md)).
 
 Device loss recovers by riding Bevy's own recovery, but **you must opt in** with a
-`RenderErrorHandler` returning `RenderErrorPolicy::Recover`
-([Device loss](../guide/device-loss.md)).
+`RenderErrorHandler` that answers a `DeviceLost` error with
+`RenderErrorPolicy::Recover(RenderCreation::default())` ([Device loss](../guide/device-loss.md)).

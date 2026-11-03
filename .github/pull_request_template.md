@@ -1,6 +1,6 @@
 <!--
 Thanks for contributing! See CONTRIBUTING.md for the constraints this project works under
-(the player owns no wgpu state, no vertex buffer, no per-frame allocation, the three faces stay in step).
+(the player owns no wgpu state, no vertex buffer, no per-frame allocation, core logic in the SDK, the three faces stay in step).
 CONTRIBUTING.md に本プロジェクトの制約が記載されています。日本語でも英語でも構いません。
 -->
 
@@ -17,7 +17,7 @@ that is useful information, not a problem.
 -->
 
 - [ ] `cargo fmt --all -- --check` and `cargo clippy --workspace --all-targets -- -D warnings`
-- [ ] `cargo test --workspace` after `./scripts/deploy-examples.sh` — `tests/render.rs` skips itself without a GPU adapter
+- [ ] `cargo test --workspace` after `./scripts/deploy-examples.sh` — the tests that draw return early without a GPU adapter, and `tests/gpu_adapter.rs` fails to say so
 - [ ] The wasm and `ffi` builds CONTRIBUTING lists, if the API changed
 - [ ] Ran an example or the preview / サンプルかプレビューで確認した
 - [ ] Not run — see notes below / 未実行（理由は下記）
@@ -33,6 +33,7 @@ that is useful information, not a problem.
 - [ ] `SSPlayer` gains no wgpu-typed field; `Device` / `Queue` / `Surface` / `SSRenderer` stay the host's.
 - [ ] No vertex buffer: one `Prim` per part, nothing per vertex on the CPU.
 - [ ] No per-frame allocations: a per-frame buffer lives on the `FrameChunk`, or on the player's `Walk`, and keeps its capacity.
+- [ ] Core logic goes to SpriteStudio-SDK, and nothing is committed inside the submodule.
 - [ ] The three faces stay in step: `ffi.rs` holds no logic, and `include/ssplayer_wgpu.h` is regenerated and committed.
 - [ ] wgpu stays on the 30 line, and no engine appears in `ssplayer-wgpu`.
 
