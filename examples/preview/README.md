@@ -9,8 +9,8 @@
 cargo run -p ssplayer-preview-gen -- pack=assets/Ringo/Ringo.ssab open=yes
 ```
 
-Then open that file. Not serve it — **open it**, from the Finder, from a terminal, from a
-host's "Preview" button. There is no server, no install and no network. Drop a `.ssab` on
+Then open that file. Not serve it — **open it**, from the Finder or from a terminal.
+There is no server, no install and no network. Drop a `.ssab` on
 it, or the folder that holds one, and it plays.
 
 The design, what it is for and what was measured is [`PREVIEW.md`](../../PREVIEW.md) in
@@ -27,7 +27,7 @@ The one rule the page lives by: **nothing may reach outside the file unasked.** 
 `file://` an external script is blocked, and so is `fetch` unless Chrome was started with
 `--allow-file-access-from-files`, while an inline `<script type="module">` runs. So there
 is no `src`, no `import` and no `XMLHttpRequest` in this source, and one `fetch`: the URL
-entrance's, which a host opens in exactly that Chrome. The build fails on a second one. A
+entrance's, which reads only in exactly that Chrome. The build fails on a second one. A
 slip would work perfectly over `http://` and fail only on the machine that opened the
 artifact.
 
@@ -41,21 +41,21 @@ The wasm is its own build (`wasm-pack --target no-modules`), not the npm package
 
 ## Opening it by path
 
-A host's Preview button opens the shell with the pack in its query:
+Opened by path, the shell takes the pack in its query:
 
 | Key | Value |
 |---|---|
 | `ssab` | the `.ssab`'s `file://` URL |
-| `animation` | the animation to open on, when the editor has one selected |
+| `animation` | the animation to open on |
 | `converter` | `ss_converter_version()` of the converter that wrote the `.ssab` |
 
-A host encodes each value as a query component (`Uri.EscapeDataString`,
-`String.uri_encode`), since a path may hold a space, `#`, `&` or `+`. Only `ssab` is
+Encode each value as a query component, since a path may hold a space, `#`, `&` or
+`+`. Only `ssab` is
 required. In a Chrome
 started with `--allow-file-access-from-files` (*The URL entrance* in `PREVIEW.md` has the
 whole command line and why), the page reads the pack, its atlases and sibling packs, and
 lists the other packs in its directory; without it, it says it cannot read the pack. To
-try it as a host would:
+open it this way:
 
 ```sh
 ./scripts/build-preview.sh

@@ -1,7 +1,7 @@
 # Self-contained `.ssab` preview — working notes
 
-One preview of a chosen animation, reachable from every host, shipped as a **single
-self-contained HTML file opened in the browser**. Not an in-editor renderer.
+One preview of a chosen animation, shipped as a **single self-contained HTML file opened
+in the browser**. Not an in-editor renderer.
 
 It is a catalogue of what a `.ssab` holds — its animations, their playback, their events,
 the assets it could not find — played by this Player as a reference. Matching each
@@ -20,14 +20,14 @@ valid page as it stands and opens to "drop a `.ssab` here" rather than to an err
 
 It has three entrances and one interior:
 
-- **From a host** — a "Preview" button opens the shell its plugin ships in Chrome, with
-  the `.ssab`'s path in the URL, and the page reads the pack and everything it depends on
-  itself. No temp file, no base64, no server (see *The URL entrance*).
 - **By hand** — the shell is opened as it ships and a `.ssab` is dropped on it with its
   atlases and sibling packs, or the folder that holds them. Nothing else has to be fetched
-  or installed, which is what serves the hosts with no editor to put a button in.
+  or installed, which is what serves the hosts with no preview in an editor.
   `examples/viewer` already plays a dropped pack, so the gesture is not a new one to
   teach.
+- **By path** — Chrome, started with one flag, opens the shell with the `.ssab`'s path in
+  the URL, and the page reads the pack and everything it depends on itself. No temp file,
+  no base64, no server (see *The URL entrance*).
 - **Filled** — `examples/preview-gen` puts a pack and everything it depends on into the
   holes, and the result opens anywhere with nothing beside it. It is the form that
   attaches to a bug report: a page opened by URL reads the reporter's files, so its HTML
@@ -35,36 +35,37 @@ It has three entrances and one interior:
 
 What follows from that shape:
 
-- **One button per pack, not per animation.** The page holds the whole pack and
-  `animationNames` returns all of it, so the animation picker belongs in the page. A
-  host that has one selected passes it as the initial value; otherwise it passes
-  nothing. No host ever needs to know the animation list, and none lists the other packs
-  either: the page offers the ones in the same directory.
-- It is **not a live view**: no file watching, no following the editor's selection, no
-  IPC back to the editor. To see new bytes after a reconvert, press reload in the page,
-  or the button again. Converting is a build step, not a preview's job.
+- **A pack, not an animation.** The page holds the whole pack and `animationNames`
+  returns all of it, so the animation picker belongs in the page; the URL can name the one
+  to open on. Whoever opens it never needs the animation list, nor the other packs: the
+  page offers the ones in the same directory.
+- It is **not a live view**: no file watching and no IPC with an editor. To see new bytes
+  after a reconvert, press reload in the page. Converting is a build step, not a
+  preview's job.
 
-## Why the preview is not drawn in the inspector
+## The editor hosts preview in their own renderer
 
-"The inspector shows what the canvas shows" is a promise only the engine's own renderer
-can keep. Driving a Godot or Unity inspector from wgpu would *guarantee* a mismatch with
-that engine's canvas, and the mismatch would be in rasterisation — blending, masking,
-colour — which is the hardest kind to explain. A separate window is a reference view and
-makes no such promise.
+"The editor shows what the canvas shows" is a promise only the engine's own renderer can
+keep. Drawing a Godot or Unity inspector with wgpu would *guarantee* a mismatch with that
+engine's canvas, and the mismatch would be in rasterisation — blending, masking, colour —
+which is the hardest kind to explain. A separate window is a reference view and makes no
+such promise.
 
-If an in-engine preview is ever wanted, write it as a thin host over the engine's
-**existing** renderer — Godot's `ss_internal_player.h` already names editor previews as
-a host alongside `Node2D`, and Unity reaches the same place with `PreviewRenderUtility`
-over the shipped graphic. That is a host, not a second renderer. It is not this work.
+So the editors preview with their own renderer: Godot's bottom panel plays and scrubs the
+selected node, and Unity's inspector plays the selected object where it stands (Play in
+Edit Mode) and follows a Timeline scrub. A Preview button opening this shell beside them
+would show a second, unmatched picture of what they already show, so neither has one. The
+shell is for the hosts with no preview in an editor, and for bug reports.
 
 ## The URL entrance
 
-A host's button does one thing: start Chrome on the shell's `file://` URL with three
-query values — the `.ssab`'s `file://` URL, the animation the editor has selected if
-any, and the converter's version (`ss_converter_version()`). The names are in
-[the shell's README](./examples/preview/README.md). It passes no fit or alignment (the
-page fits the authored canvas, *Fitting the canvas*) and no dependencies (the page reads
-them, *Page composition*), so a host never reads the `.ssab` and never computes a hash.
+Opening by path is Chrome started on the shell's `file://` URL with up to three query
+values — the `.ssab`'s `file://` URL, the animation to open on, and the version of the
+converter that wrote the pack (`ss_converter_version()`). The names and the command are in
+[the shell's README](./examples/preview/README.md#opening-it-by-path). There is no fit or
+alignment to pass (the page fits the authored canvas, *Fitting the canvas*) and no
+dependencies (the page reads them, *Page composition*), so whoever opens it never reads
+the `.ssab` and never computes a hash.
 
 ```text
 --user-data-dir=<a profile of its own> --allow-file-access-from-files
@@ -72,11 +73,11 @@ them, *Page composition*), so a host never reads the `.ssab` and never computes 
 ```
 
 - **Chrome by name, not the default browser.** A flag reaches only a Chrome it starts,
-  never one already running, so the host uses a profile of its own; a second press opens
-  a window in that same instance. macOS: `open -na "Google Chrome" --args …`.
+  never one already running, so it takes a profile of its own; opening again in that
+  profile opens a window in the same instance. macOS: `open -na "Google Chrome" --args …`.
 - **Only the shell, in an app window.** In that profile any `file://` page can read
-  local files, so the host opens nothing else there, and `--app=` leaves no URL bar to
-  open anything else with. The shell loads nothing from outside itself.
+  local files, so open nothing else there; `--app=` leaves no URL bar to open anything
+  else with. The shell loads nothing from outside itself.
 - **Reload is a fresh page.** The renderer keeps an atlas it already holds under its
   URL, so loading a reconverted pack again in place would draw it with the old atlas.
   The page's reload button and its pack picker open the page again on new query values
@@ -101,10 +102,9 @@ Chrome stable, macOS 26.6.2, fresh profile, no flags, page at `file://`.
   Drops injected through the DevTools Protocol (`Input.dispatchDragEvent`), not dragged
   from the OS.
 
-So: inline everything and `file://` is enough. **No local HTTP server is needed** — and
-one would have to be written twice, in C++ for Godot and C# for Unity, on top of port
-allocation, lifecycle, firewall prompts and a token to keep the local filesystem from
-being readable by anything that can reach the port.
+So: inline everything and `file://` is enough. **No local HTTP server is needed**, with
+its port allocation, lifecycle, firewall prompts and a token to keep the local filesystem
+from being readable by anything that can reach the port.
 
 **With `--allow-file-access-from-files`** (Chrome 156, a profile of its own, headless and
 windowed alike): a `file://` page reads local files with `fetch`, subfolders included,
@@ -150,34 +150,24 @@ which make a built shell of 1,723,638 B — the fixed cost of every page. Filled
 
 The shell is a **release artifact of this repository**: every `ssplayer-wgpu` Release
 carries it as `ssplayer-preview.html`, listed in `SHA256SUMS`, built by
-`scripts/build-preview.sh` in the release workflow's web job.
-
-It is not committed into the Players. It is generated content of about 1.7 MB, and a
-copy in each Player is a copy that drifts; the native binaries are already built rather
-than committed, and the shell travels the same way — each plugin's packaging script
-fetches a pinned release:
+`scripts/build-preview.sh` in the release workflow's web job. The tag is the pin, so the
+file name carries no version, like the zips':
 
 ```text
 https://github.com/cri-middleware/SSPlayerForWgpu/releases/download/ssplayer-wgpu-v<version>/ssplayer-preview.html
 ```
 
-The tag is the pin, so the file name carries no version, like the zips'.
-[`MAINTAINING_PLAYERS.md` §4.1](https://github.com/cri-middleware/SpriteStudio-SDK/blob/HEAD/MAINTAINING_PLAYERS.md#41-nothing-behind-the-first-door-may-need-a-clone) is the constraint that decides this: nothing behind a
-Player's first door may need a clone, so the shell has to arrive with the plugin rather
-than from a sibling checkout.
-
 **It carries its own license notices** — `LICENSE.md` and `THIRD_PARTY_NOTICES.md`,
-behind the page's Licenses link — because it travels alone: as a Release asset and inside
-each Player's package, with the wasm holding wgpu and the rest of the tree.
+behind the page's Licenses link — because it travels alone, with the wasm holding wgpu and
+the rest of the tree.
 
-**The version check is load-bearing.** A shell from another SDK release reads the same
-`.ssab` and draws it as that release does, so a stale shell does not fail — it quietly
-draws something else. The stamp names the SDK as the converter spells it,
-`<release>+<commit>`. A host puts the converter's version in the URL; the page compares
-the release before the `+` with the one it links (`ctx.sdkVersion`), says so above the
-picture when they differ, and shows the commit without comparing it. Players pin an SDK
-release, so a plugin whose pins agree stays quiet. Without the check, every "the preview
-disagrees with my engine" report has to be re-diagnosed from scratch.
+**The stamp names the SDK release it draws as.** A shell from another SDK release reads
+the same `.ssab` and draws it as that release does, so a stale shell does not fail — it
+quietly draws something else. The stamp names the SDK as the converter spells it,
+`<release>+<commit>`. When the URL carries the converter's version, the page compares the
+release before the `+` with the one it links (`ctx.sdkVersion`), says so above the picture
+when they differ, and shows the commit without comparing it. Without the stamp, every "the
+preview disagrees with my engine" report has to be re-diagnosed from scratch.
 
 ## Page composition
 
@@ -215,7 +205,7 @@ at — so `missingAssets()` names it on screen.
 An **embedded-mode** pack is one input file: its atlases arrive inside it, and the
 `web` face decodes them itself through `createImageBitmap`.
 
-That is not what the hosts we are integrating produce. Godot converts with
+That is not what the editor hosts produce. Godot converts with
 `embedded = false` (`ss_importer.cpp`) and so does Unity
 (`SpriteStudioConversionRunner.cs`), so what an editor has on disk is a **reference**
 pack plus sibling `.png` files, and the `.ssab` alone draws nothing. That is why every
@@ -293,21 +283,11 @@ Call it again when the element resizes and after the picker changes animation. S
 [the guide](./docs/en/guide/placement.md); the contract it ports is the porting guide's
 [Placement: Fit and Align](https://github.com/cri-middleware/SpriteStudio-SDK/blob/HEAD/libs/ssruntime/docs/50_features/70_placement.md).
 
-## Work order
-
-The shell (`examples/preview/shell.html` + `scripts/build-preview.sh`) and the generator
-(`examples/preview-gen`) are built, and every Release carries the shell. What is left
-lives in the Player repositories: each plugin's packaging script fetching the shell from
-a pinned Release, and **the buttons** — find Chrome, build the URL, start it as *The URL
-entrance* says.
-
 ## Out of scope
 
-- Live reload, file watching, following the editor's selection, or reconverting from
-  the preview.
+- Live reload, file watching, or reconverting from the preview.
 - In-inspector thumbnails and project-window previews. A different need — identifying a
   file at a glance rather than inspecting one — and a different mechanism.
-- An HTTP server inside the editor plugins.
 - **A route for machines without WebGPU** — WebGL, pre-rendered frames, the native
   viewer. A machine that runs the Unity or Godot editor has the D3D12, Metal or Vulkan
   that WebGPU sits on; what is left is virtual machines and remote desktops with no GPU
