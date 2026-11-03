@@ -15,7 +15,7 @@ this for you.
 
 | | |
 |---|---|
-| Rust | 1.99 or newer, edition 2024 |
+| Rust | 1.99 or newer |
 | wgpu | the **30** line — your app and the player must resolve to one `wgpu`, so a different major is a compile error |
 
 ## Install
@@ -35,7 +35,10 @@ checkout you patch — point at the crate directory rather than the repository r
 ssplayer-wgpu = { path = "third_party/SSPlayerForWgpu/libs/ssplayer-wgpu" }
 ```
 
-That path is a crate, not a workspace, so it slots into yours. Run
+That path is a crate, not a workspace. If your own project is a Cargo workspace and the checkout
+sits inside it, list the checkout under `exclude` — `exclude = ["third_party/SSPlayerForWgpu"]` — or
+cargo reads the player's `workspace = true` fields against your workspace and stops with
+``error inheriting `edition` from workspace root manifest``. Run
 `git submodule update --init --recursive` in the checkout: the player's own `SpriteStudio-SDK`
 submodule is a path dependency, and without it cargo cannot resolve `ssruntime` / `ssab`.
 
@@ -51,6 +54,9 @@ Full story in [Scopes and names](../guide/concepts.md); the reasoning is in
 [The borrow model](../wgpu/borrow-model.md).
 
 ## Set up, once
+
+The samples load a `.ssab` converted ahead of time: [Preparing assets](./assets.md) shows how to
+make one from a `.sspj`, and the official sample data needs no project of your own.
 
 ```rust
 use ssplayer_wgpu::{MaskBackend, SSPlayer, SSRenderer, SSScene, SceneConfig};
@@ -109,8 +115,8 @@ let mut rpass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
 let draw_calls = scene.draw(&renderer, &mut rpass);
 ```
 
-Pass **every** player of that target to one `update` and draw them in one pass — that is what makes
-ten characters cost one atlas upload and one set of pipelines. Their order on screen is
+Pass **every** player of that target to one `update` and draw them in one pass: a second `update` on
+the same target starts a new frame and replaces what the first one built. Their order on screen is
 `SSPlayer::set_order`, ascending.
 
 Four rules the pass has to honour:

@@ -1,7 +1,8 @@
 # Preparing assets
 
 Every face plays the same file: a **`.ssab`**, converted ahead of time from the `.sspj` project your
-artist works in. **This player converts nothing at runtime and bundles no converter.**
+artist works in. **This player converts nothing at runtime and bundles no converter.** The `.sspj` has to be
+authored in SpriteStudio **7.6 or later**.
 
 ## Converting your own
 
@@ -49,7 +50,7 @@ keep the exported files together, and the loader finds them.
 |---|---|---|
 | Rust | a filesystem path | the process's working directory; everything the pack names, against the `.ssab`'s own directory |
 | Bevy | an asset path, through `asset_server.load` into `SsPlayer::pack` | the app's asset root, like any Bevy asset; everything the pack names, against the `.ssab`'s own directory |
-| C / C++ | a filesystem path | the same |
+| C / C++ | a filesystem path | the process's working directory; everything the pack names, against the `.ssab`'s own directory |
 | Web | a URL | the page, then the `.ssab`'s own URL directory |
 
 An engine or a packed build where `File::open` cannot reach the bytes — a Godot `.pck`, an APK, an

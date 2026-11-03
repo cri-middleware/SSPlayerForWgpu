@@ -74,15 +74,14 @@ title: C / C++ ではじめる
 cargo rustc -p ssplayer-wgpu-ffi --release --crate-type staticlib -- --print native-static-libs
 ```
 
-macOS ではこう返ります：`-lSystem -liconv -framework QuartzCore -framework Metal -framework
-Foundation -framework CoreFoundation -lobjc`。これに自分のウィンドウコードが必要とするもの（`-framework Cocoa`）を足します。CMake なら：
+macOS ではこう返ります：`-lSystem -framework QuartzCore -framework CoreGraphics -liconv -framework Metal -framework Foundation -framework CoreFoundation -lobjc`（出力の残りはこれらの繰り返しです）。これに自分のウィンドウコードが必要とするもの（`-framework Cocoa`）を足します。Windows では `opengl32.lib kernel32.lib ntdll.lib userenv.lib ws2_32.lib dbghelp.lib /defaultlib:msvcrt` が返るので、リリースの `ssplayer_wgpu.lib` と一緒にリンクします。macOS の CMake なら（`SSPLAYER_DIR` は、リリースの zip を展開したフォルダです）：
 
 ```cmake
 add_executable(myapp src/main.cpp)
 target_include_directories(myapp PRIVATE "${SSPLAYER_DIR}/include")
 target_link_libraries(myapp PRIVATE
     "${SSPLAYER_DIR}/lib/libssplayer_wgpu.a"
-    "-framework Cocoa" "-framework QuartzCore" "-framework Metal"
+    "-framework Cocoa" "-framework QuartzCore" "-framework CoreGraphics" "-framework Metal"
     "-framework Foundation" "-framework CoreFoundation" objc iconv)
 ```
 
@@ -110,37 +109,47 @@ target_link_libraries(myapp PRIVATE
 
 ## プログラム全体
 
+サンプルが読み込む `.ssab` は事前にコンバートしたものです。`.sspj` からの作り方は[アセットの準備](./assets.md)にあり、公式のサンプルデータなら自前のプロジェクトは要りません。
+
 ```c
+#include <stdio.h>
 #include <ssplayer_wgpu.h>
 
-ss_scene_desc_t desc = {
-    .window      = { .kind = SS_WINDOW_METAL_LAYER, .window = my_layer },
-    .backend     = SS_BACKEND_AUTO,       /* または SS_BACKEND_DX12 / _METAL / _VULKAN */
-    .width       = 960, .height = 540,    /* ポイントではなくピクセル */
-    .clear_color = { 0.1f, 0.1f, 0.12f, 1.0f },
-    .enable_mask = true,                  /* マスクパーツが効くよう深度/ステンシルを確保 */
-    .y_down      = false,
-};
+int main(void) {
+    void *my_layer = /* あなたの CAMetalLayer* */ NULL;
+    float delta_seconds = 1.0f / 60.0f;
+    uint32_t width = 960, height = 540;
 
-ss_scene_t *scene = ss_scene_create(&desc);
-if (!scene) { fprintf(stderr, "%s\n", ss_last_error()); return 1; }
+    ss_scene_desc_t desc = {
+        .window      = { .kind = SS_WINDOW_METAL_LAYER, .window = my_layer },
+        .backend     = SS_BACKEND_AUTO,       /* または SS_BACKEND_DX12 / _METAL / _VULKAN */
+        .width       = 960, .height = 540,    /* ポイントではなくピクセル */
+        .clear_color = { 0.1f, 0.1f, 0.12f, 1.0f },
+        .enable_mask = true,                  /* マスクパーツが効くよう深度/ステンシルを確保 */
+        .y_down      = false,
+    };
 
-ss_player_t *player = ss_scene_create_player(scene);
-if (ss_player_load(player, "assets/overall/Basic.ssab") != SS_OK) {
-    fprintf(stderr, "%s\n", ss_last_error());
+    ss_scene_t *scene = ss_scene_create(&desc);
+    if (!scene) { fprintf(stderr, "%s\n", ss_last_error()); return 1; }
+
+    ss_player_t *player = ss_scene_create_player(scene);
+    if (ss_player_load(player, "assets/overall/Basic.ssab") != SS_OK) {
+        fprintf(stderr, "%s\n", ss_last_error());
+    }
+    ss_player_set_animation(player, "anime_1");
+    ss_player_play(player);
+
+    /* ... 毎フレーム、この順で： */
+    ss_scene_update(scene, delta_seconds);   /* 全プレイヤーを進めてジオメトリを構築 */
+    ss_scene_render(scene);                  /* 1 パスで全員描画して present */
+
+    /* ... リサイズ時（描画ピクセル）： */
+    ss_scene_resize(scene, width, height);
+
+    /* ... 終了時。シーンを壊すとそのプレイヤーも壊れます。 */
+    ss_scene_destroy(scene);
+    return 0;
 }
-ss_player_set_animation(player, "anime_1");
-ss_player_play(player);
-
-/* ... 毎フレーム、この順で： */
-ss_scene_update(scene, delta_seconds);   /* 全プレイヤーを進めてジオメトリを構築 */
-ss_scene_render(scene);                  /* 1 パスで全員描画して present */
-
-/* ... リサイズ時（描画ピクセル）： */
-ss_scene_resize(scene, width, height);
-
-/* ... 終了時。シーンを壊すとそのプレイヤーも壊れます。 */
-ss_scene_destroy(scene);
 ```
 
 毎フレームの API はこれだけです：**`ss_scene_update` のあと `ss_scene_render`**。1 シーン＝1 ウィンドウ、
@@ -150,8 +159,7 @@ ss_scene_destroy(scene);
 
 ## エラー
 
-失敗しうる関数は `int32_t` を返します：`SS_OK`（0）、`SS_ERROR_INVALID_ARGUMENT`（-1）、
-`SS_ERROR_GPU`（-2）。`ss_last_error()` は呼び出しスレッドで最後に起きた失敗の説明を返します（ログ向けであり、分岐用ではありません）。
+失敗しうる関数は `int32_t` を返します：`SS_OK`（0）、`SS_ERROR_INVALID_ARGUMENT`（-1）、`SS_ERROR_GPU`（-2）、または要求を断ったときのランタイム自身の正のコードです。判定は `SS_OK` と比べて行ってください。`ss_last_error()` は呼び出しスレッドで最後に起きた失敗の説明を返します（ログ向けであり、分岐用ではありません）。
 
 ロードは `.ssab` 本体が読めた限り `SS_OK` を返します。**それ以外に届かなかったものは**エラーではなく
 `ss_player_missing_count` / `ss_player_missing_at` から返ります（[ロードとアセット](../guide/loading.md)）。

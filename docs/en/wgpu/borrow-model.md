@@ -32,7 +32,7 @@ outlives the frame.
 |---|---|---|---|
 | Device | `SSRenderer` | pipelines, bind group layouts, sampler, atlas textures | the device is lost |
 | Render target | `SSScene` | the projection uniform, the frame's geometry arena, the draw list | the target's **format** changes |
-| Character | `SSPlayer` | the playback tree, transform, order, visibility, alpha | never — it holds no GPU resource |
+| Character | `SSPlayer` | the playback tree, transform, order, visibility, alpha | never — it holds no GPU resource; after a device loss it only re-registers its atlases (`restore_textures`) |
 
 The rule that keeps this honest: **`SSPlayer` must not gain a wgpu-typed field.** The moment a
 character holds a texture, a buffer or a device, "one canvas, one character" comes back — and with
@@ -65,7 +65,7 @@ that competition is always the player.
 |---|---|
 | **Colour format** | must equal `SceneConfig::color_format`. Pipelines are baked against it, so a change means a new `SSScene` |
 | **MSAA** | off. The pipelines are single-sampled |
-| **Stencil** | required if, and only if, you chose `MaskBackend::Stencil` — in the format you declared, attached to **every** pass you draw into |
+| **Stencil** | required when `SceneConfig::stencil_format` is `Some` — which `MaskBackend::Stencil` needs and `MaskBackend::Coverage` does not. Attach it, in the format you declared, to **every** pass you draw into |
 | **Colour space** | the player writes atlas bytes verbatim and does **no colour management**. Into an sRGB target that encodes twice and everything is too bright; give it a non-sRGB target, or composite in sRGB space |
 
 ## Slotting into an existing render graph
@@ -114,8 +114,7 @@ let mut main   = SSScene::new(&device, &main_config);
 let mut minimap = SSScene::new(&device, &minimap_config);
 ```
 
-Both draw the same packs from one atlas upload. A regression test
-(`tests/pack.rs::scenes_share_one_renderer`) pins that.
+Both draw the same packs from one atlas upload.
 
 !!! note "One `update` per character per frame"
     `SSScene::update` fuses the timeline advance with the geometry build. Passing the same character

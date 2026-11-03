@@ -91,16 +91,19 @@ have named for you. Ask it, on the platform you are building for:
 cargo rustc -p ssplayer-wgpu-ffi --release --crate-type staticlib -- --print native-static-libs
 ```
 
-On macOS that answers `-lSystem -liconv -framework QuartzCore -framework Metal -framework
-Foundation -framework CoreFoundation -lobjc` — to which you add whatever your own window code needs
-(`-framework Cocoa`). A CMake project:
+On macOS that answers `-lSystem -framework QuartzCore -framework CoreGraphics -liconv -framework Metal
+-framework Foundation -framework CoreFoundation -lobjc` (the rest of its output repeats these), to
+which you add whatever your own window code needs (`-framework Cocoa`). On Windows it answers
+`opengl32.lib kernel32.lib ntdll.lib userenv.lib ws2_32.lib dbghelp.lib /defaultlib:msvcrt`,
+which you link beside the release's `ssplayer_wgpu.lib`. A CMake project on macOS, where
+`SSPLAYER_DIR` is the folder you unzipped the release into:
 
 ```cmake
 add_executable(myapp src/main.cpp)
 target_include_directories(myapp PRIVATE "${SSPLAYER_DIR}/include")
 target_link_libraries(myapp PRIVATE
     "${SSPLAYER_DIR}/lib/libssplayer_wgpu.a"
-    "-framework Cocoa" "-framework QuartzCore" "-framework Metal"
+    "-framework Cocoa" "-framework QuartzCore" "-framework CoreGraphics" "-framework Metal"
     "-framework Foundation" "-framework CoreFoundation" objc iconv)
 ```
 
@@ -130,37 +133,48 @@ The window — and its layer, on macOS — must outlive the scene.
 
 ## A whole program
 
+The samples load a `.ssab` converted ahead of time: [Preparing assets](./assets.md) shows how to
+make one from a `.sspj`, and the official sample data needs no project of your own.
+
 ```c
+#include <stdio.h>
 #include <ssplayer_wgpu.h>
 
-ss_scene_desc_t desc = {
-    .window      = { .kind = SS_WINDOW_METAL_LAYER, .window = my_layer },
-    .backend     = SS_BACKEND_AUTO,       // or SS_BACKEND_DX12 / _METAL / _VULKAN
-    .width       = 960, .height = 540,    // pixels, not points
-    .clear_color = { 0.1f, 0.1f, 0.12f, 1.0f },
-    .enable_mask = true,                  // allocate a depth/stencil so mask parts clip
-    .y_down      = false,
-};
+int main(void) {
+    void *my_layer = /* your CAMetalLayer* */ NULL;
+    float delta_seconds = 1.0f / 60.0f;
+    uint32_t width = 960, height = 540;
 
-ss_scene_t *scene = ss_scene_create(&desc);
-if (!scene) { fprintf(stderr, "%s\n", ss_last_error()); return 1; }
+    ss_scene_desc_t desc = {
+        .window      = { .kind = SS_WINDOW_METAL_LAYER, .window = my_layer },
+        .backend     = SS_BACKEND_AUTO,       // or SS_BACKEND_DX12 / _METAL / _VULKAN
+        .width       = 960, .height = 540,    // pixels, not points
+        .clear_color = { 0.1f, 0.1f, 0.12f, 1.0f },
+        .enable_mask = true,                  // allocate a depth/stencil so mask parts clip
+        .y_down      = false,
+    };
 
-ss_player_t *player = ss_scene_create_player(scene);
-if (ss_player_load(player, "assets/overall/Basic.ssab") != SS_OK) {
-    fprintf(stderr, "%s\n", ss_last_error());
+    ss_scene_t *scene = ss_scene_create(&desc);
+    if (!scene) { fprintf(stderr, "%s\n", ss_last_error()); return 1; }
+
+    ss_player_t *player = ss_scene_create_player(scene);
+    if (ss_player_load(player, "assets/overall/Basic.ssab") != SS_OK) {
+        fprintf(stderr, "%s\n", ss_last_error());
+    }
+    ss_player_set_animation(player, "anime_1");
+    ss_player_play(player);
+
+    // ... every frame, in this order:
+    ss_scene_update(scene, delta_seconds);   // advance every player, build geometry
+    ss_scene_render(scene);                  // one pass, the whole cast, then present
+
+    // ... on a window resize (drawable pixels):
+    ss_scene_resize(scene, width, height);
+
+    // ... at the end. Destroying the scene destroys its players.
+    ss_scene_destroy(scene);
+    return 0;
 }
-ss_player_set_animation(player, "anime_1");
-ss_player_play(player);
-
-// ... every frame, in this order:
-ss_scene_update(scene, delta_seconds);   // advance every player, build geometry
-ss_scene_render(scene);                  // one pass, the whole cast, then present
-
-// ... on a window resize (drawable pixels):
-ss_scene_resize(scene, width, height);
-
-// ... at the end. Destroying the scene destroys its players.
-ss_scene_destroy(scene);
 ```
 
 That is the entire per-frame API: **`ss_scene_update` then `ss_scene_render`**. One scene is one
@@ -172,9 +186,10 @@ pipelines and one atlas upload. That handle split is why the two are separate ty
 
 ## Errors
 
-Functions that can fail return `int32_t`: `SS_OK` (0), `SS_ERROR_INVALID_ARGUMENT` (-1) or
-`SS_ERROR_GPU` (-2). `ss_last_error()` returns a human-readable message for the last failure on the
-calling thread — for logging, not for branching.
+Functions that can fail return `int32_t`: `SS_OK` (0), `SS_ERROR_INVALID_ARGUMENT` (-1),
+`SS_ERROR_GPU` (-2), or the runtime's own positive code when it refuses a request; test against
+`SS_OK`. `ss_last_error()` returns a human-readable message for the last failure on the calling
+thread — for logging, not for branching.
 
 A load reports `SS_OK` as long as the `.ssab` itself was readable. **Anything else that did not
 arrive comes back from `ss_player_missing_count` / `ss_player_missing_at`** rather than as an error;

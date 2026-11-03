@@ -5,7 +5,9 @@
 
 The full text is
 [LICENSE.md](https://github.com/cri-middleware/SSPlayerForWgpu/blob/main/LICENSE.md) in the
-repository, and a copy ships inside every release zip and npm package.
+repository (a reference translation is
+[LICENSE.ja.md](https://github.com/cri-middleware/SSPlayerForWgpu/blob/main/LICENSE.ja.md)), and a copy ships inside every release zip and npm
+package.
 
 Copyright © CRI Middleware Co., Ltd.
 

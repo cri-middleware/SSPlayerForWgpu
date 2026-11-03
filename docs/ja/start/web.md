@@ -46,7 +46,7 @@ defineSsPlayerWebGPUElement(); // <ss-player-webgpu> を登録
 | `animation` | 再生するアニメーション。既定は最初のもの |
 | `autoplay` | ロード後に再生開始。**boolean 属性なので、無ければ再生しません** — ポスターのように 1 フレーム目で止まります |
 | `pause-when-hidden` | 画面外・バックグラウンド時に rAF ループを止める。既定でオン、`"false"` で解除 |
-| `speed-scale` | 既定 fps の倍率 |
+| `speed-scale` | オーサリングしたフレームレートの倍率 |
 | `fit`、`align`、`flip-x`、`flip-y` | オーサリング時のキャンバスを要素にどう合わせるか。既定は `contain` と `center`、`fit="none"` で 1:1 |
 
 `element.loadSrc(src, pack?, animation?, read?)` でスクリプトからパックを差し替えられ、アニメーション名の配列が返ります。`animationstarted`・`animationfinished`・`animationlooped`・`userdata`・`signal`・`audio` を DOM イベントとして送り、パックを読み込むと `load` を送ります。`src`・`pack`・`animation`・`speed-scale` と配置の属性は、置いた後に書き換えても反映されます。`autoplay` はアニメーションを設定するときに、`pause-when-hidden` は要素の接続時に 1 回だけ読みます。要素の登録は import の副作用ではなく **opt-in** なので、API だけ使うバンドルに要素は含まれません。
@@ -56,9 +56,16 @@ defineSsPlayerWebGPUElement(); // <ss-player-webgpu> を登録
 
 ## 複数体：要素の中身の API
 
+サーフェスはキャンバスのピクセルサイズ（`width` × `height`。どちらも指定しなければ 300 × 150）で描画するので、サイズを決め、変更したら `surface.resize(width, height)` を呼んでください：
+
+```html
+<canvas id="stage" width="960" height="540"></canvas>
+```
+
 ```js
 import { sharedContext } from '@spritestudio/ssplayer-wgpu';
 
+const canvas = document.getElementById('stage');
 const ctx = await sharedContext();            // ページに 1 つ — デバイス・パイプライン・アトラスキャッシュ
 const surface = ctx.createSurface(canvas);    // キャンバスに 1 つ — 投影とフレームアリーナ
 
@@ -84,7 +91,7 @@ const loop = (now) => {
 requestAnimationFrame(loop);
 ```
 
-**プレイヤー API で非同期なのは `load` 系だけです。** パック本体、両方のテクスチャテーブルにあるアトラス、そしてインスタンスパーツが参照する兄弟 `.ssab` まで取得します。届かなかったものは例外ではなく `missingAssets()` から返ります。`setAnimation()` と再生制御はすべて同期です。
+**プレイヤー API で非同期なのは `load` 系と `setCellmapTextureFromBytes` だけです。** パック本体、両方のテクスチャテーブルにあるアトラス、そしてインスタンスパーツが参照する兄弟 `.ssab` まで取得します。届かなかったものは例外ではなく `missingAssets()` から返ります。`setAnimation()` と再生制御はすべて同期です。
 
 1 つのプレイヤーで同時に走らせられるロードは 1 本です。前のロードが完了する前に次を始めると、どちらかを黙って失う代わりに reject されます。`await` するか、要素と同じように呼び出しを直列につないでください。別々のプレイヤーなら従来どおり並行にロードできます。
 

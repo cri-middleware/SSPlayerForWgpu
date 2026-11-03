@@ -26,8 +26,7 @@ workspace が 1 つの `wgpu` に解決することで担保しています。
 ssplayer-bevy = { git = "https://github.com/cri-middleware/SSPlayerForWgpu" }
 ```
 
-これが `ssplayer-wgpu` を引き込むので、両方に依存する必要はありません。ソースを取り込む場合はチェックアウト内の `libs/ssplayer-bevy` を指し、そこで
-`git submodule update --init --recursive` を実行してください。
+これが `ssplayer-wgpu` を引き込むので、両方に依存する必要はありません。ソースを取り込む場合はチェックアウト内の `libs/ssplayer-bevy` を指し、そこで `git submodule update --init --recursive` を実行してください。自分のプロジェクトが Cargo の workspace でチェックアウト先がその中にある場合は、[Rust のパス](./rust.md#install)と同じく `exclude` に入れてください。
 
 ## アプリ全体
 
@@ -70,7 +69,7 @@ Bevy の `Transform` では**ありません**。あちらは 3D アフィンで
 
 ## ファイルをどこに置くか
 
-パックは Bevy の `AssetServer` を通して読むので、`"Ringo/Ringo.ssab"` は asset パスです。変換した `.ssab` と横にある画像を、コンバータが書き出したとおりの配置でアプリの `assets/` フォルダに置いてください。キャラクターはパックとアトラスが読み終わってから現れ、アトラス抜きのフレームが描かれることはありません。同じパックのキャラクター同士は、パックを 1 部、アトラスごとのテクスチャを 1 枚だけ共有します。Bevy の `file_watcher` フィーチャーを有効にすると、SpriteStudio で変換し直したときに新しいファイルからキャラクターを組み直します。
+パックは Bevy の `AssetServer` を通して読むので、`"Ringo/Ringo.ssab"` は asset パスです。変換した `.ssab` と横にある画像を、コンバータが書き出したとおりの配置でアプリの `assets/` フォルダに置いてください（[アセットの準備](./assets.md)。`Ringo` は公式のサンプルデータにあります）。キャラクターはパックとアトラスが読み終わってから現れ、アトラス抜きのフレームが描かれることはありません。同じパックのキャラクター同士は、パックを 1 部、アトラスごとのテクスチャを 1 枚だけ共有します。Bevy の `file_watcher` フィーチャーを有効にすると、SpriteStudio で変換し直したときに新しいファイルからキャラクターを組み直します。
 
 ## 色：カメラに `CompositingSpace::Srgb` を付ける
 
@@ -89,6 +88,9 @@ SpriteStudio のアトラスは sRGB でオーサリングされ、Player はそ
 再生はレンダーワールドで動くため、結果は 2 つの経路で返ってきます：
 
 ```rust
+use ssplayer_bevy::{SsEvent, SsEventMessage};
+
+// .add_systems(Update, play_sounds) で登録します
 fn play_sounds(mut events: MessageReader<SsEventMessage>) {
     for message in events.read() {
         if let SsEvent::Audio(audio) = &message.event {
@@ -112,7 +114,7 @@ fn play_sounds(mut events: MessageReader<SsEventMessage>) {
 Bevy の 2D 深度テクスチャは `Depth32Float` でステンシルを持たないため、アダプタは Player の**カバレッジビットマップ**バックエンドを自動的に選びます。Bevy のアタッチメントには何も要求せず、描画は
 Bevy 自身のパス内で完結します。コストはマスクを使うキャラクター 1 体につき 1 パス／フレーム。[マスク](../guide/masks.md)を参照。
 
-デバイスロストは Bevy 自身の復帰に乗って回復しますが、**opt-in が必要**です。Bevy の既定のエラーハンドラはデバイスロストで*終了*するため、`RenderErrorPolicy::Recover` を返す `RenderErrorHandler` を入れてください（[デバイスロスト](../guide/device-loss.md)）。
+デバイスロストは Bevy 自身の復帰に乗って回復しますが、**opt-in が必要**です。Bevy の既定のエラーハンドラはデバイスロストで*終了*するため、`DeviceLost` に `RenderErrorPolicy::Recover(RenderCreation::default())` を返す `RenderErrorHandler` を入れてください（ハンドラの例は[デバイスロスト](../guide/device-loss.md)にあります）。
 
 ## サンプルを動かす
 
