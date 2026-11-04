@@ -268,6 +268,9 @@ jobs:
           security import "$RUNNER_TEMP/certificate.p12" -P "$APPLE_DEV_ID_APP_CERT_PASS" -f pkcs12 -k "$keychain" -T /usr/bin/codesign
           security set-key-partition-list -S apple-tool:,apple:,codesign: -s -k "$password" "$keychain" > /dev/null
           security list-keychains -d user -s "$keychain" login.keychain-db
+          # What codesign can sign with. GitHub masks secret values, so the part
+          # of a name that matches APPLE_DEV_ID_APP_NAME prints as ***.
+          security find-identity -v -p codesigning "$keychain"
           rm -f "$RUNNER_TEMP/certificate.p12"
 
       - name: Prepare the notary key
