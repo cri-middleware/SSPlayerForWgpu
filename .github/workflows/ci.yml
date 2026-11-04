@@ -1,12 +1,14 @@
 name: CI
 
-# Two tiers, as in SpriteStudio-SDK. Every pull request lints and tests the
-# crates on Linux, checks them with the declared rust-version, compares its rendering with its base's there, builds the C
-# face with the Vulkan viewer there and the DX12 viewer on Windows, and builds
-# the wasm face with the npm package and the preview shell. The weekly run and
-# a dispatch also build for macOS the way release.yml does (universal), with the
-# Metal viewer, and build the documentation site. There is no release PR here: a
-# release is dispatched from main.
+# Two tiers, as in SpriteStudio-SDK: pull requests build for Linux and the Web
+# only. Every pull request lints and tests the crates on Linux, checks them with
+# the declared rust-version, compares its rendering with its base's there,
+# builds the C face with the Vulkan viewer there, and builds the wasm face with
+# the npm package and the preview shell. The weekly run and a dispatch also
+# build the C face for Windows with the DX12 viewer, build for macOS the way
+# release.yml does (universal), with the Metal viewer, and build the
+# documentation site. There is no release PR here: a release is dispatched from
+# main.
 # The site goes through docs.yml, which a pull request that touches the docs
 # runs on its own, for the docs alone.
 on:
@@ -173,8 +175,8 @@ jobs:
       - name: Check the generated header is up to date
         run: git diff --exit-code -- libs/ssplayer-wgpu-ffi/include/ssplayer_wgpu.h
 
-      # The Linux half of the C face's examples, as the windows job builds the
-      # DX12 one. Debug, so cargo reuses the ffi build above and only the viewer
+      # The Linux half of the C face's examples, as the weekly windows job builds
+      # the DX12 one. Debug, so cargo reuses the ffi build above and only the viewer
       # compiles. A compile check: the runner has no display to open a window on.
       - name: Build the Vulkan C++ viewer
         run: |
@@ -290,6 +292,18 @@ jobs:
           VK_ICD_FILENAMES: ${{ env.LAVAPIPE_ICD }}
         run: vulkaninfo --summary
 
+      # The cache above restores the head's target dirs only, so without this
+      # the base would compile every dependency afresh. A copy rather than a
+      # shared dir (see the next step): what the cache holds is the registry
+      # crates alone, since rust-cache drops every crate under the workspace
+      # root before it saves, the SDK's among them, so each checkout still
+      # compiles its own crates from its own sources.
+      - name: Give the base the restored dependencies
+        run: |
+          for dir in target SpriteStudio-SDK/target; do
+            if [ -d "$dir" ]; then cp -a "$dir" "golden-base/$dir"; fi
+          done
+
       - name: Render the base
         working-directory: golden-base
         env:
@@ -297,11 +311,10 @@ jobs:
           VK_ICD_FILENAMES: ${{ env.LAVAPIPE_ICD }}
           SS_GOLDEN_DIR: ${{ runner.temp }}/golden/base
         # Each checkout converts its own fixtures, so an SDK bump is compared
-        # too, and builds into its own target dir, so the base compiles its
-        # dependencies afresh. Never point the two at one: they lay their crates
-        # out at the same relative paths, so cargo would take the head's sources,
-        # checked out before the base was built, for fresh and run the base's
-        # binary twice -- a comparison that cannot fail.
+        # too, and builds into its own target dir. Never point the two at one:
+        # they lay their crates out at the same relative paths, so cargo would
+        # take the head's sources, checked out before the base was built, for
+        # fresh and run the base's binary twice -- a comparison that cannot fail.
         run: |
           ./scripts/deploy-examples.sh build=debug
           cargo test -p ssplayer-wgpu --test golden -- --ignored
@@ -331,47 +344,6 @@ jobs:
             ${{ runner.temp }}/golden/head/summary.md
             ${{ runner.temp }}/golden/head/diff/
           if-no-files-found: ignore
-
-  windows:
-    name: 🪟 DX12 viewer (Windows)
-    runs-on: windows-latest
-    timeout-minutes: 40
-    permissions:
-      contents: read
-    steps:
-      - name: Checkout
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          submodules: recursive
-          persist-credentials: false
-
-      - name: Setup Rust toolchain
-        uses: dtolnay/rust-toolchain@683b588c487a69d01f6c6ddf40f036ff682cc2c8 # master
-        with:
-          # Pinned by SHA, so the channel must be named explicitly here.
-          toolchain: stable
-
-      - name: Setup Rust cache
-        uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
-        with:
-          save-if: ${{ github.ref == 'refs/heads/main' }}
-
-      # The Win32 half of the C face compiles on no other runner: `ffi.rs`'s
-      # `SS_WINDOW_WIN32` arm and the whole of examples/viewer-dx12-cpp are
-      # `cfg`-ed or `#include`-d out everywhere else. The runner has no GPU, so
-      # this is a compile check and nothing more — DX12 itself still has to be
-      # exercised by running the viewer on real hardware.
-      #
-      # Debug, on pull requests and in the weekly run alike: a compile check
-      # needs no optimizer, the weekly run writes the cache PRs restore so both
-      # must build the same profile, and release.yml builds the release library.
-      - name: Build the ffi face (MSVC)
-        run: cargo build -p ssplayer-wgpu-ffi
-
-      - name: Build the DX12 C++ viewer
-        run: |
-          cmake -S examples/viewer-dx12-cpp -B examples/viewer-dx12-cpp/build
-          cmake --build examples/viewer-dx12-cpp/build --config Debug
 
   wasm:
     name: 🌐 Web (wasm32)
@@ -454,6 +426,47 @@ jobs:
 
   # The weekly tier. main takes every pull request and a release is dispatched
   # from it, so there is no release PR to run this on.
+  windows:
+    name: 🪟 DX12 viewer (Windows)
+    if: github.event_name != 'pull_request'
+    runs-on: windows-latest
+    timeout-minutes: 40
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          submodules: recursive
+          persist-credentials: false
+
+      - name: Setup Rust toolchain
+        uses: dtolnay/rust-toolchain@683b588c487a69d01f6c6ddf40f036ff682cc2c8 # master
+        with:
+          # Pinned by SHA, so the channel must be named explicitly here.
+          toolchain: stable
+
+      - name: Setup Rust cache
+        uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+        with:
+          save-if: ${{ github.ref == 'refs/heads/main' }}
+
+      # The Win32 half of the C face compiles on no other runner: `ffi.rs`'s
+      # `SS_WINDOW_WIN32` arm and the whole of examples/viewer-dx12-cpp are
+      # `cfg`-ed or `#include`-d out everywhere else. The runner has no GPU, so
+      # this is a compile check and nothing more — DX12 itself still has to be
+      # exercised by running the viewer on real hardware.
+      #
+      # Debug: a compile check needs no optimizer, and release.yml builds the
+      # release library.
+      - name: Build the ffi face (MSVC)
+        run: cargo build -p ssplayer-wgpu-ffi
+
+      - name: Build the DX12 C++ viewer
+        run: |
+          cmake -S examples/viewer-dx12-cpp -B examples/viewer-dx12-cpp/build
+          cmake --build examples/viewer-dx12-cpp/build --config Debug
+
   macos:
     name: 🍎 macOS (universal) and the Metal viewer
     if: github.event_name != 'pull_request'
