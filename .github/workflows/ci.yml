@@ -292,6 +292,18 @@ jobs:
           VK_ICD_FILENAMES: ${{ env.LAVAPIPE_ICD }}
         run: vulkaninfo --summary
 
+      # The cache above restores the head's target dirs only, so without this
+      # the base would compile every dependency afresh. A copy rather than a
+      # shared dir (see the next step): what the cache holds is the registry
+      # crates alone, since rust-cache drops every crate under the workspace
+      # root before it saves, the SDK's among them, so each checkout still
+      # compiles its own crates from its own sources.
+      - name: Give the base the restored dependencies
+        run: |
+          for dir in target SpriteStudio-SDK/target; do
+            if [ -d "$dir" ]; then cp -a "$dir" "golden-base/$dir"; fi
+          done
+
       - name: Render the base
         working-directory: golden-base
         env:
@@ -299,11 +311,10 @@ jobs:
           VK_ICD_FILENAMES: ${{ env.LAVAPIPE_ICD }}
           SS_GOLDEN_DIR: ${{ runner.temp }}/golden/base
         # Each checkout converts its own fixtures, so an SDK bump is compared
-        # too, and builds into its own target dir, so the base compiles its
-        # dependencies afresh. Never point the two at one: they lay their crates
-        # out at the same relative paths, so cargo would take the head's sources,
-        # checked out before the base was built, for fresh and run the base's
-        # binary twice -- a comparison that cannot fail.
+        # too, and builds into its own target dir. Never point the two at one:
+        # they lay their crates out at the same relative paths, so cargo would
+        # take the head's sources, checked out before the base was built, for
+        # fresh and run the base's binary twice -- a comparison that cannot fail.
         run: |
           ./scripts/deploy-examples.sh build=debug
           cargo test -p ssplayer-wgpu --test golden -- --ignored
