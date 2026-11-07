@@ -3312,7 +3312,7 @@ struct NodeDraw {
 /// instance part's `mask_influence` (AND) and `visible_inside_mask` (OR), and
 /// with nothing above it — a grandparent instance part that opts out of masking
 /// does not opt its grandchildren out. And the flags reach the sub-animation
-/// whether or not anything above masks. SpriteStudio 7.5 draws it this way; the
+/// whether or not anything above masks. SpriteStudio 7.6 draws it this way; the
 /// data that tells the two apart nests an instance that opts out around one that
 /// opts in. The identity — a top-level animation called by no instance — is
 /// [`InheritedMask::ROOT`].
@@ -3765,7 +3765,7 @@ fn render_node(node: &mut PlaybackNode, index: usize, preps: &[NodePrep<'_>], se
                     let Some(child_index) = child.prep else { continue };
                     // Fold the instance part's own opacity into the chain the child
                     // draws with. SpriteStudio modulates a sub-animation by its
-                    // instance part's effective alpha (SS6/SS7.5 `RateOpacity`, an
+                    // instance part's effective alpha (SS6/SpriteStudio 7.6 `RateOpacity`, an
                     // unconditional multiply cascade); `part.alpha()` is that
                     // hierarchical value. Colour deliberately does not cross the
                     // boundary — no player propagates an instance part's tint.
