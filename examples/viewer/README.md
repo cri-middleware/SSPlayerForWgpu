@@ -17,9 +17,8 @@ cargo run -p ssplayer-wgpu-viewer
 ```
 
 It starts on `assets/overall` with two characters. Dropping a `.ssab` file — or a
-folder of them — onto the window plays your own assets. Drop the whole folder when a pack
-has external instance references: those resolve by pack name, so every referenced
-pack has to be registered first.
+folder of them — onto the window plays your own assets. The sibling packs a pack's instance
+parts play from are found beside it, as `load` finds them.
 
 ## What the host owns, and what it lends
 

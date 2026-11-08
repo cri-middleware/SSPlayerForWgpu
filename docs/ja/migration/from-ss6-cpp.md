@@ -26,7 +26,7 @@
 `SystemProcessMainPre()` / `MainPost()` / `RenderPost()` を呼び、OpenGL のステート・バッファ・テクスチャは
 Player の内部が持っていました。
 
-**本 Player にはグローバルな初期化も終了処理もありません。** wgpu の `Device` / `Queue` / `Surface` はアプリケーションのもので、フレームごとに貸し出します。だからこそ、どんなレンダラーやエンジンにもロックインなしで相乗りできます（[借用モデル](../wgpu/borrow-model.md)）。
+**本 Player にはグローバルな初期化も終了処理もありません。** Rust からは、wgpu の `Device` / `Queue` / `Surface` はアプリケーションのもので、フレームごとに貸し出します。だからこそ、どんなレンダラーやエンジンにもロックインなしで相乗りできます（[借用モデル](../wgpu/borrow-model.md)）。C からは、`ss_scene_create` が渡したウィンドウからそれらを作り、`ss_scene_destroy` が解放します。
 
 | 役割 | SS6Player for CPP | Rust | C API |
 |---|---|---|---|

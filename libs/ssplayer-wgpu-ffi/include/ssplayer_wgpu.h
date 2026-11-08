@@ -245,7 +245,8 @@ typedef struct {
      */
     ss_window_handle_t window;
     /*
-     One of the `SS_BACKEND_*` constants.
+     One of the `SS_BACKEND_*` constants; any other value makes
+     `ss_scene_create` fail.
      */
     uint32_t backend;
     /*
@@ -840,9 +841,9 @@ uint32_t ss_player_cellmap_texture_count(ss_player_t *handle, const char *pack_n
  The `index`-th replaceable name of a pack — what to pass
  `ss_player_set_cellmap_texture`. `pack_name` null selects the main pack.
 
- The string is owned by the player and stays valid until the next call that
- borrows the same scratch (this function or `ss_player_animation_name`) on the
- same scene. Copy it if you need to keep it. Null if out of range.
+ The string is owned by the scene and stays valid until the next call to this
+ function on the same scene. Copy it if you need to keep it. Null if out of
+ range.
 
  # Safety
  `pack_name` must be null or a NUL-terminated UTF-8 string.
@@ -1063,7 +1064,8 @@ int32_t ss_player_total_frames(ss_player_t *handle);
 void ss_player_set_loop_count(ss_player_t *handle, int32_t count);
 
 /*
- The configured loop count.
+ The configured loop count — before an animation is set up, the one
+ `ss_player_set_loop_count` is holding for it, or 0 when none was set.
 
  # Safety
  `handle` must be a live handle or null.
@@ -1071,7 +1073,7 @@ void ss_player_set_loop_count(ss_player_t *handle, int32_t count);
 int32_t ss_player_loop_count(ss_player_t *handle);
 
 /*
- How many cycles are left of it.
+ How many cycles of the loop count are left; 0 with no animation.
 
  # Safety
  `handle` must be a live handle or null.
@@ -1681,7 +1683,9 @@ bool ss_player_track_just_looped(ss_player_t *handle, uint32_t track);
  How far into a crossfade on `track` the outgoing animation keeps firing
  events: while its share of the track, `1 - progress`, is at least
  `threshold`. The default, infinity, silences it from the moment the fade
- begins; `0.5` keeps it firing for the first half. Kept by the track.
+ begins; `0.5` keeps it firing for the first half. Kept by the track. The
+ update that completes the fade has already released the outgoing animation,
+ so it fires nothing there, even at 0.
 
  # Safety
  `handle` must be a live handle or null.
@@ -1874,8 +1878,7 @@ uint32_t ss_player_animation_count(ss_player_t *handle);
  The `index`-th animation name of the main pack, or null if out of range.
 
  The string is owned by the scene and stays valid until the next call to this
- function or `ss_player_cellmap_texture_name` on the same scene. Copy it if
- you need to keep it.
+ function on the same scene. Copy it if you need to keep it.
 
  # Safety
  `handle` must be a live handle or null.
@@ -1900,8 +1903,8 @@ const char *ss_player_current_animation(ss_player_t *handle);
  an event carries back into something a human reads. An unnamed part reads
  as an empty string; null past the last part or with no pack bound.
 
- Readable as soon as a pack is bound, unlike `ss_player_part_count`, which
- counts from the first update: walk it until it returns null. The string
+ Readable as soon as a pack is bound, while `ss_player_part_count` reads 0
+ until an animation is set up: walk it until it returns null. The string
  stays valid until the next call to this function on the same scene.
 
  # Safety

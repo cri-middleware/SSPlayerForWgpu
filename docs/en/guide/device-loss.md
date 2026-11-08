@@ -76,7 +76,9 @@ own, and embedded atlases are decoded again from the `.ssab` in step 3.
 === "Bevy"
 
     Recovery rides Bevy's own: on a new device Bevy re-runs `RenderStartup`, which rebuilds the
-    renderer, and the characters reload from the main world on the next frame.
+    renderer, and the characters reload from the main world on the next frame. They start their
+    animations from the head: the frame, the loop count and the track stack are not carried over,
+    and `SsStarted` arrives again.
 
     **You must opt in.** Bevy's default error handler *quits* on device loss. Install a
     `RenderErrorHandler` that answers a `DeviceLost` error with

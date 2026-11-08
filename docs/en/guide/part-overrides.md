@@ -35,8 +35,7 @@ form skips a lookup.
 
 Resolve the index **once**, when you set the animation, and keep it: names are matched by hash but
 the lookup still walks the part list. `part_names()` / `ss_player_part_name` (walk it from 0 until it
-returns null; `ss_player_part_count` reads 0 until the first update) / `partNames()` enumerate what
-a pack has.
+returns null, or up to `ss_player_part_count`) / `partNames()` enumerate what a pack has.
 
 ## Visibility
 

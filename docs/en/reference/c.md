@@ -15,12 +15,12 @@ no dependencies.
 | | |
 |---|---|
 | Buffers you pass in | Read during the call and not retained: `data`, `rgba`, `members`, `corners` and strings may be freed or reused when it returns |
-| Threads | On macOS, `ss_scene_create` and the `NSView` / `CAMetalLayer` it is given belong to the main thread |
-| Return values | Functions that can fail return `int32_t`: `SS_OK` (0), `SS_ERROR_INVALID_ARGUMENT` (-1), `SS_ERROR_GPU` (-2), or, when the runtime refuses a request (an unreadable `.ssab`, an unknown animation or part, a bad section), its own positive code (1–7 or 99). Test against `SS_OK`, not a specific code |
+| Threads | A scene and its players take one call at a time: serialise calls from different threads, a resize from the UI thread and a render from a render thread included. On macOS, `ss_scene_create` and the `NSView` / `CAMetalLayer` it is given belong to the main thread |
+| Return values | Functions that can fail return `int32_t`: `SS_OK` (0), `SS_ERROR_INVALID_ARGUMENT` (-1), `SS_ERROR_GPU` (-2), or, when the runtime refuses a request (an unreadable `.ssab`, an unknown animation, a part index out of range, a bad section), its own positive code (1–7 or 99). A part name the pack does not have is `SS_ERROR_INVALID_ARGUMENT`. Test against `SS_OK`, not a specific code |
 | Error text | `ss_last_error()` — the last failure on the calling thread. For logging, not for branching |
 | Versions | `ss_version()` — this library's version. `ss_sdk_version()` — the SpriteStudio-SDK version it links, written as its release tag (`v7.0.0`), or `local` for a build without `scripts/build.sh`. Both static; never free them |
 | Null handles | Every function tolerates a null handle and answers `SS_ERROR_INVALID_ARGUMENT`, or for a getter what a player with no animation reads back, rather than crashing. That is zero for most getters, but `1.0` for the speed scale and alpha, true for `ss_player_is_playing_forward`, `ss_player_sub_frame_enabled`, `ss_player_frame_skip_enabled` and `ss_player_is_visible`, `0xFFFFFF` for `ss_player_tint`, and `-1` for the part lookups (`ss_player_find_part_index`, `ss_player_is_part_hidden`, `ss_player_is_part_skinned_mesh` and their `_by_index` forms) |
-| Strings | `const char *` in, UTF-8. Strings *out* are owned by the scene and valid until the next call of the same kind — copy what you keep. One pair shares a buffer: `ss_player_animation_name` and `ss_player_cellmap_texture_name` each invalidate what the other returned |
+| Strings | `const char *` in, UTF-8. Strings *out* are owned by the scene and valid until the next call of the same kind — copy what you keep |
 | Sizes | Always **drawable pixels**, never points. Scale by the display factor yourself |
 
 ## Lifetime

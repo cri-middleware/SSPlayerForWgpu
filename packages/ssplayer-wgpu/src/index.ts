@@ -24,9 +24,9 @@ let wasmSource: InitInput | Promise<InitInput> | undefined;
 /**
  * Point the loader at the `.wasm` binary explicitly.
  *
- * Not needed under a bundler: the glue self-locates through
- * `new URL('ssplayer_wgpu_bg.wasm', import.meta.url)`, which Vite / webpack 5 /
- * Rollup all resolve to an emitted asset. It is needed where `import.meta.url`
+ * Not needed under Vite or webpack 5: the glue self-locates through
+ * `new URL('ssplayer_wgpu_bg.wasm', import.meta.url)`, which both resolve to an
+ * emitted asset (plain Rollup needs a plugin for it). It is needed where `import.meta.url`
  * does not survive the build (a classic `<script>` / IIFE bundle) or where the
  * binary is served from somewhere else — a CDN, an asset host:
  *

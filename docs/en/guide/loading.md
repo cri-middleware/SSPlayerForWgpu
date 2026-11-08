@@ -149,6 +149,11 @@ exporter wrote into the `.ssab` — so `loadSsab` and `addSsab` take `null` to k
 siblings before `set_animation`, which is when the tree looks them up. Registering a sibling pack
 *before* the load also works: the walk skips a pack the player already has.
 
+On Rust and C these calls only register the pack: a reference-mode pack's atlases are not read, and
+`missing_assets()` stays empty. Supply them as in [Supplying textures yourself](#supplying-textures-yourself),
+or on Rust hand `load_assets` a loader rooted where they sit. `loadSsab` and `addSsab` read them,
+against `baseUrl`.
+
 !!! warning "Registering a sibling never changes what is already playing"
     A playback tree is bound to the pack it was built from. Registering a new pack under a name the
     live tree is playing retires the old one rather than dropping it — what is on screen keeps

@@ -21,7 +21,7 @@ WebGPU 対応ブラウザ：**Chrome / Edge 113+、Safari 26+、Firefox 141+**�
 npm i @spritestudio/ssplayer-wgpu
 ```
 
-ESM 専用・ランタイム依存なし。wasm バイナリを同梱しており、バンドラ（Vite / webpack 5 / Rollup）は設定なしでアセットとして拾います。
+ESM 専用・ランタイム依存なし。wasm バイナリを同梱しており、Vite と webpack 5 は設定なしでアセットとして拾います。素の Rollup では、`new URL(…, import.meta.url)` をアセットとして出力するプラグインか、[`setWasmUrl`](#loading-the-wasm) が要ります。
 
 動いているところを先に見るなら、[ライブデモ](https://cri-middleware.github.io/SSPlayerForWgpu/demo/)を開いてください。
 
@@ -97,7 +97,7 @@ requestAnimationFrame(loop);
 
 ハンドルは明示的です。使い終わったら `player.destroy()` / `surface.destroy()` を呼んでください（JS 参照を捨てるだけではスワップチェーンが残ります）。どちらも冪等です。
 
-## wasm の読み込み
+## wasm の読み込み { #loading-the-wasm }
 
 バインディングは `new URL('ssplayer_wgpu_bg.wasm', import.meta.url)` で自分の場所を特定します。ESM バンドラはこれを解決できます。`import.meta.url` がビルドで失われる場合（classic `<script>` や IIFE バンドル）、あるいはバイナリを別の場所から配信する場合は、最初の `sharedContext()` より前に指定します：
 

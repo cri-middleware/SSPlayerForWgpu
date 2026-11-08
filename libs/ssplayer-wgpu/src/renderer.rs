@@ -2072,6 +2072,10 @@ impl SSRenderer {
         // Lift the sources out *before* replacing self — everything else in here
         // belonged to the dead device, but these are plain CPU pixels.
         let sources = std::mem::take(&mut self.texture_sources);
+        // Kept with the retained pixels they describe, so a load after the loss
+        // still tells a re-exported atlas from the one already on the GPU. A
+        // reproducible texture gets its digest back when the player re-offers it.
+        let digests = std::mem::take(&mut self.texture_digests);
         let (uploads, changes) = (self.texture_uploads, self.texture_changes);
         *self = Self::new(device);
         self.texture_uploads = uploads;
@@ -2081,7 +2085,11 @@ impl SSRenderer {
             // premultiplying, so putting them through it again would darken every
             // partially transparent texel a second time.
             // One the new device cannot hold is left out, and drawn as missing.
-            let _ = self.write_and_register(device, queue, *hash, premul, (*w, *h));
+            if self.write_and_register(device, queue, *hash, premul, (*w, *h))
+                && let Some(&digest) = digests.get(hash)
+            {
+                self.texture_digests.insert(*hash, digest);
+            }
         }
         self.texture_sources = sources;
     }

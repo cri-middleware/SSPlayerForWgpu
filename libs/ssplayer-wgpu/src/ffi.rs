@@ -94,7 +94,8 @@ pub struct SsWindowHandle {
 pub struct SsSceneDesc {
     /// Target window/layer.
     pub window: SsWindowHandle,
-    /// One of the `SS_BACKEND_*` constants.
+    /// One of the `SS_BACKEND_*` constants; any other value makes
+    /// `ss_scene_create` fail.
     pub backend: u32,
     /// Drawable size in **pixels** (not points — scale by the display factor).
     /// A size past the device's `max_texture_dimension_2d` draws at that limit.
@@ -394,6 +395,9 @@ pub struct SsScene {
     /// freed memory, so a double destroy — the easy mistake — is a safe no-op.
     handles: Vec<*mut SsPlayer>,
     name_scratch: CString,
+    /// Backs `ss_player_cellmap_texture_name`, apart from `name_scratch` so a
+    /// caller holding an animation name can walk the replaceable names.
+    texture_name_scratch: CString,
     /// Backs `ss_player_texture_at`'s `path`. Separate from `name_scratch` so the
     /// two "valid until the next call" contracts do not invalidate each other:
     /// walking a pack's textures and its animation names interleaved is normal.
@@ -551,13 +555,13 @@ unsafe fn optional_c_str<'a>(s: *const c_char) -> Result<Option<&'a str>, &'stat
     unsafe { c_str(s) }.map(Some).ok_or("string is not UTF-8")
 }
 
-fn backend_bits(backend: u32) -> wgpu::Backends {
+fn backend_bits(backend: u32) -> Option<wgpu::Backends> {
     match backend {
-        SS_BACKEND_DX12 => wgpu::Backends::DX12,
-        SS_BACKEND_METAL => wgpu::Backends::METAL,
-        SS_BACKEND_VULKAN => wgpu::Backends::VULKAN,
-        // AUTO (and anything unknown): the platform's primary backends.
-        _ => wgpu::Backends::PRIMARY,
+        SS_BACKEND_AUTO => Some(wgpu::Backends::PRIMARY),
+        SS_BACKEND_DX12 => Some(wgpu::Backends::DX12),
+        SS_BACKEND_METAL => Some(wgpu::Backends::METAL),
+        SS_BACKEND_VULKAN => Some(wgpu::Backends::VULKAN),
+        _ => None,
     }
 }
 
@@ -626,7 +630,11 @@ pub unsafe extern "C" fn ss_scene_create(desc: *const SsSceneDesc) -> *mut SsSce
             return std::ptr::null_mut();
         }
     };
-    let config = NativeHostConfig { backends: backend_bits(desc.backend), width: desc.width, height: desc.height, clear_color: desc.clear_color, enable_mask: desc.enable_mask, y_down: desc.y_down };
+    let Some(backends) = backend_bits(desc.backend) else {
+        set_last_error(format!("backend {} is not an SS_BACKEND_* value", desc.backend));
+        return std::ptr::null_mut();
+    };
+    let config = NativeHostConfig { backends, width: desc.width, height: desc.height, clear_color: desc.clear_color, enable_mask: desc.enable_mask, y_down: desc.y_down };
 
     // SAFETY: forwarded from this function's contract — the caller keeps the
     // window alive until `ss_scene_destroy`.
@@ -635,6 +643,7 @@ pub unsafe extern "C" fn ss_scene_create(desc: *const SsSceneDesc) -> *mut SsSce
             host,
             handles: Vec::new(),
             name_scratch: CString::default(),
+            texture_name_scratch: CString::default(),
             path_scratch: CString::default(),
             missing_scratch: CString::default(),
             event_text_scratch: CScratch::default(),
@@ -1008,9 +1017,9 @@ pub unsafe extern "C" fn ss_player_cellmap_texture_count(handle: *mut SsPlayer, 
 /// The `index`-th replaceable name of a pack — what to pass
 /// `ss_player_set_cellmap_texture`. `pack_name` null selects the main pack.
 ///
-/// The string is owned by the player and stays valid until the next call that
-/// borrows the same scratch (this function or `ss_player_animation_name`) on the
-/// same scene. Copy it if you need to keep it. Null if out of range.
+/// The string is owned by the scene and stays valid until the next call to this
+/// function on the same scene. Copy it if you need to keep it. Null if out of
+/// range.
 ///
 /// # Safety
 /// `pack_name` must be null or a NUL-terminated UTF-8 string.
@@ -1031,12 +1040,7 @@ pub unsafe extern "C" fn ss_player_cellmap_texture_name(handle: *mut SsPlayer, p
         set_last_error(format!("no replaceable texture at index {index}"));
         return std::ptr::null();
     };
-    let Ok(name) = CString::new(name) else {
-        set_last_error("texture name contains an interior NUL");
-        return std::ptr::null();
-    };
-    scene.name_scratch = name;
-    scene.name_scratch.as_ptr()
+    lend_name(&mut scene.texture_name_scratch, name, "texture name")
 }
 
 // The example below uses line comments: cbindgen renders these docs into a C
@@ -1317,7 +1321,8 @@ pub unsafe extern "C" fn ss_player_set_loop_count(handle: *mut SsPlayer, count: 
     }
 }
 
-/// The configured loop count.
+/// The configured loop count — before an animation is set up, the one
+/// `ss_player_set_loop_count` is holding for it, or 0 when none was set.
 ///
 /// # Safety
 /// `handle` must be a live handle or null.
@@ -1326,7 +1331,7 @@ pub unsafe extern "C" fn ss_player_loop_count(handle: *mut SsPlayer) -> i32 {
     unsafe { player(handle) }.map(|p| p.loop_count()).unwrap_or(0)
 }
 
-/// How many cycles are left of it.
+/// How many cycles of the loop count are left; 0 with no animation.
 ///
 /// # Safety
 /// `handle` must be a live handle or null.
@@ -2231,7 +2236,9 @@ pub unsafe extern "C" fn ss_player_track_just_looped(handle: *mut SsPlayer, trac
 /// How far into a crossfade on `track` the outgoing animation keeps firing
 /// events: while its share of the track, `1 - progress`, is at least
 /// `threshold`. The default, infinity, silences it from the moment the fade
-/// begins; `0.5` keeps it firing for the first half. Kept by the track.
+/// begins; `0.5` keeps it firing for the first half. Kept by the track. The
+/// update that completes the fade has already released the outgoing animation,
+/// so it fires nothing there, even at 0.
 ///
 /// # Safety
 /// `handle` must be a live handle or null.
@@ -2574,8 +2581,7 @@ pub unsafe extern "C" fn ss_player_animation_count(handle: *mut SsPlayer) -> u32
 /// The `index`-th animation name of the main pack, or null if out of range.
 ///
 /// The string is owned by the scene and stays valid until the next call to this
-/// function or `ss_player_cellmap_texture_name` on the same scene. Copy it if
-/// you need to keep it.
+/// function on the same scene. Copy it if you need to keep it.
 ///
 /// # Safety
 /// `handle` must be a live handle or null.
@@ -2589,12 +2595,7 @@ pub unsafe extern "C" fn ss_player_animation_name(handle: *mut SsPlayer, index: 
         set_last_error(format!("no animation at index {index}"));
         return std::ptr::null();
     };
-    let Ok(name) = CString::new(name) else {
-        set_last_error("animation name contains an interior NUL");
-        return std::ptr::null();
-    };
-    scene.name_scratch = name;
-    scene.name_scratch.as_ptr()
+    lend_name(&mut scene.name_scratch, name, "animation name")
 }
 
 /// Hand `name` to C through `scratch`, which owns it until the next call that
@@ -2638,8 +2639,8 @@ pub unsafe extern "C" fn ss_player_current_animation(handle: *mut SsPlayer) -> *
 /// an event carries back into something a human reads. An unnamed part reads
 /// as an empty string; null past the last part or with no pack bound.
 ///
-/// Readable as soon as a pack is bound, unlike `ss_player_part_count`, which
-/// counts from the first update: walk it until it returns null. The string
+/// Readable as soon as a pack is bound, while `ss_player_part_count` reads 0
+/// until an animation is set up: walk it until it returns null. The string
 /// stays valid until the next call to this function on the same scene.
 ///
 /// # Safety
