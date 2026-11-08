@@ -1425,7 +1425,13 @@ impl SSPlayer {
             reset_slots(root);
             // The runtime takes a non-negative frame as given, and one past the
             // section draws nothing at all.
-            let start_frame = if start_frame < 0.0 || start_frame.is_nan() { -1.0 } else if start_frame >= last + 1.0 { last } else { start_frame.max(first) };
+            let start_frame = if start_frame < 0.0 || start_frame.is_nan() {
+                -1.0
+            } else if start_frame >= last + 1.0 {
+                last
+            } else {
+                start_frame.max(first)
+            };
             root.context.play_with_start_frame(start_frame);
             self.start_pending = true;
         }
