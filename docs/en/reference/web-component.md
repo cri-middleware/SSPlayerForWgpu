@@ -94,13 +94,15 @@ el.player.setPartVisibilityOverride('hat', true, false);
 
 ### `loadSrc(src, pack?, animation?, read?)`
 
-Fetches and plays a `.ssab`, and is how you switch packs at runtime. It resolves to the array of
-animation names, so a UI can offer them.
+Fetches a `.ssab`, and is how you switch packs at runtime. It resolves to the array of animation
+names, so a UI can offer them. Called before the element has started — straight after
+`defineSsPlayerWebGPUElement()`, say — it waits for it, so `el.player` is there once it resolves.
 
 It selects the animation (`animation`, or the first) and then honours `autoplay` exactly as the
 initial load did — so an element without `autoplay` holds the new pack's first frame too. It does
 not rewrite the element's attributes, so an element that is moved in the DOM (and so connects
-again) loads what its `src` says; a page that moves elements sets the attribute instead.
+again) loads what its `src` says, and a load in flight when it moves is dropped; a page that moves
+elements sets the attribute instead.
 
 Passing `pack` makes the element fetch the bytes itself and register them under that name, since
 `load` takes no name override.
@@ -147,8 +149,9 @@ el.addEventListener('userdata', (e) => console.log(e.detail.text));
   `inline`** — an author who chose `inline-block`, a flex item, or `none` keeps that choice.
 * The canvas fills the element (`100%` × `100%`).
 * The backing store is **CSS size × `devicePixelRatio`**, so output is crisp on a HiDPI screen.
-* Both are computed **when the element connects**, and a `ResizeObserver` on the element keeps them
-  current: when the CSS box changes the element recomputes the backing store and calls
+* Both are computed **when the element connects**, and a `ResizeObserver` on the element and a
+  watch on `devicePixelRatio` (page zoom, a move to another display) keep them current: when either
+  changes the element recomputes the backing store and calls
   [`SsSurfaceWeb.resize()`](./js.md) itself, so a panel that resizes needs no extra code. (Where
   `ResizeObserver` is unavailable the size stays at its connect-time value; `element.surface` still
   lets you drive `resize()` by hand.)
@@ -172,7 +175,8 @@ backgrounded tab does not advance the animation by the whole idle gap.
 
 ## Device loss, handled for you
 
-The element checks for a lost device every frame and calls `restoreSharedDevice` itself. Since the
+The element checks for a lost device every frame, and again when it comes back into view, and calls
+`restoreSharedDevice` itself. Since the
 device belongs to the *page*, **the first element to notice recovers for every element on it**, and
 playback resumes on the frame it was interrupted on. See [Device loss](../guide/device-loss.md).
 
@@ -180,7 +184,8 @@ playback resumes on the frame it was interrupted on. See [Device loss](../guide/
 
 Anything thrown during startup, a load the element starts itself (for a new `src` or `pack`), an
 animation switch, a fit or a frame is caught: the element logs to the console under
-`[ss-player-webgpu]` and replaces its own content with a plain error box. The message is written as
+`[ss-player-webgpu]` and hides its canvas behind a plain error box, until a load, an animation or a
+fit that works brings the canvas back. The message is written as
 text, never as markup — it can carry a URL or a pack name that came off an attribute, and an error
 path is a poor place to start parsing HTML.
 

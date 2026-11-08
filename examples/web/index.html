@@ -88,7 +88,7 @@
     // packages/ssplayer-wgpu here, so what the demo drives is the same dist/ an
     // `npm i @spritestudio/ssplayer-wgpu` gets — not a second copy that can drift.
     import { defineSsPlayerWebGPUElement } from './ssplayer-wgpu/dist/element.js';
-    import { sharedContext } from './ssplayer-wgpu/dist/index.js';
+    import { sharedContext, restoreSharedDevice } from './ssplayer-wgpu/dist/index.js';
 
     // Registration is opt-in in the package (the element is its own entry point),
     // so a page that wants <ss-player-webgpu> asks for it once.
@@ -374,7 +374,11 @@
       const loop = (now) => {
         const dt = Math.min((now - last) / 1000, 0.05);
         last = now;
-        if (!ctx.isDeviceLost()) {
+        if (ctx.isDeviceLost()) {
+          // Shared with the element above, so whichever notices first rebuilds
+          // the device for both; this one must not wait on the other being shown.
+          restoreSharedDevice(ctx).catch((e) => console.error(e));
+        } else {
           surface.frame(dt);
           const s = surface.stats();
           const gpu = s.gpuPassTimeNs === undefined ? '—' : `${(s.gpuPassTimeNs / 1e6).toFixed(3)} ms`;

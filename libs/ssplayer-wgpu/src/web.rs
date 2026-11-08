@@ -48,22 +48,28 @@ use wasm_bindgen::prelude::*;
 /// Why a texture-override call on `player` names nothing it can replace.
 fn unreplaceable(player: &SSPlayer, pack: Option<&str>, name: &str) -> JsValue {
     if player.replaceable_cellmap_names(None).is_none() {
-        return JsValue::from_str("no pack is loaded");
+        return js_error("no pack is loaded");
     }
     let pack = pack.map_or_else(|| "the selected pack".to_string(), |pack| format!("pack \"{pack}\""));
-    JsValue::from_str(&format!("{pack} has no cellmap or texture named \"{name}\""))
+    js_error(format!("{pack} has no cellmap or texture named \"{name}\""))
 }
 
-/// Map any error into a JS exception value.
-fn js_err<E: core::fmt::Debug>(e: E) -> JsValue {
-    JsValue::from_str(&format!("{e:?}"))
+/// A JS `Error` carrying `message`, which is what every rejection and throw of
+/// this face is, so a page's `catch` gets a stack and `e.message`.
+fn js_error(message: impl AsRef<str>) -> JsValue {
+    js_sys::Error::new(message.as_ref()).into()
+}
+
+/// Map a runtime error into a JS `Error`, worded for a person.
+fn js_err<E: core::fmt::Display>(e: E) -> JsValue {
+    js_error(e.to_string())
 }
 
 /// The error a handle raises once the thing it names is gone. Not a panic: JS
 /// keeps references alive in closures and event listeners, so a call arriving
 /// after `destroy()` is ordinary rather than exceptional.
 fn gone(what: &str) -> JsValue {
-    JsValue::from_str(&format!("this {what} has been destroyed"))
+    js_error(format!("this {what} has been destroyed"))
 }
 
 /// How a canvas composites with the page behind it.
@@ -89,7 +95,7 @@ const PAGE_ALPHA_MODE: wgpu::CompositeAlphaMode = wgpu::CompositeAlphaMode::PreM
 /// and this is the WebGPU equivalent of the WebGL player's
 /// `UNPACK_PREMULTIPLY_ALPHA_WEBGL` (`SSWebGLResourceManager.createTextureFromSource`).
 async fn decode_image(bytes: &[u8]) -> Result<web_sys::ImageBitmap, JsValue> {
-    let window = web_sys::window().ok_or_else(|| JsValue::from_str("no `window` (this face needs a document)"))?;
+    let window = web_sys::window().ok_or_else(|| js_error("no `window` (this face needs a document)"))?;
     let parts = js_sys::Array::new();
     parts.push(&js_sys::Uint8Array::from(bytes));
     let blob = web_sys::Blob::new_with_u8_array_sequence(parts.as_ref())?;
@@ -98,7 +104,7 @@ async fn decode_image(bytes: &[u8]) -> Result<web_sys::ImageBitmap, JsValue> {
     options.set_premultiply_alpha(web_sys::PremultiplyAlpha::Premultiply);
     let promise = window.create_image_bitmap_with_blob_and_image_bitmap_options(&blob, &options)?;
 
-    wasm_bindgen_futures::JsFuture::from(promise).await?.dyn_into::<web_sys::ImageBitmap>().map_err(|_| JsValue::from_str("createImageBitmap did not return an ImageBitmap"))
+    wasm_bindgen_futures::JsFuture::from(promise).await?.dyn_into::<web_sys::ImageBitmap>().map_err(|_| js_error("createImageBitmap did not return an ImageBitmap"))
 }
 
 /// Report a recoverable problem: one missing atlas or sub-pack should cost you
@@ -108,7 +114,8 @@ fn warn(message: &str) {
 }
 
 /// The absolute URL relative references are resolved against: whatever base is in
-/// force, or the document's URL when there is none.
+/// force, or the document's base URL (`document.baseURI`, which honours a
+/// `<base href>`) when there is none.
 ///
 /// A base is resolved against the page because it may itself be relative — a host
 /// calling `loadSsab(bytes, null, 'assets/overall/')` is giving a page-relative
@@ -119,7 +126,7 @@ fn warn(message: &str) {
 /// against. Only a relative one needs the page, and only then is its absence a
 /// reason to give up — which is what the caller's warning goes on to say.
 fn resolved_base(base_url: Option<&str>) -> Option<String> {
-    let document = || web_sys::window()?.document()?.url().ok();
+    let document = || web_sys::window()?.document()?.base_uri().ok().flatten();
     match base_url {
         Some(base) => match web_sys::Url::new(base) {
             Ok(url) => Some(url.href()),
@@ -354,7 +361,7 @@ async fn request_adapter(instance: &wgpu::Instance) -> Result<wgpu::Adapter, JsV
     instance
         .request_adapter(&wgpu::RequestAdapterOptions { power_preference: wgpu::PowerPreference::default(), compatible_surface: None, force_fallback_adapter: false, apply_limit_buckets: false })
         .await
-        .map_err(|_| JsValue::from_str("no WebGPU adapter (this browser/GPU may not support WebGPU)"))
+        .map_err(|_| js_error("no WebGPU adapter (this browser/GPU may not support WebGPU)"))
 }
 
 /// One canvas: its swapchain and the scene drawn into it.
@@ -400,7 +407,7 @@ impl WebContext {
     fn add_surface(&mut self, canvas: web_sys::HtmlCanvasElement) -> Result<SlotId, JsValue> {
         let size = (canvas.width(), canvas.height());
         let surface = self.instance.create_surface(wgpu::SurfaceTarget::Canvas(canvas)).map_err(js_err)?;
-        let swapchain = Swapchain::new(&self.device, &self.adapter, surface, size, Some(PAGE_ALPHA_MODE), true).ok_or_else(|| JsValue::from_str("the adapter cannot present to this canvas"))?;
+        let swapchain = Swapchain::new(&self.device, &self.adapter, surface, size, Some(PAGE_ALPHA_MODE), true).ok_or_else(|| js_error("the adapter cannot present to this canvas"))?;
 
         // The scene is format-specific; the renderer is not, which is
         // what lets canvases with different formats share one of it.
@@ -429,7 +436,7 @@ impl WebContext {
     fn set_texture_from_bitmap(&mut self, hash: u32, bitmap: &web_sys::ImageBitmap) -> Result<(), JsValue> {
         let (width, height) = (bitmap.width(), bitmap.height());
         if let Some(why) = texture_extent_error(&self.device, (width, height)) {
-            return Err(JsValue::from_str(&format!("{why} (a closed ImageBitmap reports 0x0)")));
+            return Err(js_error(format!("{why} (a closed ImageBitmap reports 0x0)")));
         }
         let size = wgpu::Extent3d { width, height, depth_or_array_layers: 1 };
         let texture = self.device.create_texture(&wgpu::TextureDescriptor {
@@ -527,11 +534,11 @@ impl SsContextWeb {
         let ctx = &mut *self.inner.borrow_mut();
         let WebContext { renderer, device, queue, encoded_textures, .. } = ctx;
         if let Some(why) = texture_extent_error(device, (width, height)) {
-            return Err(JsValue::from_str(&why));
+            return Err(js_error(&why));
         }
         // Inside the device's limit, so the product cannot overflow.
         if rgba.len() != (width as usize) * (height as usize) * 4 {
-            return Err(JsValue::from_str(&format!("{} bytes do not fill a {width}x{height} RGBA8 texture", rgba.len())));
+            return Err(js_error(format!("{} bytes do not fill a {width}x{height} RGBA8 texture", rgba.len())));
         }
         // One key, one supplier: whichever path registered it last owns the
         // recovery too, so the other's retained source must go.
@@ -635,7 +642,7 @@ impl SsContextWeb {
             ctx.renderer.restore_device(&device, &queue);
             for surface in ctx.surfaces.iter_mut() {
                 if !surface.swapchain.presents_on(&adapter) {
-                    return Err(JsValue::from_str("the restored adapter cannot present a canvas's original surface format; rebuild the context"));
+                    return Err(js_error("the restored adapter cannot present a canvas's original surface format; rebuild the context"));
                 }
                 surface.swapchain.restore(&device, &adapter);
                 surface.scene.restore_device(&device, &queue);
@@ -879,7 +886,7 @@ fn read_placement(options: Option<&js_sys::Object>) -> Result<Placement, JsValue
             "contain" => Fit::Contain,
             "cover" => Fit::Cover,
             "none" => Fit::None,
-            other => return Err(JsValue::from_str(&format!("unknown fit {other:?}; expected \"contain\", \"cover\" or \"none\""))),
+            other => return Err(js_error(format!("unknown fit {other:?}; expected \"contain\", \"cover\" or \"none\""))),
         },
     };
     let align = match field(options, "align").as_string() {
@@ -895,7 +902,7 @@ fn read_placement(options: Option<&js_sys::Object>) -> Result<Placement, JsValue
             "bottom-left" => Align::BottomLeft,
             "bottom-right" => Align::BottomRight,
             other => {
-                return Err(JsValue::from_str(&format!("unknown align {other:?}; expected \"center\", \"top\", \"bottom\", \"left\", \"right\", \"top-left\", \"top-right\", \"bottom-left\" or \"bottom-right\"")));
+                return Err(js_error(format!("unknown align {other:?}; expected \"center\", \"top\", \"bottom\", \"left\", \"right\", \"top-left\", \"top-right\", \"bottom-left\" or \"bottom-right\"")));
             }
         },
     };
@@ -1097,7 +1104,7 @@ impl SsPlayerWeb {
     /// placeholder goes the same way the placeholder does.
     fn ensure_idle(&self) -> Result<(), JsValue> {
         if self.loading.get() {
-            return Err(JsValue::from_str("this player is already loading; await that promise before starting another load on it"));
+            return Err(js_error("this player is already loading; await that promise before starting another load on it"));
         }
         Ok(())
     }
@@ -1196,13 +1203,14 @@ impl SsPlayerWeb {
         // its siblings resolve against. Setting it here instead would resolve
         // `src` against itself and fetch `assets/assets/Basic.ssab`.
         let mut loader = WebAssetLoader::new(Rc::clone(&self.ctx), None, read);
+        let label = src.to_owned();
         let src = src.to_owned();
         self.with_player_detached(|mut player| async move {
             let out = player.load_with(&mut loader, &src).await;
             (player, out)
         })
         .await?
-        .map_err(js_err)
+        .map_err(|e| js_error(format!("{label}: {e}")))
     }
 
     /// [`SsPlayerWeb::load_ssab`] without changing what plays: registers an
@@ -1371,7 +1379,7 @@ impl SsPlayerWeb {
     pub fn set_cellmap_texture(&self, pack: Option<String>, name: &str, bitmap: &web_sys::ImageBitmap) -> Result<(), JsValue> {
         let ctx = &mut *self.ctx.borrow_mut();
         if let Some(why) = texture_extent_error(&ctx.device, (bitmap.width(), bitmap.height())) {
-            return Err(JsValue::from_str(&format!("{name}: {why} (a closed ImageBitmap reports 0x0)")));
+            return Err(js_error(format!("{name}: {why} (a closed ImageBitmap reports 0x0)")));
         }
         let key = {
             let entry = ctx.surfaces.get_mut(self.surface).ok_or_else(|| gone("surface"))?;
@@ -1392,7 +1400,7 @@ impl SsPlayerWeb {
         let ctx = &mut *self.ctx.borrow_mut();
         if let Some(why) = texture_extent_error(&ctx.device, (bitmap.width(), bitmap.height())) {
             bitmap.close();
-            return Err(JsValue::from_str(&format!("{name}: {why}")));
+            return Err(js_error(format!("{name}: {why}")));
         }
         let key = {
             let entry = ctx.surfaces.get_mut(self.surface).ok_or_else(|| gone("surface"))?;
@@ -1435,7 +1443,7 @@ impl SsPlayerWeb {
     /// allocates. Starting playback is [`SsPlayerWeb::play`], a separate call.
     #[wasm_bindgen(js_name = setAnimation)]
     pub fn set_animation(&self, name: &str) -> Result<(), JsValue> {
-        with_player!(self, |p| p.set_animation(name).map_err(js_err)?)
+        with_player!(self, |p| p.set_animation(name).map_err(|e| js_error(format!("{name}: {e}")))?)
     }
 
     /// Start from the head of the section, re-arming the loop count. Not a
@@ -1574,7 +1582,7 @@ impl SsPlayerWeb {
     /// are inside the animation; an end outside it is the animation's edge.
     #[wasm_bindgen(js_name = setAnimationSection)]
     pub fn set_animation_section(&self, start: i32, end: i32) -> Result<(), JsValue> {
-        with_player!(self, |p| p.set_animation_section(start, end).map_err(|e| JsValue::from_str(&format!("setAnimationSection({start}, {end}): {e:?}")))?)
+        with_player!(self, |p| p.set_animation_section(start, end).map_err(|e| js_error(format!("setAnimationSection({start}, {end}): {e}")))?)
     }
 
     /// `direction`: 0 forward, 1 backward. `style`: 0 normal, 1 ping-pong.
@@ -1662,8 +1670,8 @@ impl SsPlayerWeb {
     /// animation, 2 permanent. Normal parts only.
     #[wasm_bindgen(js_name = setPartColorOverrideByIndex)]
     pub fn set_part_color_override_by_index(&self, part: u32, rgba: u32, blend_op: u8, priority: u8) -> Result<(), JsValue> {
-        let blend_op = BlendOp::from_wire(blend_op).ok_or_else(|| JsValue::from_str("blendOp must be 0..=3"))?;
-        let priority = OverridePriority::from_wire(priority).ok_or_else(|| JsValue::from_str("priority must be 0..=2"))?;
+        let blend_op = BlendOp::from_wire(blend_op).ok_or_else(|| js_error("blendOp must be 0..=3"))?;
+        let priority = OverridePriority::from_wire(priority).ok_or_else(|| js_error("priority must be 0..=2"))?;
         with_player!(self, |p| p.set_part_color_override_by_index(part, rgba, blend_op, priority).map_err(js_err)?)
     }
 
@@ -1672,10 +1680,10 @@ impl SsPlayerWeb {
     /// `[r, g, b, a]`. Otherwise as `setPartColorOverride`.
     #[wasm_bindgen(js_name = setPartColorOverrideCornersByIndex)]
     pub fn set_part_color_override_corners_by_index(&self, part: u32, corners: &[u8], blend_op: u8, priority: u8) -> Result<(), JsValue> {
-        let blend_op = BlendOp::from_wire(blend_op).ok_or_else(|| JsValue::from_str("blendOp must be 0..=3"))?;
-        let priority = OverridePriority::from_wire(priority).ok_or_else(|| JsValue::from_str("priority must be 0..=2"))?;
+        let blend_op = BlendOp::from_wire(blend_op).ok_or_else(|| js_error("blendOp must be 0..=3"))?;
+        let priority = OverridePriority::from_wire(priority).ok_or_else(|| js_error("priority must be 0..=2"))?;
         if corners.len() != 16 {
-            return Err(JsValue::from_str("corners must be 16 bytes (4 corners x RGBA)"));
+            return Err(js_error("corners must be 16 bytes (4 corners x RGBA)"));
         }
         let mut rgba = [[0u8; 4]; 4];
         rgba.copy_from_slice(corners.as_chunks::<4>().0);
@@ -1693,7 +1701,7 @@ impl SsPlayerWeb {
     /// cannot be resolved against the loaded pack.
     #[wasm_bindgen(js_name = setPartCellOverrideByIndex)]
     pub fn set_part_cell_override_by_index(&self, part: u32, cellmap_name: &str, cell_name: &str, priority: u8) -> Result<(), JsValue> {
-        let priority = OverridePriority::from_wire(priority).ok_or_else(|| JsValue::from_str("priority must be 0..=2"))?;
+        let priority = OverridePriority::from_wire(priority).ok_or_else(|| js_error("priority must be 0..=2"))?;
         with_player!(self, |p| p.set_part_cell_override_by_index(part, cellmap_name, cell_name, priority).map_err(js_err)?)
     }
 
@@ -1725,18 +1733,18 @@ impl SsPlayerWeb {
     /// Override a part's colour by name. Arguments as `setPartColorOverrideByIndex`.
     #[wasm_bindgen(js_name = setPartColorOverride)]
     pub fn set_part_color_override(&self, part: &str, rgba: u32, blend_op: u8, priority: u8) -> Result<(), JsValue> {
-        let blend_op = BlendOp::from_wire(blend_op).ok_or_else(|| JsValue::from_str("blendOp must be 0..=3"))?;
-        let priority = OverridePriority::from_wire(priority).ok_or_else(|| JsValue::from_str("priority must be 0..=2"))?;
+        let blend_op = BlendOp::from_wire(blend_op).ok_or_else(|| js_error("blendOp must be 0..=3"))?;
+        let priority = OverridePriority::from_wire(priority).ok_or_else(|| js_error("priority must be 0..=2"))?;
         with_player!(self, |p| p.set_part_color_override(part, rgba, blend_op, priority).map_err(js_err)?)
     }
 
     /// Four-corner colour override by name. Arguments as the `ByIndex` sibling.
     #[wasm_bindgen(js_name = setPartColorOverrideCorners)]
     pub fn set_part_color_override_corners(&self, part: &str, corners: &[u8], blend_op: u8, priority: u8) -> Result<(), JsValue> {
-        let blend_op = BlendOp::from_wire(blend_op).ok_or_else(|| JsValue::from_str("blendOp must be 0..=3"))?;
-        let priority = OverridePriority::from_wire(priority).ok_or_else(|| JsValue::from_str("priority must be 0..=2"))?;
+        let blend_op = BlendOp::from_wire(blend_op).ok_or_else(|| js_error("blendOp must be 0..=3"))?;
+        let priority = OverridePriority::from_wire(priority).ok_or_else(|| js_error("priority must be 0..=2"))?;
         if corners.len() != 16 {
-            return Err(JsValue::from_str("corners must be 16 bytes (4 corners x RGBA)"));
+            return Err(js_error("corners must be 16 bytes (4 corners x RGBA)"));
         }
         let mut rgba = [[0u8; 4]; 4];
         rgba.copy_from_slice(corners.as_chunks::<4>().0);
@@ -1752,7 +1760,7 @@ impl SsPlayerWeb {
     /// Make a part draw a different cell, by name.
     #[wasm_bindgen(js_name = setPartCellOverride)]
     pub fn set_part_cell_override(&self, part: &str, cellmap_name: &str, cell_name: &str, priority: u8) -> Result<(), JsValue> {
-        let priority = OverridePriority::from_wire(priority).ok_or_else(|| JsValue::from_str("priority must be 0..=2"))?;
+        let priority = OverridePriority::from_wire(priority).ok_or_else(|| js_error("priority must be 0..=2"))?;
         with_player!(self, |p| p.set_part_cell_override(part, cellmap_name, cell_name, priority).map_err(js_err)?)
     }
 
@@ -1890,7 +1898,7 @@ impl SsPlayerWeb {
         let blend = match blend {
             0 => crate::TrackBlend::Mix,
             1 => crate::TrackBlend::Additive,
-            _ => return Err(JsValue::from_str("blend must be 0 (mix) or 1 (additive)")),
+            _ => return Err(js_error("blend must be 0 (mix) or 1 (additive)")),
         };
         with_player!(self, |p| p.set_track_blend(track, blend).map_err(js_err)?)
     }
@@ -1912,7 +1920,7 @@ impl SsPlayerWeb {
         let sync = match sync {
             0 => crate::TrackSync::Free,
             1 => crate::TrackSync::Start,
-            _ => return Err(JsValue::from_str("sync must be 0 (free) or 1 (start)")),
+            _ => return Err(js_error("sync must be 0 (free) or 1 (start)")),
         };
         with_player!(self, |p| p.set_track_sync(track, sync).map_err(js_err)?)
     }
@@ -2352,16 +2360,16 @@ impl SsPlayerWeb {
     pub fn set_crowd(&self, placements: &[f32], tints: Option<Vec<u32>>) -> Result<(), JsValue> {
         const STRIDE: usize = 6;
         if !placements.len().is_multiple_of(STRIDE) {
-            return Err(JsValue::from_str(&format!("setCrowd: {} numbers are not a whole number of members, six apiece", placements.len())));
+            return Err(js_error(format!("setCrowd: {} numbers are not a whole number of members, six apiece", placements.len())));
         }
         let count = placements.len() / STRIDE;
         if count > MAX_CROWD_MEMBERS {
-            return Err(JsValue::from_str(&format!("setCrowd: a crowd of {count} is past the {MAX_CROWD_MEMBERS} one player draws")));
+            return Err(js_error(format!("setCrowd: a crowd of {count} is past the {MAX_CROWD_MEMBERS} one player draws")));
         }
         if let Some(tints) = &tints
             && tints.len() != count
         {
-            return Err(JsValue::from_str(&format!("setCrowd: {} tints for {count} members", tints.len())));
+            return Err(js_error(format!("setCrowd: {} tints for {count} members", tints.len())));
         }
         let member = |i: usize| {
             let [x, y, scale_x, scale_y, rotation, alpha] = placements[i * STRIDE..i * STRIDE + STRIDE].try_into().expect("a whole member");
