@@ -17,6 +17,18 @@ the constraints a change most often breaks are in [CONTRIBUTING.md](./CONTRIBUTI
       loading, layout and a glyph atlas all land on this side.
 - [ ] **Integration shader gaps** — `map0` / `map1` secondary textures, shader
       parts combined with a mask, and parts other than Normal.
+- [ ] **Coverage bitmaps past the device's array-layer limit** — the coverage backend
+      allocates a layer per masking player, and one more per further 24 writers in its
+      instance tree, without checking `max_texture_array_layers`; past that many masking
+      players on screen (256 under the default limits) creating the array is a
+      validation error, which panics under wgpu's default handler. Closing it means
+      drawing the players past the limit unmasked, as group alpha already does past its
+      own, or splitting the array.
+- [ ] **Atlas colour on the web face** — `createImageBitmap` applies an image's gAMA
+      chunk or ICC profile, which the native decoders ignore, so such an atlas draws
+      slightly differently in the browser (the SDK's `Ringo.png` carries gAMA, `Doll.png`
+      an ICC profile). Passing `colorSpaceConversion: 'none'` matches the native faces;
+      it wants a side-by-side check on those two.
 
 ## Expressiveness
 
@@ -61,6 +73,21 @@ the constraints a change most often breaks are in [CONTRIBUTING.md](./CONTRIBUTI
       texture and a way for that texture to leave — **undecided** whether that is a
       native shared handle per backend (a DXGI shared handle, an `IOSurface`, Vulkan
       external memory), a CPU readback as the portable floor, or both.
+- [ ] **Web: a device-lost frame repeats the last tick** — `SsSurfaceWeb.frame` returns
+      before the update while the device is lost, so `events()` and the edges still
+      describe the last tick that ran, and `<ss-player-webgpu>` dispatches them once more.
+      It should report an empty tick, as a culled player does.
+- [ ] **Web: one blank frame per resize** — resizing a canvas clears it and the redraw
+      waits for the next animation frame, so a continuous resize flickers. Drawing the
+      current frame again straight after the resize, without advancing, closes it.
+- [ ] **Bevy: feedback a late main world misses** — the render world replaces the batch
+      it hands back each frame, so when the main world falls a frame behind, the events
+      and the started / finished / looped edges of the unread batch are lost. Appending
+      events and edges to an unread batch, and replacing only the state, closes it.
+- [ ] **JS typings for `fitInto()` and `stats()`** — both return `object` in the
+      generated `.d.ts`, and `events()`, `missingAssets()` and `textureRefs()` return
+      `any[]`, so `placed.scaleX` and `stats.drawCalls` do not type-check. Typed returns
+      on the wasm-bindgen side, with the interfaces in the package, close it.
 
 ## Resource management
 
@@ -70,6 +97,12 @@ the constraints a change most often breaks are in [CONTRIBUTING.md](./CONTRIBUTI
       bytes and VRAM with no way to reclaim them. Missing: a per-player pack release on
       every face, which must retire the pack rather than drop it, since a `Context`
       points at its resource by raw pointer.
+- [ ] **Atlases past the device's texture limit** — an atlas a load reads, or a
+      replacement handed to the Rust face's `set_cellmap_texture`, that is larger than
+      `max_texture_dimension_2d` is refused with a line on stderr and draws white, while
+      `missing_assets()` stays empty and the call returns `Ok`; only the C face's
+      `ss_scene_add_texture*` refuses it with an error. Reporting it means carrying the
+      refusal from the flush, the first point a device is lent, back to the player.
 
 ## Distribution & verification
 
