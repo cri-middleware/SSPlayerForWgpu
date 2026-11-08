@@ -280,7 +280,7 @@ static const NSUInteger kMaxPlayers = 6;
     }
     float slot = (float)_width / (float)count;
     float last = (float)(count - 1);
-    SsPlacement placement;
+    ss_placement_t placement;
     ss_placement_default(&placement);
     placement.scale = 0.9f;
     for (NSUInteger i = 0; i < count; i++) {

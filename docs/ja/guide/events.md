@@ -37,7 +37,7 @@
 
     uint32_t n = ss_player_event_count(player);
     for (uint32_t i = 0; i < n; i++) {
-        SsEventData e;
+        ss_event_data_t e;
         if (ss_player_event_at(player, i, &e) != SS_OK) continue;
 
         switch (e.kind) {
@@ -47,7 +47,7 @@
             break;
         case SS_EVENT_SIGNAL:
             for (uint32_t p = 0; p < e.param_count; p++) {
-                SsSignalParamData param;
+                ss_signal_param_data_t param;
                 ss_player_event_signal_param_at(player, i, p, &param);
             }
             break;
@@ -98,7 +98,7 @@
 
 ## モーションブレンディングを使うとき
 
-イベントを発火するのはトラック 0 のアニメーションだけです。トラック 0 を `crossfade` すると、その開始時点から入ってくるアニメーションが該当し、フェードの開始からそのイベントが届きます。出ていくアニメーションのイベントは止まります。`set_track_outgoing_event_threshold` で、フェードの途中まで発火させ続けることもできます。各イベントは、発火した**ソース**も持っています。`source()` で取れるハンドルは、`track_main_source` や `add_track_source` と同じものです。`set_source_event_threshold` で他のソースにも発火させた場合に、どのソースのイベントかを区別できます（[モーションブレンディング](./motion-blending.md)）。C の Face では `SsEventData.source`、JavaScript では各イベントのオブジェクトの `source` です。
+イベントを発火するのはトラック 0 のアニメーションだけです。トラック 0 を `crossfade` すると、その開始時点から入ってくるアニメーションが該当し、フェードの開始からそのイベントが届きます。出ていくアニメーションのイベントは止まります。`set_track_outgoing_event_threshold` で、フェードの途中まで発火させ続けることもできます。各イベントは、発火した**ソース**も持っています。`source()` で取れるハンドルは、`track_main_source` や `add_track_source` と同じものです。`set_source_event_threshold` で他のソースにも発火させた場合に、どのソースのイベントかを区別できます（[モーションブレンディング](./motion-blending.md)）。C の Face では `ss_event_data_t.source`、JavaScript では各イベントのオブジェクトの `source` です。
 
 ## 「空」にも意味があります
 
@@ -138,7 +138,7 @@ Player は通過したキーを報告するだけで、鳴らすかどうかは�
 
 シグナルはコマンド ID と `(id, 値)` の並びです。値はブール・選択肢の**インデックス**・整数・浮動小数・テキスト、あるいは **none**（パラメータは存在するが未設定）のいずれかです。
 
-C Face では値が平坦化されており、`value_type` が `SsSignalParamData` のどのフィールドを読むかを示します。
+C Face では値が平坦化されており、`value_type` が `ss_signal_param_data_t` のどのフィールドを読むかを示します。
 Rust では `SignalValue` enum、JavaScript ではそのままの値です。
 
 ## 開始・完了・ループのエッジ

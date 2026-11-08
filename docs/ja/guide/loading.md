@@ -81,7 +81,7 @@ JavaScript の Face ではページのコンテキストが最初からデバイ
     if (ss_player_load(player, path) != SS_OK) {
         fprintf(stderr, "%s\n", ss_last_error());
     } else if (ss_player_missing_count(player) > 0) {
-        SsMissingAsset m;
+        ss_missing_asset_t m;
         for (uint32_t i = 0; i < ss_player_missing_count(player); i++) {
             if (ss_player_missing_at(player, i, &m) == SS_OK) {
                 fprintf(stderr, "missing: %s\n", m.name);

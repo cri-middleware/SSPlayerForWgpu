@@ -277,7 +277,7 @@ void Viewer::LayOutPlayers() {
     }
     float slot = (float)width_ / (float)count;
     float last = (float)(count - 1);
-    SsPlacement placement;
+    ss_placement_t placement;
     ss_placement_default(&placement);
     placement.scale = 0.9f;
     for (size_t i = 0; i < count; i++) {

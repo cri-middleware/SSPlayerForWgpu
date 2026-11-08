@@ -207,7 +207,7 @@ pub struct SsMissingAsset {
     pub name: *const c_char,
 }
 
-/// What kind of thing an `SsEventData` is; read it before the payload.
+/// What kind of thing an `ss_event_data_t` is; read it before the payload.
 pub const SS_EVENT_USER_DATA: u32 = 0;
 /// See `SS_EVENT_USER_DATA`.
 pub const SS_EVENT_SIGNAL: u32 = 1;
@@ -267,7 +267,7 @@ pub struct SsEventData {
     pub loop_num: i32,
 }
 
-/// Which field of an `SsSignalParamData` carries the value.
+/// Which field of an `ss_signal_param_data_t` carries the value.
 pub const SS_SIGNAL_VALUE_NONE: u32 = 0;
 /// See `SS_SIGNAL_VALUE_NONE`.
 pub const SS_SIGNAL_VALUE_BOOL: u32 = 1;
@@ -1065,7 +1065,7 @@ pub unsafe extern "C" fn ss_player_missing_count(handle: *mut SsPlayer) -> u32 {
 /// Writes `out` and returns `SS_OK`, or leaves it untouched and reports why.
 ///
 /// # Safety
-/// `out` must point at a writable `SsMissingAsset`.
+/// `out` must point at a writable `ss_missing_asset_t`.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn ss_player_missing_at(handle: *mut SsPlayer, index: u32, out: *mut SsMissingAsset) -> i32 {
     if out.is_null() {
@@ -2389,7 +2389,7 @@ pub unsafe extern "C" fn ss_player_event_count(handle: *mut SsPlayer) -> u32 {
 ///
 /// # Safety
 /// `handle` must be a live handle or null; `out` must point at a writable
-/// `SsEventData`.
+/// `ss_event_data_t`.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn ss_player_event_at(handle: *mut SsPlayer, index: u32, out: *mut SsEventData) -> i32 {
     if out.is_null() {
@@ -2477,7 +2477,7 @@ pub unsafe extern "C" fn ss_player_event_signal_param_count(handle: *mut SsPlaye
 ///
 /// # Safety
 /// `handle` must be a live handle or null; `out` must point at a writable
-/// `SsSignalParamData`.
+/// `ss_signal_param_data_t`.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn ss_player_event_signal_param_at(handle: *mut SsPlayer, index: u32, param: u32, out: *mut SsSignalParamData) -> i32 {
     if out.is_null() {
@@ -2754,11 +2754,11 @@ pub unsafe extern "C" fn ss_player_reset_transform(handle: *mut SsPlayer) {
 /// Fill `out` with the default placement: contain, centred, unscaled,
 /// unflipped, unrotated, and the animation's own canvas as the box.
 ///
-/// Start every `SsPlacement` here. A zeroed struct asks for `scale = 0`, which
+/// Start every `ss_placement_t` here. A zeroed struct asks for `scale = 0`, which
 /// is a placement that draws nothing.
 ///
 /// # Safety
-/// `out` must point at a writable `SsPlacement`.
+/// `out` must point at a writable `ss_placement_t`.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn ss_placement_default(out: *mut SsPlacement) -> i32 {
     if out.is_null() {
@@ -2795,7 +2795,7 @@ pub unsafe extern "C" fn ss_placement_default(out: *mut SsPlacement) -> i32 {
 ///
 /// # Safety
 /// `handle` must be a live handle or null; `out` must point at a writable
-/// `SsRect`.
+/// `ss_rect_t`.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn ss_player_canvas_rect(handle: *mut SsPlayer, out: *mut SsRect) -> i32 {
     if out.is_null() {
@@ -2829,7 +2829,7 @@ pub unsafe extern "C" fn ss_player_canvas_rect(handle: *mut SsPlayer, out: *mut 
 ///
 /// # Safety
 /// `handle` must be a live handle or null; `placement` must point at a readable
-/// `SsPlacement`; `out` must be null or point at a writable `SsPlaced`.
+/// `ss_placement_t`; `out` must be null or point at a writable `ss_placed_t`.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn ss_player_fit_into(handle: *mut SsPlayer, width: f32, height: f32, placement: *const SsPlacement, out: *mut SsPlaced) -> i32 {
     if placement.is_null() {

@@ -78,7 +78,7 @@
 #define SS_MAX_CROWD_MEMBERS 4096
 
 /*
- What kind of thing an `SsEventData` is; read it before the payload.
+ What kind of thing an `ss_event_data_t` is; read it before the payload.
  */
 #define SS_EVENT_USER_DATA 0
 
@@ -93,7 +93,7 @@
 #define SS_EVENT_AUDIO 2
 
 /*
- Which field of an `SsSignalParamData` carries the value.
+ Which field of an `ss_signal_param_data_t` carries the value.
  */
 #define SS_SIGNAL_VALUE_NONE 0
 
@@ -334,7 +334,7 @@ typedef struct {
      copy it if you need to keep it. Never null.
      */
     const char *name;
-} SsMissingAsset;
+} ss_missing_asset_t;
 
 /*
  One timeline event, flattened for the ABI.
@@ -407,7 +407,7 @@ typedef struct {
      infinite audio loop.
      */
     int32_t loop_num;
-} SsEventData;
+} ss_event_data_t;
 
 /*
  One signal parameter, flattened for the ABI. `value_type` says which field
@@ -439,7 +439,7 @@ typedef struct {
      When `value_type` is `TEXT`.
      */
     const char *text;
-} SsSignalParamData;
+} ss_signal_param_data_t;
 
 /*
  A box in player-local units — the space `ss_player_part_transform` reports
@@ -453,7 +453,7 @@ typedef struct {
     float y;
     float width;
     float height;
-} SsRect;
+} ss_rect_t;
 
 /*
  Everything `ss_player_fit_into` needs.
@@ -475,7 +475,7 @@ typedef struct {
      The box to fit. Read only when `has_frame` is true; otherwise the
      animation's authored canvas is used (`ss_player_canvas_rect`).
      */
-    SsRect frame;
+    ss_rect_t frame;
     bool has_frame;
     /*
      Pixels from the aligned position, applied **after** the fit.
@@ -502,7 +502,7 @@ typedef struct {
      fit itself.
      */
     float rotation;
-} SsPlacement;
+} ss_placement_t;
 
 /*
  What `ss_player_fit_into` wrote, in `ss_player_set_transform` terms: pixels
@@ -513,7 +513,7 @@ typedef struct {
     float y;
     float scale_x;
     float scale_y;
-} SsPlaced;
+} ss_placed_t;
 
 /*
  One copy of a player in a crowd: where it stands, in `ss_player_set_transform`
@@ -877,9 +877,9 @@ uint32_t ss_player_missing_count(ss_player_t *handle);
  Writes `out` and returns `SS_OK`, or leaves it untouched and reports why.
 
  # Safety
- `out` must point at a writable `SsMissingAsset`.
+ `out` must point at a writable `ss_missing_asset_t`.
  */
-int32_t ss_player_missing_at(ss_player_t *handle, uint32_t index, SsMissingAsset *out);
+int32_t ss_player_missing_at(ss_player_t *handle, uint32_t index, ss_missing_asset_t *out);
 
 /*
  Select the animation to play, rebuilding the instance tree. It is left at its
@@ -1810,9 +1810,9 @@ uint32_t ss_player_event_count(ss_player_t *handle);
 
  # Safety
  `handle` must be a live handle or null; `out` must point at a writable
- `SsEventData`.
+ `ss_event_data_t`.
  */
-int32_t ss_player_event_at(ss_player_t *handle, uint32_t index, SsEventData *out);
+int32_t ss_player_event_at(ss_player_t *handle, uint32_t index, ss_event_data_t *out);
 
 /*
  How many parameters the `index`-th event carries, or 0 when it is not a
@@ -1832,12 +1832,12 @@ uint32_t ss_player_event_signal_param_count(ss_player_t *handle, uint32_t index)
 
  # Safety
  `handle` must be a live handle or null; `out` must point at a writable
- `SsSignalParamData`.
+ `ss_signal_param_data_t`.
  */
 int32_t ss_player_event_signal_param_at(ss_player_t *handle,
                                         uint32_t index,
                                         uint32_t param,
-                                        SsSignalParamData *out);
+                                        ss_signal_param_data_t *out);
 
 /*
  Write the part's current-frame transform into `out` as the 2D affine
@@ -1982,13 +1982,13 @@ void ss_player_reset_transform(ss_player_t *handle);
  Fill `out` with the default placement: contain, centred, unscaled,
  unflipped, unrotated, and the animation's own canvas as the box.
 
- Start every `SsPlacement` here. A zeroed struct asks for `scale = 0`, which
+ Start every `ss_placement_t` here. A zeroed struct asks for `scale = 0`, which
  is a placement that draws nothing.
 
  # Safety
- `out` must point at a writable `SsPlacement`.
+ `out` must point at a writable `ss_placement_t`.
  */
-int32_t ss_placement_default(SsPlacement *out);
+int32_t ss_placement_default(ss_placement_t *out);
 
 /*
  Write the authored canvas of the animation now playing into `out`, as a box
@@ -2004,9 +2004,9 @@ int32_t ss_placement_default(SsPlacement *out);
 
  # Safety
  `handle` must be a live handle or null; `out` must point at a writable
- `SsRect`.
+ `ss_rect_t`.
  */
-int32_t ss_player_canvas_rect(ss_player_t *handle, SsRect *out);
+int32_t ss_player_canvas_rect(ss_player_t *handle, ss_rect_t *out);
 
 /*
  Fit the animation into a `width` x `height` box and place it there, as
@@ -2027,13 +2027,13 @@ int32_t ss_player_canvas_rect(ss_player_t *handle, SsRect *out);
 
  # Safety
  `handle` must be a live handle or null; `placement` must point at a readable
- `SsPlacement`; `out` must be null or point at a writable `SsPlaced`.
+ `ss_placement_t`; `out` must be null or point at a writable `ss_placed_t`.
  */
 int32_t ss_player_fit_into(ss_player_t *handle,
                            float width,
                            float height,
-                           const SsPlacement *placement,
-                           SsPlaced *out);
+                           const ss_placement_t *placement,
+                           ss_placed_t *out);
 
 /*
  Draw order within the scene; lower draws first. The order among equal values

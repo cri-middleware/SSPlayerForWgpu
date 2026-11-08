@@ -199,7 +199,7 @@ mid-update would risk a conflict over the very resources it lent.
 
     uint32_t count = ss_player_event_count(player);
     for (uint32_t i = 0; i < count; ++i) {
-        SsEventData e;
+        ss_event_data_t e;
         if (ss_player_event_at(player, i, &e) != SS_OK) continue;
         if (e.kind == SS_EVENT_USER_DATA) {
             if (e.has_integer) { /* e.integer */ }

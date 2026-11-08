@@ -53,12 +53,12 @@ Player は与えられたターゲットに**オーサリング時のスケー�
 === "C"
 
     ```c
-    SsPlacement placement;
+    ss_placement_t placement;
     ss_placement_default(&placement);   // ゼロ初期化しないこと: scale が 0 になります
     placement.fit = SS_FIT_COVER;
     placement.align = SS_ALIGN_BOTTOM;
 
-    SsPlaced placed;
+    ss_placed_t placed;
     ss_player_fit_into(player, width, height, &placement, &placed);
     ```
 
@@ -104,11 +104,11 @@ Player は与えられたターゲットに**オーサリング時のスケー�
 === "C"
 
     ```c
-    SsRect rect;
+    ss_rect_t rect;
     if (ss_player_canvas_rect(player, &rect) == SS_OK) { /* … */ }
 
     placement.has_frame = true;
-    placement.frame = (SsRect){ -100.0f, -200.0f, 200.0f, 200.0f };
+    placement.frame = (ss_rect_t){ -100.0f, -200.0f, 200.0f, 200.0f };
     ```
 
 === "JavaScript"

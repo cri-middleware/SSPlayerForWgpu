@@ -115,7 +115,7 @@ See [Playback and transport](../guide/playback.md) — in particular why `play` 
 | | |
 |---|---|
 | `ss_player_event_count(player)` | How many the last update crossed — **including frames it skipped over** |
-| `ss_player_event_at(player, i, out)` | One `SsEventData`: `kind` says which fields carry anything |
+| `ss_player_event_at(player, i, out)` | One `ss_event_data_t`: `kind` says which fields carry anything |
 | `ss_player_event_signal_param_count(player, i)` / `ss_player_event_signal_param_at(player, i, p, out)` | A signal's parameters |
 
 `kind` is `SS_EVENT_USER_DATA` (0), `SS_EVENT_SIGNAL` (1) or `SS_EVENT_AUDIO` (2); a signal
@@ -129,7 +129,7 @@ parameter's `value_type` is one of `SS_SIGNAL_VALUE_NONE` / `_BOOL` / `_INDEX` /
 | `ss_player_set_transform(player, x, y, sx, sy, rotation)` | Position in pixels from the view centre (`y` measured **downward**), scale, rotation in radians |
 | `ss_player_reset_transform(player)` | Back to the identity: centred, unscaled, unrotated |
 | `ss_player_fit_into(player, width, height, &placement, &placed)` | Fit the animation into a box and write the transform; `placed` may be null |
-| `ss_placement_default(&placement)` | Fill an `SsPlacement` before changing it — **a zeroed one has scale 0** |
+| `ss_placement_default(&placement)` | Fill an `ss_placement_t` before changing it — **a zeroed one has scale 0** |
 | `ss_player_canvas_rect(player, &rect)` | The box `ss_player_fit_into` fits when `has_frame` is false |
 | `ss_player_set_order(player, order)` / `ss_player_order(player)` | Draw order within the scene, ascending |
 | `ss_player_set_visible(player, visible)` / `ss_player_is_visible(player)` | Hidden characters draw nothing but keep playing and reporting events |
@@ -200,7 +200,7 @@ The track stack: tracks fold onto the setup pose in ascending order, track 0 bei
 
 Commands return a status. A read of a track or source that does not exist answers **0**, so check
 `ss_player_track_count` first; the two exceptions are marked above, where 0 is a real answer.
-`SsEventData.source` says which source fired an event.
+`ss_event_data_t.source` says which source fired an event.
 
 ## Not on this face
 
