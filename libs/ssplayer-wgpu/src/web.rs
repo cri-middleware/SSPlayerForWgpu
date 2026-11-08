@@ -831,11 +831,12 @@ impl SsSurfaceWeb {
     /// anything else afterwards, is safe — the handle resolves to "destroyed".
     pub fn destroy(&self) {
         let ctx = &mut *self.ctx.borrow_mut();
-        let WebContext { surfaces, renderer, .. } = ctx;
+        let WebContext { surfaces, renderer, encoded_textures, .. } = ctx;
         if let Some(entry) = surfaces.get_mut(self.id) {
             for player in entry.players.iter_mut() {
                 for key in player.override_keys() {
                     renderer.forget_texture(key);
+                    encoded_textures.remove(&key);
                 }
             }
         }
@@ -1397,19 +1398,25 @@ impl SsPlayerWeb {
         // Decoded first — and off any RefCell borrow, since `createImageBitmap` is
         // a yield point JS re-enters through.
         let bitmap = decode_image(&bytes).await?;
+        let supplied = self.supply_cellmap_bitmap(pack.as_deref(), &name, &bitmap);
+        // Closed on every path: a decoded atlas is megabytes the page cannot free.
+        bitmap.close();
+        supplied
+    }
+
+    /// The synchronous half of [`SsPlayerWeb::set_cellmap_texture_from_bytes`],
+    /// split out so the bitmap is closed whichever way it returns.
+    fn supply_cellmap_bitmap(&self, pack: Option<&str>, name: &str, bitmap: &web_sys::ImageBitmap) -> Result<(), JsValue> {
         let ctx = &mut *self.ctx.borrow_mut();
         if let Some(why) = texture_extent_error(&ctx.device, (bitmap.width(), bitmap.height())) {
-            bitmap.close();
             return Err(js_error(format!("{name}: {why}")));
         }
         let key = {
             let entry = ctx.surfaces.get_mut(self.surface).ok_or_else(|| gone("surface"))?;
             let player = entry.players.get_mut(self.id).ok_or_else(|| gone("player"))?;
-            player.override_cellmap_texture_key(pack.as_deref(), &name).ok_or_else(|| unreplaceable(player, pack.as_deref(), &name))?
+            player.override_cellmap_texture_key(pack, name).ok_or_else(|| unreplaceable(player, pack, name))?
         };
-        let supplied = ctx.set_texture_from_bitmap(key, &bitmap);
-        bitmap.close();
-        supplied
+        ctx.set_texture_from_bitmap(key, bitmap)
     }
 
     /// Undo a runtime override: point the cellmap back at its original atlas and
@@ -1421,13 +1428,15 @@ impl SsPlayerWeb {
         let freed = {
             let entry = ctx.surfaces.get_mut(self.surface).ok_or_else(|| gone("surface"))?;
             let player = entry.players.get_mut(self.id).ok_or_else(|| gone("player"))?;
-            if !player.can_replace(pack.as_deref(), name) {
+            // A live override is restorable even after a load dropped its pack.
+            if !player.can_replace(pack.as_deref(), name) && !player.is_cellmap_overridden(pack.as_deref(), name) {
                 return Err(unreplaceable(player, pack.as_deref(), name));
             }
             player.restore_cellmap_texture(pack.as_deref(), name)
         };
         if let Some(key) = freed {
             ctx.renderer.forget_texture(key);
+            ctx.encoded_textures.remove(&key);
         }
         Ok(())
     }
@@ -2397,12 +2406,13 @@ impl SsPlayerWeb {
     /// whichever player later reuses the slot.
     pub fn destroy(&self) {
         let ctx = &mut *self.ctx.borrow_mut();
-        let WebContext { surfaces, renderer, .. } = ctx;
+        let WebContext { surfaces, renderer, encoded_textures, .. } = ctx;
         if let Some(entry) = surfaces.get_mut(self.surface) {
             // Its texture overrides live in the page's renderer, which outlives it.
             if let Some(player) = entry.players.get_mut(self.id) {
                 for key in player.override_keys() {
                     renderer.forget_texture(key);
+                    encoded_textures.remove(&key);
                 }
             }
             entry.players.remove(self.id);

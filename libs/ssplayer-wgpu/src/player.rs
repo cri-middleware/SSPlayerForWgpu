@@ -244,13 +244,13 @@ pub struct AtlasKeys(Vec<(u32, u32)>);
 impl AtlasKeys {
     /// The renderer key for `cellmap_hash`, or `cellmap_hash` itself when this
     /// table says nothing about it.
+    pub fn resolve(&self, cellmap_hash: u32) -> u32 {
+        self.0.iter().find(|(hash, _)| *hash == cellmap_hash).map(|(_, key)| *key).unwrap_or(cellmap_hash)
+    }
+
     /// Whether this table says anything about `cellmap_hash`.
     fn has(&self, cellmap_hash: u32) -> bool {
         self.0.iter().any(|(hash, _)| *hash == cellmap_hash)
-    }
-
-    pub fn resolve(&self, cellmap_hash: u32) -> u32 {
-        self.0.iter().find(|(hash, _)| *hash == cellmap_hash).map(|(_, key)| *key).unwrap_or(cellmap_hash)
     }
 
     /// Record — or correct — where `cellmap_hash` points.
@@ -1255,8 +1255,13 @@ impl SSPlayer {
         // A reference-mode atlas no loader has keyed yet is keyed by the pack and
         // the path the exporter wrote: two projects' `spritemap1` stay apart, at
         // the cost of one upload per sibling pack naming the same file. A load
-        // walk replaces these with the loader's own keys, and a re-registration
-        // keeps the keys a load already gave the name.
+        // walk replaces these with the loader's own keys, and re-registering the
+        // same bytes keeps the keys a load already gave the name. Different bytes
+        // under the name are another pack, whose keys start afresh.
+        let same = self.packs.get(&name).is_some_and(|held| held.resource().data().as_slice() == pack.resource().data().as_slice());
+        if !same {
+            self.atlas_keys.remove(&name);
+        }
         let known = self.atlas_keys.get(&name).cloned().unwrap_or_default();
         let mut entries: Vec<(u32, u32)> = pack.embedded_images().iter().map(|image| (image.slot, fnv1a_bytes(image.bytes))).collect();
         entries.extend(pack.textures().iter().filter(|texture| !texture.embedded && !known.has(texture.slot)).map(|texture| (texture.slot, reference_key(&name, &texture.path))));
@@ -1286,6 +1291,8 @@ impl SSPlayer {
             self.packs.remove(&name);
             self.atlas_keys.remove(&name);
         }
+        // Read for those packs and not yet uploaded: nothing will draw them.
+        self.pending_images.clear();
         self.add_pack(pack);
         self.main_pack = Some(pack.name().to_string());
         self.rebuild = true;
@@ -2756,13 +2763,9 @@ impl SSPlayer {
         if width == 0 || height == 0 || rgba.len() != (width as usize) * (height as usize) * 4 {
             return Err(SSRuntimeError::InvalidParameter);
         }
-        if self.resolve_pack_name(pack_name).is_none() {
-            return Err(SSRuntimeError::NotLoaded);
-        }
-        if !self.can_replace(pack_name, name) {
-            return Err(SSRuntimeError::InvalidParameter);
-        }
-        let key = self.override_cellmap_texture_key(pack_name, name).ok_or(SSRuntimeError::InvalidParameter)?;
+        let Some(key) = self.override_cellmap_texture_key(pack_name, name) else {
+            return Err(if self.resolve_pack_name(pack_name).is_none() { SSRuntimeError::NotLoaded } else { SSRuntimeError::InvalidParameter });
+        };
         // Last write wins, and never leaves a stale copy queued for one key.
         self.pending_overrides.retain(|(queued, ..)| *queued != key);
         self.pending_overrides.push((key, rgba.to_vec(), width, height));

@@ -157,8 +157,23 @@ export class SsPlayerWebGPUElement extends ElementBase {
     this.canvas = undefined;
     this._error?.remove();
     this._error = null;
-    // A load the page queues before the next connect waits for its player.
+    // A load waiting on this connection's player moves on to the next one's
+    // (see `_waitForPlayer`); one the page queues from here waits for it too.
+    this._settleReady();
     this._resetReady();
+  }
+
+  /**
+   * Wait for the current connection's player. A move in the DOM replaces the
+   * promise while a load is waiting on it, so wait again on the new one; an
+   * element taken off the page stops waiting, and its load does nothing.
+   */
+  private async _waitForPlayer(): Promise<void> {
+    for (;;) {
+      const ready = this._ready;
+      await ready;
+      if (ready === this._ready || !this.isConnected) return;
+    }
   }
 
   /** Re-size whenever `devicePixelRatio` moves off its current value. */
@@ -411,7 +426,7 @@ export class SsPlayerWebGPUElement extends ElementBase {
    * page plays a dropped folder.
    */
   loadSrc(src: string, pack?: string | null, animation?: string | null, read?: SsAssetReader | null): Promise<string[] | undefined> {
-    const run = this._loads.then(() => this._ready).then(() => this._loadSrc(src, pack, animation, read));
+    const run = this._loads.then(() => this._waitForPlayer()).then(() => this._loadSrc(src, pack, animation, read));
     // What the next call waits on must settle, so the chain survives a load that
     // rejected. The caller still sees `run` itself, rejection and all.
     this._loads = run.catch(() => {});
@@ -427,7 +442,7 @@ export class SsPlayerWebGPUElement extends ElementBase {
     if (this._attributeLoadQueued) return;
     this._attributeLoadQueued = true;
     const run = this._loads
-      .then(() => this._ready)
+      .then(() => this._waitForPlayer())
       .then(() => {
         this._attributeLoadQueued = false;
         const src = this.getAttribute('src');

@@ -951,7 +951,8 @@ pub unsafe extern "C" fn ss_player_set_cellmap_texture(handle: *mut SsPlayer, pa
     };
     let Some(name) = (unsafe { c_str(cellmap_name) }) else { return fail(SS_ERROR_INVALID_ARGUMENT, "cellmap_name is null or not UTF-8") };
 
-    if !player.can_replace(pack, name) {
+    // A live override is restorable even after a load dropped its pack.
+    if !player.can_replace(pack, name) && !(rgba.is_null() && player.is_cellmap_overridden(pack, name)) {
         return fail(SS_ERROR_INVALID_ARGUMENT, format!("{name}: the pack is not registered, or names no cellmap or texture by that name"));
     }
     if rgba.is_null() {
