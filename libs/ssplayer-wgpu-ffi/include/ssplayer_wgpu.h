@@ -801,7 +801,9 @@ int32_t ss_player_texture_at(ss_player_t *handle,
  runtime's UVs stay in the original cellmap's pixel space, so a different
  resolution samples a different region. One the device cannot hold fails
  with `SS_ERROR_INVALID_ARGUMENT` and leaves the cellmap as it was (see
- `ss_scene_add_texture`).
+ `ss_scene_add_texture`), as does a `cellmap_name` the pack does not list or a
+ `pack_name` the player does not hold. Restoring a cellmap that carries no
+ override succeeds and changes nothing.
 
  # Safety
  `pack_name` must be null or NUL-terminated UTF-8; `cellmap_name` must be

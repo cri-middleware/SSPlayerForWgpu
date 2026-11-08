@@ -16,19 +16,16 @@ fn asset_dir() -> &'static str {
     concat!(env!("CARGO_MANIFEST_DIR"), "/../../assets/overall")
 }
 
-/// Decode every PNG in the asset dir and upload it keyed by fnv1a(stem), like
-/// the viewer's reference-mode texture supply.
-fn load_textures(renderer: &mut SSRenderer, device: &wgpu::Device, queue: &wgpu::Queue, dir: &Path) {
-    for entry in std::fs::read_dir(dir).unwrap().flatten() {
-        let path = entry.path();
-        if path.extension().and_then(|s| s.to_str()) != Some("png") {
+/// Upload every reference-mode atlas the player's selected pack asks for, under
+/// the key the player draws it with — a host supplying its own pixels.
+fn load_textures(renderer: &mut SSRenderer, device: &wgpu::Device, queue: &wgpu::Queue, player: &SSPlayer, dir: &Path) {
+    for texture in player.textures(None).unwrap_or(&[]) {
+        if texture.embedded {
             continue;
         }
-        let stem = path.file_stem().and_then(|s| s.to_str()).unwrap_or_default();
-        let hash = ssruntime::fnv1a_hash_str(stem);
-        let img = image::open(&path).unwrap().to_rgba8();
+        let img = image::open(dir.join(&texture.path)).unwrap().to_rgba8();
         let (w, h) = img.dimensions();
-        renderer.upload_texture(device, queue, hash, &img, (w, h), Retention::Retain);
+        renderer.upload_texture(device, queue, player.texture_key(None, texture.slot), &img, (w, h), Retention::Retain);
     }
 }
 
@@ -44,10 +41,9 @@ fn render_ssab_tinted(device: &wgpu::Device, queue: &wgpu::Queue, stencil: bool,
     let mut renderer = SSRenderer::new(device);
     let mut scene = SSScene::new(device, &SceneConfig { color_format: COLOR_FORMAT, stencil_format: stencil.then_some(STENCIL_FORMAT), mask: if stencil { MaskBackend::Stencil } else { MaskBackend::None } });
     let mut player = SSPlayer::new();
-    load_textures(&mut renderer, device, queue, Path::new(asset_dir()));
-
     let bytes = std::fs::read(format!("{}/{pack}.ssab", asset_dir())).unwrap();
     player.load_ssab(pack, &bytes).unwrap();
+    load_textures(&mut renderer, device, queue, &player, Path::new(asset_dir()));
     let anim = player.animation_names().unwrap()[0].clone();
     player.set_animation(&anim).unwrap();
     player.set_tint(tint);
@@ -288,9 +284,9 @@ fn restore_device_rebuilds_gpu_state() {
     let mut renderer = SSRenderer::new(&device);
     let mut scene = SSScene::new(&device, &SceneConfig { color_format: COLOR_FORMAT, stencil_format: Some(STENCIL_FORMAT), mask: MaskBackend::Stencil });
     let mut player = SSPlayer::new();
-    load_textures(&mut renderer, &device, &queue, Path::new(asset_dir()));
     let bytes = std::fs::read(format!("{}/Mask.ssab", asset_dir())).unwrap();
     player.load_ssab("Mask", &bytes).unwrap();
+    load_textures(&mut renderer, &device, &queue, &player, Path::new(asset_dir()));
     let anim = player.animation_names().unwrap()[0].clone();
     player.set_animation(&anim).unwrap();
     player.play();
@@ -410,13 +406,13 @@ fn a_part_read_before_the_first_update_keeps_a_non_override() {
     };
     let (device, queue) = pollster::block_on(adapter.request_device(&wgpu::DeviceDescriptor::default())).expect("request_device");
     let mut renderer = SSRenderer::new(&device);
-    load_textures(&mut renderer, &device, &queue, Path::new(asset_dir()));
 
     let mut first_frame = |overridden: bool, read: bool| {
         let mut scene = SSScene::new(&device, &SceneConfig { color_format: COLOR_FORMAT, stencil_format: None, mask: MaskBackend::None });
         scene.set_viewport(&queue, W as f32, H as f32, false);
         let mut player = SSPlayer::new();
         player.load_ssab("PartsColor", &std::fs::read(format!("{}/PartsColor.ssab", asset_dir())).unwrap()).unwrap();
+        load_textures(&mut renderer, &device, &queue, &player, Path::new(asset_dir()));
         let anim = player.animation_names().unwrap()[0].clone();
         player.set_animation(&anim).unwrap();
         player.play();

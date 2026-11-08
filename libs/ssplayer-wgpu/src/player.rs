@@ -244,6 +244,11 @@ pub struct AtlasKeys(Vec<(u32, u32)>);
 impl AtlasKeys {
     /// The renderer key for `cellmap_hash`, or `cellmap_hash` itself when this
     /// table says nothing about it.
+    /// Whether this table says anything about `cellmap_hash`.
+    fn has(&self, cellmap_hash: u32) -> bool {
+        self.0.iter().any(|(hash, _)| *hash == cellmap_hash)
+    }
+
     pub fn resolve(&self, cellmap_hash: u32) -> u32 {
         self.0.iter().find(|(hash, _)| *hash == cellmap_hash).map(|(_, key)| *key).unwrap_or(cellmap_hash)
     }
@@ -654,6 +659,11 @@ pub struct SSPlayer {
     retired: Vec<SSPack>,
     main_pack: Option<String>,
     current_animation: Option<String>,
+    /// Packs a load registered on its own: the `.ssab` [`SSPlayer::load_with`]
+    /// read, and the sibling packs its walk found. The next [`SSPlayer::set_pack`]
+    /// drops them, so a second load reads its own siblings rather than finding the
+    /// last load's under the same name. Packs the host registered stay.
+    loaded_packs: Vec<String>,
     /// Names of packs whose embedded atlases have not been offered to
     /// a renderer yet. The offer happens on the next `update`, which is the
     /// earliest point the borrow model lends a `Device`/`Queue`; the decode itself
@@ -682,8 +692,8 @@ pub struct SSPlayer {
     /// `Arc` because every node clones it, and because replacing a pack must not
     /// disturb the tree still playing the old one.
     atlas_keys: HashMap<String, Arc<AtlasKeys>>,
-    /// What the last load could not get. Reset by each
-    /// [`SSPlayer::load_with`], appended to as the walk gives up on a file.
+    /// What the last load could not get. Reset by each [`SSPlayer::load_with`]
+    /// and [`SSPlayer::set_pack`], appended to as the walk gives up on a file.
     missing: Vec<MissingAsset>,
     /// Timeline events the last `build_frame` crossed. Cleared and refilled per
     /// update, and reused rather than reallocated — a frame with no events costs
@@ -826,14 +836,26 @@ static NEXT_PLAYER_ID: AtomicU32 = AtomicU32::new(1);
 ///
 /// Derived rather than allocated so re-overriding one cellmap reuses the key
 /// (overwriting the texture, not leaking a new entry), and mixed with the
-/// player's id so two players overriding the same cellmap stay independent. It is
-/// an fnv1a like every other renderer key, so it shares that keyspace's
-/// already-trusted assumption that distinct inputs do not collide.
-fn override_key(id: u32, cellmap_hash: u32) -> u32 {
-    let mut buf = [0u8; 20];
-    buf[..12].copy_from_slice(b"\0ssoverride\0");
-    buf[12..16].copy_from_slice(&id.to_le_bytes());
-    buf[16..20].copy_from_slice(&cellmap_hash.to_le_bytes());
+/// player's id and the pack so two players, or two packs of one player naming a
+/// cellmap alike, stay independent. It is an fnv1a like every other renderer
+/// key, so it shares that keyspace's already-trusted assumption that distinct
+/// inputs do not collide.
+fn override_key(id: u32, pack: &str, cellmap_hash: u32) -> u32 {
+    let mut buf = Vec::with_capacity(pack.len() + 21);
+    buf.extend_from_slice(b"\0ssoverride\0");
+    buf.extend_from_slice(&id.to_le_bytes());
+    buf.extend_from_slice(&cellmap_hash.to_le_bytes());
+    buf.extend_from_slice(pack.as_bytes());
+    fnv1a_bytes(&buf)
+}
+
+/// The renderer key a reference-mode atlas takes before any loader has keyed it.
+fn reference_key(pack: &str, path: &str) -> u32 {
+    let mut buf = Vec::with_capacity(pack.len() + path.len() + 8);
+    buf.extend_from_slice(b"\0ssref\0");
+    buf.extend_from_slice(pack.as_bytes());
+    buf.push(0);
+    buf.extend_from_slice(path.as_bytes());
     fnv1a_bytes(&buf)
 }
 
@@ -864,6 +886,7 @@ impl SSPlayer {
             pending_images: Vec::new(),
             atlas_keys: HashMap::new(),
             missing: Vec::new(),
+            loaded_packs: Vec::new(),
             events: Vec::new(),
             looped: false,
             ran: false,
@@ -955,6 +978,7 @@ impl SSPlayer {
         let pack = SSPack::load(&bytes)?;
         let name = pack.name().to_string();
         self.set_pack(&pack);
+        self.loaded_packs.push(name.clone());
         // Read first, re-root second. Everything from here is named relative to
         // wherever `src` turned out to be, and working that out belongs to the
         // loader — it is the only party that knows which vocabulary it is in.
@@ -1058,6 +1082,7 @@ impl SSPlayer {
                 match SSPack::load(&bytes) {
                     Ok(sub) => {
                         self.add_pack(&sub);
+                        self.loaded_packs.push(sub.name().to_string());
                         self.load_textures(loader, &sub).await;
                         queue.extend(sub.instance_packs());
                     }
@@ -1186,8 +1211,9 @@ impl SSPlayer {
     /// # Ok(()) }
     /// ```
     ///
-    /// Reset by every [`SSPlayer::load_with`], so it always describes the most
-    /// recent call rather than the player's history.
+    /// Reset by every [`SSPlayer::load_with`] and [`SSPlayer::set_pack`]
+    /// ([`SSPlayer::load_ssab`] included), so it always describes the most recent
+    /// load rather than the player's history.
     pub fn missing_assets(&self) -> &[MissingAsset] {
         &self.missing
     }
@@ -1215,6 +1241,9 @@ impl SSPlayer {
     /// resource directly (see `retired`).
     pub fn add_pack(&mut self, pack: &SSPack) {
         let name = pack.name().to_string();
+        // Registered by the host now, so the next `set_pack` keeps it; a load
+        // marks its own packs again after registering them.
+        self.loaded_packs.retain(|loaded| *loaded != name);
         if pack.has_embedded_textures() {
             self.packs_awaiting_textures.push(name.clone());
         }
@@ -1223,8 +1252,15 @@ impl SSPlayer {
         // (Bevy lending a `GpuImage`'s view) asks between this call and the
         // first update, and an answer that arrived later would be an answer it
         // had already registered under something else.
-        let embedded: Vec<(u32, u32)> = pack.embedded_images().iter().map(|image| (image.slot, fnv1a_bytes(image.bytes))).collect();
-        self.record_atlas_keys(&name, embedded.into_iter());
+        // A reference-mode atlas no loader has keyed yet is keyed by the pack and
+        // the path the exporter wrote: two projects' `spritemap1` stay apart, at
+        // the cost of one upload per sibling pack naming the same file. A load
+        // walk replaces these with the loader's own keys, and a re-registration
+        // keeps the keys a load already gave the name.
+        let known = self.atlas_keys.get(&name).cloned().unwrap_or_default();
+        let mut entries: Vec<(u32, u32)> = pack.embedded_images().iter().map(|image| (image.slot, fnv1a_bytes(image.bytes))).collect();
+        entries.extend(pack.textures().iter().filter(|texture| !texture.embedded && !known.has(texture.slot)).map(|texture| (texture.slot, reference_key(&name, &texture.path))));
+        self.record_atlas_keys(&name, entries.into_iter());
         // Only while a tree exists is there anything pointing into the pack being
         // replaced; without one the old pack is free to go here and now.
         if let Some(previous) = self.packs.insert(name, pack.clone())
@@ -1242,13 +1278,19 @@ impl SSPlayer {
     /// Register `pack` and make it the one [`SSPlayer::set_animation`] selects
     /// from. Clears the current animation.
     pub fn set_pack(&mut self, pack: &SSPack) {
+        // Nothing points into a retired pack once the tree is gone, nor into
+        // the packs the last load found for itself.
+        self.root = None;
+        self.retired.clear();
+        for name in std::mem::take(&mut self.loaded_packs) {
+            self.packs.remove(&name);
+            self.atlas_keys.remove(&name);
+        }
         self.add_pack(pack);
         self.main_pack = Some(pack.name().to_string());
-        self.root = None;
         self.rebuild = true;
         self.current_animation = None;
-        // Nothing points into a retired pack once the tree is gone.
-        self.retired.clear();
+        self.missing.clear();
     }
 
     /// Parse `data` and register it under `pack_name` — [`SSPack::load_named`] +
@@ -1311,7 +1353,7 @@ impl SSPlayer {
             _ => false,
         };
         if !reused {
-            let mut root = build_node(&self.packs, &self.atlas_keys, &main_pack, anim_name).ok_or(SSRuntimeError::NotLoaded)?;
+            let mut root = build_node(&self.packs, &self.atlas_keys, &main_pack, anim_name)?;
             // A new context starts at the runtime's defaults; the host's settings
             // are this player's, not the tree's.
             let t = self.transport;
@@ -1597,11 +1639,10 @@ impl SSPlayer {
     /// something inside the animation they were measured in, and setting an
     /// animation rebuilds the tree and takes the section with it.
     pub fn set_animation_section(&mut self, start: i32, end: i32) -> Result<(), SSRuntimeError> {
+        let root = self.root.as_mut().ok_or(SSRuntimeError::NotLoaded)?;
+        root.context.set_animation_section(start, end)?;
         // The playhead may be clamped into the new range.
         self.rebuild = true;
-        if let Some(root) = &mut self.root {
-            root.context.set_animation_section(start, end)?;
-        }
         Ok(())
     }
 
@@ -2587,7 +2628,11 @@ impl SSPlayer {
     /// # }
     /// ```
     ///
-    /// Answers `slot` itself for a pack whose atlases the player has never seen.
+    /// A reference-mode atlas of a pack registered without a load
+    /// ([`SSPlayer::add_ssab`], [`SSPlayer::add_pack`]) is keyed by the pack's name
+    /// and the path the exporter wrote, so two projects naming their atlas alike
+    /// never share a key; sibling packs naming one file each upload it. Answers
+    /// `slot` itself for a pack this player does not hold.
     pub fn texture_key(&self, pack_name: Option<&str>, slot: u32) -> u32 {
         let Some(name) = pack_name.or(self.main_pack.as_deref()) else { return slot };
         self.atlas_keys.get(name).map(|keys| keys.resolve(slot)).unwrap_or(slot)
@@ -2687,11 +2732,25 @@ impl SSPlayer {
     ///
     /// The pixels reach the GPU on the next `update` (the borrow model lends no
     /// device before then), so the swap is visible from the following frame.
+    ///
+    /// `NotLoaded` with no pack bound; `InvalidParameter` for a pack this player
+    /// does not hold, a name the pack cannot replace, or pixels that do not fill
+    /// `width` x `height`.
+    ///
+    /// The replacement lives in the device-scoped renderer, which the player does
+    /// not own: restore it with [`SSPlayer::restore_cellmap_texture`] and let an
+    /// `update` drop it before dropping the player, or it stays registered.
     pub fn set_cellmap_texture(&mut self, pack_name: Option<&str>, name: &str, rgba: &[u8], width: u32, height: u32) -> Result<(), SSRuntimeError> {
         if width == 0 || height == 0 || rgba.len() != (width as usize) * (height as usize) * 4 {
             return Err(SSRuntimeError::InvalidParameter);
         }
-        let key = self.override_cellmap_texture_key(pack_name, name).ok_or(SSRuntimeError::NotLoaded)?;
+        if self.resolve_pack_name(pack_name).is_none() {
+            return Err(SSRuntimeError::NotLoaded);
+        }
+        if !self.can_replace(pack_name, name) {
+            return Err(SSRuntimeError::InvalidParameter);
+        }
+        let key = self.override_cellmap_texture_key(pack_name, name).ok_or(SSRuntimeError::InvalidParameter)?;
         // Last write wins, and never leaves a stale copy queued for one key.
         self.pending_overrides.retain(|(queued, ..)| *queued != key);
         self.pending_overrides.push((key, rgba.to_vec(), width, height));
@@ -2704,13 +2763,17 @@ impl SSPlayer {
     /// registers a texture under the returned key against the [`SSRenderer`]; every
     /// draw of this player's cellmap then resolves to it.
     ///
-    /// `None` on an unbound player (no pack to attach the override to). The lower
-    /// half of [`SSPlayer::set_cellmap_texture`], and the seam
+    /// `None` on an unbound player, for a pack this player does not hold, and for
+    /// a `name` that is not one of [`SSPlayer::replaceable_cellmap_names`]. The
+    /// lower half of [`SSPlayer::set_cellmap_texture`], and the seam
     /// `SSPlayer::restore_cellmap_texture` reverses.
     pub fn override_cellmap_texture_key(&mut self, pack_name: Option<&str>, name: &str) -> Option<u32> {
+        if !self.can_replace(pack_name, name) {
+            return None;
+        }
         let pack = self.resolve_pack_name(pack_name)?;
         let cellmap_hash = ssruntime::fnv1a_hash_str(name);
-        let key = override_key(self.id, cellmap_hash);
+        let key = override_key(self.id, &pack, cellmap_hash);
         // The key a restore returns to is whatever the cellmap resolves to *now*,
         // before this redirect — captured only when the override is first set, so
         // re-overriding does not overwrite it with the override's own key.
@@ -2751,6 +2814,13 @@ impl SSPlayer {
         Some(over.key)
     }
 
+    /// The private renderer keys this player's live overrides are registered
+    /// under, for a face that owns the renderer to drop when it drops the player.
+    #[cfg(any(feature = "ffi", feature = "web"))]
+    pub(crate) fn override_keys(&self) -> impl Iterator<Item = u32> + '_ {
+        self.overrides.values().flatten().map(|over| over.key)
+    }
+
     /// Whether a cellmap currently carries a runtime override. `None` pack selects
     /// the main pack.
     pub fn is_cellmap_overridden(&self, pack_name: Option<&str>, name: &str) -> bool {
@@ -2762,6 +2832,16 @@ impl SSPlayer {
     /// The pack a texture-override call names, or the main pack for `None`.
     fn resolve_pack_name(&self, pack_name: Option<&str>) -> Option<String> {
         pack_name.map(str::to_string).or_else(|| self.main_pack.clone())
+    }
+
+    /// Whether the pack (`None` selects the main one) is registered and `name` is
+    /// one of the names [`SSPlayer::replaceable_cellmap_names`] lists for it.
+    pub(crate) fn can_replace(&self, pack_name: Option<&str>, name: &str) -> bool {
+        let Some(pack) = pack_name.or(self.main_pack.as_deref()).and_then(|pack| self.packs.get(pack)) else { return false };
+        // SAFETY: the pack's bytes, which the host guaranteed are a valid `.ssab` when it
+        // loaded them (`SSPack::build`).
+        let ab = unsafe { root_as_ss_anime_binary_unchecked(pack.resource().data().as_slice()) };
+        ab.cellmaps().is_some_and(|cellmaps| cellmaps.iter().any(|c| c.name() == name)) || ab.external_textures().is_some_and(|externals| externals.iter().any(|et| et.name() == Some(name)))
     }
 
     /// The authored canvas of the currently playing animation, as a box in
@@ -3054,28 +3134,28 @@ impl SSPlayer {
 /// Recursively build a playback node: create a context bound to `pack`'s
 /// resource, set up `anime`, and build an instance child for every instance
 /// part found in the pack. Child failures are skipped (not fatal).
-fn build_node(packs: &HashMap<String, SSPack>, atlas_keys: &HashMap<String, Arc<AtlasKeys>>, pack: &str, anime: &str) -> Option<PlaybackNode> {
-    let resource = packs.get(pack)?.resource();
+fn build_node(packs: &HashMap<String, SSPack>, atlas_keys: &HashMap<String, Arc<AtlasKeys>>, pack: &str, anime: &str) -> Result<PlaybackNode, SSRuntimeError> {
+    let resource = packs.get(pack).ok_or(SSRuntimeError::NotLoaded)?.resource();
     let res_ptr = resource.resource_static_ptr();
     if res_ptr.is_null() {
-        return None;
+        return Err(SSRuntimeError::NotLoaded);
     }
     // SAFETY: the resource lives in `packs` for the player's lifetime.
     let static_res = unsafe { &*res_ptr };
     let mut context = Context::new();
     context.bind_resource(static_res);
     // Y-down, matching every sibling Player that draws into a Y-down target.
-    // The Brain owns
-    // the flip and applies it once at the source — it mirrors the hierarchy by
+    // The Brain owns the flip and applies it once at the source — it mirrors the
+    // hierarchy by
     // negating `position_y`, `rotation_z` and `pivot_y` — so the baked geometry,
     // the world matrices [`SSPlayer::part_transform`] hands out and the effect
     // particles all agree about which way is up. The projection undoes it for a
     // Y-up target (see `SSScene::set_viewport`), which is the one place the
     // target's own sense is known.
     context.set_coordinate_system(ssruntime::SsCoordinateSystem::YDown);
-    context.setup_animation(anime).ok()?;
+    context.setup_animation(anime)?;
     let (instances, effects, mask_flags) = build_rig(&context, static_res, packs, atlas_keys);
-    Some(PlaybackNode { context, instances, effects, effect_clock: None, mask_flags, pack: pack.to_string(), atlas_keys: node_atlas_keys(atlas_keys, pack), res: static_res })
+    Ok(PlaybackNode { context, instances, effects, effect_clock: None, mask_flags, pack: pack.to_string(), atlas_keys: node_atlas_keys(atlas_keys, pack), res: static_res })
 }
 
 /// The per-animation half of a node: which instance children it mounts, which
@@ -3117,7 +3197,7 @@ fn build_rig(
             match part_type {
                 PartType::PartTypeInstance => {
                     if let Some(inst) = part.part_type_as_part_type_instance()
-                        && let Some(child) = build_node(packs, atlas_keys, inst.ref_anime_pack(), inst.ref_anime_name())
+                        && let Ok(child) = build_node(packs, atlas_keys, inst.ref_anime_pack(), inst.ref_anime_name())
                     {
                         let frame_no = child.context.get_frame_no();
                         instances.insert(i, InstanceChild { slot: InstanceSlot::new(), node: Box::new(child), frame_no, visible: false, prep: None });

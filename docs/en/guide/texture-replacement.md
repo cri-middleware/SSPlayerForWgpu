@@ -53,6 +53,10 @@ premultiplied on the way to the GPU for you. On JavaScript you pass encoded byte
 decodes, or a premultiplied `ImageBitmap`. **Restoring** points the cell map back at its original atlas — which was
 never touched, so nothing is reloaded.
 
+A name the pack does not list, or a pack the character does not hold, is refused — `InvalidParameter`
+on Rust, `SS_ERROR_INVALID_ARGUMENT` on C, a rejection on JavaScript, a warning on Bevy — and changes
+nothing. Restoring a cell map that carries no replacement succeeds and changes nothing.
+
 === "Rust"
 
     ```rust
@@ -152,6 +156,10 @@ too, pass that pack's name instead of `None` / `NULL` / `null` (Bevy reaches onl
 On Rust and C the replacement reaches the GPU on the **next update** — the borrow model lends the
 player no device before then — so the swap shows from the following frame. It survives selecting
 another animation, because it lives with the character, not with the current animation tree.
+
+The replacement lives in the renderer, which outlives the character. Destroying a character on C or
+JavaScript, or despawning it in Bevy, drops it; on Rust, restore it and let one update run before
+dropping the player, or it stays registered.
 
 !!! note "After a device loss"
 

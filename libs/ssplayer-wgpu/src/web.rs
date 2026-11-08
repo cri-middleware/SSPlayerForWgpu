@@ -45,6 +45,15 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use wasm_bindgen::prelude::*;
 
+/// Why a texture-override call on `player` names nothing it can replace.
+fn unreplaceable(player: &SSPlayer, pack: Option<&str>, name: &str) -> JsValue {
+    if player.replaceable_cellmap_names(None).is_none() {
+        return JsValue::from_str("no pack is loaded");
+    }
+    let pack = pack.map_or_else(|| "the selected pack".to_string(), |pack| format!("pack \"{pack}\""));
+    JsValue::from_str(&format!("{pack} has no cellmap or texture named \"{name}\""))
+}
+
 /// Map any error into a JS exception value.
 fn js_err<E: core::fmt::Debug>(e: E) -> JsValue {
     JsValue::from_str(&format!("{e:?}"))
@@ -814,7 +823,16 @@ impl SsSurfaceWeb {
     /// in the shared context, not in this handle. Calling it twice, or calling
     /// anything else afterwards, is safe — the handle resolves to "destroyed".
     pub fn destroy(&self) {
-        self.ctx.borrow_mut().surfaces.remove(self.id);
+        let ctx = &mut *self.ctx.borrow_mut();
+        let WebContext { surfaces, renderer, .. } = ctx;
+        if let Some(entry) = surfaces.get_mut(self.id) {
+            for player in entry.players.iter_mut() {
+                for key in player.override_keys() {
+                    renderer.forget_texture(key);
+                }
+            }
+        }
+        surfaces.remove(self.id);
     }
 }
 
@@ -1345,16 +1363,20 @@ impl SsPlayerWeb {
     /// `pack` null selects the main pack. `name` is one of
     /// [`SsPlayerWeb::replaceable_cellmap_names`]. The replacement should match the
     /// original atlas's size and cell layout — the runtime's UVs stay in the
-    /// original cellmap's pixel space. Rejects when the player is unbound, and for
-    /// a bitmap the device cannot hold — past its `max_texture_dimension_2d`, or
-    /// closed — leaving the cellmap as it was.
+    /// original cellmap's pixel space. Rejects when the player is unbound, for a
+    /// pack or name it cannot replace, and for a bitmap the device cannot hold —
+    /// past its `max_texture_dimension_2d`, or closed — leaving the cellmap as it
+    /// was.
     #[wasm_bindgen(js_name = setCellmapTexture)]
     pub fn set_cellmap_texture(&self, pack: Option<String>, name: &str, bitmap: &web_sys::ImageBitmap) -> Result<(), JsValue> {
         let ctx = &mut *self.ctx.borrow_mut();
+        if let Some(why) = texture_extent_error(&ctx.device, (bitmap.width(), bitmap.height())) {
+            return Err(JsValue::from_str(&format!("{name}: {why} (a closed ImageBitmap reports 0x0)")));
+        }
         let key = {
             let entry = ctx.surfaces.get_mut(self.surface).ok_or_else(|| gone("surface"))?;
             let player = entry.players.get_mut(self.id).ok_or_else(|| gone("player"))?;
-            player.override_cellmap_texture_key(pack.as_deref(), name).ok_or_else(|| JsValue::from_str("no pack is loaded"))?
+            player.override_cellmap_texture_key(pack.as_deref(), name).ok_or_else(|| unreplaceable(player, pack.as_deref(), name))?
         };
         ctx.set_texture_from_bitmap(key, bitmap)
     }
@@ -1368,10 +1390,14 @@ impl SsPlayerWeb {
         // a yield point JS re-enters through.
         let bitmap = decode_image(&bytes).await?;
         let ctx = &mut *self.ctx.borrow_mut();
+        if let Some(why) = texture_extent_error(&ctx.device, (bitmap.width(), bitmap.height())) {
+            bitmap.close();
+            return Err(JsValue::from_str(&format!("{name}: {why}")));
+        }
         let key = {
             let entry = ctx.surfaces.get_mut(self.surface).ok_or_else(|| gone("surface"))?;
             let player = entry.players.get_mut(self.id).ok_or_else(|| gone("player"))?;
-            player.override_cellmap_texture_key(pack.as_deref(), &name).ok_or_else(|| JsValue::from_str("no pack is loaded"))?
+            player.override_cellmap_texture_key(pack.as_deref(), &name).ok_or_else(|| unreplaceable(player, pack.as_deref(), &name))?
         };
         let supplied = ctx.set_texture_from_bitmap(key, &bitmap);
         bitmap.close();
@@ -1379,13 +1405,17 @@ impl SsPlayerWeb {
     }
 
     /// Undo a runtime override: point the cellmap back at its original atlas and
-    /// drop the replacement from the renderer. A no-op if it was not overridden.
+    /// drop the replacement from the renderer. A no-op if it was not overridden;
+    /// rejects a pack or name the player cannot replace.
     #[wasm_bindgen(js_name = restoreCellmapTexture)]
     pub fn restore_cellmap_texture(&self, pack: Option<String>, name: &str) -> Result<(), JsValue> {
         let ctx = &mut *self.ctx.borrow_mut();
         let freed = {
             let entry = ctx.surfaces.get_mut(self.surface).ok_or_else(|| gone("surface"))?;
             let player = entry.players.get_mut(self.id).ok_or_else(|| gone("player"))?;
+            if !player.can_replace(pack.as_deref(), name) {
+                return Err(unreplaceable(player, pack.as_deref(), name));
+            }
             player.restore_cellmap_texture(pack.as_deref(), name)
         };
         if let Some(key) = freed {
@@ -2359,7 +2389,14 @@ impl SsPlayerWeb {
     /// whichever player later reuses the slot.
     pub fn destroy(&self) {
         let ctx = &mut *self.ctx.borrow_mut();
-        if let Some(entry) = ctx.surfaces.get_mut(self.surface) {
+        let WebContext { surfaces, renderer, .. } = ctx;
+        if let Some(entry) = surfaces.get_mut(self.surface) {
+            // Its texture overrides live in the page's renderer, which outlives it.
+            if let Some(player) = entry.players.get_mut(self.id) {
+                for key in player.override_keys() {
+                    renderer.forget_texture(key);
+                }
+            }
             entry.players.remove(self.id);
         }
     }

@@ -77,6 +77,9 @@ struct PlayerSlot {
     /// new or changed image is registered, a removed one is restored, and the
     /// whole set is dropped when the pack changes (its cellmaps do).
     applied_overrides: HashMap<String, (AssetId<Image>, TextureId, u32)>,
+    /// Override names already reported as naming nothing in the pack, so each is
+    /// reported once rather than every frame.
+    unknown_overrides: Vec<String>,
 }
 
 /// Everything the render world owns on this crate's behalf.
@@ -156,7 +159,17 @@ pub(crate) fn sync_players(mut state: Option<ResMut<SsRenderState>>, extracted: 
     // Drop the trees whose entities went away. The extracted list is this
     // frame's whole truth, so anything absent from it is gone.
     let before = state.slots.len();
-    state.slots.retain(|slot| extracted.players.iter().any(|player| player.entity == slot.entity));
+    let SsRenderState { renderer, slots, .. } = &mut *state;
+    slots.retain(|slot| {
+        let kept = extracted.players.iter().any(|player| player.entity == slot.entity);
+        // Its texture overrides live in the renderer, which outlives it.
+        if !kept {
+            for (_, _, key) in slot.applied_overrides.values() {
+                renderer.forget_texture(*key);
+            }
+        }
+        kept
+    });
     let mut packs_changed = state.slots.len() != before;
 
     // Split the borrow: the override reconcile needs the device-scoped renderer
@@ -186,6 +199,7 @@ pub(crate) fn sync_players(mut state: Option<ResMut<SsRenderState>>, extracted: 
                     pending_tracks: Vec::new(),
                     added_sources: Vec::new(),
                     applied_overrides: HashMap::new(),
+                    unknown_overrides: Vec::new(),
                 });
                 slots.len() - 1
             }
@@ -530,7 +544,8 @@ fn lend_atlases(renderer: &mut SSRenderer, device: &wgpu::Device, lent: &mut Has
 /// finished preparing is left for a later frame, so binding a freshly-loaded
 /// handle is safe.
 fn reconcile_overrides(slot: &mut PlayerSlot, renderer: &mut SSRenderer, device: &wgpu::Device, images: &RenderAssets<GpuImage>, wanted: &[(String, Handle<Image>)], pack_changed: bool, warned_srgb: &mut bool) {
-    if pack_changed && !slot.applied_overrides.is_empty() {
+    if pack_changed {
+        slot.unknown_overrides.clear();
         for (name, (_, _, key)) in std::mem::take(&mut slot.applied_overrides) {
             slot.player.restore_cellmap_texture(None, &name);
             renderer.forget_texture(key);
@@ -546,7 +561,17 @@ fn reconcile_overrides(slot: &mut PlayerSlot, renderer: &mut SSRenderer, device:
         if slot.applied_overrides.get(name).is_some_and(|&(applied, texture, _)| applied == id && texture == gpu.texture.id()) {
             continue;
         }
-        let Some(key) = slot.player.override_cellmap_texture_key(None, name) else { continue };
+        let Some(key) = slot.player.override_cellmap_texture_key(None, name) else {
+            // `None` before the tree is built is not news; a name the pack does not
+            // list is a typo the host cannot otherwise see.
+            if let Some(names) = slot.player.replaceable_cellmap_names(None)
+                && !slot.unknown_overrides.contains(name)
+            {
+                warn!("ssplayer-bevy: SsCellmapTextures names {name:?}, which the pack does not have; it has {names:?}");
+                slot.unknown_overrides.push(name.clone());
+            }
+            continue;
+        };
         // The player takes atlas bytes as authored; sampling an sRGB texture hands
         // it linear values instead, and the costume comes out visibly darker than
         // the atlas it replaces. Bevy loads a PNG as sRGB unless told otherwise.

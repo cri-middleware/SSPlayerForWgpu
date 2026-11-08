@@ -34,19 +34,16 @@ fn gpu() -> Option<(wgpu::Device, wgpu::Queue)> {
     Some((device, queue))
 }
 
-/// Decode every PNG in the asset dir and upload it keyed by fnv1a(stem), like
-/// the viewer's reference-mode texture supply.
-fn load_textures(renderer: &mut SSRenderer, device: &wgpu::Device, queue: &wgpu::Queue, dir: &Path) {
-    for entry in std::fs::read_dir(dir).unwrap().flatten() {
-        let path = entry.path();
-        if path.extension().and_then(|s| s.to_str()) != Some("png") {
+/// Upload every reference-mode atlas the player's selected pack asks for, under
+/// the key the player draws it with — a host supplying its own pixels.
+fn load_textures(renderer: &mut SSRenderer, device: &wgpu::Device, queue: &wgpu::Queue, player: &SSPlayer, dir: &Path) {
+    for texture in player.textures(None).unwrap_or(&[]) {
+        if texture.embedded {
             continue;
         }
-        let stem = path.file_stem().and_then(|s| s.to_str()).unwrap_or_default();
-        let hash = ssruntime::fnv1a_hash_str(stem);
-        let img = image::open(&path).unwrap().to_rgba8();
+        let img = image::open(dir.join(&texture.path)).unwrap().to_rgba8();
         let (w, h) = img.dimensions();
-        renderer.upload_texture(device, queue, hash, &img, (w, h), Retention::Retain);
+        renderer.upload_texture(device, queue, player.texture_key(None, texture.slot), &img, (w, h), Retention::Retain);
     }
 }
 
@@ -61,10 +58,10 @@ fn make_scene(device: &wgpu::Device, queue: &wgpu::Queue, stencil: bool) -> SSSc
 /// resource of its own — the atlas goes to the caller's shared
 /// `renderer`, which is why several players cost one upload between them.
 fn make_player(device: &wgpu::Device, queue: &wgpu::Queue, renderer: &mut SSRenderer, pack: &str) -> SSPlayer {
-    load_textures(renderer, device, queue, Path::new(asset_dir()));
     let mut player = SSPlayer::new();
     let bytes = std::fs::read(format!("{}/{pack}.ssab", asset_dir())).unwrap();
     player.load_ssab(pack, &bytes).unwrap();
+    load_textures(renderer, device, queue, &player, Path::new(asset_dir()));
     let anim = player.animation_names().unwrap()[0].clone();
     player.set_animation(&anim).unwrap();
     player.play();
