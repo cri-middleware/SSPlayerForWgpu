@@ -22,8 +22,7 @@ pub enum Fit {
     /// spill hidden supplies one.
     Cover,
     /// No fit at all: scale 1, origin at the view's centre. The placement is then
-    /// the caller's own [`Placement::scale`] and [`Placement::offset`], which is
-    /// the behaviour from before there was a fit.
+    /// the caller's own [`Placement::scale`] and [`Placement::offset`].
     None,
 }
 
@@ -183,7 +182,7 @@ mod tests {
     use super::*;
 
     const VIEW: (f32, f32) = (400.0, 200.0);
-    /// Wider than it is tall, and not centred on the origin — so a mistake in the
+    /// Taller than it is wide, and not centred on the origin — so a mistake in the
     /// box's low edge cannot hide behind a symmetric fixture.
     const BOX: Rect = Rect { x: -100.0, y: -300.0, width: 200.0, height: 400.0 };
 

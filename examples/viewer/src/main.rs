@@ -163,8 +163,7 @@ struct AppState {
     /// `set_order`, not this (see `layout_cast`).
     cast: Vec<Member>,
     /// Which member the pack / animation / appearance keys drive. `None` is
-    /// "all of them", which keeps the single-character key bindings behaving as
-    /// they always did.
+    /// "all of them".
     focus: Option<usize>,
     layout: Layout,
     /// Draw the cast back to front instead of front to back. Only
@@ -181,8 +180,7 @@ struct AppState {
     /// Wall time of the last `SSScene::update`, in milliseconds.
     last_update_ms: f64,
     /// When the status block was last drawn. It refreshes on a timer as well as
-    /// on keypresses, so the frame counters on it stay live ( item 10
-    /// — these numbers are the only evidence a change made the frame cheaper).
+    /// on keypresses, so the frame counters on it stay live.
     last_status: Instant,
 }
 
@@ -739,9 +737,9 @@ impl AppState {
             }
         }
 
-        //what the frame cost. `prims` vs `draw_calls` is the
-        // headroom draw-call merging has; `gpu` is absent when the adapter has no
-        // timestamp query, and lags a frame or two when it does.
+        // What the frame cost. `prims` vs `draw_calls` is the headroom draw-call
+        // merging has; `gpu` is absent when the adapter has no timestamp query, and
+        // lags a frame or two when it does.
         let stats = self.scene.stats();
         let gpu = match stats.gpu_pass_time_ns {
             Some(ns) => format!("{:.3} ms", ns as f64 / 1.0e6),
@@ -844,7 +842,7 @@ impl ApplicationHandler for App {
         let scene = SSScene::new(&device, &SceneConfig { color_format: format, stencil_format: Some(STENCIL_FORMAT), mask: MaskBackend::Stencil });
 
         // Only the catalogue: every player loads what it plays from its path, and
-        // that one call brings the atlases and the referenced packs with it. There is no separate texture pass here any more.
+        // that one call brings the atlases and the referenced packs with it.
         let (packs, pack_anims, pack_paths) = load_packs(&self.asset_dir);
 
         // Prefer "Basic" as the initial pack, otherwise the first one.

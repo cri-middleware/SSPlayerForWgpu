@@ -101,8 +101,9 @@ pub struct SceneConfig {
     ///
     /// Independent of [`SceneConfig::mask`]: this describes the *attachment*,
     /// which a host may have for its own reasons whatever it masks with. The one
-    /// combination that cannot work is [`MaskBackend::Stencil`] without a format,
-    /// which [`SSScene::new`] refuses by falling back to [`MaskBackend::None`].
+    /// combination that cannot work is [`MaskBackend::Stencil`] without a format:
+    /// a debug build asserts, and a release build falls back to
+    /// [`MaskBackend::None`] and draws every mask target unclipped.
     pub stencil_format: Option<wgpu::TextureFormat>,
     /// How this scene draws masks.
     pub mask: MaskBackend,
@@ -155,7 +156,7 @@ struct BatchDrawCall {
     /// [`CROWD_SHIFT`].
     instances: std::ops::Range<u32>,
     /// Index of this part's block in the shader-params buffer, for
-    /// [`PipelineKey::Shader`] draws — the dynamic offset for bind group(2).
+    /// [`PipelineKind::Shader`] draws — the dynamic offset for bind group(2).
     shader_slot: Option<u32>,
     /// Which layer of the frame's coverage array this call rasterises into
     /// (writer draws) or samples from (masked content). `None` when the call has
@@ -387,12 +388,12 @@ struct LayerTargets {
     layers: u32,
 }
 
-/// Layer 2b: the per-target, per-frame half — what one render target's worth of
-/// geometry looks like this frame.
+/// The per-target, per-frame half — what one render target's worth of geometry
+/// looks like this frame.
 ///
 /// Borrow model: owns neither the `Device`/`Queue`, the render target, nor the
 /// [`SSRenderer`]. It holds the projection (which is a property of the target)
-/// and the frame's vertex/index/draw-call accumulation.
+/// and the frame's arena, primitive table, mesh stream and draw calls.
 ///
 /// One of these serves every player drawing into the same target.
 pub struct SSScene {
@@ -845,9 +846,9 @@ impl SSScene {
         self.mask
     }
 
-    /// The config this renderer was built from. Retained so a lost device can be
-    /// replaced by a renderer targeting the same formats without the
-    /// caller having to remember them.
+    /// The config this scene was built from. Retained so a lost device can be
+    /// replaced by a scene targeting the same formats without the caller having
+    /// to remember them.
     pub fn config(&self) -> SceneConfig {
         SceneConfig { color_format: self.color_format, stencil_format: self.stencil_format, mask: self.mask }
     }
@@ -893,7 +894,7 @@ impl SSScene {
     ///
     /// This is the frame boundary: one `begin_frame` / `end_frame` pair spans
     /// **all** the players sharing the target, so their geometry lands in one
-    /// vertex buffer and their draws can be recorded back to back.
+    /// frame buffer and their draws can be recorded back to back.
     ///
     /// Players are drawn in ascending [`crate::SSPlayer::order`], ties keeping the
     /// order the caller passed them in; `players` itself is left as it was. The
@@ -1073,8 +1074,7 @@ impl SSScene {
         // than iterated because `ensure_pipeline` needs `&mut self`.
         //
         // The same walk counts what draw-call merging and bind-group dedup would
-        // save. Both are cheap to measure and neither is
-        // cheap to implement, so measure first.
+        // save.
         // The bake list is compiled here too. It is drawn from a different pass,
         // by which point there is no `&mut SSRenderer` to build a pipeline with —
         // a writer whose pipeline was missing would simply not rasterise, and an
@@ -1359,8 +1359,8 @@ impl StagingSlot {
     }
 }
 
-/// One frame of one render target: the arena / primitive / draw-call trio every
-/// player sharing the target appends to, in its `order`.
+/// One frame of one render target: the arena, primitives, mesh stream and draw
+/// calls every player sharing the target appends to, in its `order`.
 pub struct FrameChunk {
     /// The target this frame is being built for — needed for pipeline keys.
     config: SceneConfig,
@@ -1482,8 +1482,7 @@ impl FrameChunk {
     /// `[a, b, c, d, tx, ty]` for `u = a*x + c*y + tx`, `v = b*x + d*y + ty`.
     /// Both the bake (which turns UV into clip space) and the replay (which
     /// samples with it) read this one transform, so the two cannot disagree about
-    /// where the bitmap is — the mismatch that costs Godot's implementation a
-    /// frame of lag cannot be represented here.
+    /// where the bitmap is.
     pub fn set_node_coverage(&mut self, node: &mut NodeSlot, uv: &[f32; 6], extent: (f32, f32), writers: &[ScopedWriter]) {
         let layer = self.coverage_nodes.len() as u32;
         let base = self.push_coverage_block(uv, layer, writers);
@@ -1602,13 +1601,14 @@ impl FrameChunk {
         self.draw_calls.push(BatchDrawCall { key, texture_hash, vertices: first * stride..last * stride, instances: 0..self.members, shader_slot, cov_layer: None });
     }
 
-    /// Append one Normal/Mesh DrawBatch's geometry into the frame accumulation,
-    /// pre-multiplying every vertex by `transform` (identity for the root; the
-    /// composed parent instance world matrix for instance children). `frame` is
-    /// re-parsed for its draw_order/parts/parts_color; the batch fields are
-    /// passed in so the caller (SSPlayer) drives batch iteration and can
-    /// interleave instance recursion at the right rank. `batch.stencil` selects
-    /// the stencil-test content pipeline for masked parts.
+    /// Append one Normal, Mesh or Shape DrawBatch's geometry to the frame. The
+    /// vertices are copied as the runtime laid them out; `node` names the
+    /// placement the vertex stage applies to them (the root's, or an instance
+    /// child's composed with its parents'). `frame` is re-parsed for its
+    /// draw_order/parts/parts_color; the batch fields are passed in so the caller
+    /// (SSPlayer) drives batch iteration and can interleave instance recursion at
+    /// the right rank. `batch.stencil` selects the stencil-test content pipeline
+    /// for masked parts.
     pub fn append_batch(&mut self, renderer: &SSRenderer, frame: &FrameView, node: &NodeSlot, batch: &BatchInfo) {
         let BatchInfo { start_rank, count, texture_hash, blend_type, kind, stencil, mask_seq, alpha, tint } = *batch;
         if frame.frame_data.is_empty() {
@@ -1645,8 +1645,8 @@ impl FrameChunk {
                 // Integration-shader dispatch: when the frame carries
                 // `SHDR` attributes and this non-masked batch has ≥1 shader part,
                 // draw per-part so each shader part gets its own pipeline + params.
-                // Masked parts (stencil != None) use the plain path (shader × mask
-                // is not combined in v1, matching WebGL).
+                // Masked parts (stencil != None) use the plain path: shader and
+                // mask are not combined, matching WebGL.
                 let shaders = frame_data.shaders();
                 let has_shader = |rank: usize| -> Option<PartAttributeShader> {
                     let si = parts.get(draw_order.get(rank) as usize).shader();
@@ -1986,9 +1986,10 @@ impl FrameChunk {
         self.push_prim(Prim { aux_base, pos_base: aux_base + 16, uv_base: aux_base + 16 + (count * 2) as u32, node_base: node.transform, count: count as u32, ..prim });
     }
 
-    /// Append an effect slot's `EffectDrawPlan` (a raw FlatBuffer) into the
-    /// frame accumulation. `transform` is the effect part's composed world
-    /// matrix (verts are slot-relative). Blend is per-command; color is taken
+    /// Append an effect slot's `EffectDrawPlan` (a raw FlatBuffer) to the frame.
+    /// `node` names the effect part's composed placement (the vertices are
+    /// slot-relative), and `keys` translates the plan's cellmap hashes into
+    /// renderer texture keys. Blend is per-command; color is taken
     /// from the plan and modulates the cellmap texture via the sprite shader.
     /// `stencil` selects the stencil test when the effect is a masked target
     /// (inherited from a parent mask); `None` for ordinary effects. `alpha` and

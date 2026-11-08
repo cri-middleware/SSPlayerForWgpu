@@ -109,7 +109,7 @@ jobs:
       - name: Generate demo assets
         # Also proves the SDK submodule still builds against this checkout. A
         # debug converter converts the samples just as well, and compiles in a
-        # fraction of the release build's time (locally 1-7 s against 37 s). The
+        # fraction of the release build's time. The
         # weekly run builds the same profile, since it writes the cache PRs
         # restore; the release converter is SpriteStudio-SDK's to build.
         run: ./scripts/deploy-examples.sh build=debug
@@ -119,10 +119,9 @@ jobs:
 
       - name: Install a software GPU (Mesa lavapipe)
         # The runner has no real adapter, and every offscreen-rendering test skips
-        # itself when `request_adapter` fails — so the half of the suite that
-        # actually draws (render.rs, scene.rs, pack.rs, events.rs, timing.rs) used
-        # to verify nothing here. lavapipe is Mesa's software Vulkan device: wgpu
-        # sees a conformant adapter and those tests run for real.
+        # itself when `request_adapter` fails, so without one the half of the suite
+        # that actually draws would verify nothing. lavapipe is Mesa's software
+        # Vulkan device: wgpu sees a conformant adapter and those tests run for real.
         run: |
           sudo apt-get update
           sudo apt-get install -y mesa-vulkan-drivers vulkan-tools
@@ -377,7 +376,7 @@ jobs:
         run: cargo build -p ssplayer-wgpu --target wasm32-unknown-unknown --no-default-features --features web
 
       # The Linux job's clippy builds default features, which leave src/web.rs
-      # out, so until this step the js face was compiled but never linted.
+      # out, so this is the step that lints the js face.
       - name: Clippy (js face)
         run: cargo clippy -p ssplayer-wgpu --target wasm32-unknown-unknown --no-default-features --features web -- -D warnings
 

@@ -1,7 +1,6 @@
 //! Timeline events and the end-of-playback notifications.
 //!
-//! These pin two things, because
-//! both are invisible until they are wrong and both have bitten sibling Players:
+//! These pin two things, because both are invisible until they are wrong:
 //!
 //! 1. **Events on frames that frame skipping jumped over must still fire.** A
 //!    slow tick advances several frames at once; the runtime records every frame
@@ -346,10 +345,9 @@ fn events_describe_only_the_tick_that_just_ran() {
 /// A culled player reports nothing, rather than the last tick that ran.
 ///
 /// `set_culled(true)` skips the timeline advance entirely, so there is no tick
-/// to describe — but the report fields used to be left as they were, and
-/// `events()` then answered with the same event on every update for as long as
-/// the player stayed culled. A host that plays a sound per event hears it
-/// repeat once the player is culled, which is the whole point of polling per tick.
+/// to describe. Left in place, the last reports would answer `events()` with the
+/// same event on every update for as long as the player stayed culled, and a
+/// host that plays a sound per event would hear it repeat.
 #[test]
 fn a_culled_player_reports_no_events() {
     let Some((device, queue)) = gpu() else {
@@ -400,10 +398,9 @@ fn a_culled_player_reports_no_events() {
 /// selected again.
 ///
 /// `load` goes through `set_pack`, which drops the tree that was playing and
-/// leaves no animation selected, so the updates that follow run no tick. They
-/// used to return with the last tick's reports still in place, and a character
-/// swapped mid-playback replayed the old pack's events and edges on every update
-/// until the host called `set_animation`.
+/// leaves no animation selected, so the updates that follow run no tick and must
+/// not replay the old pack's events and edges until the host calls
+/// `set_animation`.
 #[test]
 fn a_player_with_its_tree_dropped_reports_nothing() {
     let Some((device, queue)) = gpu() else {

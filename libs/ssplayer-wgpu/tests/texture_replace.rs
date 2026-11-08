@@ -11,9 +11,7 @@
 //! * the redirect actually moves where a cellmap resolves, and a restore moves it
 //!   back to the untouched original — no reload involved;
 //! * the override is **per player**, because the table is: two players of one
-//!   pack do not share it, which is the same "override is per player instance"
-//!   the reference Godot Player has (its per-player texture map), reached here by
-//!   a different structure;
+//!   pack do not share it;
 //! * it survives a tree rebuild (`set_animation`), because it lives in the
 //!   player's table rather than the tree;
 //! * enumeration lists **both** name spaces — cellmaps and TextureChange targets.
@@ -268,9 +266,9 @@ fn the_override_reaches_the_drawn_pixels_and_a_restore_undoes_it() {
 ///
 /// wgpu reports a texture past `max_texture_dimension_2d`, or pixels that do not
 /// fill it, as a validation error, and its default handler panics. The C and
-/// JavaScript faces own their device, so an oversized atlas used to take the
-/// host process with it. The renderer now refuses such a texture where it would
-/// create it: the key keeps whatever it held, and the frame still draws.
+/// JavaScript faces own their device, so an oversized atlas would take the host
+/// process with it. The renderer refuses such a texture where it would create it:
+/// the key keeps whatever it held, and the frame still draws.
 #[test]
 fn a_texture_the_device_cannot_hold_is_left_out_and_the_frame_still_draws() {
     let Some((device, queue)) = gpu() else {

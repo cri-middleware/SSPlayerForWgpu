@@ -15,8 +15,8 @@
 # page's own script) lives in examples/preview/shell.html and ships verbatim;
 # this script only substitutes five markers into it.
 #
-# The version stamp is load-bearing rather than decoration. The `.ssab` schema
-# is still moving at version 1, so a stale shell does not fail -- it quietly
+# The version stamp is load-bearing rather than decoration. Two SDK releases can
+# share a `.ssab` schema version, so a stale shell does not fail -- it quietly
 # draws something else. The page compares the SDK release it links against the
 # converter version a host puts in its URL. See PREVIEW.md.
 set -euo pipefail

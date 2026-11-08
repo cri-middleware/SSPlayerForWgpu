@@ -384,7 +384,7 @@ void Viewer::LayOutPlayers() {
     }
     float slot = (float)width_ / (float)count;
     float last = (float)(count - 1);
-    SsPlacement placement;
+    ss_placement_t placement;
     ss_placement_default(&placement);
     placement.scale = 0.9f;
     for (size_t i = 0; i < count; i++) {
@@ -519,6 +519,15 @@ void Viewer::Tick() {
     // stepping the animation by all of it would look like a skip.
     if (delta > 0.25f) {
         delta = 0.25f;
+    }
+
+    // The driver can take the device away (a TDR, a GPU reset). Update and render
+    // do nothing while it is gone, so rebuild it rather than freeze.
+    if (ss_scene_is_device_lost(scene_)) {
+        if (ss_scene_restore_device(scene_) != SS_OK) {
+            fprintf(stderr, "restore: %s\n", ss_last_error());
+        }
+        return;
     }
 
     // One update and one render for the whole window, whatever the player count:

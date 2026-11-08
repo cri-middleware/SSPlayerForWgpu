@@ -163,10 +163,8 @@ mod tests {
     }
 
     /// And derived from that root *every time*, not folded into the last answer,
-    /// so a loader survives being used for a second load.
-    ///
-    /// Getting this wrong is not theoretical: it accumulated, and the second
-    /// `load_with` on a reused loader went looking in `chars/hero/hero` and failed.
+    /// so a second `load_with` on a reused loader does not look in
+    /// `chars/hero/hero`.
     #[test]
     fn the_base_does_not_accumulate_across_loads() {
         let mut loader = rooted_at("chars");

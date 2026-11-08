@@ -1,6 +1,6 @@
 //! Instance-internal clipping masks must carry **past the instance boundary** and
-//! keep clipping the parent's parts drawn after the instance
-//! (the fix ForUnity #133 / ForGodot #295). The `InstancePropagation` fixture is
+//! keep clipping the parent's parts drawn after the instance. The
+//! `InstancePropagation` fixture is
 //! built for exactly this: four `Source01_*` instances (a 2×2 of maskInfluence ×
 //! visibleInsideMask), each playing a child whose lower `Check_*_DM_v` rows are
 //! clipping writers, with `Arrow*` parts drawn after the instances and a `Hole32`

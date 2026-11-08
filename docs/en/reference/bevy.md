@@ -65,7 +65,9 @@ atlas as a Bevy `Image` — non-sRGB, because the player takes atlas bytes as au
 | `scale_x`, `scale_y` | `1.0` |
 | `rotation` (radians) | `0.0` |
 
-Free to change, every frame if you like.
+`x` and `y` are measured from the view's centre in Bevy's world units — logical pixels under the
+default 2D projection — and `y` runs **downward**, as `SSPlayer::set_transform`'s does, opposite to
+Bevy's world. Free to change, every frame if you like.
 
 ### `SsPlayback` — transport and compositing
 
@@ -241,7 +243,7 @@ take a `RenderContext` get their own command encoder, and only an explicit edge 
 buffer reaches the queue first. Without it, whether characters land over or under Bevy's sprites
 would be a race.
 
-A window resize needs nothing from you: the draw system reprojects to the camera's viewport every
+A window resize needs nothing from you: the draw system reprojects to the viewport's size every
 frame.
 
 ## What this adapter does not do yet
@@ -249,6 +251,8 @@ frame.
 | | |
 |---|---|
 | **One view** | The adapter holds one `SSScene` with every character in it, and `SSScene::update` fuses the timeline advance with the geometry build, so a second view would advance every animation twice per frame. Later views are skipped, with a warning — so a UI camera, a render-to-texture portrait, a minimap or a split screen leaves every character in whichever view came first |
+| **Screen space** | Characters are placed from the view's centre, whatever the camera does: its `Transform` and its projection's `scale` do not move or zoom them, and `Visibility` and `RenderLayers` do not hide them. Hide one with `SsPlayback::visible`, and move it with `SsTransform` |
+| **Depth among sprites** | Characters draw over all of Bevy's 2D — sprites, `Mesh2d`, `Text2d` — in one pass after `main_transparent_pass_2d`, so a sprite cannot sit in front of one |
 | **MSAA** | must be off. The adapter warns once and skips a multisampled target rather than crashing |
 | **Part overrides** | not exposed as components. See [Scopes and names](../guide/concepts.md#what-each-face-can-do) |
 

@@ -13,6 +13,8 @@ import { SsPlayerWebGPUElement, defineSsPlayerWebGPUElement } from '@spritestudi
 
 `read` は `SsAssetReader` です：`(url: string) => SsAssetBytes | Promise<SsAssetBytes>`。`SsAssetBytes` は `ArrayBuffer | Uint8Array | Blob | null | undefined`。この 2 つの型と、要素のクラス `SsPlayerWebGPUElement` は export されています。`SsContextWeb.create()` は独自のコンテキスト（= 2 つ目のデバイス）を作るので、呼ぶのは `sharedContext()` にしてください。
 
+投げる例外と reject はどれも `Error` で、`message` には呼び出しに渡した URL や名前が入ります（あるとき）。
+
 要素は独立したエントリポイントにあるので、API だけを使うバンドルに要素は含まれません。
 
 ## モジュール関数

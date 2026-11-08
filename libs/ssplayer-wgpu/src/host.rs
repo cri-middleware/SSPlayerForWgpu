@@ -125,6 +125,12 @@ impl NativeHost {
     /// Remove a player. Returns whether `id` named a live one; a stale id is a
     /// no-op rather than a mistake made silently.
     pub fn destroy_player(&mut self, id: PlayerId) -> bool {
+        // Its texture overrides live in the renderer, which outlives it.
+        if let Some(player) = self.players.get_mut(id) {
+            for key in player.override_keys() {
+                self.renderer.forget_texture(key);
+            }
+        }
         self.players.remove(id)
     }
 

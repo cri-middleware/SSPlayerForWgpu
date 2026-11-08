@@ -37,7 +37,7 @@ Read after the update that produced them. What you get is **the events the last 
 
     uint32_t n = ss_player_event_count(player);
     for (uint32_t i = 0; i < n; i++) {
-        SsEventData e;
+        ss_event_data_t e;
         if (ss_player_event_at(player, i, &e) != SS_OK) continue;
 
         switch (e.kind) {
@@ -47,7 +47,7 @@ Read after the update that produced them. What you get is **the events the last 
             break;
         case SS_EVENT_SIGNAL:
             for (uint32_t p = 0; p < e.param_count; p++) {
-                SsSignalParamData param;
+                ss_signal_param_data_t param;
                 ss_player_event_signal_param_at(player, i, p, &param);
             }
             break;
@@ -107,7 +107,7 @@ the incoming animation: its events come through from the start of the fade, and 
 animation's stop — unless `set_track_outgoing_event_threshold` keeps them going for part of it. Each event also says which
 **source** fired it — `source()`, the handle `track_main_source` and `add_track_source` use — which
 tells events apart once another source has opted in with `set_source_event_threshold`
-([Motion blending](./motion-blending.md)). The C face carries it as `SsEventData.source`, and each
+([Motion blending](./motion-blending.md)). The C face carries it as `ss_event_data_t.source`, and each
 JavaScript event object as `source`.
 
 ## Empty is meaningful
@@ -162,7 +162,7 @@ A signal is a command id plus a list of `(id, value)` pairs, where the value is 
 choice **index**, an integer, a float, text — or **none**, meaning the parameter exists but was left
 unset.
 
-On the C face the values are flattened: `value_type` says which field of `SsSignalParamData` to
+On the C face the values are flattened: `value_type` says which field of `ss_signal_param_data_t` to
 read. In Rust it is the `SignalValue` enum; in JavaScript, a plain value.
 
 ## Start, completion and loop edges

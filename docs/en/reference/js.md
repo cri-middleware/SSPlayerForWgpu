@@ -14,6 +14,9 @@ import { SsPlayerWebGPUElement, defineSsPlayerWebGPUElement } from '@spritestudi
 
 `read` is an `SsAssetReader`: `(url: string) => SsAssetBytes | Promise<SsAssetBytes>`, with `SsAssetBytes` = `ArrayBuffer | Uint8Array | Blob | null | undefined`. Both types, and `SsPlayerWebGPUElement` (the element's class), are exported. `SsContextWeb.create()` builds a context of its own, i.e. a second device; call `sharedContext()` instead.
 
+Every throw and rejection is an `Error`; its `message` names the URL or the name the call was given
+where there is one.
+
 The element lives behind its own entry point, so a bundle that only wants the API never carries it.
 
 ## Module functions

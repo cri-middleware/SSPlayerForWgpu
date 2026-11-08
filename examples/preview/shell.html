@@ -547,8 +547,8 @@ $('licenses').addEventListener('click', () => {
   // number the console can answer.
   window.ssPreview = { ctx, surface, player };
 
-  // The `.ssab` schema version has not moved, so a shell from another SDK
-  // release does not fail on a pack: it quietly draws it as that release does.
+  // Two SDK releases can share a schema version, so a shell from another release
+  // does not fail on a pack: it quietly draws it as that release does.
   const converter = params.get('converter');
   if (converter) {
     const sdk = ctx.sdkVersion.replace(/^v/, '');

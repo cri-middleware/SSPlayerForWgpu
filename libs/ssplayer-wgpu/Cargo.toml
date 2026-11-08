@@ -17,7 +17,7 @@ crate-type = ["rlib"]
 
 [features]
 default = ["embedded"]
-# Decode embedded-mode ssab textures (PNG atlases) inside the player via the
+# Decode embedded-mode ssab textures (PNG, JPEG, WebP or TGA atlases) inside the player via the
 # `image` crate. Turn off for lean WASM builds that decode textures
 # host-side (e.g. the browser's `createImageBitmap`) and supply them by hash.
 embedded = ["dep:image"]
@@ -26,10 +26,8 @@ embedded = ["dep:image"]
 # Build with `--target wasm32-unknown-unknown` + wasm-bindgen.
 # **Deliberately does not pull `embedded`**: the browser already ships an image
 # decoder, so embedded atlases go out as encoded bytes (`embeddedTextures`) and
-# come back through `createImageBitmap` (`addTextureFromBytes`) — the same split
-# ssplayer-core/ssplayer-webgl use. Bundling `image` on top of that cost 59 KB
-# brotli (201 KB -> 142 KB, -29%) to duplicate a decoder that was already there.
-# Add `embedded` back for a page that would rather not write that glue.
+# come back through `createImageBitmap` (`addTextureFromBytes`), rather than
+# bundling a second decoder into the wasm. Add `embedded` back for a page that would rather not write that glue.
 web = ["dep:wasm-bindgen", "dep:wasm-bindgen-futures", "dep:js-sys", "dep:web-sys", "dep:console_error_panic_hook", "wasm-bindgen/std"]
 # C/C++ bindings (the "ffi" face): `ss_player_*` entry points plus a
 # self-contained host that builds wgpu from a raw window handle. The
@@ -43,13 +41,14 @@ wgpu = { workspace = true }
 ssruntime = { workspace = true }
 ssab = { workspace = true }
 bytemuck = { version = "1.25.2", features = ["derive"] }
-image = { version = "0.25.10", optional = true, default-features = false, features = ["png"] }
+# The formats a SpriteStudio cellmap can name; the web face decodes in the browser.
+image = { version = "0.25.10", optional = true, default-features = false, features = ["png", "jpeg", "webp", "tga"] }
 wasm-bindgen = { workspace = true, optional = true }
 wasm-bindgen-futures = { workspace = true, optional = true }
 js-sys = { workspace = true, optional = true }
 # `Blob` / `ImageBitmap*` / `PremultiplyAlpha` are the browser-side texture
 # decoder this face uses in place of a bundled one.
-web-sys = { workspace = true, optional = true, features = ["HtmlCanvasElement", "Window", "Document", "Blob", "ImageBitmap", "ImageBitmapOptions", "PremultiplyAlpha", "Response", "Url", "console"] }
+web-sys = { workspace = true, optional = true, features = ["HtmlCanvasElement", "Window", "Document", "Node", "Blob", "ImageBitmap", "ImageBitmapOptions", "PremultiplyAlpha", "Response", "Url", "console"] }
 console_error_panic_hook = { workspace = true, optional = true }
 # The C face blocks on wgpu's async adapter/device requests: a C caller has no
 # executor to hand us.

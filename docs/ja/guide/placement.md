@@ -1,6 +1,6 @@
 # ボックスへのフィット
 
-Player は与えられたターゲットに**オーサリング時のスケールのまま**描きます。ゲームではそれが望ましい動作です — キャラクターはアーティストが作ったサイズで、残りはカメラが決めます。ですが UI ではそうはいきません。パネルもカードもプレビューペインも、レイアウトが決めたサイズのボックスであり、アニメーションはその中に収まらなければなりません。
+Player は与えられたターゲットに**オーサリング時のスケールのまま**描きます。ゲームではそれが望ましい動作です — キャラクターはアーティストが作ったサイズで、配置と拡大縮小はゲームの側で決めます。ですが UI ではそうはいきません。パネルもカードもプレビューペインも、レイアウトが決めたサイズのボックスであり、アニメーションはその中に収まらなければなりません。
 
 `fitInto` がその一手です。ボックスを渡せば配置を計算し、`setTransform` と同じ継ぎ目（ビューの中心からのピクセル、`y` は下向き）を通して書き込みます — 描画側に足すものはなく、毎フレームの追加コストもありません。
 
@@ -53,12 +53,12 @@ Player は与えられたターゲットに**オーサリング時のスケー�
 === "C"
 
     ```c
-    SsPlacement placement;
+    ss_placement_t placement;
     ss_placement_default(&placement);   // ゼロ初期化しないこと: scale が 0 になります
     placement.fit = SS_FIT_COVER;
     placement.align = SS_ALIGN_BOTTOM;
 
-    SsPlaced placed;
+    ss_placed_t placed;
     ss_player_fit_into(player, width, height, &placement, &placed);
     ```
 
@@ -104,11 +104,11 @@ Player は与えられたターゲットに**オーサリング時のスケー�
 === "C"
 
     ```c
-    SsRect rect;
+    ss_rect_t rect;
     if (ss_player_canvas_rect(player, &rect) == SS_OK) { /* … */ }
 
     placement.has_frame = true;
-    placement.frame = (SsRect){ -100.0f, -200.0f, 200.0f, 200.0f };
+    placement.frame = (ss_rect_t){ -100.0f, -200.0f, 200.0f, 200.0f };
     ```
 
 === "JavaScript"

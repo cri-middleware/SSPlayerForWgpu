@@ -26,8 +26,8 @@
 # covers that second branch.
 #
 # assets/ is gitignored. libs/ssplayer-wgpu's tests read assets/overall and
-# assets/overall_emb; examples/viewer and examples/viewer-metal-cpp play
-# assets/overall from the repository, so only the browser needs a copy.
+# assets/overall_emb; the native examples play assets/ from the repository, so
+# only the browser needs a copy.
 #
 # Usage: scripts/deploy-examples.sh [build=release|debug] [when=always|stale]
 #

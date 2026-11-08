@@ -71,7 +71,7 @@
 
   <script type="module">
     // Same staged package the other demos drive (scripts/build.sh platform=web).
-    import { sharedContext } from './ssplayer-wgpu/dist/index.js';
+    import { sharedContext, restoreSharedDevice } from './ssplayer-wgpu/dist/index.js';
 
     // --- i18n ------------------------------------------------------------------
     // The demo's prose in both languages; the switch swaps textContent/innerHTML.
@@ -252,7 +252,9 @@
     function loop(now) {
       const dt = Math.min((now - last) / 1000, 0.05);
       last = now;
-      if (!ctx.isDeviceLost()) {
+      if (ctx.isDeviceLost()) {
+        restoreSharedDevice(ctx).catch((e) => console.error(e));
+      } else {
         surface.frame(dt);
         const name = partSel.value;
         const m = player.partTransform(name);

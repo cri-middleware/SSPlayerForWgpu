@@ -108,7 +108,7 @@ title: C API リファレンス
 | | |
 |---|---|
 | `ss_player_event_count(player)` | 直前の update が跨いだ数 — **スキップしたフレームの分も含みます** |
-| `ss_player_event_at(player, i, out)` | `SsEventData` 1 件。`kind` がどのフィールドに値があるかを示します |
+| `ss_player_event_at(player, i, out)` | `ss_event_data_t` 1 件。`kind` がどのフィールドに値があるかを示します |
 | `ss_player_event_signal_param_count(player, i)` / `ss_player_event_signal_param_at(player, i, p, out)` | シグナルのパラメータ |
 
 `kind` は `SS_EVENT_USER_DATA`（0）/ `SS_EVENT_SIGNAL`（1）/ `SS_EVENT_AUDIO`（2）。シグナルパラメータの
@@ -121,7 +121,7 @@ title: C API リファレンス
 | `ss_player_set_transform(player, x, y, sx, sy, rotation)` | 位置（ビューの中心からのピクセル、`y` は**下向き**が正）・スケール・回転（ラジアン） |
 | `ss_player_reset_transform(player)` | 恒等の配置（中央、等倍、回転なし）に戻します |
 | `ss_player_fit_into(player, width, height, &placement, &placed)` | アニメーションを箱に収め、そのトランスフォームを書き込みます。`placed` は null でも構いません |
-| `ss_placement_default(&placement)` | `SsPlacement` を変更する前に既定値で埋めます — **ゼロ初期化ではスケールが 0 になります** |
+| `ss_placement_default(&placement)` | `ss_placement_t` を変更する前に既定値で埋めます — **ゼロ初期化ではスケールが 0 になります** |
 | `ss_player_canvas_rect(player, &rect)` | `has_frame` が false のときに `ss_player_fit_into` が収める箱 |
 | `ss_player_set_order(player, order)` / `ss_player_order(player)` | シーン内の描画順（昇順） |
 | `ss_player_set_visible(player, visible)` / `ss_player_is_visible(player)` | 非表示のキャラクターは描画されませんが、再生は続きイベントも出します |
@@ -186,7 +186,7 @@ GPU に届きます。[テクスチャ差し替え](../guide/texture-replacement
 | `ss_player_add_track_source(player, track, name, weight, &source)` | 別のアニメーションを横に載せ、weight で混ぜる |
 | `ss_player_set_source_weight` / `_frame` / `_event_threshold` と、`set_` の無い取得 | ソース 1 つの weight・再生位置・イベントのしきい値 |
 
-操作は状態コードを返します。存在しないトラックやソースを読むと **0** が返るので、先に `ss_player_track_count` で確かめてください。例外は上で印を付けた 2 つで、0 が意味を持つ値だからです。`SsEventData.source` は、イベントを発火したソースを表します。
+操作は状態コードを返します。存在しないトラックやソースを読むと **0** が返るので、先に `ss_player_track_count` で確かめてください。例外は上で印を付けた 2 つで、0 が意味を持つ値だからです。`ss_event_data_t.source` は、イベントを発火したソースを表します。
 
 ## この Face に無いもの
 

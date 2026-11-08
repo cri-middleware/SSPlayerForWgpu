@@ -160,7 +160,7 @@ impl SsEvent {
 /// crossfade on track 0 hands the track to another. **Indices are
 /// bounds-checked**: they are only meaningful against that animation, and a
 /// stale one — or the runtime's not-found `-1` — would otherwise read past the
-/// FlatBuffer. The Godot Player hit exactly that.
+/// FlatBuffer.
 ///
 /// Signals that are switched off are skipped, matching the sibling Players:
 /// an inactive signal is authoring state, not something that happened.

@@ -23,9 +23,6 @@
 //! A comparison also writes `summary.md` into the dump directory, and a
 //! `diff/<image>.png` for each image that moved: before, after, and where they
 //! differ, for a reviewer to look at rather than count.
-//!
-//! This is what verified the P7-6 SoA passthrough: moving vertex expansion from
-//! the CPU to the vertex stage left all 134 images bit-identical.
 
 use ssplayer_wgpu::{MaskBackend, Retention, SSPlayer, SSRenderer, SSScene, SceneConfig};
 
@@ -38,17 +35,18 @@ fn asset_dir() -> &'static str {
     concat!(env!("CARGO_MANIFEST_DIR"), "/../../assets/overall")
 }
 
-fn load_textures(renderer: &mut SSRenderer, device: &wgpu::Device, queue: &wgpu::Queue) {
-    for entry in std::fs::read_dir(asset_dir()).unwrap().flatten() {
-        let path = entry.path();
-        if path.extension().and_then(|s| s.to_str()) != Some("png") {
-            continue;
+/// Upload every reference-mode atlas `packs` ask for, under the key `player`
+/// draws each with — a host supplying its own pixels.
+fn load_textures(renderer: &mut SSRenderer, device: &wgpu::Device, queue: &wgpu::Queue, player: &SSPlayer, packs: &[&str]) {
+    for &pack in packs {
+        for texture in player.textures(Some(pack)).unwrap_or(&[]) {
+            if texture.embedded {
+                continue;
+            }
+            let img = image::open(std::path::Path::new(asset_dir()).join(&texture.path)).unwrap().to_rgba8();
+            let (w, h) = img.dimensions();
+            renderer.upload_texture(device, queue, player.texture_key(Some(pack), texture.slot), &img, (w, h), Retention::Retain);
         }
-        let stem = path.file_stem().and_then(|s| s.to_str()).unwrap_or_default();
-        let hash = ssruntime::fnv1a_hash_str(stem);
-        let img = image::open(&path).unwrap().to_rgba8();
-        let (w, h) = img.dimensions();
-        renderer.upload_texture(device, queue, hash, &img, (w, h), Retention::Retain);
     }
 }
 
@@ -198,7 +196,6 @@ fn golden_corpus() {
     for stencil in [false, true] {
         for pack in &packs {
             let mut renderer = SSRenderer::new(&device);
-            load_textures(&mut renderer, &device, &queue);
             let mut scene = SSScene::new(&device, &SceneConfig { color_format: COLOR_FORMAT, stencil_format: stencil.then_some(STENCIL_FORMAT), mask: if stencil { MaskBackend::Stencil } else { MaskBackend::None } });
             scene.set_viewport(&queue, W as f32, H as f32, false);
 
@@ -212,6 +209,8 @@ fn golden_corpus() {
             if player.load_ssab(pack, &bytes).is_err() {
                 continue;
             }
+            let names: Vec<&str> = packs.iter().map(String::as_str).collect();
+            load_textures(&mut renderer, &device, &queue, &player, &names);
             let Some(anims) = player.animation_names() else { continue };
 
             for anim in anims.iter().take(4) {
@@ -235,7 +234,6 @@ fn golden_corpus() {
     // Multi-player arrangements: the interactions the single-player dumps miss.
     for (label, a, b) in [("mask_mask", "Mask", "Mask"), ("mask_basic", "Mask", "Basic"), ("shape_effect", "Shape", "Effect"), ("shader_mesh", "Shader", "Mesh")] {
         let mut renderer = SSRenderer::new(&device);
-        load_textures(&mut renderer, &device, &queue);
         let mut scene = SSScene::new(&device, &SceneConfig { color_format: COLOR_FORMAT, stencil_format: Some(STENCIL_FORMAT), mask: MaskBackend::Stencil });
         scene.set_viewport(&queue, W as f32, H as f32, false);
 
@@ -250,6 +248,8 @@ fn golden_corpus() {
             p
         };
         let (mut p1, mut p2) = (make(a, -30.0), make(b, 30.0));
+        load_textures(&mut renderer, &device, &queue, &p1, &[a]);
+        load_textures(&mut renderer, &device, &queue, &p2, &[b]);
         p1.set_order(0);
         p2.set_order(1);
         for frame in 1..=16 {

@@ -40,16 +40,16 @@ fn asset_dir() -> &'static str {
     concat!(env!("CARGO_MANIFEST_DIR"), "/../../assets/overall")
 }
 
-fn load_textures(renderer: &mut SSRenderer, device: &wgpu::Device, queue: &wgpu::Queue) {
-    for entry in std::fs::read_dir(Path::new(asset_dir())).unwrap().flatten() {
-        let path = entry.path();
-        if path.extension().and_then(|s| s.to_str()) != Some("png") {
+/// Upload every reference-mode atlas `player`'s selected pack asks for, under
+/// the key the player draws it with.
+fn load_textures(renderer: &mut SSRenderer, device: &wgpu::Device, queue: &wgpu::Queue, player: &SSPlayer) {
+    for texture in player.textures(None).unwrap_or(&[]) {
+        if texture.embedded {
             continue;
         }
-        let stem = path.file_stem().and_then(|s| s.to_str()).unwrap_or_default();
-        let img = image::open(&path).unwrap().to_rgba8();
+        let img = image::open(Path::new(asset_dir()).join(&texture.path)).unwrap().to_rgba8();
         let (w, h) = img.dimensions();
-        renderer.upload_texture(device, queue, ssruntime::fnv1a_hash_str(stem), &img, (w, h), Retention::Retain);
+        renderer.upload_texture(device, queue, player.texture_key(None, texture.slot), &img, (w, h), Retention::Retain);
     }
 }
 
@@ -101,7 +101,6 @@ fn frame_cost_by_player_count() {
 
     for count in [1usize, 8, 32, 64, 128, 256] {
         let mut renderer = SSRenderer::new(&device);
-        load_textures(&mut renderer, &device, &queue);
         let mut scene = SSScene::new(&device, &SceneConfig { color_format: COLOR_FORMAT, stencil_format: Some(STENCIL_FORMAT), mask: MaskBackend::Stencil });
         scene.set_viewport(&queue, W as f32, H as f32, false);
 
@@ -110,6 +109,9 @@ fn frame_cost_by_player_count() {
         // like — and what made the threaded walk's naive split unbalanced.
         let packs = ["Basic", "Mask", "Shape", "Effect"];
         let mut owned: Vec<SSPlayer> = (0..count).map(|i| make_player(packs[i % packs.len()])).collect();
+        for player in owned.iter().take(packs.len()) {
+            load_textures(&mut renderer, &device, &queue, player);
+        }
         for (i, player) in owned.iter_mut().enumerate() {
             player.set_transform((i as f32 % 8.0) * 120.0 - 420.0, (i as f32 / 8.0).floor() * 140.0 - 200.0, 0.5, 0.5, 0.0);
             player.set_order(i as i32);

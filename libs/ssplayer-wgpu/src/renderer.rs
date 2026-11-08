@@ -16,8 +16,8 @@ use ssruntime::runtime::framedata::ss::runtime::BlendType;
 ///
 /// Every draw looks up a pipeline and a texture, under keys this crate makes
 /// itself — a [`PipelineKey`], a texture key — so SipHash's defence against
-/// chosen keys buys nothing here, and it was a tenth of a masked frame's update.
-/// A multiply-rotate per word, as `rustc` hashes its own tables.
+/// chosen keys buys nothing here. A multiply-rotate per word, as `rustc` hashes
+/// its own tables.
 #[derive(Default)]
 pub(crate) struct KeyHasher(u64);
 
@@ -67,9 +67,8 @@ type KeyMap<K, V> = HashMap<K, V, BuildHasherDefault<KeyHasher>>;
 /// Which vertex stage expands a draw's primitives.
 ///
 /// There is no vertex buffer: the runtime's SoA arrays are copied into the
-/// scene's arena verbatim and the vertex stage reads them, so what used to be a
-/// CPU expansion loop per geometry kind is now an entry point per geometry kind.
-/// They differ only in how `@builtin(vertex_index)` maps to a primitive and where
+/// scene's arena verbatim and the vertex stage reads them, with one entry point
+/// per geometry kind. They differ only in how `@builtin(vertex_index)` maps to a primitive and where
 /// that primitive's position / UV / colour come from.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub(crate) enum GeomClass {
@@ -216,7 +215,7 @@ pub(crate) enum PipelineKind {
     /// so the target's own formats drop out of the key's meaning here.
     Coverage(GeomClass),
     /// Integration shader (`ss-*`): shader id x blend index. Never
-    /// stencil-tested — shader parts are not masked in v1 — and always
+    /// stencil-tested — shader parts are not masked — and always
     /// [`GeomClass::Quad`], because only Normal parts carry a SHDR attribute.
     Shader(u32, usize),
     /// One faded player's offscreen layer, folded back into the target at the
@@ -295,16 +294,14 @@ impl TexInfo {
     }
 }
 
-/// Layer 2a: everything whose useful lifetime is the
-/// **device**, not one player and not one render target.
+/// Everything whose useful lifetime is the **device**, not one player and not
+/// one render target.
 ///
 /// Pipelines, bind group layouts, the sampler, the white fallback and the atlas
 /// textures are all valid for any target on the device that created them, so
 /// exactly one of these serves every [`crate::SSScene`] and every
 /// [`crate::SSPlayer`] drawing on that device. The host owns it and lends it,
-/// the same way it lends `Device` and `Queue` — putting a copy inside each
-/// player is what made a second character on screen duplicate ~39 pipelines and
-/// every atlas.
+/// the same way it lends `Device` and `Queue`.
 ///
 /// Nothing here is format-specific: the pipeline key carries the target formats,
 /// so targets that disagree share one renderer.
@@ -455,10 +452,9 @@ fn stencil_compare(stencil: StencilTest) -> wgpu::CompareFunction {
 /// masks of differing `mask_influence` compose to.
 ///
 /// The counter must be contiguous from bit 0 (increment/decrement are ordinary
-/// arithmetic); parity takes one dedicated high bit. Unlike ForUnity — which
-/// fences SS masking into URP's low nibble — this player owns the whole 8-bit
-/// stencil, so the counter gets seven bits (overlap depth up to 127) and parity
-/// the eighth.
+/// arithmetic); parity takes one dedicated high bit. This player owns the whole
+/// 8-bit stencil, so the counter gets seven bits (overlap depth up to 127) and
+/// parity the eighth.
 const STENCIL_PLANE_COUNTER: u32 = 0x7F;
 const STENCIL_PLANE_PARITY: u32 = 0x80;
 
@@ -514,8 +510,8 @@ fn depth_stencil_state(format: Option<wgpu::TextureFormat>, compare: wgpu::Compa
 /// this player exists.
 ///
 /// The position maths is written out scalar by scalar rather than as matrix
-/// products, so it performs the same operations in the same order as the CPU path
-/// it replaced. That is what lets the two be compared pixel for pixel.
+/// products: a matrix product invites FMA contraction, which moves pixels and
+/// breaks the bit-exact golden comparison.
 const COMMON_WGSL: &str = r#"
 struct VertexOutput {
     @builtin(position) clip_position: vec4<f32>,
@@ -612,6 +608,32 @@ fn ss_straight_rgb(tex: vec4<f32>) -> vec3<f32> {
     return select(tex.rgb, tex.rgb / max(tex.a, 0.0001), tex_info.flags.x > 0.5);
 }
 
+// The part's texel at `uv`, filtered in premultiplied space. The sampler blends a
+// straight texture's transparent texels' colour into its edges — dark or white
+// fringes wherever the art is scaled — so a straight texture is filtered here
+// from its four nearest texels instead, and handed back straight. `sampled` is
+// the hardware sample, taken while control flow is still uniform.
+fn ss_texel(sampled: vec4<f32>, uv: vec2<f32>) -> vec4<f32> {
+    if (tex_info.flags.x > 0.5) {
+        return sampled;
+    }
+    let dims = vec2<i32>(textureDimensions(t_diffuse, 0));
+    let p = uv * vec2<f32>(dims) - 0.5;
+    let base = vec2<i32>(floor(p));
+    let f = p - floor(p);
+    let hi = dims - vec2<i32>(1);
+    let c00 = ss_premul(textureLoad(t_diffuse, clamp(base, vec2<i32>(0), hi), 0));
+    let c10 = ss_premul(textureLoad(t_diffuse, clamp(base + vec2<i32>(1, 0), vec2<i32>(0), hi), 0));
+    let c01 = ss_premul(textureLoad(t_diffuse, clamp(base + vec2<i32>(0, 1), vec2<i32>(0), hi), 0));
+    let c11 = ss_premul(textureLoad(t_diffuse, clamp(base + vec2<i32>(1, 1), vec2<i32>(0), hi), 0));
+    let c = mix(mix(c00, c10, f.x), mix(c01, c11, f.x), f.y);
+    return vec4<f32>(c.rgb / max(c.a, 0.0001), c.a);
+}
+
+fn ss_premul(texel: vec4<f32>) -> vec4<f32> {
+    return vec4<f32>(texel.rgb * texel.a, texel.a);
+}
+
 // group(2) under the coverage layout: the coverage bitmaps for the masked
 // content that replays them, the group-alpha layers for the composite.
 @group(2) @binding(0) var t_layers: texture_2d_array<f32>;
@@ -701,9 +723,8 @@ fn member_tint(pi: u32, node: u32) -> u32 {
     return pack4x8unorm(vec4<f32>(unpack4x8unorm(tint).rgb * unpack4x8unorm(member).rgb, 0.0));
 }
 
-// A node's placement applied to a world-space point. Columns are read
-// individually so the sum is accumulated in the same order as the CPU's
-// `apply_transform`.
+// A node's placement applied to a world-space point, summed scalar by scalar
+// like the rest of the position maths.
 fn apply_node(base: u32, x: f32, y: f32, z: f32) -> vec3<f32> {
     return vec3<f32>(
         f_arena[base] * x + f_arena[base + 4u] * y + f_arena[base + 8u] * z + f_arena[base + 12u],
@@ -729,7 +750,7 @@ fn to_clip(p: vec3<f32>) -> vec4<f32> {
 }
 
 // The runtime's UVs are in texture pixels. A missing texture binds
-// the 1x1 white fallback, whose size is 1 — the same no-op the CPU path applied.
+// the 1x1 white fallback, whose size of 1 makes this a no-op.
 fn normalize_uv(base: u32, k: u32) -> vec2<f32> {
     return vec2<f32>(f_arena[base + k * 2u], f_arena[base + k * 2u + 1u]) / tex_info.size.xy;
 }
@@ -849,8 +870,7 @@ fn vs_shape(@builtin(vertex_index) vi: u32, @builtin(instance_index) member: u32
     let lx = f_arena[(*p).pos_base + v * 2u];
     let ly = f_arena[(*p).pos_base + v * 2u + 1u];
 
-    // Bilinear fill over the part's box coordinates, matching the CPU's
-    // `bilerp_color` term for term.
+    // Bilinear fill over the part's box coordinates.
     let node = node_of(pi, member);
     let fx = f_arena[(*p).uv_base + v * 2u];
     let fy = f_arena[(*p).uv_base + v * 2u + 1u];
@@ -1073,7 +1093,7 @@ const WGSL_SHADER: &str = r#"
 // keeping the whole path premultiplied.
 @fragment
 fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
-    let tex = textureSample(t_diffuse, s_diffuse, in.uv);
+    let tex = ss_texel(textureSample(t_diffuse, s_diffuse, in.uv), in.uv);
     if (tex.a == 0.0) {
         return vec4<f32>(0.0);
     }
@@ -1094,7 +1114,7 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
 // being uniform — which a `discard` above it would make it.
 @fragment
 fn fs_main_coverage(in: VertexOutput) -> @location(0) vec4<f32> {
-    let tex = textureSample(t_diffuse, s_diffuse, in.uv);
+    let tex = ss_texel(textureSample(t_diffuse, s_diffuse, in.uv), in.uv);
     let info = in.mask_info;
     if ((info & MASK_INFO_ACTIVE) != 0u && !mask_passes(in, info, in.cov_base)) {
         discard;
@@ -1197,7 +1217,7 @@ pub(crate) fn ss_shader_entry(id_hash: u32) -> Option<&'static str> {
     SS_SHADER_ENTRIES.iter().find(|(h, _)| *h == id_hash).map(|(_, e)| *e)
 }
 
-/// The 13 SpriteStudio integration shaders (統合シェーダ), ported from the WebGL
+/// The 13 SpriteStudio integration shaders, ported from the WebGL
 /// `SSShaderLib.ts` (itself the SS6-SDK GLSL). Each entry computes a straight-
 /// alpha `Pixel`, then `ss_finish` applies the same PartsColor composite as
 /// `fs_main` (varg mix/mul/add-sub) and re-premultiplies — except `ss-blur`,
@@ -1481,8 +1501,8 @@ fn fs_ss_spot(in: VertexOutput) -> @location(0) vec4<f32> {
 
 impl SSRenderer {
     /// Build the device-scoped resources. Cheap: no pipeline is compiled until a
-    /// frame asks for one, so this is two shader modules, three bind
-    /// group layouts, a sampler and a 1x1 texture.
+    /// frame asks for one, so this is the shader modules, the bind group layouts,
+    /// a sampler and a 1x1 texture.
     ///
     /// Takes no target formats — those ride in the pipeline key, which is what
     /// lets one renderer serve every target on the device.
@@ -1642,7 +1662,7 @@ impl SSRenderer {
     }
 
     /// Compile `key`'s pipeline if this is the first frame that needs it. A
-    /// [`PipelineKey::Shader`] whose id is not a built-in `ss-*` shader stays
+    /// [`PipelineKind::Shader`] whose id is not a built-in `ss-*` shader stays
     /// absent; [`Self::draw`] skips draws whose pipeline is missing.
     pub(crate) fn ensure_pipeline(&mut self, device: &wgpu::Device, key: PipelineKey) {
         if self.pipelines.contains_key(&key) {
@@ -1745,7 +1765,7 @@ impl SSRenderer {
                     entry,
                     blend: Some(blend_state(blend_of(blend_idx))),
                     write_mask: wgpu::ColorWrites::ALL,
-                    // Shader parts are never masked in v1, so the stencil is inert.
+                    // Shader parts are never masked, so the stencil is inert.
                     depth_stencil: depth_stencil_state(key.stencil_format, wgpu::CompareFunction::Always, wgpu::StencilOperation::Keep, 0x00),
                     color_format: key.color_format,
                 }
@@ -1853,8 +1873,9 @@ impl SSRenderer {
         self.textures.get(&hash).map(|t| t.alpha)
     }
 
-    /// Provide a texture the **renderer** creates. `hash` is the fnv1a
-    /// hash of the cellmap image path. This is the convenience path used by the
+    /// Provide a texture the **renderer** creates. `hash` is the key the player
+    /// draws the image under: [`crate::SSPlayer::texture_key`]'s answer for a
+    /// pack's atlas, or the key an override returned. This is the convenience path used by the
     /// viewer, the web host and the C API; an engine integration wants
     /// [`SSRenderer::set_texture`] instead.
     ///
@@ -1881,8 +1902,8 @@ impl SSRenderer {
     ///
     /// The whole point is that no full-size copy happens: `rgba` is premultiplied in
     /// place, written to the texture, and — for [`Retention::Retain`] — retained as
-    /// itself. A 4096² atlas is 64 MB, so the two copies the borrowing form makes
-    /// are worth a second entry point.
+    /// itself. A 4096² atlas is 64 MB, so the copy the borrowing form makes is
+    /// worth a second entry point.
     pub fn upload_texture_owned(&mut self, device: &wgpu::Device, queue: &wgpu::Queue, hash: u32, mut rgba: Vec<u8>, (width, height): (u32, u32), retention: Retention) {
         premultiply(&mut rgba);
         // No digest: a host owns what it uploads, and a load walk that meets
@@ -1925,8 +1946,8 @@ impl SSRenderer {
         // Every texture this renderer creates comes through here, so this is where
         // one the device cannot hold stops. wgpu would report it as a validation
         // error, whose default handler panics — and the C and JavaScript faces own
-        // their device, so that took the host process, or every player on the page,
-        // down with it. The faces refuse such a texture where the host hands it
+        // their device, so it would take the host process, or every player on the
+        // page, down with it. The faces refuse such a texture where the host hands it
         // over; what reaches this point came out of a pack, or a device restored
         // with smaller limits than the one it replaced.
         let why = texture_extent_error(device, (width, height)).or_else(|| (premul.len() != (width as usize) * (height as usize) * 4).then(|| format!("{} bytes do not fill a {width}x{height} RGBA8 texture", premul.len())));

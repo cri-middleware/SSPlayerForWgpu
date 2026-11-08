@@ -62,9 +62,16 @@ fn alpha_ramp(width: u32, height: u32) -> Vec<u8> {
     out
 }
 
+/// The key a player registering `pack` from its bytes draws `slot` under.
+fn texture_key(pack: &SSPack, slot: u32) -> u32 {
+    let mut player = SSPlayer::new();
+    player.add_pack(pack);
+    player.texture_key(Some(pack.name()), slot)
+}
+
 /// The atlases `pack` asks for, loaded the way a host is meant to load them:
-/// the `.ssab` names each image and where it sits relative to
-/// itself, and the hash comes with it rather than being derived from a filename.
+/// the `.ssab` names each image and where it sits relative to itself, and the
+/// player says which key it draws each under.
 fn atlases(pack: &SSPack) -> Vec<(u32, Vec<u8>, u32, u32)> {
     let mut out = Vec::new();
     for texture in pack.textures() {
@@ -73,7 +80,7 @@ fn atlases(pack: &SSPack) -> Vec<(u32, Vec<u8>, u32, u32)> {
         }
         let img = image::open(std::path::Path::new(asset_dir()).join(&texture.path)).unwrap().to_rgba8();
         let (w, h) = img.dimensions();
-        out.push((texture.slot, img.into_raw(), w, h));
+        out.push((texture_key(pack, texture.slot), img.into_raw(), w, h));
     }
     out
 }
@@ -352,7 +359,7 @@ fn a_pack_names_its_texture_change_targets() {
         return;
     };
     let all = atlases(&pack);
-    let box_hash = pack.textures().iter().find(|t| t.path == "box_00_00.png").unwrap().slot;
+    let box_hash = texture_key(&pack, pack.textures().iter().find(|t| t.path == "box_00_00.png").unwrap().slot);
     let minus_box: Vec<_> = all.iter().filter(|(hash, ..)| *hash != box_hash).cloned().collect();
     assert_eq!(minus_box.len() + 1, all.len(), "the atlas to drop was not in the supplied set");
 
@@ -642,10 +649,9 @@ fn embedded_pixels_can_be_routed_through_the_borrowed_channel() {
 ///
 /// `build_node` binds every `Context` to its pack's resource by **raw pointer**,
 /// and the only `Arc` keeping that resource alive is the one in the player's pack
-/// map. `add_pack` / `add_ssab` therefore used to free the resource the tree was
-/// still evaluating — a use-after-free reachable from safe Rust and from
-/// `ss_player_add_ssab` / `addSsab`, which crashed inside the runtime on the next
-/// update. The pack that arrives is registered for the *next* tree; what is
+/// map, so `add_pack` / `add_ssab` must not free the resource the tree is still
+/// evaluating — a use-after-free reachable from safe Rust and from
+/// `ss_player_add_ssab` / `addSsab`. The pack that arrives is registered for the *next* tree; what is
 /// playing keeps the data it was built from.
 #[test]
 fn re_registering_a_pack_does_not_pull_it_out_from_under_the_tree() {

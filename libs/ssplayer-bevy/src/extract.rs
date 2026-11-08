@@ -1,8 +1,8 @@
-//! The one-way main world -> render world hand-off.
+//! The main world -> render world hand-off.
 //!
 //! The playback tree lives in the render world, so everything the main world
-//! wants to say about a character has to cross here. Nothing crosses back yet:
-//! reading events and completion edges is its own phase (see the crate docs).
+//! wants to say about a character has to cross here. What crosses back — events
+//! and completion edges — goes through `feedback.rs`.
 
 use bevy::asset::RecursiveDependencyLoadState;
 use bevy::ecs::message::MessageCursor;
@@ -80,7 +80,7 @@ pub(crate) struct ExtractedPlayers {
     track_cursor: MessageCursor<SsTrackCommand>,
 }
 
-// A five-part query with an optional is exactly the shape `type_complexity`
+// A six-part query with optionals is exactly the shape `type_complexity`
 // fires on, and the shape Bevy queries take; naming it would obscure, not clarify.
 // A system takes what it reads as parameters, one message buffer per kind, so
 // the count grows with the kinds; a `SystemParam` bundle would only move the list.
@@ -94,9 +94,15 @@ pub(crate) fn extract_players(
     stops: Extract<Res<Messages<SsStop>>>,
     track_commands: Extract<Res<Messages<SsTrackCommand>>>,
     settings: Extract<Res<SsSceneSettings>>,
+    cameras: Extract<Query<&Camera>>,
     query: Extract<Query<(Entity, &SsPlayer, &SsTransform, &SsPlayback, Option<&SsCellmapTextures>, Option<&SsCrowd>)>>,
 ) {
     extracted.delta_secs = time.delta_secs();
+    // `SsTransform` and crowd members are in Bevy's world units, logical pixels
+    // under the default 2D projection, while the scene projects the view's
+    // physical pixels so masks and fade layers keep the display's resolution.
+    // The lowest-order active camera is the one the draw system binds.
+    let scale = cameras.iter().filter(|camera| camera.is_active).min_by_key(|camera| camera.order).and_then(Camera::target_scaling_factor).unwrap_or(1.0);
     extracted.group_alpha = settings.group_alpha;
     let ExtractedPlayers { seeks: seek_list, plays: play_list, stops: stop_list, track_commands: track_list, seek_cursor, play_cursor, stop_cursor, track_cursor, .. } = &mut *extracted;
     seek_list.clear();
@@ -118,11 +124,11 @@ pub(crate) fn extract_players(
         out.settled = matches!(asset_server.get_recursive_dependency_load_state(&player.pack), Some(RecursiveDependencyLoadState::Loaded | RecursiveDependencyLoadState::Failed(_)));
         out.animation.clone_from(&player.animation);
         out.transition_ms = player.transition_ms;
-        out.transform = *transform;
+        out.transform = SsTransform { x: transform.x * scale, y: transform.y * scale, scale_x: transform.scale_x * scale, scale_y: transform.scale_y * scale, rotation: transform.rotation };
         out.playback = *playback;
         copy_overrides(&mut out.overrides, textures.map(|t| &t.overrides));
         out.crowd.clear();
-        out.crowd.extend_from_slice(crowd.map_or(&[][..], |crowd| &crowd.members));
+        out.crowd.extend(crowd.map_or(&[][..], |crowd| &crowd.members).iter().map(|member| CrowdMember { x: member.x * scale, y: member.y * scale, scale_x: member.scale_x * scale, scale_y: member.scale_y * scale, ..*member }));
     }
 }
 

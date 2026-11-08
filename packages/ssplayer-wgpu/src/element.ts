@@ -26,7 +26,11 @@ import type { SsAssetReader, SsContextWeb, SsSurfaceWeb, SsPlayerWeb } from '../
 /** The attributes that only move the character, so a change re-fits and nothing else. */
 const FIT_ATTRIBUTES = ['fit', 'align', 'flip-x', 'flip-y'];
 
-export class SsPlayerWebGPUElement extends HTMLElement {
+// A server-side render evaluates this module where `HTMLElement` does not exist;
+// the class is only ever instantiated in a browser.
+const ElementBase = (typeof HTMLElement === 'undefined' ? class {} : HTMLElement) as typeof HTMLElement;
+
+export class SsPlayerWebGPUElement extends ElementBase {
   /**
    * What a page may change on a live element. `autoplay` is read when an
    * animation is set up, and `pause-when-hidden` once at connect.
@@ -49,7 +53,15 @@ export class SsPlayerWebGPUElement extends HTMLElement {
   private _io: IntersectionObserver | null = null;
   private _ro: ResizeObserver | null = null;
   private _onVisibilityChange: (() => void) | null = null;
+  private _dpr: { query: MediaQueryList; onChange: () => void } | null = null;
   private _loads: Promise<unknown> = Promise.resolve();
+  /** Settles once `_start` has a player, or has given up on one. */
+  private _ready!: Promise<void>;
+  private _settleReady: () => void = () => {};
+  /** Which connection `_start` belongs to: a move in the DOM starts another. */
+  private _connection = 0;
+  private _error: HTMLElement | null = null;
+  private _attributeLoadQueued = false;
   /**
    * The box the character is fitted into: the canvas of the animation the pack
    * was loaded on, kept across `animation` switches so the character does not
@@ -57,6 +69,17 @@ export class SsPlayerWebGPUElement extends HTMLElement {
    * picks it again.
    */
   private _frame: { x: number; y: number; width: number; height: number } | undefined;
+
+  constructor() {
+    super();
+    this._resetReady();
+  }
+
+  private _resetReady(): void {
+    this._ready = new Promise((resolve) => {
+      this._settleReady = resolve;
+    });
+  }
 
   connectedCallback(): void {
     // A custom element is `display: inline` unless the page says otherwise, and an
@@ -84,6 +107,9 @@ export class SsPlayerWebGPUElement extends HTMLElement {
       this._ro = new ResizeObserver(() => this._applySize());
       this._ro.observe(this);
     }
+    // Page zoom and a move to another display change the device pixel ratio
+    // without changing the CSS box, so the observer above does not see them.
+    this._watchDevicePixelRatio();
 
     // --- Visibility gating -------------------------------------
     // Assume on-screen until the observer says otherwise, so a host without
@@ -94,7 +120,8 @@ export class SsPlayerWebGPUElement extends HTMLElement {
     this._wantTicker = false;
     this._ensureVisibilityWatch();
 
-    void this._start();
+    void this._start(++this._connection);
+    this._loadFromAttributes();
   }
 
   disconnectedCallback(): void {
@@ -112,6 +139,10 @@ export class SsPlayerWebGPUElement extends HTMLElement {
       document.removeEventListener('visibilitychange', this._onVisibilityChange);
       this._onVisibilityChange = null;
     }
+    if (this._dpr) {
+      this._dpr.query.removeEventListener('change', this._dpr.onChange);
+      this._dpr = null;
+    }
     // The surface and the player live in the page's shared context, not in these
     // wrappers, so dropping the references would leak a swapchain per element
     // that ever existed. The context itself stays — other elements share it.
@@ -124,6 +155,38 @@ export class SsPlayerWebGPUElement extends HTMLElement {
     // move.
     this.canvas?.remove();
     this.canvas = undefined;
+    this._error?.remove();
+    this._error = null;
+    // A load waiting on this connection's player moves on to the next one's
+    // (see `_waitForPlayer`); one the page queues from here waits for it too.
+    this._settleReady();
+    this._resetReady();
+  }
+
+  /**
+   * Wait for the current connection's player. A move in the DOM replaces the
+   * promise while a load is waiting on it, so wait again on the new one; an
+   * element taken off the page stops waiting, and its load does nothing.
+   */
+  private async _waitForPlayer(): Promise<void> {
+    for (;;) {
+      const ready = this._ready;
+      await ready;
+      if (ready === this._ready || !this.isConnected) return;
+    }
+  }
+
+  /** Re-size whenever `devicePixelRatio` moves off its current value. */
+  private _watchDevicePixelRatio(): void {
+    if (typeof matchMedia === 'undefined') return;
+    const query = matchMedia(`(resolution: ${window.devicePixelRatio || 1}dppx)`);
+    const onChange = (): void => {
+      query.removeEventListener('change', onChange);
+      this._applySize();
+      this._watchDevicePixelRatio();
+    };
+    query.addEventListener('change', onChange);
+    this._dpr = { query, onChange };
   }
 
   /**
@@ -150,16 +213,19 @@ export class SsPlayerWebGPUElement extends HTMLElement {
   }
 
   attributeChangedCallback(name: string, oldValue: string | null, value: string | null): void {
-    // Before `_start` has a player there is nothing to change: it reads every
-    // attribute itself once the player exists.
-    if (!this.player || oldValue === value) return;
+    if (oldValue === value) return;
+    if (name === 'src' || name === 'pack') {
+      // Before the first connect, `connectedCallback` queues the load itself.
+      if (this._connection > 0 && this.isConnected) this._loadFromAttributes();
+      return;
+    }
+    // Before `_start` has a player there is nothing to change: the load reads
+    // every attribute itself once the player exists.
+    if (!this.player) return;
     if (FIT_ATTRIBUTES.includes(name)) {
-      this._fit();
+      if (this._fit()) this._recover();
     } else if (name === 'speed-scale') {
       this.player.setSpeedScale(this._speedScale());
-    } else if (name === 'src' || name === 'pack') {
-      const src = this.getAttribute('src');
-      if (src) void this.loadSrc(src, this.getAttribute('pack'), this.getAttribute('animation')).catch((e) => this._fail(e));
     } else if (name === 'animation' && value) {
       // Behind any load in flight: the player is lifted out of the context while
       // one runs, and the switch belongs to the pack that load leaves behind.
@@ -171,12 +237,12 @@ export class SsPlayerWebGPUElement extends HTMLElement {
    * Fit the character into the canvas by the `fit` / `align` / `flip-x` /
    * `flip-y` attributes, against the box picked at load. An unknown `fit` or
    * `align` throws, naming what it accepts, and fails the element rather than
-   * drawing somewhere the page did not ask for.
+   * drawing somewhere the page did not ask for. Says whether it fitted.
    */
-  private _fit(): void {
+  private _fit(): boolean {
     const player = this.player;
     const canvas = this.canvas;
-    if (!player || !canvas) return;
+    if (!player || !canvas) return false;
     try {
       player.fitInto(canvas.width, canvas.height, {
         fit: this.getAttribute('fit') || 'contain',
@@ -185,8 +251,10 @@ export class SsPlayerWebGPUElement extends HTMLElement {
         flipY: this.hasAttribute('flip-y'),
         frame: this._frame,
       });
+      return true;
     } catch (e) {
       this._fail(e);
+      return false;
     }
   }
 
@@ -206,6 +274,7 @@ export class SsPlayerWebGPUElement extends HTMLElement {
     if (!player || player.currentAnimation() === name) return;
     player.setAnimation(name);
     if (this.hasAttribute('autoplay')) player.play();
+    this._recover();
   }
 
   /**
@@ -218,9 +287,15 @@ export class SsPlayerWebGPUElement extends HTMLElement {
   private _dispatchFrame(): void {
     const player = this.player;
     if (!player) return;
+    // A listener may remove the element, which destroys the player: stop there.
     if (player.justStarted()) this._emit('animationstarted');
-    for (const event of player.events()) this._emit(String(event.kind).toLowerCase(), event);
+    if (this.player !== player) return;
+    for (const event of player.events()) {
+      this._emit(String(event.kind).toLowerCase(), event);
+      if (this.player !== player) return;
+    }
     if (player.justFinished()) this._emit('animationfinished');
+    if (this.player !== player) return;
     if (player.justLooped()) this._emit('animationlooped');
   }
 
@@ -231,7 +306,7 @@ export class SsPlayerWebGPUElement extends HTMLElement {
   /**
    * Pause the rAF loop while the canvas is scrolled off-screen or the tab is in
    * the background — battery on mobile, and the viewability rule ad creatives are
-   * measured against. Mirrors the WebGL player's `SSSurface` gating; no-op when
+   * measured against. No-op when
    * `pause-when-hidden="false"` or the APIs are missing (then it simply always runs).
    */
   private _ensureVisibilityWatch(): void {
@@ -262,6 +337,12 @@ export class SsPlayerWebGPUElement extends HTMLElement {
 
   /** Start or stop the rAF loop to match `_shouldRun` (idempotent). */
   private _syncTicker(): void {
+    // A device lost while the loop was stopped has nobody to notice it but this:
+    // rebuild it once the element would draw again.
+    if (this._wantTicker && !this._restoring && this.ctx?.isDeviceLost() && (!this._gated || (this._intersecting && !document.hidden))) {
+      void this._restoreDevice();
+      return;
+    }
     if (this._shouldRun && !this._raf) {
       // Reset the clock so the first frame after a pause uses a normal delta
       // instead of the whole idle gap.
@@ -312,27 +393,27 @@ export class SsPlayerWebGPUElement extends HTMLElement {
     this._syncTicker();
   }
 
-  private async _start(): Promise<void> {
+  private async _start(connection: number): Promise<void> {
     try {
       this.ctx = await sharedContext();
-      // Disconnected while the context was initialising: don't take a swapchain
-      // nobody will release.
-      if (!this.isConnected) return;
+      // Disconnected, or moved and connected again, while the context was
+      // initialising: don't take a swapchain nobody will release.
+      if (!this.isConnected || connection !== this._connection) return;
       this.surface = this.ctx.createSurface(this.canvas!);
       this.player = this.surface.createPlayer();
       // A setting holds from before the first animation and across a pack.
       this.player.setSpeedScale(this._speedScale());
-      const src = this.getAttribute('src');
-      if (src) await this.loadSrc(src, this.getAttribute('pack'), this.getAttribute('animation'));
-      this._wantTicker = true;
-      this._syncTicker();
     } catch (e) {
       this._fail(e);
+    } finally {
+      if (connection === this._connection) this._settleReady();
     }
   }
 
   /**
-   * Fetch + play a `.ssab`, embedded or reference. Can be called to switch packs.
+   * Fetch a `.ssab`, embedded or reference, and select `animation` (or its
+   * first); with `autoplay`, play it too. Resolves to the pack's animation names.
+   * Can be called to switch packs.
    *
    * Calls are **serialised**: the player is lifted out of the shared context for
    * the duration of a load, so two in flight at once would race for the slot and
@@ -345,55 +426,87 @@ export class SsPlayerWebGPUElement extends HTMLElement {
    * page plays a dropped folder.
    */
   loadSrc(src: string, pack?: string | null, animation?: string | null, read?: SsAssetReader | null): Promise<string[] | undefined> {
-    const run = this._loads.then(() => this._loadSrc(src, pack, animation, read));
+    const run = this._loads.then(() => this._waitForPlayer()).then(() => this._loadSrc(src, pack, animation, read));
     // What the next call waits on must settle, so the chain survives a load that
     // rejected. The caller still sees `run` itself, rejection and all.
     this._loads = run.catch(() => {});
     return run;
   }
 
+  /**
+   * Queue a load of the `src` / `pack` / `animation` attributes, read when it
+   * runs rather than now, so a change made before the player exists still lands.
+   * At most one waits at a time; a `loadSrc` the page makes later runs after it.
+   */
+  private _loadFromAttributes(): void {
+    if (this._attributeLoadQueued) return;
+    this._attributeLoadQueued = true;
+    const run = this._loads
+      .then(() => this._waitForPlayer())
+      .then(() => {
+        this._attributeLoadQueued = false;
+        const src = this.getAttribute('src');
+        return src ? this._loadSrc(src, this.getAttribute('pack'), this.getAttribute('animation')) : undefined;
+      });
+    this._loads = run.catch(() => {});
+    run.catch((e) => this._fail(e));
+  }
+
   private async _loadSrc(src: string, pack?: string | null, animation?: string | null, read?: SsAssetReader | null): Promise<string[] | undefined> {
-    if (!this.player) return;
+    // The player this load is for. A move in the DOM destroys it and makes
+    // another, which loads for itself; what this one fetched is then nobody's.
+    const player = this.player;
+    if (!player) {
+      if (this.isConnected) throw new Error('<ss-player-webgpu> has no player: WebGPU did not start (see the console)');
+      return;
+    }
     // One call fetches the pack, its atlases and any sibling `.ssab` its instance
     // parts play from — a URL answers both "what bytes" and
     // "what do its siblings resolve against". `pack` is a name override, which
     // `load` deliberately does not take; the rare host that needs one goes
     // through `loadSsab` with its own bytes.
     if (pack) {
-      const url = new URL(src, location.href);
-      const answer = read ? await read(url.href) : await (await fetch(url)).arrayBuffer();
+      const url = new URL(src, document.baseURI);
+      let answer: Awaited<ReturnType<SsAssetReader>> | ArrayBuffer;
+      if (read) {
+        answer = await read(url.href);
+      } else {
+        const response = await fetch(url);
+        if (!response.ok) throw new Error(`could not read ${url.href}: HTTP ${response.status}`);
+        answer = await response.arrayBuffer();
+      }
       if (answer == null) throw new Error(`could not read ${url.href}`);
       // A dropped `File` is a Blob, whose bytes are one await further.
       const bytes = new Uint8Array(answer instanceof Blob ? await answer.arrayBuffer() : answer);
-      await this.player.loadSsab(bytes, pack, url.href, read);
+      if (this.player !== player) return;
+      await player.loadSsab(bytes, pack, url.href, read);
     } else {
-      await this.player.load(src, read);
+      await player.load(src, read);
     }
-    // Disconnected while the bytes were in flight: `disconnectedCallback` has
-    // destroyed the player, and calling a destroyed handle is not a diagnostic
-    // worth raising over an element that is no longer on the page.
-    if (!this.player) return;
-    const names = this.player.animationNames();
+    // Disconnected (or moved) while the bytes were in flight:
+    // `disconnectedCallback` has destroyed this player, and calling a destroyed
+    // handle is not a diagnostic worth raising.
+    if (this.player !== player) return;
+    const names = player.animationNames();
     // Selecting and starting are separate calls: `setAnimation` is
-    // the allocating step, `play` is transport. The old single `play(name)` is
-    // deliberately not carried over.
-    this.player.setAnimation(animation || names[0]!);
-    this._frame = this.player.canvasRect() ?? undefined;
-    this._fit();
+    // the allocating step, `play` is transport.
+    player.setAnimation(animation || names[0]!);
+    this._frame = player.canvasRect() ?? undefined;
+    if (!this._fit()) return names;
     // `autoplay`, the HTML way: a boolean attribute is absent by default, so this
-    // is opt-in — the same shape `<video autoplay>` has, and the same shape
-    // `<ss-player>` (the WebGL element) already had. Without it the element holds
-    // its first frame, poster-like; `draw` still renders it, since drawing is
-    // independent of the transport.
-    //
-    // Sibling Players whose player is PLACED rather than constructed default the
-    // other way (ForGodot / ForUnity autoplay on), because a scene node has no
-    // code to call `play()` for it. An attribute is that code.
-    if (this.hasAttribute('autoplay')) this.player.play();
+    // is opt-in, as `<video autoplay>` is. Without it the element holds its first
+    // frame, poster-like; the surface's `frame()` still renders it, since drawing
+    // is independent of the transport.
+    if (this.hasAttribute('autoplay')) player.play();
+    this._recover();
     this._emit('load');
     return names;
   }
 
+  /**
+   * Show `err` in place of the canvas and stop the loop. The canvas stays, hidden,
+   * so the next load or attribute that works brings the element back.
+   */
   private _fail(err: unknown): void {
     this._wantTicker = false;
     this._syncTicker();
@@ -401,10 +514,23 @@ export class SsPlayerWebGPUElement extends HTMLElement {
     // textContent, not innerHTML: the message can carry a URL or a pack name that
     // came off an attribute, and an error path is a poor place to start parsing
     // markup.
-    const box = document.createElement('div');
-    box.style.cssText = 'font:14px system-ui;color:#c0392b;padding:1em';
-    box.textContent = `⚠️ ${err}`;
-    this.replaceChildren(box);
+    if (!this._error) {
+      this._error = document.createElement('div');
+      this._error.style.cssText = 'font:14px system-ui;color:#c0392b;padding:1em';
+      this.appendChild(this._error);
+    }
+    this._error.textContent = `⚠️ ${err instanceof Error ? err.message : err}`;
+    if (this.canvas) this.canvas.style.display = 'none';
+  }
+
+  /** Undo `_fail` and run the loop, once there is an animation to draw. */
+  private _recover(): void {
+    if (!this.player?.currentAnimation()) return;
+    this._error?.remove();
+    this._error = null;
+    if (this.canvas) this.canvas.style.display = 'block';
+    this._wantTicker = true;
+    this._syncTicker();
   }
 }
 

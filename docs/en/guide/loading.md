@@ -96,7 +96,7 @@ character, so everything else that did not arrive comes back as a list you can b
     if (ss_player_load(player, path) != SS_OK) {
         fprintf(stderr, "%s\n", ss_last_error());
     } else if (ss_player_missing_count(player) > 0) {
-        SsMissingAsset m;
+        ss_missing_asset_t m;
         for (uint32_t i = 0; i < ss_player_missing_count(player); i++) {
             if (ss_player_missing_at(player, i, &m) == SS_OK) {
                 fprintf(stderr, "missing: %s\n", m.name);
@@ -168,7 +168,8 @@ The texture map is **device-scoped**, so a pack shown five times is uploaded onc
     projects ask for the same cell map hash and mean two different atlases. Register by that hash
     and the second pack looks already-supplied: its own pixels are dropped and its parts draw the
     first pack's atlas. Ask the player for the key instead — it answers with an identity for the
-    image, so two packs that really do share a file still share one upload.
+    image. After a `load`, two packs that really do share a file still share one upload; packs
+    registered from bytes are keyed per pack, so siblings naming one file upload it once each.
 
 === "Rust"
 
@@ -187,6 +188,7 @@ The texture map is **device-scoped**, so a pack shown five times is uploaded onc
 
     ```c
     ss_texture_ref_t ref;
+    /* NULL is the selected pack; repeat with each sibling pack's name. */
     for (uint32_t i = 0; i < ss_player_texture_count(player, NULL); i++) {
         if (ss_player_texture_at(player, NULL, i, &ref) != SS_OK || ref.embedded) continue;
         /* Read <the .ssab's directory>/ref.path yourself; ref.key is already the key. */

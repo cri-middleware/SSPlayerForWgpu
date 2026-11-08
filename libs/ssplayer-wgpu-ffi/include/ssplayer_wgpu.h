@@ -78,7 +78,7 @@
 #define SS_MAX_CROWD_MEMBERS 4096
 
 /*
- What kind of thing an `SsEventData` is; read it before the payload.
+ What kind of thing an `ss_event_data_t` is; read it before the payload.
  */
 #define SS_EVENT_USER_DATA 0
 
@@ -93,7 +93,7 @@
 #define SS_EVENT_AUDIO 2
 
 /*
- Which field of an `SsSignalParamData` carries the value.
+ Which field of an `ss_signal_param_data_t` carries the value.
  */
 #define SS_SIGNAL_VALUE_NONE 0
 
@@ -258,8 +258,8 @@ typedef struct {
      */
     uint32_t height;
     /*
-     Clear colour, straight RGBA in 0..1. Alpha 0 leaves the window transparent
-     where nothing is drawn.
+     Clear colour, straight RGBA in 0..1. The window stays opaque whatever the
+     alpha.
      */
     float clear_color[4];
     /*
@@ -269,7 +269,9 @@ typedef struct {
      */
     bool enable_mask;
     /*
-     Flip the projection to Y-down (screen coordinates). `false` = Y-up.
+     Whether the render target is Y-down. A window's swapchain is not: pass
+     `false`, and `true` draws upside down. Player coordinates
+     (`ss_player_set_transform`) run downward either way.
      */
     bool y_down;
 } ss_scene_desc_t;
@@ -285,12 +287,9 @@ typedef struct {
 
      An identity for the **image**, not for the cellmap that names it: some
      tools name the atlas `spritemap1.png` in every project they export, so two packs
-     name their atlas alike, and a key that was only the cellmap's hash left the
-     second drawing the first one's atlas. Two packs that really do share a file
-     still share this, and so still share one upload.
-
-     Was `hash`, and renamed with the meaning: a field that silently stopped
-     being a cellmap hash is worse than one that stops compiling.
+     name their atlas alike, and a key made from the cellmap's hash alone would
+     let the second draw the first one's atlas. Two packs that really do share a
+     file still share this, and so still share one upload.
      */
     uint32_t key;
     /*
@@ -335,7 +334,7 @@ typedef struct {
      copy it if you need to keep it. Never null.
      */
     const char *name;
-} SsMissingAsset;
+} ss_missing_asset_t;
 
 /*
  One timeline event, flattened for the ABI.
@@ -408,7 +407,7 @@ typedef struct {
      infinite audio loop.
      */
     int32_t loop_num;
-} SsEventData;
+} ss_event_data_t;
 
 /*
  One signal parameter, flattened for the ABI. `value_type` says which field
@@ -440,7 +439,7 @@ typedef struct {
      When `value_type` is `TEXT`.
      */
     const char *text;
-} SsSignalParamData;
+} ss_signal_param_data_t;
 
 /*
  A box in player-local units — the space `ss_player_part_transform` reports
@@ -454,7 +453,7 @@ typedef struct {
     float y;
     float width;
     float height;
-} SsRect;
+} ss_rect_t;
 
 /*
  Everything `ss_player_fit_into` needs.
@@ -476,7 +475,7 @@ typedef struct {
      The box to fit. Read only when `has_frame` is true; otherwise the
      animation's authored canvas is used (`ss_player_canvas_rect`).
      */
-    SsRect frame;
+    ss_rect_t frame;
     bool has_frame;
     /*
      Pixels from the aligned position, applied **after** the fit.
@@ -503,7 +502,7 @@ typedef struct {
      fit itself.
      */
     float rotation;
-} SsPlacement;
+} ss_placement_t;
 
 /*
  What `ss_player_fit_into` wrote, in `ss_player_set_transform` terms: pixels
@@ -514,7 +513,7 @@ typedef struct {
     float y;
     float scale_x;
     float scale_y;
-} SsPlaced;
+} ss_placed_t;
 
 /*
  One copy of a player in a crowd: where it stands, in `ss_player_set_transform`
@@ -696,8 +695,8 @@ int32_t ss_player_load(ss_player_t *handle, const char *path);
 
  Every pack an animation can reference must be registered before
  `ss_player_set_animation`, since external instance parts resolve by pack
- name. Embedded-mode packs also carry their atlases; those
- are decoded here and uploaded on the next `ss_scene_update`.
+ name. Embedded-mode packs also carry their atlases; those are decoded and
+ uploaded on the next `ss_scene_update`.
 
  # Safety
  `pack_name` must be a NUL-terminated UTF-8 string and `data` must point at
@@ -802,7 +801,9 @@ int32_t ss_player_texture_at(ss_player_t *handle,
  runtime's UVs stay in the original cellmap's pixel space, so a different
  resolution samples a different region. One the device cannot hold fails
  with `SS_ERROR_INVALID_ARGUMENT` and leaves the cellmap as it was (see
- `ss_scene_add_texture`).
+ `ss_scene_add_texture`), as does a `cellmap_name` the pack does not list or a
+ `pack_name` the player does not hold. Restoring a cellmap that carries no
+ override succeeds and changes nothing.
 
  # Safety
  `pack_name` must be null or NUL-terminated UTF-8; `cellmap_name` must be
@@ -863,10 +864,6 @@ const char *ss_player_cellmap_texture_name(ss_player_t *handle, const char *pack
  }
  ```
 
- (Line comments above, deliberately: cbindgen renders these docs into a C
- block comment, so a nested block-comment terminator would close it early
- and break the generated header for every C and C++ host.)
-
  Describes the most recent load, not the player's history. Zero for a null or
  destroyed handle, which is indistinguishable from success — check the load's
  own return value for that.
@@ -882,9 +879,9 @@ uint32_t ss_player_missing_count(ss_player_t *handle);
  Writes `out` and returns `SS_OK`, or leaves it untouched and reports why.
 
  # Safety
- `out` must point at a writable `SsMissingAsset`.
+ `out` must point at a writable `ss_missing_asset_t`.
  */
-int32_t ss_player_missing_at(ss_player_t *handle, uint32_t index, SsMissingAsset *out);
+int32_t ss_player_missing_at(ss_player_t *handle, uint32_t index, ss_missing_asset_t *out);
 
 /*
  Select the animation to play, rebuilding the instance tree. It is left at its
@@ -912,7 +909,8 @@ void ss_player_play(ss_player_t *handle);
 /*
  `ss_player_play` from `start_frame` rather than the head of the section. The
  family spells this `play(startFrame)`; C has no overloads, so it is a second
- entry point here. Re-arms the loop count exactly as `ss_player_play` does.
+ entry point here. Re-arms the loop count exactly as `ss_player_play` does. A
+ frame outside the section is brought inside it, as `ss_player_seek` does.
 
  # Safety
  `handle` must be a live handle or null.
@@ -967,7 +965,9 @@ void ss_player_set_speed_scale(ss_player_t *handle, float speed);
 float ss_player_speed_scale(ss_player_t *handle);
 
 /*
- Whether the root animation is advancing.
+ Whether an animation has been started and has neither stopped nor finished.
+ `ss_player_pause` leaves it true; `ss_player_is_pausing` says whether it is
+ held.
 
  # Safety
  `handle` must be a live handle or null.
@@ -1813,9 +1813,9 @@ uint32_t ss_player_event_count(ss_player_t *handle);
 
  # Safety
  `handle` must be a live handle or null; `out` must point at a writable
- `SsEventData`.
+ `ss_event_data_t`.
  */
-int32_t ss_player_event_at(ss_player_t *handle, uint32_t index, SsEventData *out);
+int32_t ss_player_event_at(ss_player_t *handle, uint32_t index, ss_event_data_t *out);
 
 /*
  How many parameters the `index`-th event carries, or 0 when it is not a
@@ -1835,12 +1835,12 @@ uint32_t ss_player_event_signal_param_count(ss_player_t *handle, uint32_t index)
 
  # Safety
  `handle` must be a live handle or null; `out` must point at a writable
- `SsSignalParamData`.
+ `ss_signal_param_data_t`.
  */
 int32_t ss_player_event_signal_param_at(ss_player_t *handle,
                                         uint32_t index,
                                         uint32_t param,
-                                        SsSignalParamData *out);
+                                        ss_signal_param_data_t *out);
 
 /*
  Write the part's current-frame transform into `out` as the 2D affine
@@ -1985,13 +1985,13 @@ void ss_player_reset_transform(ss_player_t *handle);
  Fill `out` with the default placement: contain, centred, unscaled,
  unflipped, unrotated, and the animation's own canvas as the box.
 
- Start every `SsPlacement` here. A zeroed struct asks for `scale = 0`, which
+ Start every `ss_placement_t` here. A zeroed struct asks for `scale = 0`, which
  is a placement that draws nothing.
 
  # Safety
- `out` must point at a writable `SsPlacement`.
+ `out` must point at a writable `ss_placement_t`.
  */
-int32_t ss_placement_default(SsPlacement *out);
+int32_t ss_placement_default(ss_placement_t *out);
 
 /*
  Write the authored canvas of the animation now playing into `out`, as a box
@@ -2007,9 +2007,9 @@ int32_t ss_placement_default(SsPlacement *out);
 
  # Safety
  `handle` must be a live handle or null; `out` must point at a writable
- `SsRect`.
+ `ss_rect_t`.
  */
-int32_t ss_player_canvas_rect(ss_player_t *handle, SsRect *out);
+int32_t ss_player_canvas_rect(ss_player_t *handle, ss_rect_t *out);
 
 /*
  Fit the animation into a `width` x `height` box and place it there, as
@@ -2030,17 +2030,17 @@ int32_t ss_player_canvas_rect(ss_player_t *handle, SsRect *out);
 
  # Safety
  `handle` must be a live handle or null; `placement` must point at a readable
- `SsPlacement`; `out` must be null or point at a writable `SsPlaced`.
+ `ss_placement_t`; `out` must be null or point at a writable `ss_placed_t`.
  */
 int32_t ss_player_fit_into(ss_player_t *handle,
                            float width,
                            float height,
-                           const SsPlacement *placement,
-                           SsPlaced *out);
+                           const ss_placement_t *placement,
+                           ss_placed_t *out);
 
 /*
- Draw order within the scene; lower draws first. Ties keep the order the
- players were created in.
+ Draw order within the scene; lower draws first. The order among equal values
+ is not guaranteed, so give players that overlap distinct orders.
 
  # Safety
  `handle` must be a live handle or null.

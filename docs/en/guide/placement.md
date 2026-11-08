@@ -1,7 +1,7 @@
 # Fitting into a box
 
 The player draws at **authored scale** into whatever target it is given. That is what a game wants —
-a character is the size the artist made it, and the camera decides the rest. It is not what a UI
+a character is the size the artist made it, and the game places and scales it from there. It is not what a UI
 wants: a panel, a card or a preview pane is a box of a size the layout decided, and the animation
 has to end up inside it.
 
@@ -58,12 +58,12 @@ across the SpriteStudio Player family.
 === "C"
 
     ```c
-    SsPlacement placement;
+    ss_placement_t placement;
     ss_placement_default(&placement);   // never zero-initialise it: scale would be 0
     placement.fit = SS_FIT_COVER;
     placement.align = SS_ALIGN_BOTTOM;
 
-    SsPlaced placed;
+    ss_placed_t placed;
     ss_player_fit_into(player, width, height, &placement, &placed);
     ```
 
@@ -116,11 +116,11 @@ one scale across a pack, read the canvas once after the first `setAnimation` and
 === "C"
 
     ```c
-    SsRect rect;
+    ss_rect_t rect;
     if (ss_player_canvas_rect(player, &rect) == SS_OK) { /* … */ }
 
     placement.has_frame = true;
-    placement.frame = (SsRect){ -100.0f, -200.0f, 200.0f, 200.0f };
+    placement.frame = (ss_rect_t){ -100.0f, -200.0f, 200.0f, 200.0f };
     ```
 
 === "JavaScript"
