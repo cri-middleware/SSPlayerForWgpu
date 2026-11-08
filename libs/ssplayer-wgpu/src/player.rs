@@ -1415,11 +1415,17 @@ impl SSPlayer {
     ///
     /// Not a resume either — it re-arms the loop count exactly as `play` does,
     /// and the frame it starts from becomes the reference the loop counts from.
+    /// A frame outside the section is brought inside it, as [`SSPlayer::seek`]
+    /// does; a negative one starts from the head, as `play` does.
     pub fn play_from(&mut self, start_frame: f32) {
         self.prev_finished = false;
         self.rebuild = true;
+        let (first, last) = (self.start_frame() as f32, self.end_frame() as f32);
         if let Some(root) = &mut self.root {
             reset_slots(root);
+            // The runtime takes a non-negative frame as given, and one past the
+            // section draws nothing at all.
+            let start_frame = if start_frame < 0.0 || start_frame.is_nan() { -1.0 } else if start_frame >= last + 1.0 { last } else { start_frame.max(first) };
             root.context.play_with_start_frame(start_frame);
             self.start_pending = true;
         }
