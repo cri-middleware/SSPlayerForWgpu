@@ -608,6 +608,32 @@ fn ss_straight_rgb(tex: vec4<f32>) -> vec3<f32> {
     return select(tex.rgb, tex.rgb / max(tex.a, 0.0001), tex_info.flags.x > 0.5);
 }
 
+// The part's texel at `uv`, filtered in premultiplied space. The sampler blends a
+// straight texture's transparent texels' colour into its edges — dark or white
+// fringes wherever the art is scaled — so a straight texture is filtered here
+// from its four nearest texels instead, and handed back straight. `sampled` is
+// the hardware sample, taken while control flow is still uniform.
+fn ss_texel(sampled: vec4<f32>, uv: vec2<f32>) -> vec4<f32> {
+    if (tex_info.flags.x > 0.5) {
+        return sampled;
+    }
+    let dims = vec2<i32>(textureDimensions(t_diffuse, 0));
+    let p = uv * vec2<f32>(dims) - 0.5;
+    let base = vec2<i32>(floor(p));
+    let f = p - floor(p);
+    let hi = dims - vec2<i32>(1);
+    let c00 = ss_premul(textureLoad(t_diffuse, clamp(base, vec2<i32>(0), hi), 0));
+    let c10 = ss_premul(textureLoad(t_diffuse, clamp(base + vec2<i32>(1, 0), vec2<i32>(0), hi), 0));
+    let c01 = ss_premul(textureLoad(t_diffuse, clamp(base + vec2<i32>(0, 1), vec2<i32>(0), hi), 0));
+    let c11 = ss_premul(textureLoad(t_diffuse, clamp(base + vec2<i32>(1, 1), vec2<i32>(0), hi), 0));
+    let c = mix(mix(c00, c10, f.x), mix(c01, c11, f.x), f.y);
+    return vec4<f32>(c.rgb / max(c.a, 0.0001), c.a);
+}
+
+fn ss_premul(texel: vec4<f32>) -> vec4<f32> {
+    return vec4<f32>(texel.rgb * texel.a, texel.a);
+}
+
 // group(2) under the coverage layout: the coverage bitmaps for the masked
 // content that replays them, the group-alpha layers for the composite.
 @group(2) @binding(0) var t_layers: texture_2d_array<f32>;
@@ -1067,7 +1093,7 @@ const WGSL_SHADER: &str = r#"
 // keeping the whole path premultiplied.
 @fragment
 fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
-    let tex = textureSample(t_diffuse, s_diffuse, in.uv);
+    let tex = ss_texel(textureSample(t_diffuse, s_diffuse, in.uv), in.uv);
     if (tex.a == 0.0) {
         return vec4<f32>(0.0);
     }
@@ -1088,7 +1114,7 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
 // being uniform — which a `discard` above it would make it.
 @fragment
 fn fs_main_coverage(in: VertexOutput) -> @location(0) vec4<f32> {
-    let tex = textureSample(t_diffuse, s_diffuse, in.uv);
+    let tex = ss_texel(textureSample(t_diffuse, s_diffuse, in.uv), in.uv);
     let info = in.mask_info;
     if ((info & MASK_INFO_ACTIVE) != 0u && !mask_passes(in, info, in.cov_base)) {
         discard;
