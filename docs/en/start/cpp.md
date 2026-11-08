@@ -177,6 +177,9 @@ int main(void) {
 }
 ```
 
+The example is C99. C++ before C++20 — MSVC's default is C++14 — has no designated initializers:
+zero the struct (`ss_scene_desc_t desc{};`) and set its fields one by one.
+
 That is the entire per-frame API: **`ss_scene_update` then `ss_scene_render`**. One scene is one
 window; one player is one character; a scene draws every player it owns in a single pass, in
 ascending `ss_player_set_order`.

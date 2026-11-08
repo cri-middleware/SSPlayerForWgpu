@@ -29,7 +29,7 @@
     player.setPartVisibilityOverrideByIndex(index, true, false);
     ```
 
-インデックスは `set_animation` のときに**一度だけ**引いて保持してください。名前の照合はハッシュですが、探索自体はパーツ列を歩きます。パックが持つものは `part_names()` / `ss_player_part_name`（0 から null が返るまで歩きます。`ss_player_part_count` は最初の update まで 0 です）/ `partNames()` で列挙できます。
+インデックスは `set_animation` のときに**一度だけ**引いて保持してください。名前の照合はハッシュですが、探索自体はパーツ列を歩きます。パックが持つものは `part_names()` / `ss_player_part_name`（0 から null が返るまで、または `ss_player_part_count` まで歩きます）/ `partNames()` で列挙できます。
 
 ## 表示
 

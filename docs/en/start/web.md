@@ -26,8 +26,9 @@ away.
 npm i @spritestudio/ssplayer-wgpu
 ```
 
-ESM-only, no runtime dependencies. It ships the wasm binary, and a bundler (Vite, webpack 5,
-Rollup) picks it up as an asset with no configuration.
+ESM-only, no runtime dependencies. It ships the wasm binary, which Vite and webpack 5 pick up as an
+asset with no configuration. Plain Rollup needs a plugin that emits `new URL(…, import.meta.url)`
+assets, or [`setWasmUrl`](#loading-the-wasm).
 
 To see it running first, open the [live demo](https://cri-middleware.github.io/SSPlayerForWgpu/demo/).
 

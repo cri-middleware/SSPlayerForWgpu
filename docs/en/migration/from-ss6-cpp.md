@@ -30,9 +30,11 @@ code** — but the host code gets considerably smaller, and this page is the map
 `MainPost()` / `RenderPost()` every frame, with OpenGL state, buffers and textures owned inside the
 player.
 
-**This player has no global initialisation and no shutdown.** The wgpu `Device` / `Queue` /
-`Surface` belong to your application, which lends them per frame — so the player rides along inside
-any renderer or engine without locking you in. See [The borrow model](../wgpu/borrow-model.md).
+**This player has no global initialisation and no shutdown.** From Rust, the wgpu `Device` /
+`Queue` / `Surface` belong to your application, which lends them per frame — so the player rides
+along inside any renderer or engine without locking you in. See [The borrow model](../wgpu/borrow-model.md).
+From C, `ss_scene_create` builds them from the window you hand it, and `ss_scene_destroy` frees
+them.
 
 | Role | SS6Player for CPP | Rust | C API |
 |---|---|---|---|

@@ -22,9 +22,9 @@ for the embedded set.
 
 Dropping a `.ssab` — or a folder of them — plays it, whichever way it was
 exported. Dropped packs join the list `Left`/`Right` walks rather than replacing
-it, so a character can be compared against the demo set; drop a whole folder when
-the pack has external instance references, since those resolve by pack name and
-every referenced pack has to be registered first.
+it, so a character can be compared against the demo set. The sibling packs a
+pack's instance parts play from are found beside it, as `ss_player_load` finds
+them.
 
 **Reference-mode packs work too, and that is the interesting part.** Their
 atlases stay as sibling files, and where those sit is the `.ssab`'s own business:

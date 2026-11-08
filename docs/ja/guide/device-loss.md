@@ -65,7 +65,7 @@ flowchart LR
 
 === "Bevy"
 
-    復帰は Bevy 自身の復帰に乗ります。新しいデバイスで Bevy が `RenderStartup` を再実行してレンダラーが作り直され、キャラクターは次のフレームにメインワールドから読み直されます。
+    復帰は Bevy 自身の復帰に乗ります。新しいデバイスで Bevy が `RenderStartup` を再実行してレンダラーが作り直され、キャラクターは次のフレームにメインワールドから読み直されます。アニメーションは先頭から始まり、フレーム、ループ回数、トラックスタックは引き継がれず、`SsStarted` がもう一度届きます。
 
     **opt-in が必要です。** Bevy の既定のエラーハンドラはデバイスロストで*終了*します。`DeviceLost` に `RenderErrorPolicy::Recover(RenderCreation::default())` を返す `RenderErrorHandler` を入れてください：
 

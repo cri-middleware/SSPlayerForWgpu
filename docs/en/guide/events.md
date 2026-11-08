@@ -104,8 +104,9 @@ frame it was noticed on.
 
 Only track 0's animation fires events, and from the moment a `crossfade` on track 0 begins that is
 the incoming animation: its events come through from the start of the fade, and the outgoing
-animation's stop — unless `set_track_outgoing_event_threshold` keeps them going for part of it. Each event also says which
-**source** fired it — `source()`, the handle `track_main_source` and `add_track_source` use — which
+animation's stop — unless `set_track_outgoing_event_threshold` keeps them going for part of it,
+though never in the update that completes the fade, which has already released it. Each event
+also says which **source** fired it — `source()`, the handle `track_main_source` and `add_track_source` use — which
 tells events apart once another source has opted in with `set_source_event_threshold`
 ([Motion blending](./motion-blending.md)). The C face carries it as `ss_event_data_t.source`, and each
 JavaScript event object as `source`.
