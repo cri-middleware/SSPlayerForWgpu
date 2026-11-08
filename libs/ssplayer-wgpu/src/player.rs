@@ -1615,12 +1615,13 @@ impl SSPlayer {
         }
     }
 
-    /// The configured count, and how many cycles are left of it.
+    /// The configured count — before an animation is set up, the one
+    /// [`SSPlayer::set_loop_count`] is holding for it, or 0 when none was set.
     pub fn loop_count(&self) -> i32 {
-        self.root.as_ref().map(|r| r.context.get_loop_count()).unwrap_or(0)
+        self.root.as_ref().map(|r| r.context.get_loop_count()).or(self.loop_count).unwrap_or(0)
     }
 
-    /// See [`SSPlayer::loop_count`].
+    /// How many cycles of [`SSPlayer::loop_count`] are left; 0 with no animation.
     pub fn remaining_loops(&self) -> i32 {
         self.root.as_ref().map(|r| r.context.get_remaining_loops()).unwrap_or(0)
     }
@@ -1897,6 +1898,8 @@ impl SSPlayer {
     /// `threshold`. The default, `+∞`, silences it from the moment the fade
     /// begins, when the incoming one starts firing; `0.5` keeps it firing for
     /// the first half. Kept by the track, so it holds for every crossfade on it.
+    /// The update that completes the fade has already released the outgoing
+    /// animation, so it fires nothing there, even at `0`.
     pub fn set_track_outgoing_event_threshold(&mut self, track: u32, threshold: f32) -> Result<(), SSRuntimeError> {
         let root = self.root_posed()?;
         root.context.set_track_outgoing_event_threshold(track, threshold)
@@ -2588,7 +2591,7 @@ impl SSPlayer {
     ///
     /// Reads the `.ssab` parts table, which is static for the resource, rather
     /// than [`SSPlayer::part_count`] — that one is derived from the world-matrix
-    /// buffer and is zero until an animation has been set up and stepped.
+    /// buffer and is zero until an animation has been set up.
     ///
     /// A part authored without a name holds its slot as an empty string, so the
     /// vector stays index-aligned with `part_index`.

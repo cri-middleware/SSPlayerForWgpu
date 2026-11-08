@@ -1145,7 +1145,7 @@ impl SsPlayerWeb {
         // Spelled out because a typed trailing parameter costs the ones before it
         // their `?` in the generated `.d.ts`.
         #[wasm_bindgen(unchecked_optional_param_type = "string | null")] pack: Option<String>,
-        #[wasm_bindgen(unchecked_optional_param_type = "string | null")] base_url: Option<String>,
+        #[wasm_bindgen(js_name = "baseUrl", unchecked_optional_param_type = "string | null")] base_url: Option<String>,
         #[wasm_bindgen(unchecked_optional_param_type = "SsAssetReader | null")] read: Option<js_sys::Function>,
     ) -> Result<(), JsValue> {
         self.ensure_idle()?;
@@ -1227,7 +1227,7 @@ impl SsPlayerWeb {
         // Spelled out because a typed trailing parameter costs the ones before it
         // their `?` in the generated `.d.ts`.
         #[wasm_bindgen(unchecked_optional_param_type = "string | null")] pack: Option<String>,
-        #[wasm_bindgen(unchecked_optional_param_type = "string | null")] base_url: Option<String>,
+        #[wasm_bindgen(js_name = "baseUrl", unchecked_optional_param_type = "string | null")] base_url: Option<String>,
         #[wasm_bindgen(unchecked_optional_param_type = "SsAssetReader | null")] read: Option<js_sys::Function>,
     ) -> Result<(), JsValue> {
         self.ensure_idle()?;
@@ -1463,7 +1463,7 @@ impl SsPlayerWeb {
 
     /// `play()` from `startFrame` rather than the head of the section.
     #[wasm_bindgen(js_name = playFrom)]
-    pub fn play_from(&self, start_frame: f32) -> Result<(), JsValue> {
+    pub fn play_from(&self, #[wasm_bindgen(js_name = "startFrame")] start_frame: f32) -> Result<(), JsValue> {
         with_player!(self, |p| p.play_from(start_frame))
     }
 
@@ -1560,13 +1560,14 @@ impl SsPlayerWeb {
         with_player!(self, |p| p.set_loop_count(count))
     }
 
-    /// The configured loop count.
+    /// The configured loop count — before an animation is set up, the one
+    /// `setLoopCount` is holding for it, or 0 when none was set.
     #[wasm_bindgen(js_name = loopCount)]
     pub fn loop_count(&self) -> Result<i32, JsValue> {
         with_player!(self, |p| p.loop_count())
     }
 
-    /// How many cycles are left of it.
+    /// How many cycles of the loop count are left; 0 with no animation.
     #[wasm_bindgen(js_name = remainingLoops)]
     pub fn remaining_loops(&self) -> Result<i32, JsValue> {
         with_player!(self, |p| p.remaining_loops())
@@ -1678,7 +1679,7 @@ impl SsPlayerWeb {
     /// pre-multiply it. `priority`: 0 until the next keyframe, 1 until the next
     /// animation, 2 permanent. Normal parts only.
     #[wasm_bindgen(js_name = setPartColorOverrideByIndex)]
-    pub fn set_part_color_override_by_index(&self, part: u32, rgba: u32, blend_op: u8, priority: u8) -> Result<(), JsValue> {
+    pub fn set_part_color_override_by_index(&self, part: u32, rgba: u32, #[wasm_bindgen(js_name = "blendOp")] blend_op: u8, priority: u8) -> Result<(), JsValue> {
         let blend_op = BlendOp::from_wire(blend_op).ok_or_else(|| js_error("blendOp must be 0..=3"))?;
         let priority = OverridePriority::from_wire(priority).ok_or_else(|| js_error("priority must be 0..=2"))?;
         with_player!(self, |p| p.set_part_color_override_by_index(part, rgba, blend_op, priority).map_err(js_err)?)
@@ -1688,7 +1689,7 @@ impl SsPlayerWeb {
     /// runtime's order — left-top, right-top, left-bottom, right-bottom, each
     /// `[r, g, b, a]`. Otherwise as `setPartColorOverride`.
     #[wasm_bindgen(js_name = setPartColorOverrideCornersByIndex)]
-    pub fn set_part_color_override_corners_by_index(&self, part: u32, corners: &[u8], blend_op: u8, priority: u8) -> Result<(), JsValue> {
+    pub fn set_part_color_override_corners_by_index(&self, part: u32, corners: &[u8], #[wasm_bindgen(js_name = "blendOp")] blend_op: u8, priority: u8) -> Result<(), JsValue> {
         let blend_op = BlendOp::from_wire(blend_op).ok_or_else(|| js_error("blendOp must be 0..=3"))?;
         let priority = OverridePriority::from_wire(priority).ok_or_else(|| js_error("priority must be 0..=2"))?;
         if corners.len() != 16 {
@@ -1709,7 +1710,7 @@ impl SsPlayerWeb {
     /// `.ssce` extension. Normal and Mask parts only; throws when the cell
     /// cannot be resolved against the loaded pack.
     #[wasm_bindgen(js_name = setPartCellOverrideByIndex)]
-    pub fn set_part_cell_override_by_index(&self, part: u32, cellmap_name: &str, cell_name: &str, priority: u8) -> Result<(), JsValue> {
+    pub fn set_part_cell_override_by_index(&self, part: u32, #[wasm_bindgen(js_name = "cellmapName")] cellmap_name: &str, #[wasm_bindgen(js_name = "cellName")] cell_name: &str, priority: u8) -> Result<(), JsValue> {
         let priority = OverridePriority::from_wire(priority).ok_or_else(|| js_error("priority must be 0..=2"))?;
         with_player!(self, |p| p.set_part_cell_override_by_index(part, cellmap_name, cell_name, priority).map_err(js_err)?)
     }
@@ -1741,7 +1742,7 @@ impl SsPlayerWeb {
 
     /// Override a part's colour by name. Arguments as `setPartColorOverrideByIndex`.
     #[wasm_bindgen(js_name = setPartColorOverride)]
-    pub fn set_part_color_override(&self, part: &str, rgba: u32, blend_op: u8, priority: u8) -> Result<(), JsValue> {
+    pub fn set_part_color_override(&self, part: &str, rgba: u32, #[wasm_bindgen(js_name = "blendOp")] blend_op: u8, priority: u8) -> Result<(), JsValue> {
         let blend_op = BlendOp::from_wire(blend_op).ok_or_else(|| js_error("blendOp must be 0..=3"))?;
         let priority = OverridePriority::from_wire(priority).ok_or_else(|| js_error("priority must be 0..=2"))?;
         with_player!(self, |p| p.set_part_color_override(part, rgba, blend_op, priority).map_err(js_err)?)
@@ -1749,7 +1750,7 @@ impl SsPlayerWeb {
 
     /// Four-corner colour override by name. Arguments as the `ByIndex` sibling.
     #[wasm_bindgen(js_name = setPartColorOverrideCorners)]
-    pub fn set_part_color_override_corners(&self, part: &str, corners: &[u8], blend_op: u8, priority: u8) -> Result<(), JsValue> {
+    pub fn set_part_color_override_corners(&self, part: &str, corners: &[u8], #[wasm_bindgen(js_name = "blendOp")] blend_op: u8, priority: u8) -> Result<(), JsValue> {
         let blend_op = BlendOp::from_wire(blend_op).ok_or_else(|| js_error("blendOp must be 0..=3"))?;
         let priority = OverridePriority::from_wire(priority).ok_or_else(|| js_error("priority must be 0..=2"))?;
         if corners.len() != 16 {
@@ -1768,7 +1769,7 @@ impl SsPlayerWeb {
 
     /// Make a part draw a different cell, by name.
     #[wasm_bindgen(js_name = setPartCellOverride)]
-    pub fn set_part_cell_override(&self, part: &str, cellmap_name: &str, cell_name: &str, priority: u8) -> Result<(), JsValue> {
+    pub fn set_part_cell_override(&self, part: &str, #[wasm_bindgen(js_name = "cellmapName")] cellmap_name: &str, #[wasm_bindgen(js_name = "cellName")] cell_name: &str, priority: u8) -> Result<(), JsValue> {
         let priority = OverridePriority::from_wire(priority).ok_or_else(|| js_error("priority must be 0..=2"))?;
         with_player!(self, |p| p.set_part_cell_override(part, cellmap_name, cell_name, priority).map_err(js_err)?)
     }
@@ -1827,8 +1828,8 @@ impl SsPlayerWeb {
     /// carries back into something a human reads, and what fills a part picker.
     ///
     /// An unnamed part holds its slot as an empty string, so the array stays
-    /// index-aligned. `length` is the part count, and unlike `partCount` it is
-    /// there as soon as a pack is bound rather than after the first update.
+    /// index-aligned. `length` is the part count, and unlike `partCount`, which
+    /// is 0 until an animation is set up, it is there as soon as a pack is bound.
     #[wasm_bindgen(js_name = partNames)]
     pub fn part_names(&self) -> Result<Vec<String>, JsValue> {
         with_player!(self, |p| p.part_names().unwrap_or_default())
@@ -1844,7 +1845,7 @@ impl SsPlayerWeb {
     /// The cell names inside one cellmap — the other half of what
     /// `setPartCellOverride` takes.
     #[wasm_bindgen(js_name = cellNames)]
-    pub fn cell_names(&self, cellmap_name: &str) -> Result<Vec<String>, JsValue> {
+    pub fn cell_names(&self, #[wasm_bindgen(js_name = "cellmapName")] cellmap_name: &str) -> Result<Vec<String>, JsValue> {
         with_player!(self, |p| p.cell_names(cellmap_name).unwrap_or_default())
     }
 
@@ -1949,14 +1950,14 @@ impl SsPlayerWeb {
     /// reports, and it plays with the speed, direction and loop count the page
     /// set. The instance tree is not rebuilt; the instance and effect parts
     /// belong to the pack, so the running children carry on.
-    pub fn crossfade(&self, track: u32, name: &str, duration_ms: f32) -> Result<(), JsValue> {
+    pub fn crossfade(&self, track: u32, name: &str, #[wasm_bindgen(js_name = "durationMs")] duration_ms: f32) -> Result<(), JsValue> {
         with_player!(self, |p| p.crossfade(track, name, duration_ms).map_err(js_err)?)
     }
 
     /// Drive `track`'s alpha to `target` over `durationMs`. Fading track 0 to 0
     /// settles the character onto the setup pose.
     #[wasm_bindgen(js_name = fadeTrack)]
-    pub fn fade_track(&self, track: u32, target: f32, duration_ms: f32) -> Result<(), JsValue> {
+    pub fn fade_track(&self, track: u32, target: f32, #[wasm_bindgen(js_name = "durationMs")] duration_ms: f32) -> Result<(), JsValue> {
         with_player!(self, |p| p.fade_track(track, target, duration_ms).map_err(js_err)?)
     }
 
@@ -2080,6 +2081,8 @@ impl SsPlayerWeb {
     /// events: while its share of the track, `1 - progress`, is at least
     /// `threshold`. The default, `Infinity`, silences it from the moment the
     /// fade begins; `0.5` keeps it firing for the first half. Kept by the track.
+    /// The update that completes the fade has already released the outgoing
+    /// animation, so it fires nothing there, even at `0`.
     #[wasm_bindgen(js_name = setTrackOutgoingEventThreshold)]
     pub fn set_track_outgoing_event_threshold(&self, track: u32, threshold: f32) -> Result<(), JsValue> {
         with_player!(self, |p| p.set_track_outgoing_event_threshold(track, threshold).map_err(js_err)?)
@@ -2217,7 +2220,7 @@ impl SsPlayerWeb {
     /// `y` measured **downward** (as `partTransform` reports, and as ForWeb's
     /// `offsetY` means it). `rotation` is in radians.
     #[wasm_bindgen(js_name = setTransform)]
-    pub fn set_transform(&self, x: f32, y: f32, scale_x: f32, scale_y: f32, rotation: f32) -> Result<(), JsValue> {
+    pub fn set_transform(&self, x: f32, y: f32, #[wasm_bindgen(js_name = "scaleX")] scale_x: f32, #[wasm_bindgen(js_name = "scaleY")] scale_y: f32, rotation: f32) -> Result<(), JsValue> {
         with_player!(self, |p| p.set_transform(x, y, scale_x, scale_y, rotation))
     }
 
