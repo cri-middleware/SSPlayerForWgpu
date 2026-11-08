@@ -1,7 +1,7 @@
 # Fitting into a box
 
 The player draws at **authored scale** into whatever target it is given. That is what a game wants —
-a character is the size the artist made it, and the camera decides the rest. It is not what a UI
+a character is the size the artist made it, and the game places and scales it from there. It is not what a UI
 wants: a panel, a card or a preview pane is a box of a size the layout decided, and the animation
 has to end up inside it.
 

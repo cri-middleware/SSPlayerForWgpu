@@ -40,7 +40,9 @@ pub struct SsPlayer {
 }
 
 /// Where the character sits, in the same terms
-/// [`ssplayer_wgpu::SSPlayer::set_transform`] takes.
+/// [`ssplayer_wgpu::SSPlayer::set_transform`] takes but in Bevy's world units —
+/// logical pixels under the default 2D projection — from the view's centre, with
+/// `y` downward. The camera's own `Transform` and zoom do not apply.
 ///
 /// Deliberately not Bevy's [`Transform`]: that is a 3D affine whose decomposition
 /// into the player's five scalars is lossy, and a host that wants the two linked

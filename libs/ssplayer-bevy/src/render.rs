@@ -671,7 +671,9 @@ pub(crate) fn draw_players(
         let size = target.main_texture().size();
         UVec2::new(size.width, size.height)
     });
-    // Y-up, matching Bevy's 2D world axes.
+    // The target is Y-up, as every wgpu target is; `SsTransform.y` still runs
+    // downward, as `set_transform`'s does. Physical pixels: extract scaled the
+    // transforms from Bevy's logical ones.
     scene.set_viewport(queue, size.x as f32, size.y as f32, false);
     scene.set_group_alpha(extracted.group_alpha);
 

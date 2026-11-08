@@ -362,7 +362,7 @@ fn handle_input(
     }
     if keys.just_pressed(KeyCode::KeyF) {
         // Not the native viewer's projection-handedness flip — the adapter owns the
-        // projection (it follows the camera), so this mirrors the character
+        // projection (it follows the viewport's size), so this mirrors the character
         // vertically via a negative scale instead. Enough to sanity-check that
         // negative scale draws.
         state.y_flip = !state.y_flip;
