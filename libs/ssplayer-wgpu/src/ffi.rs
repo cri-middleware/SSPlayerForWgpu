@@ -1131,7 +1131,8 @@ pub unsafe extern "C" fn ss_player_play(handle: *mut SsPlayer) {
 
 /// `ss_player_play` from `start_frame` rather than the head of the section. The
 /// family spells this `play(startFrame)`; C has no overloads, so it is a second
-/// entry point here. Re-arms the loop count exactly as `ss_player_play` does.
+/// entry point here. Re-arms the loop count exactly as `ss_player_play` does. A
+/// frame outside the section is brought inside it, as `ss_player_seek` does.
 ///
 /// # Safety
 /// `handle` must be a live handle or null.
@@ -2767,7 +2768,7 @@ pub unsafe extern "C" fn ss_player_reset_transform(handle: *mut SsPlayer) {
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn ss_placement_default(out: *mut SsPlacement) -> i32 {
     if out.is_null() {
-        return SS_ERROR_INVALID_ARGUMENT;
+        return fail(SS_ERROR_INVALID_ARGUMENT, "out is null");
     }
     let default = Placement::default();
     unsafe {
@@ -2804,13 +2805,13 @@ pub unsafe extern "C" fn ss_placement_default(out: *mut SsPlacement) -> i32 {
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn ss_player_canvas_rect(handle: *mut SsPlayer, out: *mut SsRect) -> i32 {
     if out.is_null() {
-        return SS_ERROR_INVALID_ARGUMENT;
+        return fail(SS_ERROR_INVALID_ARGUMENT, "out is null");
     }
     let Some(player) = (unsafe { player(handle) }) else {
-        return SS_ERROR_INVALID_ARGUMENT;
+        return fail(SS_ERROR_INVALID_ARGUMENT, "player handle is null or destroyed");
     };
     let Some(rect) = player.canvas_rect() else {
-        return SS_ERROR_INVALID_ARGUMENT;
+        return fail(SS_ERROR_INVALID_ARGUMENT, "no animation is set up");
     };
     unsafe { out.write(SsRect { x: rect.x, y: rect.y, width: rect.width, height: rect.height }) };
     SS_OK
@@ -2838,14 +2839,17 @@ pub unsafe extern "C" fn ss_player_canvas_rect(handle: *mut SsPlayer, out: *mut 
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn ss_player_fit_into(handle: *mut SsPlayer, width: f32, height: f32, placement: *const SsPlacement, out: *mut SsPlaced) -> i32 {
     if placement.is_null() {
-        return SS_ERROR_INVALID_ARGUMENT;
+        return fail(SS_ERROR_INVALID_ARGUMENT, "placement is null");
     }
     let desc = unsafe { *placement };
-    let (Some(fit), Some(align)) = (fit_from_wire(desc.fit), align_from_wire(desc.align)) else {
-        return SS_ERROR_INVALID_ARGUMENT;
+    let Some(fit) = fit_from_wire(desc.fit) else {
+        return fail(SS_ERROR_INVALID_ARGUMENT, format!("fit {} is not an SS_FIT_* value", desc.fit));
+    };
+    let Some(align) = align_from_wire(desc.align) else {
+        return fail(SS_ERROR_INVALID_ARGUMENT, format!("align {} is not an SS_ALIGN_* value", desc.align));
     };
     let Some(player) = (unsafe { player(handle) }) else {
-        return SS_ERROR_INVALID_ARGUMENT;
+        return fail(SS_ERROR_INVALID_ARGUMENT, "player handle is null or destroyed");
     };
     let frame = desc.has_frame.then_some(Rect { x: desc.frame.x, y: desc.frame.y, width: desc.frame.width, height: desc.frame.height });
     let placed = player.fit_into(width, height, &Placement { fit, align, frame, offset: (desc.offset_x, desc.offset_y), scale: desc.scale, flip_x: desc.flip_x, flip_y: desc.flip_y, rotation: desc.rotation });

@@ -909,7 +909,8 @@ void ss_player_play(ss_player_t *handle);
 /*
  `ss_player_play` from `start_frame` rather than the head of the section. The
  family spells this `play(startFrame)`; C has no overloads, so it is a second
- entry point here. Re-arms the loop count exactly as `ss_player_play` does.
+ entry point here. Re-arms the loop count exactly as `ss_player_play` does. A
+ frame outside the section is brought inside it, as `ss_player_seek` does.
 
  # Safety
  `handle` must be a live handle or null.
