@@ -521,6 +521,15 @@ void Viewer::Tick() {
         delta = 0.25f;
     }
 
+    // The driver can take the device away (a TDR, a GPU reset). Update and render
+    // do nothing while it is gone, so rebuild it rather than freeze.
+    if (ss_scene_is_device_lost(scene_)) {
+        if (ss_scene_restore_device(scene_) != SS_OK) {
+            fprintf(stderr, "restore: %s\n", ss_last_error());
+        }
+        return;
+    }
+
     // One update and one render for the whole window, whatever the player count:
     // they share a scene, so they share the pass.
     ss_scene_update(scene_, delta);
