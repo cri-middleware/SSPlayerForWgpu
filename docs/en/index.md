@@ -39,7 +39,7 @@ own, and you never need the other three.
     You own a `wgpu::Device` and a render pass — your own renderer, `winit`, `egui`, `Slint`.
     The player draws into the pass you opened.
 
-    [:octicons-arrow-right-24: Get started with Rust](./start/rust.md)
+    :octicons-arrow-right-24: [Get started with Rust](./start/rust.md)
 
 -   :material-gamepad-variant: __Bevy__
 
@@ -48,7 +48,7 @@ own, and you never need the other three.
     Add a plugin, spawn three components. Characters go into Bevy's own 2D pass, on the device
     Bevy already owns. You never touch wgpu.
 
-    [:octicons-arrow-right-24: Get started with Bevy](./start/bevy.md)
+    :octicons-arrow-right-24: [Get started with Bevy](./start/bevy.md)
 
 -   :material-language-cpp: __C / C++__
 
@@ -58,7 +58,7 @@ own, and you never need the other three.
     `wl_surface` and call two functions per frame — DX12, Metal or Vulkan underneath.
     **No wgpu type ever crosses the ABI.**
 
-    [:octicons-arrow-right-24: Get started with C / C++](./start/cpp.md)
+    :octicons-arrow-right-24: [Get started with C / C++](./start/cpp.md)
 
 -   :material-web: __JavaScript / TypeScript__
 
@@ -67,7 +67,7 @@ own, and you never need the other three.
     An npm package with the WebGPU renderer compiled to WebAssembly, plus a
     `<ss-player-webgpu>` element for the one-character case. The device is built for you.
 
-    [:octicons-arrow-right-24: Get started on the web](./start/web.md)
+    :octicons-arrow-right-24: [Get started on the web](./start/web.md)
 
 </div>
 

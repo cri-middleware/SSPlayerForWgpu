@@ -25,7 +25,7 @@ Windows のゲームも、macOS のアプリも、4 本の移植版ではなく�
 
     `wgpu::Device` とレンダーパスを自分で持っているケース（自作レンダラー、`winit`、`egui`、`Slint`）。あなたが開いたパスの中に描画します。
 
-    [:octicons-arrow-right-24: Rust ではじめる](./start/rust.md)
+    :octicons-arrow-right-24: [Rust ではじめる](./start/rust.md)
 
 -   :material-gamepad-variant: __Bevy__
 
@@ -34,7 +34,7 @@ Windows のゲームも、macOS のアプリも、4 本の移植版ではなく�
     プラグインを 1 つ追加して、コンポーネントを 3 つ spawn するだけ。Bevy が既に持っているデバイス上で、
     Bevy 自身の 2D パスに描画されます。wgpu には一切触れません。
 
-    [:octicons-arrow-right-24: Bevy ではじめる](./start/bevy.md)
+    :octicons-arrow-right-24: [Bevy ではじめる](./start/bevy.md)
 
 -   :material-language-cpp: __C / C++__
 
@@ -43,7 +43,7 @@ Windows のゲームも、macOS のアプリも、4 本の移植版ではなく�
     静的ライブラリ 1 本とヘッダ 1 枚。`HWND` / `CAMetalLayer` / `Window` / `wl_surface` を渡して、毎フレーム 2 つの関数を呼ぶだけ。裏側は DX12 / Metal / Vulkan です。
     **wgpu の型は ABI を一切越えません。**
 
-    [:octicons-arrow-right-24: C / C++ ではじめる](./start/cpp.md)
+    :octicons-arrow-right-24: [C / C++ ではじめる](./start/cpp.md)
 
 -   :material-web: __JavaScript / TypeScript__
 
@@ -52,7 +52,7 @@ Windows のゲームも、macOS のアプリも、4 本の移植版ではなく�
     WebGPU レンダラーを WebAssembly にコンパイルした npm パッケージ。1 体だけ表示するなら
     `<ss-player-webgpu>` 要素で済みます。デバイスはライブラリ側が用意します。
 
-    [:octicons-arrow-right-24: Web ではじめる](./start/web.md)
+    :octicons-arrow-right-24: [Web ではじめる](./start/web.md)
 
 </div>
 
