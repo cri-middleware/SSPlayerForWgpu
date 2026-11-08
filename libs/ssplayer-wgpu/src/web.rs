@@ -28,10 +28,7 @@
 //! decoding of those PNGs is the browser's job here, not the player's** — the
 //! `web` feature carries no image decoder, because one is already installed on
 //! every page. [`SsPlayerWeb::embedded_textures`] hands out the encoded bytes and
-//! [`SsContextWeb::add_texture_from_bytes`] runs them through `createImageBitmap`,
-//! which is the same division of labour as `ssplayer-core`'s
-//! `extractEmbeddedTextures` + `ssplayer-webgl`'s `loadTextureFromBytes`, and the
-//! reason this face is ~30% smaller over the wire than one that bundles `image`.
+//! [`SsContextWeb::add_texture_from_bytes`] runs them through `createImageBitmap`.
 
 use crate::events::{SignalValue, SsEvent};
 use crate::fit::{Align, Fit, Placement, Rect};
@@ -70,8 +67,8 @@ fn gone(what: &str) -> JsValue {
 ///
 /// Not read off `SurfaceCapabilities`: wgpu's WebGPU backend reports `[Opaque]`
 /// there and accepts `PreMultiplied` in `configure` anyway, mapping it onto the
-/// canvas context's `alphaMode: "premultiplied"`. Picking the first reported mode
-/// is what made every element an opaque black box.
+/// canvas context's `alphaMode: "premultiplied"`, so picking the first reported
+/// mode would make every element an opaque box.
 const PAGE_ALPHA_MODE: wgpu::CompositeAlphaMode = wgpu::CompositeAlphaMode::PreMultiplied;
 
 /// Decode encoded image bytes (PNG) with **the browser's** decoder.
@@ -95,10 +92,8 @@ async fn decode_image(bytes: &[u8]) -> Result<web_sys::ImageBitmap, JsValue> {
     wasm_bindgen_futures::JsFuture::from(promise).await?.dyn_into::<web_sys::ImageBitmap>().map_err(|_| JsValue::from_str("createImageBitmap did not return an ImageBitmap"))
 }
 
-/// Report a recoverable problem the way the sibling players do — one missing
-/// atlas or sub-pack should cost you that one thing, not the character
-/// (`SS6PlayerForGodot`'s `ERR_PRINT` + `continue`, `PackResolver`'s
-/// `console.warn` + `continue`).
+/// Report a recoverable problem: one missing atlas or sub-pack should cost you
+/// that one thing, not the character.
 fn warn(message: &str) {
     web_sys::console::warn_1(&JsValue::from_str(message));
 }
@@ -355,8 +350,7 @@ async fn request_adapter(instance: &wgpu::Instance) -> Result<wgpu::Adapter, JsV
 
 /// One canvas: its swapchain and the scene drawn into it.
 struct SurfaceEntry {
-    /// Always with a stencil buffer: masks and the per-part shader gating rely
-    /// on one being present.
+    /// Always with a stencil buffer: masks rely on one being present.
     swapchain: Swapchain,
     scene: SSScene,
     /// The players drawn into this canvas. The scene borrows them per frame
@@ -386,8 +380,7 @@ struct WebContext {
     ///
     /// Affordable precisely because they are encoded: a 2048² atlas is a few
     /// hundred KB here against the 16 MB its pixels would take under
-    /// [`Retention::Retain`]. The same trade the WebGL player makes by retaining
-    /// its `{ kind: 'bytes' }` source rather than the decoded image.
+    /// [`Retention::Retain`].
     encoded_textures: HashMap<u32, Rc<[u8]>>,
     /// Kept last: the instance must outlive the surfaces it created.
     instance: wgpu::Instance,
@@ -422,8 +415,8 @@ impl WebContext {
     /// Refuses a bitmap the device cannot hold — past its
     /// `max_texture_dimension_2d`, or empty, which is also what a closed one
     /// reports — before anything changes. wgpu would raise it as a validation
-    /// error, and with its default handler that aborted the wasm instance and
-    /// took every player on the page with it.
+    /// error, whose default handler aborts the wasm instance and takes every
+    /// player on the page with it.
     fn set_texture_from_bitmap(&mut self, hash: u32, bitmap: &web_sys::ImageBitmap) -> Result<(), JsValue> {
         let (width, height) = (bitmap.width(), bitmap.height());
         if let Some(why) = texture_extent_error(&self.device, (width, height)) {
@@ -544,10 +537,8 @@ impl SsContextWeb {
     /// Both `.ssab` forms end here. An embedded pack's atlases come from
     /// [`SsPlayerWeb::embedded_textures`] and need no fetch; a reference pack's
     /// come from fetching each [`SsPlayerWeb::texture_refs`] entry whose
-    /// `embedded` is false, resolved against the `.ssab`'s own URL. That is the
-    /// same shape as `ssplayer-core`'s `extractEmbeddedTextures` /
-    /// `extractTexturePaths` pair, and the reason this face supports both forms
-    /// without carrying a decoder.
+    /// `embedded` is false, resolved against the `.ssab`'s own URL — which is how
+    /// this face supports both forms without carrying a decoder.
     ///
     /// The bytes are kept (they are the encoded image, not the pixels) so
     /// [`SsContextWeb::restore_device`] can rebuild this texture on its own.
@@ -559,8 +550,7 @@ impl SsContextWeb {
     /// Supply a texture under its `key` from an `ImageBitmap` the **page** decoded.
     ///
     /// For a host with its own asset pipeline — the analogue of
-    /// [`crate::SSRenderer::set_texture`] and of the WebGL player's
-    /// `bindTextureSource`. The bitmap must be premultiplied
+    /// [`crate::SSRenderer::set_texture`]. The bitmap must be premultiplied
     /// (`createImageBitmap(blob, { premultiplyAlpha: 'premultiply' })`), which is
     /// what the whole pipeline composites in.
     ///
@@ -582,8 +572,8 @@ impl SsContextWeb {
     /// Whether an atlas is already registered for `key`.
     ///
     /// The texture map is device-scoped, so this answers for the
-    /// whole page: it is how a caller keeps "N players of one pack decode its
-    /// atlas once between them" true now that the decode happens in JS. The
+    /// whole page: it is how a page that decodes atlases itself keeps "N players of
+    /// one pack decode its atlas once between them" true. The
     /// player-side flush gets that for free (it filters before the decode); a
     /// page supplying textures itself has to ask.
     #[wasm_bindgen(js_name = hasTexture)]
@@ -761,8 +751,7 @@ impl SsSurfaceWeb {
 
     /// Fade each player whose alpha is below 1 as one layer, composited at its
     /// alpha, rather than part by part — so overlapping parts of a half-faded
-    /// character read half, not three quarters. The WebGL player does this for
-    /// every faded player; here it is off by default.
+    /// character read half, not three quarters. Off by default.
     ///
     /// Each player faded at once costs a render pass per frame and a layer the
     /// size of the canvas (about 8 MiB at 1920x1080), counted in
@@ -789,9 +778,9 @@ impl SsSurfaceWeb {
     ///
     /// `gpuPassTimeNs` is `undefined` unless the browser granted
     /// `timestamp-query`, and lags one or two frames by design. The counters are
-    /// always available: `prims` vs `drawCalls` is the headroom draw-call merging
-    /// would have, and `redundantTextureBinds` the headroom bind-group dedup
-    /// would — both measured on native, neither yet measured here.
+    /// always available: `mergeableDraws` counts the draw calls that could have
+    /// joined the one before them, and `redundantTextureBinds` the texture binds
+    /// that repeated the one before them.
     pub fn stats(&self) -> Result<js_sys::Object, JsValue> {
         let ctx = &mut *self.ctx.borrow_mut();
         let entry = ctx.surfaces.get_mut(self.id).ok_or_else(|| gone("surface"))?;
@@ -926,10 +915,10 @@ macro_rules! with_player {
 /// The web half of [`AssetLoader`]: `fetch` for files, or the host's own reader
 /// in its place, and `createImageBitmap` for images.
 ///
-/// The counterpart of the filesystem loader behind [`SSPlayer::load`], and the
-/// reason the walk itself —
-/// both texture tables, deduplication by file, transitive instance packs — is
-/// written once in [`SSPlayer::load`] rather than twice. What differs is only
+/// The counterpart of the filesystem loader behind `SSPlayer::load`, and the
+/// reason the walk itself — both texture tables, deduplication by file,
+/// transitive instance packs — is written once in [`SSPlayer::load_with`]
+/// rather than twice. What differs is only
 /// what a browser can do that a filesystem cannot, and the other way round.
 ///
 /// Holds the context by `Rc` and takes its `RefMut` for a moment at a time,
@@ -991,10 +980,6 @@ impl AssetLoader for WebAssetLoader {
     /// The URL `path` resolves to, hashed — the same resolution `read` performs,
     /// so two packs fetched from two directories that both name `spritemap1.png`
     /// are two images and the sibling packs of one project are one.
-    ///
-    /// This is the URL-keying `ssplayer-core` settled on for the same reason: the
-    /// alias it cached under used to be the cellmap hash, which is global state,
-    /// and two players showing different projects on one page collided.
     fn texture_key(&self, path: &str, cellmap_hash: u32) -> u32 {
         match absolute_url(path, self.base_url.as_deref()) {
             Some(url) => ssruntime::fnv1a_hash_str(&url),
@@ -1010,10 +995,9 @@ impl AssetLoader for WebAssetLoader {
         }
     }
 
-    /// What the renderer holds — and it is now safe to ask, because `key` names
-    /// the image rather than a slot inside one pack. Asking by cellmap hash was
-    /// the bug itself: a second project's `spritemap1` looked present, its PNG
-    /// was never fetched, and its parts drew the first project's atlas.
+    /// What the renderer holds. `key` names the image rather than a slot inside
+    /// one pack, so a second project's `spritemap1` is not mistaken for the
+    /// first's.
     fn has_texture(&self, key: u32) -> bool {
         self.ctx.borrow().renderer.texture_size(key).is_some()
     }
@@ -1045,7 +1029,7 @@ impl SsPlayerWeb {
 
     /// Run `body` on this handle's player, **outside** the context's `RefCell`.
     ///
-    /// [`SSPlayer::load`] holds `&mut SSPlayer` across its awaits, and on this
+    /// [`SSPlayer::load_with`] holds `&mut SSPlayer` across its awaits, and on this
     /// face the player lives inside the one cell everything else borrows — so it
     /// is lifted out for the duration and put back after. The slot keeps a blank
     /// player meanwhile, which draws nothing: it has no animation yet, which is
@@ -1105,16 +1089,14 @@ impl SsPlayerWeb {
 impl SsPlayerWeb {
     /// Register + select a `.ssab`, **and load the textures it needs**.
     ///
-    /// The shape of SpriteStudio Player for Godot's `setSSABResource`, which loads the
-    /// pack's textures before returning and leaves `setAnimation` a pure
-    /// selection. Texture loading belongs to initialisation, not to animation
-    /// selection: switching
-    /// motions is a frequent, synchronous operation that must not carry a
-    /// `Promise`. [`SsPlayerWeb::set_animation`] therefore stays synchronous.
+    /// It loads the pack's textures before returning and leaves `setAnimation` a
+    /// pure selection. Texture loading belongs to initialisation, not to
+    /// animation selection: switching motions is a frequent, synchronous
+    /// operation that must not carry a `Promise`, so
+    /// [`SsPlayerWeb::set_animation`] stays synchronous.
     ///
-    /// This is async because a browser cannot do otherwise — `fetch` and
-    /// `createImageBitmap` are asynchronous where Godot's `ResourceLoader::load`
-    /// is not. **That is the one place the asynchrony appears.**
+    /// This is async because `fetch` and `createImageBitmap` are. **That is the
+    /// one place the asynchrony appears.**
     ///
     /// * `pack` names the pack for external instance references (`ref_anime_pack`).
     /// Pass `null`/`undefined` — the usual case — to use the name the exporter
@@ -1157,15 +1139,13 @@ impl SsPlayerWeb {
 
     /// Fetch a `.ssab` **and everything it needs**, then select it.
     ///
-    /// The shortest form, and the one `ssplayer-core`'s `load(ssabUrl)` takes: a
-    /// URL is the one input that answers both questions a pack raises — what the
+    /// The shortest form: a URL is the one input that answers both questions a pack raises — what the
     /// bytes are, and what its sibling files resolve against. `src` may be
     /// absolute or relative (resolved against the document, like any URL a page
     /// uses), and the pack keeps the name the exporter gave it.
     ///
-    /// This is [`SSPlayer::load`] with the browser's loader plugged in — the same
-    /// call, the same walk, as a native host makes with
-    /// [`SSPlayer::load`]. Use [`SsPlayerWeb::load_ssab`] when the bytes have
+    /// This is [`SSPlayer::load_with`] with the browser's loader plugged in — the
+    /// same walk a native host's `SSPlayer::load` makes. Use [`SsPlayerWeb::load_ssab`] when the bytes have
     /// no URL at all — a bundler's import — and pass `baseUrl` if that pack
     /// still has siblings to find.
     ///
@@ -1195,9 +1175,8 @@ impl SsPlayerWeb {
         // No base of our own: `src` is page-relative like any other URL here, so
         // the document resolves it. The walk then hands `src` to `set_base` — after
         // it has been read, never before — and the `.ssab`'s own URL becomes what
-        // its siblings resolve against. Setting it here instead is what once made
-        // `src` resolve against itself and fetch `assets/assets/Basic.ssab`; the
-        // ordering is now what rules that out.
+        // its siblings resolve against. Setting it here instead would resolve
+        // `src` against itself and fetch `assets/assets/Basic.ssab`.
         let mut loader = WebAssetLoader::new(Rc::clone(&self.ctx), None, read);
         let src = src.to_owned();
         self.with_player_detached(|mut player| async move {
@@ -1212,9 +1191,8 @@ impl SsPlayerWeb {
     /// additional pack for external instance references, and loads its assets
     /// too — a sub-animation's cells come out of its own pack's atlases.
     ///
-    /// Rarely needed now that [`SsPlayerWeb::load`] resolves those references
-    /// itself; it remains for packs that are not URL-addressable, the case
-    /// `ssplayer-core` covers with its `InstancePackProvider` hook.
+    /// Rarely needed, since [`SsPlayerWeb::load`] resolves those references
+    /// itself; it is for packs that are not URL-addressable.
     #[wasm_bindgen(js_name = addSsab)]
     pub async fn add_ssab(
         &self,
@@ -1252,9 +1230,7 @@ impl SsPlayerWeb {
     /// The atlases a registered pack asks for, as `{ key, path, embedded }[]`
     /// in pack order. `pack` undefined selects the main pack.
     ///
-    /// The counterpart of [`SsContextWeb::add_texture`], and the same shape the
-    /// reference implementation exposes (`ssplayer-core`'s `extractTexturePaths`):
-    /// only the `.ssab` knows where its atlases were exported to, so a page
+    /// The counterpart of [`SsContextWeb::add_texture`]: only the `.ssab` knows where its atlases were exported to, so a page
     /// showing a reference-mode pack fetches `new URL(path, ssabUrl)` for every
     /// entry whose `embedded` is false and registers the pixels by **`key`**.
     /// Embedded entries need no fetch — they arrive with the pack.
@@ -1291,9 +1267,8 @@ impl SsPlayerWeb {
     /// still something to decode, and on this face the decoder is the browser.
     /// Hand each entry to [`SsContextWeb::add_texture_from_bytes`].
     ///
-    /// Same shape as `ssplayer-core`'s `extractEmbeddedTextures`, and same
-    /// reason: it is what lets a player support embedded packs without carrying
-    /// an image decoder into the bundle.
+    /// It is what lets this face support embedded packs without carrying an image
+    /// decoder into the bundle.
     #[wasm_bindgen(js_name = embeddedTextures)]
     pub fn embedded_textures(&self, pack: Option<String>) -> Result<js_sys::Array, JsValue> {
         with_player!(self, |p| {
@@ -1873,6 +1848,7 @@ impl SsPlayerWeb {
         with_player!(self, |p| p.set_track_alpha(track, alpha).map_err(js_err)?)
     }
 
+    /// `track`'s alpha, or `undefined` when there is no such track.
     #[wasm_bindgen(js_name = trackAlpha)]
     pub fn track_alpha(&self, track: u32) -> Result<Option<f32>, JsValue> {
         with_player!(self, |p| p.track_alpha(track))
@@ -1955,6 +1931,7 @@ impl SsPlayerWeb {
         with_player!(self, |p| p.set_track_frame(track, frame).map_err(js_err)?)
     }
 
+    /// `track`'s playhead, or `undefined` when there is no such track.
     #[wasm_bindgen(js_name = trackFrame)]
     pub fn track_frame(&self, track: u32) -> Result<Option<f32>, JsValue> {
         with_player!(self, |p| p.track_frame(track))
@@ -1974,6 +1951,7 @@ impl SsPlayerWeb {
     // belongs to the animation, and laying another one starts it looping
     // forever again.
 
+    /// `track`'s speed (see `setTrackSpeed`), or `undefined` when there is no such track.
     #[wasm_bindgen(js_name = trackSpeed)]
     pub fn track_speed(&self, track: u32) -> Result<Option<f32>, JsValue> {
         with_player!(self, |p| p.track_speed(track))
@@ -1998,6 +1976,7 @@ impl SsPlayerWeb {
         with_player!(self, |p| p.set_track_frame_skip_enabled(track, skip).map_err(js_err)?)
     }
 
+    /// Whether `track` skips frames to keep time, or `undefined` when there is no such track.
     #[wasm_bindgen(js_name = trackFrameSkipEnabled)]
     pub fn track_frame_skip_enabled(&self, track: u32) -> Result<Option<bool>, JsValue> {
         with_player!(self, |p| p.track_frame_skip_enabled(track))
@@ -2059,6 +2038,8 @@ impl SsPlayerWeb {
         with_player!(self, |p| p.set_track_outgoing_event_threshold(track, threshold).map_err(js_err)?)
     }
 
+    /// The threshold the outgoing side of a crossfade on `track` fires its events
+    /// at, or `undefined` when there is no such track.
     #[wasm_bindgen(js_name = trackOutgoingEventThreshold)]
     pub fn track_outgoing_event_threshold(&self, track: u32) -> Result<Option<f32>, JsValue> {
         with_player!(self, |p| p.track_outgoing_event_threshold(track))
@@ -2083,6 +2064,7 @@ impl SsPlayerWeb {
         with_player!(self, |p| p.set_source_weight(source, weight).map_err(js_err)?)
     }
 
+    /// `source`'s weight within its track, or `undefined` when there is no such source.
     #[wasm_bindgen(js_name = sourceWeight)]
     pub fn source_weight(&self, source: u32) -> Result<Option<f32>, JsValue> {
         with_player!(self, |p| p.source_weight(source))
@@ -2094,6 +2076,7 @@ impl SsPlayerWeb {
         with_player!(self, |p| p.set_source_frame(source, frame).map_err(js_err)?)
     }
 
+    /// `source`'s playhead, or `undefined` when there is no such source.
     #[wasm_bindgen(js_name = sourceFrame)]
     pub fn source_frame(&self, source: u32) -> Result<Option<f32>, JsValue> {
         with_player!(self, |p| p.source_frame(source))
@@ -2107,6 +2090,8 @@ impl SsPlayerWeb {
         with_player!(self, |p| p.set_source_event_threshold(source, threshold).map_err(js_err)?)
     }
 
+    /// The weight `source` must reach for its events to fire, or `undefined` when
+    /// there is no such source.
     #[wasm_bindgen(js_name = sourceEventThreshold)]
     pub fn source_event_threshold(&self, source: u32) -> Result<Option<f32>, JsValue> {
         with_player!(self, |p| p.source_event_threshold(source))

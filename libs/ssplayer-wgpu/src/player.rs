@@ -36,9 +36,7 @@ const IDENTITY: [f32; 16] = [1.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 1
 /// **This is the whole of the platform-specific part of loading.** Everything
 /// else — reading both texture tables, deduplicating by file, walking instance
 /// references transitively — is the same everywhere and lives in
-/// [`SSPlayer::load_with`], so a face cannot quietly implement half of it. That is the
-/// same line `SS6PlayerForCPP` draws between `Common/` and `Platform/`, and the
-/// one `ssplayer-core` draws with `IResourceManager`.
+/// [`SSPlayer::load_with`], so a face cannot quietly implement half of it.
 ///
 /// Two implementations ship: the filesystem behind [`SSPlayer::load`], and the
 /// web face's (`fetch` + `createImageBitmap`, whose pixels reach the GPU without
@@ -59,8 +57,8 @@ pub trait AssetLoader {
     /// [`SSPlayer::load_with`] calls this first, before it reads anything. It is
     /// what lets one loader serve more than one load: without it the base set by
     /// the last load is still in force when the next `src` is read, and a second
-    /// `load_with(loader, "overall/Other.ssab")` goes looking in
-    /// `overall/overall`. An engine adapter holding a single loader over its
+    /// `load_with(loader, "overall/Other.ssab")` looks in `overall/overall`. An
+    /// engine adapter holding a single loader over its
     /// `AssetServer` / `ResourceLoader` / `.pck` handle is the shape that needs
     /// this; nothing else about the walk changes.
     ///
@@ -89,9 +87,8 @@ pub trait AssetLoader {
     /// base the two would have reached separately.
     ///
     /// [`SSPlayer::load_with`] calls this exactly once per load, **after** reading
-    /// the pack and before asking for anything else. That order is what makes the
-    /// bug this contract exists for unrepresentable: `src` is read while the base
-    /// is still whatever the caller set up, so it can never be resolved against
+    /// the pack and before asking for anything else, so `src` is read while the
+    /// base is still whatever the caller set up and can never be resolved against
     /// itself. [`SSPlayer::load_assets`] does not call it at all — a caller
     /// reaching for that one is expected to have rooted the loader itself.
     fn set_base(&mut self, src: &str);
@@ -114,8 +111,6 @@ pub trait AssetLoader {
     /// — the default — falls back to exactly that. Implement it where a pack is
     /// addressable by name but not by path: an archive keyed by pack name, an
     /// engine's asset server, bytes a drop handler is already holding.
-    /// `ssplayer-core` has the same hook for the same reason
-    /// (`InstancePackProvider`, tried before its fetch).
     ///
     /// The alternative is to register the pack with [`SSPlayer::add_ssab`] before
     /// loading — the walk skips a pack it already has — but that means knowing
@@ -147,8 +142,8 @@ pub trait AssetLoader {
     /// the harmless direction; answering alike for two files draws the wrong
     /// picture.
     ///
-    /// The default answers `cellmap_hash`, which is what a loader rooted in one
-    /// place forever has always done.
+    /// The default answers `cellmap_hash`, which is enough for a loader that never
+    /// serves two projects to one renderer.
     fn texture_key(&self, _path: &str, cellmap_hash: u32) -> u32 {
         cellmap_hash
     }
@@ -169,8 +164,7 @@ pub trait AssetLoader {
 
     /// Report a file that could not be loaded. One missing atlas or sub-pack
     /// costs you that one thing, not the character, so this is a diagnostic
-    /// rather than an error — the same call `SS6PlayerForGodot` makes with
-    /// `ERR_PRINT` and `ssplayer-core` with `console.warn`.
+    /// rather than an error.
     fn warn(&self, message: &str);
 }
 
@@ -196,8 +190,7 @@ fn refresh_atlas_keys(node: &mut PlaybackNode, atlas_keys: &HashMap<String, Arc<
 }
 
 /// The table for one pack, or an empty one when the player has never seen its
-/// atlases — in which case every slot resolves to itself and the renderer is
-/// keyed exactly as it was before there was a table.
+/// atlases — in which case every slot resolves to itself.
 fn node_atlas_keys(atlas_keys: &HashMap<String, Arc<AtlasKeys>>, pack: &str) -> Arc<AtlasKeys> {
     atlas_keys.get(pack).cloned().unwrap_or_default()
 }
@@ -240,9 +233,8 @@ fn atlas_key(loader: &impl AssetLoader, texture: &TextureRef, embedded: Option<&
 /// identifies the image (see [`AssetLoader::texture_key`]) and translates every
 /// hash through this table on the way to a draw call.
 ///
-/// A slot with no entry resolves to itself, so a pack whose atlases the player
-/// never saw — the host registered them against [`SSRenderer`] directly — keeps
-/// behaving exactly as it did before there was a table.
+/// A slot with no entry resolves to itself: the cellmap hash is the key, for a
+/// pack whose atlases the host registered against [`SSRenderer`] directly.
 ///
 /// A `Vec` rather than a map: packs have a handful of cellmaps (usually one), and
 /// this is read once per draw batch.
@@ -292,6 +284,7 @@ pub enum MissingKind {
 /// [`AssetLoader::warn`], and this is the half a program can branch on.
 #[derive(Clone, Debug)]
 pub struct MissingAsset {
+    /// Whether a texture or a pack is missing.
     pub kind: MissingKind,
     /// What was asked for: for a texture, the path the exporter wrote —
     /// relative to its pack's directory, which is what the loader resolved it
@@ -477,10 +470,13 @@ pub const MAX_CROWD_MEMBERS: usize = 1 << CROWD_SHIFT;
 /// where the player does, unfaded and untinted.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct CrowdMember {
+    /// Horizontal position, in the same terms as `set_transform`'s.
     pub x: f32,
     /// Measured downward, as `set_transform`'s is.
     pub y: f32,
+    /// Horizontal scale; negative mirrors.
     pub scale_x: f32,
+    /// Vertical scale; negative mirrors.
     pub scale_y: f32,
     /// Radians.
     pub rotation: f32,
@@ -503,9 +499,8 @@ impl CrowdMember {
     }
 }
 
-/// Translation, scale, then rotation in radians, as a column-major matrix (see
-/// `mat4_mul` / `apply_transform`): the columns are scale*rotation for x and y,
-/// then z, then the translation.
+/// Translation, scale, then rotation in radians, as a column-major matrix: the
+/// columns are scale*rotation for x and y, then z, then the translation.
 fn placement(x: f32, y: f32, scale_x: f32, scale_y: f32, rotation: f32) -> [f32; 16] {
     let (sin, cos) = rotation.sin_cos();
     #[rustfmt::skip]
@@ -526,9 +521,8 @@ fn placement(x: f32, y: f32, scale_x: f32, scale_y: f32, rotation: f32) -> [f32;
 /// costs one integer read.
 ///
 /// Each index addresses the event table of **the animation of the source that
-/// fired it**, so the table is looked up per event. Keeping the one
-/// `set_animation` chose read every event wrongly once a crossfade on track 0
-/// had handed the track to another animation: a different event, or none.
+/// fired it**, so the table is looked up per event: a crossfade on track 0 hands
+/// the track to another animation than the one `set_animation` chose.
 fn collect_events(node: &PlaybackNode, out: &mut Vec<SsEvent>) {
     out.clear();
     let indices = node.context.get_passed_event_indices();
@@ -585,8 +579,8 @@ struct PlaybackNode {
     /// to look the table up by name.
     pack: String,
     /// Where this node's pack's cellmap hashes point in the renderer's texture
-    /// map. Read once at build time, for the same reason `mask_flags` is: the
-    /// draw walk needs it per batch and it cannot change under a live tree.
+    /// map. Read at build time, because the draw walk needs it per batch, and
+    /// re-read by [`refresh_atlas_keys`] when a load moves an atlas.
     ///
     /// Per node rather than per player because a node plays from *one* pack
     /// while the tree spans several — an instance part's sub-animation is a
@@ -619,10 +613,9 @@ struct EffectPart {
     ///
     /// Copied rather than borrowed: the buffer behind `step`'s result belongs to
     /// the slot, and the draw walk that consumes it is a later walk than the one
-    /// that steps. Keeping the raw pointer instead would additionally cost
-    /// `SSPlayer: Send`, which `SSScene::update` does not require now that its
-    /// walk is serial again, but a host that moves players
-    /// between its own threads does. The allocation is reused frame to frame, so
+    /// that steps. Keeping the raw pointer instead would cost `SSPlayer: Send`,
+    /// which a host that moves players between its own threads needs. The
+    /// allocation is reused frame to frame, so
     /// the price is one memcpy per effect.
     plan: Vec<u8>,
 }
@@ -652,8 +645,8 @@ pub struct SSPlayer {
     ///
     /// [`build_node`] binds each `Context` to a resource by **raw pointer**, and
     /// the `Arc` keeping that resource alive lives in `packs` — so re-registering
-    /// a name (`add_pack` / `add_ssab`) used to free the very resource the tree
-    /// was still evaluating. Retiring the old pack here is what keeps
+    /// a name (`add_pack` / `add_ssab`) would free the very resource the tree is
+    /// still evaluating. Retiring the old pack here is what keeps
     /// `resource_static_ptr`'s contract ("keep some `Arc` alive for as long as
     /// the pointer is in use"); the tree goes on playing the data it was built
     /// from, and [`SSPlayer::set_animation`] — the one call that rebuilds it —
@@ -694,7 +687,7 @@ pub struct SSPlayer {
     missing: Vec<MissingAsset>,
     /// Timeline events the last `build_frame` crossed. Cleared and refilled per
     /// update, and reused rather than reallocated — a frame with no events costs
-    /// nothing beyond the `passed_event_count` read.
+    /// nothing beyond the `get_passed_event_indices` read.
     events: Vec<SsEvent>,
     /// Whether the last update crossed a loop boundary. A pulse the runtime
     /// clears on entry to every update, so it is captured there and mirrored
@@ -709,22 +702,16 @@ pub struct SSPlayer {
     finished_edge: bool,
     /// The latch that makes `finished_edge` an edge.
     ///
-    /// Held explicitly: the alternative
-    /// is to lean on some earlier `is_playing` guard, which works until someone
-    /// moves the guard. Notifying `is_finished` directly
-    /// (fires every frame afterwards) and not resetting the latch in `play`
-    /// (the *next* completion goes missing) are defects that really happened in
-    /// sibling Players.
+    /// Held explicitly rather than leaning on an earlier `is_playing` guard.
+    /// `play` resets it, or the next completion goes unreported.
     prev_finished: bool,
     /// Whether the last update was the first to run after a `play`.
     started_edge: bool,
     /// A `play` that no tick has run since. The tick reports it, not the call,
     /// so a culled player's skipped tick leaves it for the first one that runs.
     start_pending: bool,
-    /// Where this player sits in the scene — the root transform of its tree. Composed by [`SSPlayer::set_transform`]; only the matrix is
-    /// kept because nothing yet re-composes it. A future `box` (the
-    /// WebGL player's viewport-tracking rect) moves after `set_transform` runs,
-    /// so it will need the authored parameters retained as well.
+    /// Where this player sits in the scene — the root transform of its tree,
+    /// composed by [`SSPlayer::set_transform`].
     transform: [f32; 16],
     /// Draw order within a scene; lower draws first. Nothing in this file reads
     /// it — it exists so the host and [`crate::SSScene`] can sort by it.
@@ -749,9 +736,8 @@ pub struct SSPlayer {
     /// changes hands: `set_animation`, and a `set_track_animation` or
     /// `crossfade` on track 0.
     ///
-    /// Held for the reason every sibling Player holds it: the runtime resets the
-    /// count on every transition, deliberately, because a transition is what
-    /// states it.
+    /// Held because the runtime resets the count on every transition,
+    /// deliberately, because a transition is what states it.
     ///
     /// `None` until the host sets one, so a count it never chose is never
     /// written over the animation's own default.
@@ -762,10 +748,9 @@ pub struct SSPlayer {
     ///
     /// The runtime carries these across a `setup_animation` itself, but they
     /// live on its context, and this player builds a new one for its first
-    /// animation and whenever the pack behind it changes. The sibling Players
-    /// keep one context and rebind it, so there the settings hold from before
-    /// the first animation and across a pack change; holding them here is what
-    /// makes that true of this one. Only the setters below write them, so the
+    /// animation and whenever the pack behind it changes. Holding them here is
+    /// what makes the settings hold from before the first animation and across a
+    /// pack change. Only the setters below write them, so the
     /// copy cannot drift from the context it was handed to.
     transport: HostTransport,
     /// Whether the *display* frame keeps its fraction (see
@@ -775,8 +760,7 @@ pub struct SSPlayer {
     /// one reason: a runtime texture override ([`SSPlayer::set_cellmap_texture`])
     /// registers its replacement in the device-scoped renderer under a *private*
     /// key, and two players overriding the same cellmap must not collide on it.
-    /// Mixing this id into that key is what keeps the override per player, the way
-    /// each sibling Player's own texture map is.
+    /// Mixing this id into that key is what keeps the override per player.
     id: u32,
     /// Active runtime texture overrides, per pack name. Each entry redirects one
     /// cellmap's draws to a private renderer key; the map here is the source of
@@ -896,10 +880,9 @@ impl SSPlayer {
             tint: WHITE_TINT,
             loop_count: None,
             transport: HostTransport::default(),
-            // On, matching the Web and Flutter players: this one draws for
-            // applications and for hosts with a display refresh to keep up with,
-            // where interpolating between authored frames is the point. The game
-            // engines default it off.
+            // On: this player draws for applications and for hosts with a display
+            // refresh to keep up with, where interpolating between authored frames
+            // is the point.
             sub_frame: true,
             id: NEXT_PLAYER_ID.fetch_add(1, Ordering::Relaxed),
             overrides: HashMap::new(),
@@ -944,8 +927,7 @@ impl SSPlayer {
     /// A pack keeps the name inside the `.ssab`. That is the name instance
     /// references are matched against (`ref_anime_pack`), and the same string is
     /// the sibling file's stem, which is what makes those siblings findable at
-    /// all — the rule `SS6PlayerForGodot`'s `_load_external_ssabs` and
-    /// `ssplayer-core`'s `resolveInstancePacks` also follow. Use
+    /// all. Use
     /// [`SSPlayer::load_ssab`] to name a pack yourself, and expect external
     /// references to it to stop resolving.
     ///
@@ -1145,9 +1127,7 @@ impl SSPlayer {
     /// A base key an atlas registers under is also the key a *restore* returns to,
     /// so a cellmap that is actively overridden takes the newly-learned key as its
     /// new `original` — and the override's redirect is re-applied on top, so a
-    /// reload never quietly cancels a live override (the same
-    /// name-over-hash follow-through the reference Godot Player does on a resource
-    /// swap).
+    /// reload never quietly cancels a live override.
     fn record_atlas_keys(&mut self, pack: &str, entries: impl Iterator<Item = (u32, u32)>) {
         let mut entries: Vec<(u32, u32)> = entries.collect();
         if let Some(overrides) = self.overrides.get_mut(pack) {
@@ -1254,8 +1234,7 @@ impl SSPlayer {
             // The live tree was built from the pack just replaced, so it is no
             // longer what this name means. Forgetting the selection is what lets
             // `set_animation` -- a no-op for the name already set up -- still
-            // rebuild from the replacement, which is the contract this method
-            // documents ("the replacement is what the next tree is built from").
+            // rebuild from the replacement.
             self.current_animation = None;
         }
     }
@@ -1313,8 +1292,8 @@ impl SSPlayer {
         let static_res: &'static ssruntime::AnimationResource<'static> = unsafe { &*res_ptr };
 
         // Hand the existing root context the new clip whenever it is still bound
-        // to the pack we are selecting from, as every sibling Player does: the
-        // runtime carries the host's transport across a setup on one context. A
+        // to the pack we are selecting from: the runtime carries the host's
+        // transport across a setup on one context. A
         // context built new — the first animation, or a replaced pack — is
         // handed it from `transport` below instead.
         //
@@ -1409,10 +1388,9 @@ impl SSPlayer {
     /// [`SSPlayer::pause`] is [`SSPlayer::resume`]'s job.
     /// No-op until [`SSPlayer::set_animation`] has succeeded.
     pub fn play(&mut self) {
-        // Re-arm the completion latch. Without this, replaying an animation that
-        // already finished would compare against a `true` left over from the
-        // previous run and the *next* completion would never be reported — one of
-        // the defects found in sibling Players.
+        // Re-arm the completion latch, or replaying an animation that already
+        // finished compares against the `true` its last run left and the next
+        // completion is never reported.
         self.prev_finished = false;
         self.rebuild = true;
         if let Some(root) = &mut self.root {
@@ -1472,6 +1450,9 @@ impl SSPlayer {
         self.root.as_ref().map(|r| r.context.get_speed_scale()).unwrap_or(self.transport.speed_scale.max(0.0))
     }
 
+    /// Whether an animation has been started and has neither stopped nor
+    /// finished. A [`SSPlayer::pause`] leaves it true; [`SSPlayer::is_pausing`]
+    /// says whether it is held.
     pub fn is_playing(&self) -> bool {
         self.root.as_ref().map(|r| r.context.is_playing()).unwrap_or(false)
     }
@@ -1662,6 +1643,7 @@ impl SSPlayer {
         root.context.set_track_alpha(track, alpha)
     }
 
+    /// `track`'s alpha, or `None` when no animation is set up or there is no such track.
     pub fn track_alpha(&self, track: u32) -> Option<f32> {
         self.root.as_ref()?.context.get_track_alpha(track)
     }
@@ -1673,6 +1655,7 @@ impl SSPlayer {
         root.context.set_track_blend(track, blend)
     }
 
+    /// How `track` composes onto the tracks below it, or `None` when there is no such track.
     pub fn track_blend(&self, track: u32) -> Option<TrackBlend> {
         self.root.as_ref()?.context.get_track_blend(track)
     }
@@ -1686,10 +1669,13 @@ impl SSPlayer {
         root.context.set_track_sync(track, sync)
     }
 
+    /// Where the animations laid on `track` start (see [`SSPlayer::set_track_sync`]),
+    /// or `None` when there is no such track.
     pub fn track_sync(&self, track: u32) -> Option<TrackSync> {
         self.root.as_ref()?.context.get_track_sync(track)
     }
 
+    /// How many tracks are laid, track 0 included. Zero when no animation is set up.
     pub fn track_count(&self) -> u32 {
         self.root.as_ref().map(|r| r.context.get_track_count()).unwrap_or(0)
     }
@@ -1728,10 +1714,13 @@ impl SSPlayer {
         root.context.fade_track(track, target, duration_ms)
     }
 
+    /// Progress of the fade in flight on `track`, from 0 to 1, or `None` when it is
+    /// not fading.
     pub fn track_fade_progress(&self, track: u32) -> Option<f32> {
         self.root.as_ref()?.context.get_track_fade_progress(track)
     }
 
+    /// Cancel `track`'s fade, leaving its alpha and weights where they stand.
     pub fn cancel_track_fade(&mut self, track: u32) -> Result<(), SSRuntimeError> {
         let root = self.root_posed()?;
         root.context.cancel_track_fade(track)
@@ -1744,10 +1733,13 @@ impl SSPlayer {
         root.context.set_track_frame(track, frame)
     }
 
+    /// `track`'s playhead, or `None` when there is no such track.
     pub fn track_frame(&self, track: u32) -> Option<f32> {
         self.root.as_ref()?.context.get_track_frame(track)
     }
 
+    /// Set `track`'s speed, as a multiple of each animation's frame rate. Track
+    /// 0's is [`SSPlayer::set_speed_scale`].
     pub fn set_track_speed(&mut self, track: u32, speed: f32) -> Result<(), SSRuntimeError> {
         let root = self.root_posed()?;
         root.context.set_track_speed(track, speed)
@@ -1784,6 +1776,7 @@ impl SSPlayer {
         root.context.set_track_skip_frames(track, skip)
     }
 
+    /// Whether `track` skips frames to keep time, or `None` when there is no such track.
     pub fn track_frame_skip_enabled(&self, track: u32) -> Option<bool> {
         self.root.as_ref()?.context.get_track_skip_frames(track)
     }
@@ -1794,10 +1787,12 @@ impl SSPlayer {
         root.context.set_track_playback_direction(track, direction.into(), style.into())
     }
 
+    /// Which way `track`'s playhead walks, or `None` when there is no such track.
     pub fn track_playback_direction(&self, track: u32) -> Option<PlaybackDirection> {
         self.root.as_ref()?.context.get_track_playback_direction(track).map(Into::into)
     }
 
+    /// How `track` behaves at the end of its section, or `None` when there is no such track.
     pub fn track_playback_style(&self, track: u32) -> Option<PlaybackStyle> {
         self.root.as_ref()?.context.get_track_playback_style(track).map(Into::into)
     }
@@ -1847,6 +1842,8 @@ impl SSPlayer {
         root.context.set_track_outgoing_event_threshold(track, threshold)
     }
 
+    /// The threshold the outgoing side of a crossfade on `track` fires its events
+    /// at, or `None` when there is no such track.
     pub fn track_outgoing_event_threshold(&self, track: u32) -> Option<f32> {
         self.root.as_ref()?.context.get_track_outgoing_event_threshold(track)
     }
@@ -1880,6 +1877,7 @@ impl SSPlayer {
         root.context.set_source_weight(source, weight)
     }
 
+    /// `source`'s weight within its track, or `None` when there is no such source.
     pub fn source_weight(&self, source: u32) -> Option<f32> {
         self.root.as_ref()?.context.get_source_weight(source)
     }
@@ -1891,6 +1889,7 @@ impl SSPlayer {
         root.context.set_source_frame(source, frame)
     }
 
+    /// `source`'s playhead, or `None` when there is no such source.
     pub fn source_frame(&self, source: u32) -> Option<f32> {
         self.root.as_ref()?.context.get_source_frame(source)
     }
@@ -1903,6 +1902,8 @@ impl SSPlayer {
         root.context.set_source_event_threshold(source, threshold)
     }
 
+    /// The weight `source` must reach for its events to fire, or `None` when there
+    /// is no such source.
     pub fn source_event_threshold(&self, source: u32) -> Option<f32> {
         self.root.as_ref()?.context.get_source_event_threshold(source)
     }
@@ -2055,9 +2056,6 @@ impl SSPlayer {
     ///
     /// Normal parts only. Others ignore it silently — `Ok` means the override
     /// was recorded, not that anything looks different.
-    ///
-    /// The C ABI takes `blend_op` before the colour; this face deliberately does
-    /// not (see the SDK's Player API conventions).
     pub fn set_part_color_override(&mut self, part: &str, rgba: u32, blend_op: BlendOp, priority: OverridePriority) -> Result<(), SSRuntimeError> {
         let index = self.resolve_part(part)?;
         self.set_part_color_override_by_index(index, rgba, blend_op, priority)
@@ -2186,9 +2184,9 @@ impl SSPlayer {
     /// "playback is no longer running". Counting loops, or calling `stop`
     /// yourself, is how you end an infinite one.
     ///
-    /// The related trap is deriving completion from `!is_playing` or from
-    /// reaching the last frame; both are wrong in ways sibling Players
-    /// have run into, which is why neither is offered here.
+    /// Do not derive completion from `!is_playing` or from reaching the last
+    /// frame: `stop` clears the one, and reverse and ping-pong playback pass the
+    /// other without finishing.
     pub fn just_finished(&self) -> bool {
         self.finished_edge
     }
@@ -2262,8 +2260,7 @@ impl SSPlayer {
     /// The companion to [`SSPlayer::part_transform`], which reports where a part
     /// *would* be whether or not it is drawn, on the same frame. A host following
     /// a part with its own scene graph needs both: the pose to place its
-    /// follower, and this to decide whether to show it — the `on_hide` option the
-    /// sibling Players offer on their built-in attachments.
+    /// follower, and this to decide whether to show it.
     ///
     /// It reads that frame and builds none, so a read is a lookup however often
     /// it is made, and never changes what the next update builds. An override
@@ -2376,6 +2373,7 @@ impl SSPlayer {
         self.order = order;
     }
 
+    /// This player's draw order (see [`SSPlayer::set_order`]).
     pub fn order(&self) -> i32 {
         self.order
     }
@@ -2394,6 +2392,7 @@ impl SSPlayer {
         self.visible = visible;
     }
 
+    /// Whether this player draws (see [`SSPlayer::set_visible`]).
     pub fn is_visible(&self) -> bool {
         self.visible
     }
@@ -2412,6 +2411,7 @@ impl SSPlayer {
         self.culled = culled;
     }
 
+    /// Whether this player is skipped entirely (see [`SSPlayer::set_culled`]).
     pub fn is_culled(&self) -> bool {
         self.culled
     }
@@ -2434,6 +2434,7 @@ impl SSPlayer {
         self.alpha = alpha;
     }
 
+    /// The player-level fade, clamped to 0..=1 (see [`SSPlayer::set_alpha`]).
     pub fn alpha(&self) -> f32 {
         self.alpha
     }
@@ -2452,6 +2453,7 @@ impl SSPlayer {
         self.tint = tint;
     }
 
+    /// The player-level tint as `0xRRGGBB` (see [`SSPlayer::set_tint`]).
     pub fn tint(&self) -> u32 {
         self.tint
     }
@@ -2585,10 +2587,7 @@ impl SSPlayer {
     /// # }
     /// ```
     ///
-    /// Answers `cellmap_hash` itself for a pack whose atlases the player has
-    /// never seen, so a host that registered everything against the renderer
-    /// directly before this existed keeps working unchanged — and pays for it
-    /// with the collision this exists to remove.
+    /// Answers `slot` itself for a pack whose atlases the player has never seen.
     pub fn texture_key(&self, pack_name: Option<&str>, slot: u32) -> u32 {
         let Some(name) = pack_name.or(self.main_pack.as_deref()) else { return slot };
         self.atlas_keys.get(name).map(|keys| keys.resolve(slot)).unwrap_or(slot)
@@ -2628,12 +2627,10 @@ impl SSPlayer {
     // --- Runtime texture replacement ---------------------------
     //
     // Swapping the texture a cellmap binds *from your program* — costume changes,
-    // dynamic expressions — rather than from the authoring data. The SDK defines
-    // it as a Player-side responsibility, distinct from the Override Layer API.
+    // dynamic expressions — rather than from the authoring data.
     //
-    // Where the sibling Players keep a per-player texture map and overwrite an
-    // entry in it, this player's texture map is the device-scoped [`SSRenderer`]'s,
-    // shared so N players of one character upload it once. So an override here is
+    // This player's texture map is the device-scoped [`SSRenderer`]'s, shared so N
+    // players of one character upload it once. So an override here is
     // a *redirect*: the replacement is registered under a private key (unique to
     // this player and this cellmap), and the player's own atlas-key table — which
     // every draw already resolves through — is pointed at it. That keeps the
@@ -2641,8 +2638,7 @@ impl SSPlayer {
     // a restore a redirect back to the shared atlas rather than a reload of it.
     //
     // An instance child plays from its own pack and so its own table, so a parent
-    // override does not reach it — the same "override is per player instance" the
-    // reference Godot Player has, for the same structural reason.
+    // override does not reach it.
 
     /// Every cellmap name and external-texture name in a pack, the namespace
     /// [`SSPlayer::set_cellmap_texture`] takes. `None` selects the main pack;
@@ -2876,10 +2872,10 @@ impl SSPlayer {
         names.sort();
         names.dedup();
 
-        // The batch is assembled before anything is decoded, because the decode is
-        // no longer sequential and "already registered" therefore cannot be re-read
-        // between images. `claimed` is what used to be implicit in the loop: a hash
-        // that an earlier entry took is not decoded a second time.
+        // The batch is assembled before anything is decoded, because the decode
+        // runs in parallel and "already registered" cannot be re-read between
+        // images. `claimed` holds the hashes an earlier entry took, so none is
+        // decoded a second time.
         //
         // Host-read atlases come first, so a reference-mode image wins over an
         // embedded one for the same hash — the order [`SSPlayer::load`] read them
@@ -2916,30 +2912,25 @@ impl SSPlayer {
     ///
     /// Called by [`SSScene::update`] for each player in draw order — the scene
     /// owns the frame boundary (`begin_frame` / `end_frame`), because one frame
-    /// now spans every player sharing the target.
+    /// spans every player sharing the target.
     ///
     /// `alpha` is the fade to fold into the parts: the player's own, or 1 when
     /// the scene fades it as a whole.
     pub(crate) fn build_frame(&mut self, scene: &mut FrameChunk, renderer: &SSRenderer, delta_secs: f32, alpha: f32) {
         self.rebuild = false;
         // `culled` means "this player cannot be seen": no timeline advance and no
-        // geometry. Textures are still flushed above, so it can be unculled
-        // without re-loading anything.
+        // geometry. `SSScene::update_with` has flushed its textures already, so it
+        // can be unculled without re-loading anything.
         if self.culled {
-            // What the last tick that ran reported is not this tick's news. Leaving
-            // it in place made a culled player answer `events()` with the same
-            // footstep on every update — a host that plays a sound per event fires
-            // it for as long as the player stays culled — and kept a loop or finish
-            // edge readable long after it was crossed.
+            // What the last tick that ran reported is not this tick's news: a host
+            // that plays a sound per event would replay it every update.
             self.report_no_tick();
             return;
         }
 
         // No tree is a tick that did not run either: before the first
         // `set_animation`, and once `set_pack` — which `load` and `load_ssab` go
-        // through — has dropped the tree that was playing. Returning with the
-        // reports untouched made every update until the next `set_animation`
-        // answer with the old pack's last events and edges.
+        // through — has dropped the tree that was playing.
         let Some(root) = &mut self.root else {
             self.report_no_tick();
             return;
@@ -2957,9 +2948,8 @@ impl SSPlayer {
 
         // Collect what the host reacts to before anything that could skip work:
         // events must fire whenever the runtime reports them, whether or not
-        // this tick also draws. The Godot Player gated event handling on the
-        // integer draw frame changing and lost frame-0 events on the first tick
-        // after `play()` as a result.
+        // this tick also draws — gating them on the integer draw frame changing
+        // loses frame 0's events on the first tick after `play()`.
         let finished = root.context.is_finished();
         collect_events(root, &mut self.events);
         self.looped = looped;
@@ -3074,8 +3064,8 @@ fn build_node(packs: &HashMap<String, SSPack>, atlas_keys: &HashMap<String, Arc<
     let static_res = unsafe { &*res_ptr };
     let mut context = Context::new();
     context.bind_resource(static_res);
-    // Y-down, matching every sibling Player that draws into a Y-down target
-    // (ForWeb, ForFlutter, ForGodot, ForRenPy, ForReactNative). The Brain owns
+    // Y-down, matching every sibling Player that draws into a Y-down target.
+    // The Brain owns
     // the flip and applies it once at the source — it mirrors the hierarchy by
     // negating `position_y`, `rotation_z` and `pivot_y` — so the baked geometry,
     // the world matrices [`SSPlayer::part_transform`] hands out and the effect
@@ -3095,7 +3085,7 @@ fn build_node(packs: &HashMap<String, SSPack>, atlas_keys: &HashMap<String, Arc<
 /// redo. The context is the animation-independent half — it belongs to the pack,
 /// and handing it a new clip through `setup_animation` is what keeps the speed,
 /// the frame-rate override, the frame skip and the playback direction across the
-/// switch, exactly as every sibling Player gets them kept.
+/// switch.
 fn build_rig(
     context: &Context<'static>,
     static_res: &'static ssruntime::AnimationResource<'static>,
@@ -3267,9 +3257,8 @@ fn step_undrawn_effects(node: &mut PlaybackNode) {
     }
 }
 
-/// The two halves of layer 2, bundled for the tree walk: the scene being
-/// filled, and the device-scoped renderer it reads texture
-/// sizes from. Only the scene is mutated — pipelines are compiled later, in
+/// The scene being filled and the device-scoped renderer it reads texture sizes
+/// from, bundled for the tree walk. Only the scene is mutated — pipelines are compiled later, in
 /// `end_frame`, which is where the renderer is borrowed mutably.
 struct FrameBuild<'a> {
     scene: &'a mut FrameChunk,

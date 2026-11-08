@@ -13,17 +13,13 @@
 // it was exported. `ss_player_load(player, path)` is the whole of loading — the
 // pack, its atlases in either export mode, and the sibling .ssab files its
 // instance parts play from, all resolved against the directory the drop came
-// from. This viewer used to walk `ss_player_texture_at` and
-// call `ss_scene_add_texture_png` per image; that loop is what the one call
-// replaced. Those entry points remain for a host whose assets are not files —
-// an archive, a platform asset manager.
+// from. A host whose assets are not files — an archive, a platform asset
+// manager — walks `ss_player_texture_at` and calls `ss_scene_add_texture_png`
+// per image instead.
 //
-// **It shows two characters at once by default**. That
-// used to be impossible through this API: the handle fused the window and the
-// player, so a second character meant a second surface on the same window and
-// the two cleared over each other. Now the window is `ss_scene_t` and each
-// character is an `ss_player_t` placed with `ss_player_set_transform`, sharing
-// one device, one renderer and one atlas upload.
+// **It shows two characters at once by default**. The window is `ss_scene_t` and
+// each character is an `ss_player_t` placed with `ss_player_set_transform`,
+// sharing one device, one renderer and one atlas upload.
 //
 //   ssviewer-metal [asset-dir] [pack-name]     e.g. ssviewer-metal "" Mask
 //
@@ -302,7 +298,7 @@ static const NSUInteger kMaxPlayers = 6;
 
 /// Whether `path` is worth putting in the list the Left/Right keys walk.
 ///
-/// Only a readability check now: loading is `loadPackAtIndex`'s job, and it takes
+/// Only a readability check: loading is `loadPackAtIndex`'s job, and it takes
 /// the path rather than bytes, so nothing needs registering up front.
 - (BOOL)adoptPackAtPath:(NSString *)path {
     if (![path.pathExtension isEqualToString:@"ssab"] || ![[NSFileManager defaultManager] isReadableFileAtPath:path]) {
@@ -374,9 +370,7 @@ static const NSUInteger kMaxPlayers = 6;
 /// Play one of the listed packs on every player.
 ///
 /// `ss_player_load` is the whole of it: the pack, its atlases in either export
-/// mode, and the sibling .ssab files its instance parts play from. This viewer
-/// used to walk `ss_player_texture_at` and call `ss_scene_add_texture_png` per
-/// image, and that loop is what the call replaced.
+/// mode, and the sibling .ssab files its instance parts play from.
 - (void)loadPackAtIndex:(NSUInteger)index {
     NSString *path = _packs[index];
     for (NSValue *entry in _players) {

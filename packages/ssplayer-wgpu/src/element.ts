@@ -231,7 +231,7 @@ export class SsPlayerWebGPUElement extends HTMLElement {
   /**
    * Pause the rAF loop while the canvas is scrolled off-screen or the tab is in
    * the background — battery on mobile, and the viewability rule ad creatives are
-   * measured against. Mirrors the WebGL player's `SSSurface` gating; no-op when
+   * measured against. No-op when
    * `pause-when-hidden="false"` or the APIs are missing (then it simply always runs).
    */
   private _ensureVisibilityWatch(): void {
@@ -332,7 +332,9 @@ export class SsPlayerWebGPUElement extends HTMLElement {
   }
 
   /**
-   * Fetch + play a `.ssab`, embedded or reference. Can be called to switch packs.
+   * Fetch a `.ssab`, embedded or reference, and select `animation` (or its
+   * first); with `autoplay`, play it too. Resolves to the pack's animation names.
+   * Can be called to switch packs.
    *
    * Calls are **serialised**: the player is lifted out of the shared context for
    * the duration of a load, so two in flight at once would race for the slot and
@@ -375,20 +377,14 @@ export class SsPlayerWebGPUElement extends HTMLElement {
     if (!this.player) return;
     const names = this.player.animationNames();
     // Selecting and starting are separate calls: `setAnimation` is
-    // the allocating step, `play` is transport. The old single `play(name)` is
-    // deliberately not carried over.
+    // the allocating step, `play` is transport.
     this.player.setAnimation(animation || names[0]!);
     this._frame = this.player.canvasRect() ?? undefined;
     this._fit();
     // `autoplay`, the HTML way: a boolean attribute is absent by default, so this
-    // is opt-in — the same shape `<video autoplay>` has, and the same shape
-    // `<ss-player>` (the WebGL element) already had. Without it the element holds
-    // its first frame, poster-like; `draw` still renders it, since drawing is
-    // independent of the transport.
-    //
-    // Sibling Players whose player is PLACED rather than constructed default the
-    // other way (ForGodot / ForUnity autoplay on), because a scene node has no
-    // code to call `play()` for it. An attribute is that code.
+    // is opt-in, as `<video autoplay>` is. Without it the element holds its first
+    // frame, poster-like; the surface's `frame()` still renders it, since drawing
+    // is independent of the transport.
     if (this.hasAttribute('autoplay')) this.player.play();
     this._emit('load');
     return names;

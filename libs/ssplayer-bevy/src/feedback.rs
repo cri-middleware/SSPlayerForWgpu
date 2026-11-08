@@ -1,7 +1,7 @@
 //! The render-world -> main-world hand-off: timeline events and lifecycle edges,
 //! carried back so gameplay can react to them.
 //!
-//! Playback advances in the render world (see [`crate::render`]), so what a tick
+//! Playback advances in the render world, so what a tick
 //! produces — the events it crossed, whether it started, looped or finished, the
 //! frame it landed on — has to cross back. It does so through a buffer the draw
 //! system fills and a main-world system drains, which is why it lands **one frame late**:
@@ -107,7 +107,9 @@ impl FeedbackChannel {
 /// [`SsEvent::Audio`] is the cue for the host's own audio stack, not a sound.
 #[derive(Message, Clone, Debug)]
 pub struct SsEventMessage {
+    /// The character whose timeline fired it.
     pub entity: Entity,
+    /// The event, as the player decoded it.
     pub event: SsEvent,
 }
 
@@ -120,18 +122,21 @@ pub struct SsEventMessage {
 /// crossfades on the tree that is already playing.
 #[derive(Message, Clone, Copy, Debug)]
 pub struct SsStarted {
+    /// The character that started.
     pub entity: Entity,
 }
 
 /// Raised once, on the frame a character's animation reached its end.
 #[derive(Message, Clone, Copy, Debug)]
 pub struct SsFinished {
+    /// The character that finished.
     pub entity: Entity,
 }
 
 /// Raised once, on the frame a character's timeline wrapped back to the start.
 #[derive(Message, Clone, Copy, Debug)]
 pub struct SsLooped {
+    /// The character that looped.
     pub entity: Entity,
 }
 

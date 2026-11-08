@@ -1,8 +1,8 @@
-//! The one-way main world -> render world hand-off.
+//! The main world -> render world hand-off.
 //!
 //! The playback tree lives in the render world, so everything the main world
-//! wants to say about a character has to cross here. Nothing crosses back yet:
-//! reading events and completion edges is its own phase (see the crate docs).
+//! wants to say about a character has to cross here. What crosses back — events
+//! and completion edges — goes through `feedback.rs`.
 
 use bevy::asset::RecursiveDependencyLoadState;
 use bevy::ecs::message::MessageCursor;
@@ -80,7 +80,7 @@ pub(crate) struct ExtractedPlayers {
     track_cursor: MessageCursor<SsTrackCommand>,
 }
 
-// A five-part query with an optional is exactly the shape `type_complexity`
+// A six-part query with optionals is exactly the shape `type_complexity`
 // fires on, and the shape Bevy queries take; naming it would obscure, not clarify.
 // A system takes what it reads as parameters, one message buffer per kind, so
 // the count grows with the kinds; a `SystemParam` bundle would only move the list.

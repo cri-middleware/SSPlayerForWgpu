@@ -77,10 +77,7 @@ pub struct EmbeddedTexture {
 ///
 /// This is the *parsing* half of embedded support, and it deliberately has no
 /// decoder behind it — which is why it is available without the `embedded`
-/// feature. The sibling players split the same way: `ssplayer-core`'s
-/// `extractEmbeddedTextures` hands out bytes and `ssplayer-webgl` decodes them
-/// with `createImageBitmap`, which is how the WebGL player supports embedded
-/// packs while shipping no image decoder of its own. A host with a decoder
+/// feature. A host with a decoder
 /// already — a browser, or an engine's asset pipeline — wants this;
 /// [`SSPack::decode_embedded`] is for hosts that would rather the player do it.
 ///
@@ -101,9 +98,8 @@ pub struct EmbeddedImage<'a> {
 ///
 /// This is what makes reference mode loadable without the host guessing: the
 /// pack answers *what* it needs and *where the exporter put it*, and the host —
-/// the only side that has a filesystem or a network — does the reading. The
-/// sibling players work exactly this way (`ssplayer-core`'s
-/// `extractTexturePaths` + `loadTextures`), and a host here should too: resolve
+/// the only side that has a filesystem or a network — does the reading. A host
+/// resolves
 /// [`TextureRef::path`] against the directory the `.ssab` came from, skipping
 /// the entries that are [`TextureRef::embedded`] because those arrive with the
 /// pack.
@@ -197,8 +193,7 @@ impl SSPack {
         // part the author gave a TextureChange (`TCHG`). Miss these and those
         // batches resolve to nothing — here that means the 1x1 white fallback,
         // so the part turns into a white silhouette rather than disappearing.
-        // Both tables go into one list under the key a draw batch will ask for,
-        // exactly as `SS6PlayerForGodot`'s `_loadTextures` does.
+        // Both tables go into one list under the key a draw batch will ask for.
         //
         // An `ExternalTexture`'s `name_hash` is the hash of its file name, so it
         // is also the key of its embedded blob — no join needed, unlike a
@@ -233,10 +228,9 @@ impl SSPack {
     /// **Both tables, always.** `DrawBatch.texture_hash` is a cellmap's
     /// `name_hash` for an ordinary part but a texture *file name*'s hash for one
     /// the author gave a TextureChange (`TCHG`), and the two tables are the only
-    /// places those keys come from. `assets/overall/TextureChange.ssab` is the
-    /// fixture: one cellmap and three external textures, one of which is the
-    /// cellmap's own image under a second hash. Loading only the cellmaps leaves
-    /// the changed parts on the white fallback.
+    /// places those keys come from. An external texture can be a cellmap's own
+    /// image under a second hash. Loading only the cellmaps leaves the changed
+    /// parts on the white fallback.
     pub fn textures(&self) -> &[TextureRef] {
         &self.textures
     }
@@ -255,9 +249,7 @@ impl SSPack {
     /// with a filesystem or a network — fetches it and hands it to
     /// [`SSPlayer::add_pack`]. The exporter writes the referenced pack's own name
     /// here, which is both the file's stem and the key `ref_anime_pack` resolves
-    /// against, so `<the .ssab's directory>/<name>.ssab` finds it — the rule
-    /// `SS6PlayerForGodot`'s `_load_external_ssabs` and `ssplayer-core`'s
-    /// `resolveInstancePacks` both follow.
+    /// against, so `<the .ssab's directory>/<name>.ssab` finds it.
     ///
     /// Only genuinely external references appear: `external_instances()` is the
     /// exporter's own list, so a pack whose instance parts play its own
@@ -312,7 +304,7 @@ impl SSPack {
         // Each table on its own: a pack can have one and not the other. An
         // embedded pack whose parts only draw TextureChange targets has no
         // cellmaps at all (`assets/overall_emb/Instance.ssab` is one), and
-        // requiring both here left it carrying nothing — every part on the white
+        // requiring both would leave it carrying nothing — every part on the white
         // fallback, with its atlas sitting unread inside the file.
         let mut out = Vec::new();
         if let Some(cellmaps) = ab.cellmaps() {

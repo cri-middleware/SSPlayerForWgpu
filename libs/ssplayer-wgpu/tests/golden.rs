@@ -23,9 +23,6 @@
 //! A comparison also writes `summary.md` into the dump directory, and a
 //! `diff/<image>.png` for each image that moved: before, after, and where they
 //! differ, for a reviewer to look at rather than count.
-//!
-//! This is what verified the P7-6 SoA passthrough: moving vertex expansion from
-//! the CPU to the vertex stage left all 134 images bit-identical.
 
 use ssplayer_wgpu::{MaskBackend, Retention, SSPlayer, SSRenderer, SSScene, SceneConfig};
 

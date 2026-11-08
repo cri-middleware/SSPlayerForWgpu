@@ -101,14 +101,16 @@ pub struct SsSceneDesc {
     pub width: u32,
     /// See `width`.
     pub height: u32,
-    /// Clear colour, straight RGBA in 0..1. Alpha 0 leaves the window transparent
-    /// where nothing is drawn.
+    /// Clear colour, straight RGBA in 0..1. The window stays opaque whatever the
+    /// alpha.
     pub clear_color: [f32; 4],
     /// Allocate a depth/stencil buffer so mask parts rasterise. With
     /// `false` the scene runs without masking, exactly as if the host attached
     /// no stencil.
     pub enable_mask: bool,
-    /// Flip the projection to Y-down (screen coordinates). `false` = Y-up.
+    /// Whether the render target is Y-down. A window's swapchain is not: pass
+    /// `false`, and `true` draws upside down. Player coordinates
+    /// (`ss_player_set_transform`) run downward either way.
     pub y_down: bool,
 }
 
@@ -167,12 +169,9 @@ pub struct SsTextureRef {
     ///
     /// An identity for the **image**, not for the cellmap that names it: some
     /// tools name the atlas `spritemap1.png` in every project they export, so two packs
-    /// name their atlas alike, and a key that was only the cellmap's hash left the
-    /// second drawing the first one's atlas. Two packs that really do share a file
-    /// still share this, and so still share one upload.
-    ///
-    /// Was `hash`, and renamed with the meaning: a field that silently stopped
-    /// being a cellmap hash is worse than one that stops compiling.
+    /// name their atlas alike, and a key made from the cellmap's hash alone would
+    /// let the second draw the first one's atlas. Two packs that really do share a
+    /// file still share this, and so still share one upload.
     pub key: u32,
     /// `true` when the image rides inside the `.ssab` (embedded mode): the pack
     /// supplies it on the next `ss_scene_update` and the host loads nothing.
@@ -437,10 +436,9 @@ impl CScratch {
     /// Refill with `s`, and return a pointer good until the next call on this
     /// slot — the same contract the `CString` fields carry.
     ///
-    /// A string with an interior NUL comes back empty, which is what
-    /// `CString::new(..).unwrap_or_default()` did here before: C cannot be handed
-    /// the tail past a NUL, and quietly delivering only the head would be a
-    /// different string wearing the right name.
+    /// A string with an interior NUL comes back empty: C cannot be handed the
+    /// tail past a NUL, and quietly delivering only the head would be a different
+    /// string wearing the right name.
     fn set(&mut self, s: &str) -> *const c_char {
         self.0.clear();
         if !s.as_bytes().contains(&0) {
@@ -558,7 +556,7 @@ fn backend_bits(backend: u32) -> wgpu::Backends {
         SS_BACKEND_DX12 => wgpu::Backends::DX12,
         SS_BACKEND_METAL => wgpu::Backends::METAL,
         SS_BACKEND_VULKAN => wgpu::Backends::VULKAN,
-        // AUTO (and anything unknown): every backend wgpu compiled in.
+        // AUTO (and anything unknown): the platform's primary backends.
         _ => wgpu::Backends::PRIMARY,
     }
 }
@@ -758,8 +756,8 @@ pub unsafe extern "C" fn ss_player_load(handle: *mut SsPlayer, path: *const c_ch
 ///
 /// Every pack an animation can reference must be registered before
 /// `ss_player_set_animation`, since external instance parts resolve by pack
-/// name. Embedded-mode packs also carry their atlases; those
-/// are decoded here and uploaded on the next `ss_scene_update`.
+/// name. Embedded-mode packs also carry their atlases; those are decoded and
+/// uploaded on the next `ss_scene_update`.
 ///
 /// # Safety
 /// `pack_name` must be a NUL-terminated UTF-8 string and `data` must point at
@@ -1035,6 +1033,8 @@ pub unsafe extern "C" fn ss_player_cellmap_texture_name(handle: *mut SsPlayer, p
     scene.name_scratch.as_ptr()
 }
 
+// The example below uses line comments: cbindgen renders these docs into a C
+// block comment, which a `*/` would close early.
 /// How many things the player's last load could not get.
 ///
 /// `ss_player_load` reports an error only when the `.ssab` itself is unreadable —
@@ -1048,10 +1048,6 @@ pub unsafe extern "C" fn ss_player_cellmap_texture_name(handle: *mut SsPlayer, p
 /// // it plays, but something is a silhouette or absent
 /// }
 /// ```
-///
-/// (Line comments above, deliberately: cbindgen renders these docs into a C
-/// block comment, so a nested block-comment terminator would close it early
-/// and break the generated header for every C and C++ host.)
 ///
 /// Describes the most recent load, not the player's history. Zero for a null or
 /// destroyed handle, which is indistinguishable from success — check the load's
@@ -1201,7 +1197,9 @@ pub unsafe extern "C" fn ss_player_speed_scale(handle: *mut SsPlayer) -> f32 {
     unsafe { player(handle) }.map(|p| p.speed_scale()).unwrap_or(1.0)
 }
 
-/// Whether the root animation is advancing.
+/// Whether an animation has been started and has neither stopped nor finished.
+/// `ss_player_pause` leaves it true; `ss_player_is_pausing` says whether it is
+/// held.
 ///
 /// # Safety
 /// `handle` must be a live handle or null.
@@ -2345,8 +2343,8 @@ pub unsafe extern "C" fn ss_player_source_event_threshold(handle: *mut SsPlayer,
 // below describes that tick and is replaced by the next one, so a host that
 // wants to keep a payload copies it before updating again.
 //
-// The strings are borrowed from the player and stay valid until the next
-// `ss_scene_update` on it — the same rule `ss_player_texture_at` follows.
+// Each string a reader below returns stays valid until that reader's next call,
+// as its own doc says.
 
 /// Whether the last `ss_scene_update` was the first to run after an
 /// `ss_player_play` / `ss_player_play_from`: true for exactly one update. Not
@@ -2879,8 +2877,8 @@ fn align_from_wire(align: u32) -> Option<Align> {
     }
 }
 
-/// Draw order within the scene; lower draws first. Ties keep the order the
-/// players were created in.
+/// Draw order within the scene; lower draws first. The order among equal values
+/// is not guaranteed, so give players that overlap distinct orders.
 ///
 /// # Safety
 /// `handle` must be a live handle or null.
@@ -3196,10 +3194,9 @@ mod tests {
         assert_eq!(unsafe { CStr::from_ptr(slot.set("OnFootstep")) }.to_str().unwrap(), "OnFootstep");
         assert_eq!(unsafe { CStr::from_ptr(slot.set("")) }.to_bytes(), b"");
 
-        // An interior NUL comes back empty, which is what the
-        // `CString::new(..).unwrap_or_default()` this replaced did: the tail past
-        // a NUL cannot reach C, and handing over the head alone would be a
-        // different string wearing the right name.
+        // An interior NUL comes back empty: the tail past a NUL cannot reach C,
+        // and handing over the head alone would be a different string wearing the
+        // right name.
         assert_eq!(unsafe { CStr::from_ptr(slot.set("bad\0tail")) }.to_bytes(), b"");
 
         // A shorter refill reuses the buffer instead of allocating a new one,

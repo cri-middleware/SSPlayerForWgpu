@@ -2,7 +2,7 @@
 //!
 //! These live in the **main world**. They are the whole authoring surface: the
 //! playback tree itself never appears here, because it is owned by the render
-//! world (see [`crate::render`]) and reached only through these components.
+//! world and reached only through these components.
 
 use bevy::platform::collections::HashMap;
 use bevy::prelude::*;
@@ -47,9 +47,13 @@ pub struct SsPlayer {
 /// can write the one system that copies across.
 #[derive(Component, Clone, Copy, Debug)]
 pub struct SsTransform {
+    /// Horizontal position from the view's centre.
     pub x: f32,
+    /// Vertical position from the view's centre, measured downward.
     pub y: f32,
+    /// Horizontal scale; negative mirrors.
     pub scale_x: f32,
+    /// Vertical scale; negative mirrors.
     pub scale_y: f32,
     /// Radians.
     pub rotation: f32,
@@ -158,7 +162,9 @@ impl Default for SsPlayback {
 /// last wins.
 #[derive(Message, Clone, Copy, Debug)]
 pub struct SsSeek {
+    /// The character to seek.
     pub entity: Entity,
+    /// The frame to move the playhead to.
     pub frame: f32,
 }
 
@@ -174,7 +180,9 @@ pub struct SsSeek {
 /// animation is set up; of several in one frame, the last wins.
 #[derive(Message, Clone, Copy, Debug)]
 pub struct SsPlay {
+    /// The character to start.
     pub entity: Entity,
+    /// The frame to start from; `None` starts from the head of the section.
     pub start_frame: Option<f32>,
 }
 
@@ -188,6 +196,7 @@ pub struct SsPlay {
 /// sent before the pack has loaded is applied once the animation is set up.
 #[derive(Message, Clone, Copy, Debug)]
 pub struct SsStop {
+    /// The character to stop.
     pub entity: Entity,
 }
 
@@ -210,7 +219,9 @@ pub struct SsStop {
 /// [`SsTrackState`], a frame late.
 #[derive(Message, Clone, Debug)]
 pub struct SsTrackCommand {
+    /// The character whose track stack to change.
     pub entity: Entity,
+    /// The operation.
     pub command: TrackCommand,
 }
 
@@ -293,8 +304,11 @@ pub struct SsTrackState {
 pub struct SsTrackInfo {
     /// The source carrying the track's animation; `None` on an empty track.
     pub main_source: Option<u32>,
+    /// The track's alpha.
     pub alpha: f32,
+    /// How the track composes onto the tracks below it.
     pub blend: TrackBlend,
+    /// Where the animations laid on the track start.
     pub sync: TrackSync,
     /// The track's playhead; `None` on an empty track.
     pub frame: Option<f32>,
@@ -304,9 +318,13 @@ pub struct SsTrackInfo {
     /// frame skip and heading — what [`TrackCommand::SetSpeed`] and the
     /// commands after it set.
     pub speed: f32,
+    /// The track's frame rate: the override, or the authored rate.
     pub frame_rate: i32,
+    /// Whether the track skips frames to keep time.
     pub frame_skip_enabled: bool,
+    /// Which way the track's playhead walks.
     pub direction: PlaybackDirection,
+    /// How the track behaves at the end of its section.
     pub style: PlaybackStyle,
     /// `-1` for a track that loops forever; `None` on an empty track.
     pub loop_count: Option<i32>,
@@ -315,6 +333,8 @@ pub struct SsTrackInfo {
     pub finished: bool,
     /// The last advance wrapped the track's animation back to its start.
     pub just_looped: bool,
+    /// The threshold the outgoing side of a crossfade on the track fires its
+    /// events at.
     pub outgoing_event_threshold: f32,
 }
 
@@ -323,10 +343,13 @@ pub struct SsTrackInfo {
 pub struct SsSourceInfo {
     /// The handle the `Source*` commands take.
     pub source: u32,
+    /// The track it was laid on.
     pub track: u32,
     /// The animation it was laid with.
     pub animation: String,
+    /// Its weight within the track.
     pub weight: f32,
+    /// Its playhead.
     pub frame: f32,
 }
 
@@ -370,6 +393,7 @@ pub struct SsCellmapTextures {
 /// allocates nothing.
 #[derive(Component, Clone, Debug, Default)]
 pub struct SsCrowd {
+    /// The copies to draw, each at its own placement.
     pub members: Vec<CrowdMember>,
 }
 

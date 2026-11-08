@@ -258,8 +258,8 @@ typedef struct {
      */
     uint32_t height;
     /*
-     Clear colour, straight RGBA in 0..1. Alpha 0 leaves the window transparent
-     where nothing is drawn.
+     Clear colour, straight RGBA in 0..1. The window stays opaque whatever the
+     alpha.
      */
     float clear_color[4];
     /*
@@ -269,7 +269,9 @@ typedef struct {
      */
     bool enable_mask;
     /*
-     Flip the projection to Y-down (screen coordinates). `false` = Y-up.
+     Whether the render target is Y-down. A window's swapchain is not: pass
+     `false`, and `true` draws upside down. Player coordinates
+     (`ss_player_set_transform`) run downward either way.
      */
     bool y_down;
 } ss_scene_desc_t;
@@ -285,12 +287,9 @@ typedef struct {
 
      An identity for the **image**, not for the cellmap that names it: some
      tools name the atlas `spritemap1.png` in every project they export, so two packs
-     name their atlas alike, and a key that was only the cellmap's hash left the
-     second drawing the first one's atlas. Two packs that really do share a file
-     still share this, and so still share one upload.
-
-     Was `hash`, and renamed with the meaning: a field that silently stopped
-     being a cellmap hash is worse than one that stops compiling.
+     name their atlas alike, and a key made from the cellmap's hash alone would
+     let the second draw the first one's atlas. Two packs that really do share a
+     file still share this, and so still share one upload.
      */
     uint32_t key;
     /*
@@ -696,8 +695,8 @@ int32_t ss_player_load(ss_player_t *handle, const char *path);
 
  Every pack an animation can reference must be registered before
  `ss_player_set_animation`, since external instance parts resolve by pack
- name. Embedded-mode packs also carry their atlases; those
- are decoded here and uploaded on the next `ss_scene_update`.
+ name. Embedded-mode packs also carry their atlases; those are decoded and
+ uploaded on the next `ss_scene_update`.
 
  # Safety
  `pack_name` must be a NUL-terminated UTF-8 string and `data` must point at
@@ -863,10 +862,6 @@ const char *ss_player_cellmap_texture_name(ss_player_t *handle, const char *pack
  }
  ```
 
- (Line comments above, deliberately: cbindgen renders these docs into a C
- block comment, so a nested block-comment terminator would close it early
- and break the generated header for every C and C++ host.)
-
  Describes the most recent load, not the player's history. Zero for a null or
  destroyed handle, which is indistinguishable from success — check the load's
  own return value for that.
@@ -967,7 +962,9 @@ void ss_player_set_speed_scale(ss_player_t *handle, float speed);
 float ss_player_speed_scale(ss_player_t *handle);
 
 /*
- Whether the root animation is advancing.
+ Whether an animation has been started and has neither stopped nor finished.
+ `ss_player_pause` leaves it true; `ss_player_is_pausing` says whether it is
+ held.
 
  # Safety
  `handle` must be a live handle or null.
@@ -2039,8 +2036,8 @@ int32_t ss_player_fit_into(ss_player_t *handle,
                            SsPlaced *out);
 
 /*
- Draw order within the scene; lower draws first. Ties keep the order the
- players were created in.
+ Draw order within the scene; lower draws first. The order among equal values
+ is not guaranteed, so give players that overlap distinct orders.
 
  # Safety
  `handle` must be a live handle or null.

@@ -26,10 +26,8 @@ embedded = ["dep:image"]
 # Build with `--target wasm32-unknown-unknown` + wasm-bindgen.
 # **Deliberately does not pull `embedded`**: the browser already ships an image
 # decoder, so embedded atlases go out as encoded bytes (`embeddedTextures`) and
-# come back through `createImageBitmap` (`addTextureFromBytes`) — the same split
-# ssplayer-core/ssplayer-webgl use. Bundling `image` on top of that cost 59 KB
-# brotli (201 KB -> 142 KB, -29%) to duplicate a decoder that was already there.
-# Add `embedded` back for a page that would rather not write that glue.
+# come back through `createImageBitmap` (`addTextureFromBytes`), rather than
+# bundling a second decoder into the wasm. Add `embedded` back for a page that would rather not write that glue.
 web = ["dep:wasm-bindgen", "dep:wasm-bindgen-futures", "dep:js-sys", "dep:web-sys", "dep:console_error_panic_hook", "wasm-bindgen/std"]
 # C/C++ bindings (the "ffi" face): `ss_player_*` entry points plus a
 # self-contained host that builds wgpu from a raw window handle. The

@@ -642,10 +642,9 @@ fn embedded_pixels_can_be_routed_through_the_borrowed_channel() {
 ///
 /// `build_node` binds every `Context` to its pack's resource by **raw pointer**,
 /// and the only `Arc` keeping that resource alive is the one in the player's pack
-/// map. `add_pack` / `add_ssab` therefore used to free the resource the tree was
-/// still evaluating — a use-after-free reachable from safe Rust and from
-/// `ss_player_add_ssab` / `addSsab`, which crashed inside the runtime on the next
-/// update. The pack that arrives is registered for the *next* tree; what is
+/// map, so `add_pack` / `add_ssab` must not free the resource the tree is still
+/// evaluating — a use-after-free reachable from safe Rust and from
+/// `ss_player_add_ssab` / `addSsab`. The pack that arrives is registered for the *next* tree; what is
 /// playing keeps the data it was built from.
 #[test]
 fn re_registering_a_pack_does_not_pull_it_out_from_under_the_tree() {

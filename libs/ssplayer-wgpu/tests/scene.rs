@@ -428,10 +428,6 @@ fn pipelines_are_built_on_demand() {
 
 /// The renderer is device-scoped, so a second player on the same
 /// device costs no extra pipelines and no extra atlas upload.
-///
-/// Before P7-3 each player owned its renderer outright, so two characters on one
-/// screen meant two copies of every pipeline and every atlas — 16 MB of VRAM for
-/// one 2048² page, doubled.
 #[test]
 fn players_share_one_renderer() {
     let Some((device, queue)) = gpu() else {

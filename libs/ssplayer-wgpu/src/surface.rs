@@ -19,7 +19,7 @@ pub const STENCIL_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Depth24Plus
 /// stencil buffer at: at least 1, at most `max_texture_dimension_2d`.
 ///
 /// A window or canvas past the limit then draws at the largest size the device
-/// has, stretched by the compositor, where configuring it at its own size was a
+/// has, stretched by the compositor; configuring it at its own size is a
 /// validation error and a panic.
 pub(crate) fn surface_extent(device: &wgpu::Device, width: u32, height: u32) -> (u32, u32) {
     let max = device.limits().max_texture_dimension_2d;
