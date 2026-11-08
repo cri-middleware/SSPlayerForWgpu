@@ -17,7 +17,7 @@ crate-type = ["rlib"]
 
 [features]
 default = ["embedded"]
-# Decode embedded-mode ssab textures (PNG atlases) inside the player via the
+# Decode embedded-mode ssab textures (PNG, JPEG, WebP or TGA atlases) inside the player via the
 # `image` crate. Turn off for lean WASM builds that decode textures
 # host-side (e.g. the browser's `createImageBitmap`) and supply them by hash.
 embedded = ["dep:image"]
@@ -41,7 +41,8 @@ wgpu = { workspace = true }
 ssruntime = { workspace = true }
 ssab = { workspace = true }
 bytemuck = { version = "1.25.2", features = ["derive"] }
-image = { version = "0.25.10", optional = true, default-features = false, features = ["png"] }
+# The formats a SpriteStudio cellmap can name; the web face decodes in the browser.
+image = { version = "0.25.10", optional = true, default-features = false, features = ["png", "jpeg", "webp", "tga"] }
 wasm-bindgen = { workspace = true, optional = true }
 wasm-bindgen-futures = { workspace = true, optional = true }
 js-sys = { workspace = true, optional = true }
