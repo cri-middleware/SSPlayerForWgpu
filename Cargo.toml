@@ -58,11 +58,11 @@ bevy = { version = "0.20.1", default-features = false }
 # Pinned to the 30 line to stay compatible with Slint's `unstable-wgpu-30`: a
 # host that composes a Slint UI and this player on one device needs the exact
 # wgpu major Slint names. Do not bump without checking Slint's supported major.
-wgpu = "30.0.1"
-wasm-bindgen = { version = "0.2.129", default-features = false }
-wasm-bindgen-futures = "0.4.79"
-js-sys = "0.3.106"
-web-sys = "0.3.106"
+wgpu = "30.0.2"
+wasm-bindgen = { version = "0.2.130", default-features = false }
+wasm-bindgen-futures = "0.4.80"
+js-sys = "0.3.107"
+web-sys = "0.3.107"
 console_error_panic_hook = "0.1.7"
 
 [profile.dev]
