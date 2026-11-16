@@ -1070,8 +1070,7 @@ impl SSScene {
         }
 
         // Compile whatever this frame draws with and has not drawn with before. After the first few frames every key is a cache hit, so
-        // this is a walk over the draw list and nothing more. Indexed rather
-        // than iterated because `ensure_pipeline` needs `&mut self`.
+        // this is a walk over the draw list and nothing more.
         //
         // The same walk counts what draw-call merging and bind-group dedup would
         // save.
@@ -1080,9 +1079,8 @@ impl SSScene {
         // a writer whose pipeline was missing would simply not rasterise, and an
         // empty bitmap reads as "no coverage", which draws masked content
         // unclipped rather than failing.
-        for i in 0..self.frame.coverage_calls.len() {
-            let key = self.frame.coverage_calls[i].key;
-            renderer.ensure_pipeline(device, key);
+        for call in &self.frame.coverage_calls {
+            renderer.ensure_pipeline(device, call.key);
         }
         if self.frame.layered_groups() > 0 {
             renderer.ensure_pipeline(device, self.frame.key(PipelineKind::Composite));
