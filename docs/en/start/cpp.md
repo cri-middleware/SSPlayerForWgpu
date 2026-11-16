@@ -57,7 +57,7 @@ functions a frame; it renders through **DirectX 12 on Windows, Metal on macOS an
 
 === "From source"
 
-    Needs a Rust toolchain (1.99+); nothing else. `cargo` also regenerates the header through
+    Needs a Rust toolchain (1.100+); nothing else. `cargo` also regenerates the header through
     cbindgen in the same pass, so the header always matches the library you just built.
 
     ```bash

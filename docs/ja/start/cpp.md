@@ -43,7 +43,7 @@ title: C / C++ ではじめる
 
 === "ソースから"
 
-    必要なのは Rust ツールチェイン（1.99+）だけです。同じビルドで cbindgen がヘッダも再生成するため、ヘッダは常に今ビルドしたライブラリと一致します。
+    必要なのは Rust ツールチェイン（1.100+）だけです。同じビルドで cbindgen がヘッダも再生成するため、ヘッダは常に今ビルドしたライブラリと一致します。
 
     ```bash
     git clone --recursive https://github.com/cri-middleware/SSPlayerForWgpu.git

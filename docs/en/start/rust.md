@@ -15,7 +15,7 @@ this for you.
 
 | | |
 |---|---|
-| Rust | 1.99 or newer |
+| Rust | 1.100 or newer |
 | wgpu | the **30** line — your app and the player must resolve to one `wgpu`, so a different major is a compile error |
 
 ## Install
