@@ -83,7 +83,7 @@ to whoever reads it next.
 ## Development Environment
 
 ### Prerequisites
-- **Rust 1.99+** and a GPU backend wgpu 30 supports (Vulkan / Metal / DX12 /
+- **Rust 1.100+** and a GPU backend wgpu 30 supports (Vulkan / Metal / DX12 /
   WebGPU). On Linux with no GPU driver, Mesa's software Vulkan device (lavapipe,
   `mesa-vulkan-drivers`) is enough. The tests that draw return early without an
   adapter and report `ok`, so `tests/gpu_adapter.rs` fails instead to say so.
@@ -275,7 +275,7 @@ SSPlayerForWgpu にご関心をお寄せいただき、ありがとうござい�
 ## 開発環境のセットアップ
 
 ### 前提条件
-- **Rust 1.99 以降**と、wgpu 30 が対応する GPU バックエンド（Vulkan / Metal / DX12 / WebGPU）。GPU ドライバの無い Linux では、Mesa のソフトウェア Vulkan（lavapipe、`mesa-vulkan-drivers`）で足ります。描画するテストはアダプタが無いと早期 return して `ok` と報告するので、代わりに `tests/gpu_adapter.rs` が失敗してそれを知らせます
+- **Rust 1.100 以降**と、wgpu 30 が対応する GPU バックエンド（Vulkan / Metal / DX12 / WebGPU）。GPU ドライバの無い Linux では、Mesa のソフトウェア Vulkan（lavapipe、`mesa-vulkan-drivers`）で足ります。描画するテストはアダプタが無いと早期 return して `ok` と報告するので、代わりに `tests/gpu_adapter.rs` が失敗してそれを知らせます
 - **SDK submodule。** `ssruntime` と `ssab` は `SpriteStudio-SDK/` への path 依存なので、`--recursive` 付きで clone する（または `git submodule update --init` を実行する）必要があります
 - Web の Face の場合のみ: `wasm-pack`、`pnpm`（`corepack enable`）、`rustup target add wasm32-unknown-unknown`
 
