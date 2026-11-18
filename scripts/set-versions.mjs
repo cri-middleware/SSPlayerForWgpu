@@ -7,7 +7,8 @@
 // than one file, and this changes that one field in each of them:
 //
 //   ssplayer-wgpu   Cargo.toml's [workspace.package] version, which ssplayer-wgpu
-//                   and ssplayer-wgpu-ffi inherit; their two entries in
+//                   and ssplayer-wgpu-ffi inherit, and the version of its
+//                   [workspace.dependencies] entry; their two entries in
 //                   Cargo.lock; packages/ssplayer-wgpu/package.json; the
 //                   version the CDN samples in examples/cdn pin; and the
 //                   player's own line in THIRD_PARTY_NOTICES.md.
@@ -55,6 +56,30 @@ const tomlSection = (section) => (text, from, to) => {
   return out.join('');
 };
 
+// The `version` of the one-line `name = { ... }` entry in [section].
+const tomlDependency = (section, name) => (text, from, to) => {
+  const entry = new RegExp(`^(\\s*${escape(name)}\\s*=\\s*\\{.*\\bversion\\s*=\\s*")([^"]*)(".*)$`, 's');
+  const lines = text.split(/(?<=\n)/);
+  let here = false;
+  let hits = 0;
+  const out = lines.map((line) => {
+    if (/^\s*\[/.test(line)) {
+      here = line.replace(/\s/g, '') === `[${section}]`;
+      return line;
+    }
+    const m = here && entry.exec(line);
+    if (!m) return line;
+    hits += 1;
+    if (m[2] !== from) throw new Error(`[${section}] ${name} is '${m[2]}', not '${from}'`);
+    return `${m[1]}${to}${m[3]}`;
+  });
+  if (hits !== 1) throw new Error(`[${section}] has ${hits} ${name} entries with a version`);
+  return out.join('');
+};
+
+// A file is read once and written once, so the edits of one file run in turn here.
+const inTurn = (...edits) => (text, from, to) => edits.reduce((next, edit) => edit(next, from, to), text);
+
 const lockEntries = (crates) => (text, from, to) => {
   let next = text;
   for (const crate of crates) {
@@ -95,7 +120,7 @@ const PACKAGES = {
       readFileSync(join(ROOT, 'Cargo.toml'), 'utf8').split(/^\s*\[workspace\.package\]\s*$/m)[1] ?? '',
     )?.[1] ?? '',
     files: [
-      ['Cargo.toml', tomlSection('workspace.package')],
+      ['Cargo.toml', inTurn(tomlSection('workspace.package'), tomlDependency('workspace.dependencies', 'ssplayer-wgpu'))],
       ['Cargo.lock', lockEntries(['ssplayer-wgpu', 'ssplayer-wgpu-ffi'])],
       ['packages/ssplayer-wgpu/package.json', jsonVersion],
       ['examples/cdn/element.html', cdnPins],

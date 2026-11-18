@@ -7,9 +7,11 @@
 #
 # It is `[workspace.package] version` in Cargo.toml, which
 # scripts/set-versions.mjs changes. ssplayer-wgpu and ssplayer-wgpu-ffi inherit
-# it, and packages/ssplayer-wgpu/package.json carries the copy npm needs; this
-# prints nothing but an error while either crate declares a version of its own
-# or the copy disagrees. ssplayer-bevy is versioned on its own and is not read.
+# it, packages/ssplayer-wgpu/package.json carries the copy npm needs, and the
+# ssplayer-wgpu entry of [workspace.dependencies] the copy a crate that depends on
+# it publishes with; this prints nothing but an error while either crate declares
+# a version of its own or either copy disagrees. ssplayer-bevy is versioned on its
+# own and is not read.
 #
 # build-release.sh refuses a tag that disagrees, so a Release called
 # ssplayer-wgpu-v1.2.3 cannot hold an npm package that says 1.2.4.
@@ -49,6 +51,17 @@ for crate in ssplayer-wgpu ssplayer-wgpu-ffi; do
     exit 1
   fi
 done
+
+DEP_VERSION="$(awk '
+  /^[[:space:]]*\[/ { line = $0; gsub(/[[:space:]]/, "", line); here = (line == "[workspace.dependencies]"); next }
+  here && /^[[:space:]]*ssplayer-wgpu[[:space:]]*=/ && match($0, /version[[:space:]]*=[[:space:]]*"[^"]*"/) {
+    v = substr($0, RSTART, RLENGTH); sub(/^[^"]*"/, "", v); sub(/"$/, "", v); print v; exit
+  }
+' "$ROOT_DIR/Cargo.toml")"
+if [ "$DEP_VERSION" != "$VERSION" ]; then
+  echo "$APP: Cargo.toml's [workspace.dependencies] ssplayer-wgpu asks for '$DEP_VERSION', [workspace.package] says '$VERSION' -- bump them together" >&2
+  exit 1
+fi
 
 if ! command -v node > /dev/null 2>&1; then
   echo "$APP: node not found -- it is what reads packages/ssplayer-wgpu/package.json" >&2
