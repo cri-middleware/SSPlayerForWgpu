@@ -14,7 +14,7 @@ An agent can run every block. A person sorts the scan's summary in step 4 and de
 
 ### 1. Decide the version
 
-Look at what the player gained since its previous tag. The SDK it ships is the commit of the `SpriteStudio-SDK` submodule — `ssruntime` and `ssab` are path dependencies into it — and the player names it by that commit's version. The first release names the version the player already has, `7.0.0-beta.1`.
+Look at what the player gained since its previous tag. The SDK it ships is the commit of the `SpriteStudio-SDK` submodule — `ssruntime` and `ssab` are path dependencies into it — and the player names it by that commit's version.
 
 ```bash
 git fetch origin --tags
@@ -86,7 +86,7 @@ git switch main && git pull --ff-only &&
 
 ### 5. Run the release
 
-Run the block that fits. npm cannot stage a package it does not have yet, so the run that releases the package's first version — the first release — adds `-f publish_npm=false`, and step 7 publishes it by hand.
+Run the block that fits. npm cannot stage a package it does not have yet, so a run that releases the package's first version adds `-f publish_npm=false`, and step 7 publishes it by hand.
 
 Once npm has the package:
 
@@ -133,7 +133,7 @@ npm stage list @spritestudio/ssplayer-wgpu        # each staged version, with it
 npm stage approve <stage-id>
 ```
 
-A version the run did not stage — every run with `publish_npm=false`, the first release among them, and any after a failed **Stage on npm** — is published by hand instead, from the very tarball on the draft. `scripts/npm-dist-tag.sh` picks the dist-tag: `latest` for a full release, and for a prerelease while the package's `latest` is not yet a full release; the prerelease's word (`beta`, `rc`) after that.
+A version the run did not stage — every run with `publish_npm=false`, and any after a failed **Stage on npm** — is published by hand instead, from the very tarball on the draft. `scripts/npm-dist-tag.sh` picks the dist-tag: `latest` for a full release, and for a prerelease while the package's `latest` is not yet a full release; the prerelease's word (`beta`, `rc`) after that.
 
 ```bash
 tag=$(gh release list --json tagName,isDraft -q '[.[] | select(.isDraft) | .tagName | select(startswith("ssplayer-wgpu-v"))][0] // empty')
@@ -281,7 +281,7 @@ git checkout "${TAG:?}" &&
 
 ### 1. バージョンを決める
 
-前回のタグから Player が何を得たかを見ます。同梱する SDK は `SpriteStudio-SDK` submodule のコミットです（`ssruntime` と `ssab` はこの submodule へのパス依存）。Player はそのコミットのバージョンで SDK を名乗ります。初回のリリースでは、Player がいま持っているバージョン `7.0.0-beta.1` をそのまま指定します。
+前回のタグから Player が何を得たかを見ます。同梱する SDK は `SpriteStudio-SDK` submodule のコミットです（`ssruntime` と `ssab` はこの submodule へのパス依存）。Player はそのコミットのバージョンで SDK を名乗ります。
 
 ```bash
 git fetch origin --tags
@@ -353,7 +353,7 @@ git switch main && git pull --ff-only &&
 
 ### 5. リリースを実行する
 
-当てはまる方のブロックを実行します。npm はまだ無いパッケージを stage できないので、パッケージの最初のバージョンを出す run（初回のリリースがそうです）には `-f publish_npm=false` を足し、手順 7 で手作業で publish します。
+当てはまる方のブロックを実行します。npm はまだ無いパッケージを stage できないので、パッケージの最初のバージョンを出す run には `-f publish_npm=false` を足し、手順 7 で手作業で publish します。
 
 npm にパッケージがあるとき:
 
@@ -400,7 +400,7 @@ npm stage list @spritestudio/ssplayer-wgpu        # stage されたバージョ�
 npm stage approve <stage-id>
 ```
 
-run が stage しなかったバージョンは、下書きに添付された tarball そのものを手作業で publish します。`publish_npm=false` で実行した run（初回のリリースを含む）と、**Stage on npm** が失敗した後がこれにあたります。dist-tag は `scripts/npm-dist-tag.sh` が決めます。正式版は `latest` です。プレリリースも、パッケージの `latest` がまだ正式版でなければ `latest`、正式版になった後はその語（`beta`・`rc`）です。
+run が stage しなかったバージョンは、下書きに添付された tarball そのものを手作業で publish します。`publish_npm=false` で実行した run と、**Stage on npm** が失敗した後がこれにあたります。dist-tag は `scripts/npm-dist-tag.sh` が決めます。正式版は `latest` です。プレリリースも、パッケージの `latest` がまだ正式版でなければ `latest`、正式版になった後はその語（`beta`・`rc`）です。
 
 ```bash
 tag=$(gh release list --json tagName,isDraft -q '[.[] | select(.isDraft) | .tagName | select(startswith("ssplayer-wgpu-v"))][0] // empty')
