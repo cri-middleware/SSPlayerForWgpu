@@ -6,6 +6,8 @@ All notable changes to `ssplayer-wgpu` are documented here. The format is based 
 
 ## [Unreleased]
 
+## [7.0.0-beta.1] - 2026-11-18
+
 ### Added
 - **First release.** A wgpu renderer for SpriteStudio animations (`.ssab`), linking the
   SpriteStudio-SDK runtime (`ssruntime`, `ssab`) as Rust crates. One rendering code path covers
