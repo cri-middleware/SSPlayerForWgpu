@@ -111,10 +111,6 @@ the constraints a change most often breaks are in [CONTRIBUTING.md](./CONTRIBUTI
       for Web and for Flutter do; none of the three has been checked against the editor.
       Blocked on: a reference render of each.
 
-- [ ] **crates.io** — `ssruntime` and `ssab` are path dependencies into the
-      submodule; cargo will not publish a crate that depends on paths only.
-      Blocked on: the SDK crates `ssab` and `ssruntime` being published first.
-
 ## Needs SDK
 
 - [ ] **Crowd members at their own phase** — `SSPlayer::set_crowd` draws one

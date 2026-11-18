@@ -23,12 +23,12 @@ resolving a single `wgpu`.
 
 ## Install
 
-```toml
-[dependencies]
-ssplayer-bevy = { git = "https://github.com/cri-middleware/SSPlayerForWgpu" }
+```bash
+cargo add ssplayer-bevy
 ```
 
-It pulls `ssplayer-wgpu` in; you do not depend on both. To vendor the source instead, point at
+It pulls `ssplayer-wgpu` in; you do not depend on both. To use changes that are not released yet,
+make it a git dependency on this repository (`ssplayer-bevy = { git = "https://github.com/cri-middleware/SSPlayerForWgpu" }`). To vendor the source instead, point at
 `libs/ssplayer-bevy` inside a checkout of this repository and run
 `git submodule update --init --recursive` there. If your own project is a Cargo workspace and the
 checkout sits inside it, list it under `exclude`, as on the [Rust path](./rust.md#install).

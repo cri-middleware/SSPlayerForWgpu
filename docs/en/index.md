@@ -92,15 +92,15 @@ well: the rustdoc under API reference, the demo under Get started.
 
 ## 📦 What ships
 
-One library, four packages. The Rust crates are git dependencies on this repository, the C library
+One library, four packages. The Rust crates are on crates.io (and a git dependency on this repository for changes not released yet), the C library
 is a zip on each
 [`ssplayer-wgpu` Release](https://github.com/cri-middleware/SSPlayerForWgpu/releases?q=ssplayer-wgpu&expanded=true),
 and the web package is on npm.
 
 | Face | Ships as |
 |---|---|
-| Rust | the `ssplayer-wgpu` crate, as a git dependency |
-| Bevy | the `ssplayer-bevy` crate, as a git dependency |
+| Rust | the `ssplayer-wgpu` crate on crates.io, or a git dependency |
+| Bevy | the `ssplayer-bevy` crate on crates.io, or a git dependency |
 | C / C++ | `ssplayer-wgpu-windows-x86_64.zip` and `ssplayer-wgpu-macos-universal.zip` — `include/`, `lib/`, `README.md`, `docs/` (these pages, in English), `LICENSE.md`, `LICENSE.ja.md`, `THIRD_PARTY_NOTICES.md` |
 | Web | `@spritestudio/ssplayer-wgpu` on npm |
 

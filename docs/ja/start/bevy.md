@@ -21,12 +21,11 @@ workspace が 1 つの `wgpu` に解決することで担保しています。
 
 ## 導入 { #install }
 
-```toml
-[dependencies]
-ssplayer-bevy = { git = "https://github.com/cri-middleware/SSPlayerForWgpu" }
+```bash
+cargo add ssplayer-bevy
 ```
 
-これが `ssplayer-wgpu` を引き込むので、両方に依存する必要はありません。ソースを取り込む場合はチェックアウト内の `libs/ssplayer-bevy` を指し、そこで `git submodule update --init --recursive` を実行してください。自分のプロジェクトが Cargo の workspace でチェックアウト先がその中にある場合は、[Rust のパス](./rust.md#install)と同じく `exclude` に入れてください。
+これが `ssplayer-wgpu` を引き込むので、両方に依存する必要はありません。まだリリースしていない変更を使うときは、このリポジトリへの git 依存（`ssplayer-bevy = { git = "https://github.com/cri-middleware/SSPlayerForWgpu" }`）にします。ソースを取り込む場合はチェックアウト内の `libs/ssplayer-bevy` を指し、そこで `git submodule update --init --recursive` を実行してください。自分のプロジェクトが Cargo の workspace でチェックアウト先がその中にある場合は、[Rust のパス](./rust.md#install)と同じく `exclude` に入れてください。
 
 ## アプリ全体
 
