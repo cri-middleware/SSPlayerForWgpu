@@ -48,6 +48,7 @@ plugins:
   - search
   - redirects
   - llmstxt:
+      preprocess: docs/llmstxt-preprocess.py
       full_output: llms-full.txt
       markdown_description: |
         wgpu player with one library behind several faces: Rust (`start/rust`), Bevy
