@@ -114,6 +114,13 @@ jobs:
         # restore; the release converter is SpriteStudio-SDK's to build.
         run: ./scripts/deploy-examples.sh build=debug
 
+      # The Bevy examples play their sample sounds through bevy_audio, whose Linux
+      # backend (alsa-sys) finds libasound with pkg-config at build time.
+      - name: Install the ALSA headers
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libasound2-dev
+
       - name: Clippy
         run: cargo clippy --workspace --all-targets -- -D warnings
 
@@ -220,6 +227,12 @@ jobs:
         uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
         with:
           save-if: ${{ github.ref == 'refs/heads/main' }}
+
+      # alsa-sys, for the Bevy examples' audio (see the check job).
+      - name: Install the ALSA headers
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libasound2-dev
 
       - name: cargo check (workspace)
         run: cargo check --workspace --locked

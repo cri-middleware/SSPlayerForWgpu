@@ -20,7 +20,8 @@ wgpu = { workspace = true }
 # `Core2d` schedule this draws in), assets and a window. Deliberately *not*
 # `bevy_sprite_render` — this crate draws with the player's own pipelines and
 # never touches Bevy's 2d renderer, so an app that wants no `bevy_sprite` still
-# gets characters. No audio, glTF, PBR or UI either; those are the host's.
+# gets characters. No windowing backend, audio, glTF, PBR or UI either; those
+# are the host's.
 bevy = { workspace = true, features = [
     "std",
     "multi_threaded",
@@ -29,7 +30,6 @@ bevy = { workspace = true, features = [
     "bevy_render",
     "bevy_core_pipeline",
     "bevy_window",
-    "bevy_winit",
     "png",
 ] }
 
@@ -42,8 +42,10 @@ bevy = { workspace = true, features = [
 # own crates (`examples/overall-bevy`, `examples/viewer-bevy`) and carry the
 # heavier host features — audio, UI, text — that only a host, not this crate, needs.
 [dev-dependencies]
-# `bevy_sprite*` for the composited sprite in `tests/bevy_render.rs`.
-bevy = { workspace = true, features = ["bevy_sprite", "bevy_sprite_render"] }
+# `bevy_sprite*` for the composited sprite in `tests/bevy_render.rs`;
+# `bevy_winit` because the tests disable its `WinitPlugin`, and `x11` because
+# winit does not build on Linux without a window backend.
+bevy = { workspace = true, features = ["bevy_sprite", "bevy_sprite_render", "bevy_winit", "x11"] }
 ssplayer-wgpu = { workspace = true }
 wgpu = { workspace = true }
 pollster = "1.0.1"

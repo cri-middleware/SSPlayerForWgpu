@@ -31,7 +31,9 @@ get_filename_component(REPO_ROOT "${CMAKE_CURRENT_SOURCE_DIR}/../.." ABSOLUTE)
 # Match cargo's profile to CMake's, since that decides the target/ subdirectory.
 # As generator expressions, so a Visual Studio build of Debug still gets the
 # debug library it links against.
-set(CARGO_ARGS "$<$<NOT:$<CONFIG:Debug>>:--release>")
+# The profile is named in both branches: a generator expression that evaluates
+# to nothing still reaches cargo as an empty argument.
+set(CARGO_ARGS "--profile=$<IF:$<CONFIG:Debug>,dev,release>")
 set(SS_LIB_DIR "${REPO_ROOT}/target/$<IF:$<CONFIG:Debug>,debug,release>")
 # The cdylib's MSVC import library. `ssplayer_wgpu.lib` next to it is the
 # staticlib — linking that one instead works too, but then every system library
