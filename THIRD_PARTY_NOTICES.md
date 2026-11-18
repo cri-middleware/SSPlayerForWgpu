@@ -16,7 +16,7 @@ We would like to thank the authors and contributors of these open-source project
 
 ## Overview of Licenses
 
-- [Apache License 2.0](#Apache-2.0) (100)
+- [Apache License 2.0](#Apache-2.0) (104)
 - [MIT License](#MIT) (11)
 - [BSD 3-Clause &quot;New&quot; or &quot;Revised&quot; License](#BSD-3-Clause) (3)
 - [zlib License](#Zlib) (2)
@@ -674,8 +674,8 @@ Used by:
 ### <a id="Apache-2.0"></a>Apache License 2.0
 
 Used by:
-- **zerocopy-derive 0.8.59** (https://github.com/google/zerocopy)
-- **zerocopy 0.8.59** (https://github.com/google/zerocopy)
+- **zerocopy-derive 0.8.63** (https://github.com/google/zerocopy)
+- **zerocopy 0.8.63** (https://github.com/google/zerocopy)
 
 ```text
                                  Apache License
@@ -1100,6 +1100,8 @@ Used by:
 
 Used by:
 - **codespan-reporting 0.13.1** (https://github.com/brendanzab/codespan)
+- **zune-core 0.5.3** (https://github.com/etemesi254/zune-image)
+- **zune-jpeg 0.5.15** (https://github.com/etemesi254/zune-image/tree/dev/crates/zune-jpeg)
 
 ```text
                                  Apache License
@@ -1310,7 +1312,8 @@ Used by:
 ### <a id="Apache-2.0"></a>Apache License 2.0
 
 Used by:
-- **crc32fast 1.5.2** (https://github.com/srijs/rust-crc32fast)
+- **crc32fast 1.5.5** (https://github.com/srijs/rust-crc32fast)
+- **quick-error 2.0.1** (http://github.com/tailhook/quick-error)
 
 ```text
                                  Apache License
@@ -1949,34 +1952,34 @@ limitations under the License.
 Used by:
 - **arrayvec 0.7.8** (https://github.com/bluss/arrayvec)
 - **bitflags 2.13.2** (https://github.com/bitflags/bitflags)
-- **bumpalo 3.20.3** (https://github.com/fitzgen/bumpalo)
+- **bumpalo 3.20.4** (https://github.com/fitzgen/bumpalo)
 - **cfg-if 1.0.5** (https://github.com/rust-lang/cfg-if)
-- **equivalent 1.0.2** (https://github.com/indexmap-rs/equivalent)
-- **flate2 1.1.10** (https://github.com/rust-lang/flate2-rs)
+- **equivalent 1.0.3** (https://github.com/indexmap-rs/equivalent)
+- **flate2 1.1.11** (https://github.com/rust-lang/flate2-rs)
 - **hashbrown 0.16.1** (https://github.com/rust-lang/hashbrown)
 - **hashbrown 0.17.1** (https://github.com/rust-lang/hashbrown)
 - **indexmap 2.14.2** (https://github.com/indexmap-rs/indexmap)
-- **js-sys 0.3.106** (https://github.com/wasm-bindgen/wasm-bindgen/tree/master/crates/js-sys)
+- **js-sys 0.3.107** (https://github.com/wasm-bindgen/wasm-bindgen/tree/master/crates/js-sys)
 - **khronos-egl 6.0.0** (https://github.com/timothee-haudebourg/khronos-egl)
 - **lock_api 0.4.14** (https://github.com/Amanieu/parking_lot)
-- **log 0.4.34** (https://github.com/rust-lang/log)
+- **log 0.4.35** (https://github.com/rust-lang/log)
 - **num-traits 0.2.19** (https://github.com/rust-num/num-traits)
 - **once_cell 1.21.4** (https://github.com/matklad/once_cell)
 - **parking_lot 0.12.5** (https://github.com/Amanieu/parking_lot)
 - **parking_lot_core 0.9.12** (https://github.com/Amanieu/parking_lot)
 - **png 0.18.1** (https://github.com/image-rs/image-png)
-- **pollster 1.0.1** (https://github.com/zesterer/pollster)
+- **pollster 1.0.2** (https://github.com/zesterer/pollster)
 - **renderdoc-sys 1.1.0** (https://github.com/ebkalderon/renderdoc-rs)
 - **rustc-hash 1.1.0** (https://github.com/rust-lang-nursery/rustc-hash)
 - **scopeguard 1.2.0** (https://github.com/bluss/scopeguard)
-- **smallvec 1.16.2** (https://github.com/servo/rust-smallvec)
-- **unicode-width 0.2.2** (https://github.com/unicode-rs/unicode-width)
-- **wasm-bindgen-futures 0.4.79** (https://github.com/wasm-bindgen/wasm-bindgen/tree/master/crates/futures)
-- **wasm-bindgen-macro-support 0.2.129** (https://github.com/wasm-bindgen/wasm-bindgen/tree/main/crates/macro-support)
-- **wasm-bindgen-macro 0.2.129** (https://github.com/wasm-bindgen/wasm-bindgen/tree/master/crates/macro)
-- **wasm-bindgen-shared 0.2.129** (https://github.com/wasm-bindgen/wasm-bindgen/tree/master/crates/shared)
-- **wasm-bindgen 0.2.129** (https://github.com/wasm-bindgen/wasm-bindgen)
-- **web-sys 0.3.106** (https://github.com/wasm-bindgen/wasm-bindgen/tree/master/crates/web-sys)
+- **smallvec 1.16.6** (https://github.com/smallvec/smallvec)
+- **unicode-width 0.2.3** (https://github.com/unicode-rs/unicode-width)
+- **wasm-bindgen-futures 0.4.80** (https://github.com/wasm-bindgen/wasm-bindgen/tree/master/crates/futures)
+- **wasm-bindgen-macro-support 0.2.130** (https://github.com/wasm-bindgen/wasm-bindgen/tree/main/crates/macro-support)
+- **wasm-bindgen-macro 0.2.130** (https://github.com/wasm-bindgen/wasm-bindgen/tree/master/crates/macro)
+- **wasm-bindgen-shared 0.2.130** (https://github.com/wasm-bindgen/wasm-bindgen/tree/master/crates/shared)
+- **wasm-bindgen 0.2.130** (https://github.com/wasm-bindgen/wasm-bindgen)
+- **web-sys 0.3.107** (https://github.com/wasm-bindgen/wasm-bindgen/tree/master/crates/web-sys)
 
 ```text
                               Apache License
@@ -3398,13 +3401,14 @@ Used by:
 - **fdeflate 0.3.7** (https://github.com/image-rs/fdeflate)
 - **flatbuffers 25.12.19** (https://github.com/google/flatbuffers)
 - **half 2.7.1** (https://github.com/VoidStarKat/half-rs)
+- **image-webp 0.2.4** (https://github.com/image-rs/image-webp)
 - **image 0.25.10** (https://github.com/image-rs/image)
-- **libc 0.2.190** (https://github.com/rust-lang/libc)
-- **litrs 1.0.0** (https://github.com/LukasKalbertodt/litrs)
+- **libc 0.2.191** (https://github.com/rust-lang/libc)
+- **litrs 1.0.1** (https://github.com/LukasKalbertodt/litrs)
 - **miniz_oxide 0.8.9** (https://github.com/Frommi/miniz_oxide/tree/master/miniz_oxide)
 - **miniz_oxide 0.9.1** (https://github.com/Frommi/miniz_oxide/tree/master/miniz_oxide)
-- **naga-types 30.0.1** (https://github.com/gfx-rs/wgpu)
-- **naga 30.0.1** (https://github.com/gfx-rs/wgpu)
+- **naga-types 30.0.2** (https://github.com/gfx-rs/wgpu)
+- **naga 30.0.2** (https://github.com/gfx-rs/wgpu)
 - **objc2-core-foundation 0.3.2** (https://github.com/madsmtm/objc2)
 - **objc2-core-graphics 0.3.2** (https://github.com/madsmtm/objc2)
 - **objc2-metal 0.3.2** (https://github.com/madsmtm/objc2)
@@ -3417,17 +3421,17 @@ Used by:
 - **raw-window-handle 0.6.2** (https://github.com/rust-windowing/raw-window-handle)
 - **spirv 0.4.0+sdk-1.4.341.0** (https://github.com/gfx-rs/rspirv)
 - **syn 2.0.119** (https://github.com/dtolnay/syn)
-- **syn 3.0.6** (https://github.com/dtolnay/syn)
+- **syn 3.0.10** (https://github.com/dtolnay/syn)
 - **thiserror-impl 2.0.21** (https://github.com/dtolnay/thiserror)
 - **thiserror 2.0.21** (https://github.com/dtolnay/thiserror)
-- **unicode-ident 1.0.26** (https://github.com/dtolnay/unicode-ident)
-- **wgpu-core-deps-apple 30.0.1** (https://github.com/gfx-rs/wgpu)
-- **wgpu-core-deps-windows-linux-android 30.0.1** (https://github.com/gfx-rs/wgpu)
-- **wgpu-core 30.0.1** (https://github.com/gfx-rs/wgpu)
-- **wgpu-hal 30.0.1** (https://github.com/gfx-rs/wgpu)
-- **wgpu-naga-bridge 30.0.1** (https://github.com/gfx-rs/wgpu)
-- **wgpu-types 30.0.1** (https://github.com/gfx-rs/wgpu)
-- **wgpu 30.0.1** (https://github.com/gfx-rs/wgpu)
+- **unicode-ident 1.0.27** (https://github.com/dtolnay/unicode-ident)
+- **wgpu-core-deps-apple 30.0.2** (https://github.com/gfx-rs/wgpu)
+- **wgpu-core-deps-windows-linux-android 30.0.2** (https://github.com/gfx-rs/wgpu)
+- **wgpu-core 30.0.2** (https://github.com/gfx-rs/wgpu)
+- **wgpu-hal 30.0.2** (https://github.com/gfx-rs/wgpu)
+- **wgpu-naga-bridge 30.0.2** (https://github.com/gfx-rs/wgpu)
+- **wgpu-types 30.0.2** (https://github.com/gfx-rs/wgpu)
+- **wgpu 30.0.2** (https://github.com/gfx-rs/wgpu)
 
 ```text
 Apache License
@@ -3598,7 +3602,7 @@ THE SOFTWARE.
 ### <a id="MIT"></a>MIT License
 
 Used by:
-- **ordered-float 5.5.0** (https://github.com/reem/rust-ordered-float)
+- **ordered-float 5.5.1** (https://github.com/reem/rust-ordered-float)
 
 ```text
 Copyright (c) 2015 Jonathan Reem
@@ -3700,7 +3704,7 @@ Used by:
 - **libm 0.2.16** (https://github.com/rust-lang/compiler-builtins)
 - **objc2-encode 4.1.0** (https://github.com/madsmtm/objc2)
 - **objc2-foundation 0.3.2** (https://github.com/madsmtm/objc2)
-- **objc2 0.6.4** (https://github.com/madsmtm/objc2)
+- **objc2 0.6.5** (https://github.com/madsmtm/objc2)
 
 ```text
 MIT License
@@ -3790,7 +3794,7 @@ THE SOFTWARE.
 ### <a id="Unicode-3.0"></a>Unicode License v3
 
 Used by:
-- **unicode-ident 1.0.26** (https://github.com/dtolnay/unicode-ident)
+- **unicode-ident 1.0.27** (https://github.com/dtolnay/unicode-ident)
 
 ```text
 UNICODE LICENSE V3
