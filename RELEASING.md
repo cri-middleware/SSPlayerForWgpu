@@ -4,13 +4,13 @@ Maintainers only. Contributors do not run any of this — see [CONTRIBUTING.md](
 
 ## Cutting a release
 
-Anyone with the Write role on this repository can cut a release: it is one run of the **Release** workflow on `main`, so nothing depends on whose machine starts it. You need `git` and `gh` 2.87 or later (run `gh auth login` once), for steps 2 and 3, the toolchain [CONTRIBUTING.md](./CONTRIBUTING.md) sets up, and for step 7, `npm` signed in to an account that can publish to the `@spritestudio` scope. The repository needs GitHub Pages enabled with GitHub Actions as its source, and a `*-v*` tag rule on its `github-pages` environment, or publishing a Release deploys nothing; both are settings a repository admin makes. The package on npm needs a trusted publisher for this repository's `release.yml`, allowed to stage. npm sets one up only for a package it already has, so the package's first version goes out by hand (step 7). The macOS library is signed with the organisation's Developer ID and notarized, so the repository needs the six organisation secrets the sibling repositories sign with: `APPLE_DEV_ID_APP_CERT`, `APPLE_DEV_ID_APP_CERT_PASS`, `APPLE_DEV_ID_APP_NAME`, `ASC_API_KEY_PASS`, `ASC_API_KEY_ID` and `ASC_API_ISSUER_ID`. Without them a release stops before it builds. The commands are bash: in zsh, run `setopt interactive_comments` first, so that the `#` comments are not taken as arguments; on Windows, use Git Bash.
+Anyone with the Write role on this repository can cut a release: it is one run of the **Release** workflow on `main`, so nothing depends on whose machine starts it. You need `git` and `gh` 2.87 or later (run `gh auth login` once), for steps 2, 3 and 9, the toolchain [CONTRIBUTING.md](./CONTRIBUTING.md) sets up, for step 7, `npm` signed in to an account that can publish to the `@spritestudio` scope, and for step 9, a crates.io token of a member of the `cri-middleware/spritestudio` GitHub team, the team that owns the crate there. The repository needs GitHub Pages enabled with GitHub Actions as its source, and a `*-v*` tag rule on its `github-pages` environment, or publishing a Release deploys nothing; both are settings a repository admin makes. The package on npm needs a trusted publisher for this repository's `release.yml`, allowed to stage. npm sets one up only for a package it already has, so the package's first version goes out by hand (step 7). The macOS library is signed with the organisation's Developer ID and notarized, so the repository needs the six organisation secrets the sibling repositories sign with: `APPLE_DEV_ID_APP_CERT`, `APPLE_DEV_ID_APP_CERT_PASS`, `APPLE_DEV_ID_APP_NAME`, `ASC_API_KEY_PASS`, `ASC_API_KEY_ID` and `ASC_API_ISSUER_ID`. Without them a release stops before it builds. The commands are bash: in zsh, run `setopt interactive_comments` first, so that the `#` comments are not taken as arguments; on Windows, use Git Bash.
 
-This releases the player — the `ssplayer-wgpu` crate, its C face and the npm package `@spritestudio/ssplayer-wgpu` — as zips, the package's tarball and the [preview shell](./PREVIEW.md) on a GitHub Release, and that tarball on npm. The packages here are versioned independently, and a release names the version it sets, as `<package>@<version>`; the Bevy adapter `ssplayer-bevy` has a version of its own and no release route yet. The player's version is `[workspace.package] version` in `Cargo.toml`, which `ssplayer-wgpu` and `ssplayer-wgpu-ffi` inherit, with the copy npm needs in `packages/ssplayer-wgpu/package.json`. `scripts/set-versions.mjs` writes all of them, and turns the `## [Unreleased]` notes in `libs/ssplayer-wgpu/CHANGELOG.md` into that version's section; `scripts/release-version.sh` prints the version and refuses while the copies disagree. What each version gained is written in that changelog and nowhere else: a Release carries the zips, the tarball, the preview shell and a link to it. A contributor's pull request carries no version and no changelog entry — both are written here. There is no release branch: what `main` holds is what goes out, so `main` holds only what can ship.
+This releases the player — the `ssplayer-wgpu` crate, its C face and the npm package `@spritestudio/ssplayer-wgpu` — as zips, the package's tarball and the [preview shell](./PREVIEW.md) on a GitHub Release, that tarball on npm, and the crate on crates.io. The packages here are versioned independently, and a release names the version it sets, as `<package>@<version>`; the Bevy adapter `ssplayer-bevy` has a version of its own and no release route yet. The player's version is `[workspace.package] version` in `Cargo.toml`, which `ssplayer-wgpu` and `ssplayer-wgpu-ffi` inherit, with the copy npm needs in `packages/ssplayer-wgpu/package.json` and the one a crate depending on it publishes with in the `ssplayer-wgpu` entry of `[workspace.dependencies]`. `scripts/set-versions.mjs` writes all of them, and turns the `## [Unreleased]` notes in `libs/ssplayer-wgpu/CHANGELOG.md` into that version's section; `scripts/release-version.sh` prints the version and refuses while the copies disagree. What each version gained is written in that changelog and nowhere else: a Release carries the zips, the tarball, the preview shell and a link to it. A contributor's pull request carries no version and no changelog entry — both are written here. There is no release branch: what `main` holds is what goes out, so `main` holds only what can ship.
 
 Every block runs as written in a new shell: it works out what it needs from git and GitHub. One value is set by hand, written as a placeholder to fill in: `<version>`, the version from step 1, as in `7.0.0-beta.2`, in steps 4 and 5 and their retry under [Undoing a release](#undoing-a-release). The block that assembles a run's artifacts takes the run as `<run-id>` the same way, and a block that acts on a staged version takes it as `<stage-id>`. Left as it is, a placeholder stops its line with a syntax error.
 
-An agent can run every block. A person sorts the scan's summary in step 4 and decides two steps: the merge in step 2, which puts the notes on `main`, and step 8, which publishes the Release for good. Step 7, which asks for a 2FA code, is a person's too.
+An agent can run every block. A person sorts the scan's summary in step 4 and decides two steps: the merge in step 2, which puts the notes on `main`, and step 8, which publishes the Release for good. Step 7, which asks for a 2FA code, and step 9, which publishes the crate for good with a crates.io token of the person's own, are a person's too.
 
 ### 1. Decide the version
 
@@ -168,13 +168,32 @@ gh run watch "${RUN:?}" --exit-status
 
 Then open the site. A failed run leaves the Release published and the site as it was. When the cause was a setting outside the repository, re-run it with `gh run rerun <run-id>`, the run the block watched; a fix in the repository goes into `main` by pull request and deploys with `gh workflow run pages.yml --ref main`.
 
+### 9. Publish the crate
+
+**A person runs this step**: it takes a crates.io token of their own, and a version on crates.io is permanent — crates.io never lets its number be used again. The block checks out the tag of the `ssplayer-wgpu` Release published last, with the submodule, and publishes `ssplayer-wgpu`. On crates.io the crate depends on the SDK release `[workspace.dependencies]` names, not on the submodule, and cargo builds it against that release before uploading: the step fails while the player uses anything that release lacks, and that release has to be on crates.io first, which the SDK's own release sees to. Make the token on crates.io under Account Settings → API Tokens, with the `publish-update` scope, limited to `ssplayer-wgpu` and set to expire within days, and revoke it there once the block is done. The block waits for it to be pasted and does not show it, so it stays out of the shell's history.
+
+```bash
+git fetch origin --tags
+tag=$(gh release list --json tagName,publishedAt,isDraft -q '[.[] | select(.isDraft | not) | select(.tagName | startswith("ssplayer-wgpu-v"))] | sort_by(.publishedAt) | last | .tagName // empty')
+git switch --detach "${tag:?}" && git submodule update --init SpriteStudio-SDK &&
+  read -rs CARGO_REGISTRY_TOKEN && export CARGO_REGISTRY_TOKEN="${CARGO_REGISTRY_TOKEN:?}" &&   # paste the token
+  cargo publish -p ssplayer-wgpu --locked
+```
+
+The crate's first version needs the `publish-new` scope on the token as well, and makes whoever publishes it the crate's only owner. Right after, with a token that has the `change-owners` scope, add the team as an owner with the block below, which only a member of the team can run, and a second person too, with `cargo owner --add` and their crates.io login: the team can publish and yank but not change owners, and crates.io never leaves a crate without a person among its owners.
+
+```bash
+read -rs CARGO_REGISTRY_TOKEN && export CARGO_REGISTRY_TOKEN="${CARGO_REGISTRY_TOKEN:?}" &&   # paste the token
+  cargo owner --add github:cri-middleware:spritestudio ssplayer-wgpu
+```
+
 ## Patching an earlier line
 
 Fixes go to the latest release (SECURITY.md). When one has to reach an earlier version of a package on request, as `ssplayer-wgpu` 7.0.2 after 7.1.0, `main` carries the newer line, so it is released from a `maint/` branch cut from that version's tag. `release.yml` runs from a `maint/` branch as it does from `main`, and pushes the version commit back to that branch. `set-versions.mjs` compares with the branch's own version, so the patch is no step backwards, and a package whose Release already exists is skipped, so only the patched one is tagged and drafted.
 
 1. **Branch.** The first block cuts a `maint/` branch from the line's latest full release. Commit or cherry-pick the fix onto it, with notes under the package's `## [Unreleased]` in its CHANGELOG.md.
 2. **Release.** The second block runs the release from the branch, as step 5 does from `main`. The tarball is staged on npm under `latest-X.Y`, which `scripts/npm-dist-tag.sh` picks since npm's `latest` is a newer full release, so a bare `npm install` keeps getting the newest; approve it as step 7 does.
-3. **Publish.** `scripts/release-channel.sh` calls the Release `old`, and `pages.yml` deploys nothing for it. Publish it with the last block, not from the Releases page, whose default would make it Latest.
+3. **Publish.** `scripts/release-channel.sh` calls the Release `old`, and `pages.yml` deploys nothing for it. Publish it with the last block, not from the Releases page, whose default would make it Latest. Then publish the crate with step 9's block, which finds this Release as the one published last; crates.io keeps the newer line as the crate's default version.
 4. **Back to main.** Cherry-pick the fix onto `main` if it still needs it; the last block deletes the branch.
 
 ```bash
@@ -201,7 +220,7 @@ gh release edit "${TAG:?}" --draft=false --latest=false &&
 
 ## Undoing a release
 
-**A version npm has made public is permanent**, whether approved or published by hand: it cannot be withdrawn, only superseded. So is a published Release, whose tag and assets hosts have downloaded. A fault found after either is fixed by a new patch version. A staged version is not public yet, and `npm stage reject <stage-id>` removes it (a person, with 2FA). Before that:
+**A version npm has made public is permanent**, whether approved or published by hand: it cannot be withdrawn, only superseded. So is a published Release, whose tag and assets hosts have downloaded, and a version on crates.io, which can only be yanked: `cargo yank --version <version> ssplayer-wgpu`, with a token that has the `yank` scope, stops new lockfiles from resolving to it and leaves those that already have as they are. A fault found after any of them is fixed by a new patch version. A staged version is not public yet, and `npm stage reject <stage-id>` removes it (a person, with 2FA). Before that:
 
 *   A run that failed before its commit reached `main` is run again with the same version, once the cause is fixed in `main`. The **Re-run** button would replay the old commit, and its push would be rejected.
 
@@ -252,13 +271,13 @@ git checkout "${TAG:?}" &&
 
 ## リリースの手順
 
-このリポジトリの Write ロールを持つ人なら誰でもリリースできます。リリースは `main` での **Release** ワークフローの実行 1 回なので、誰の手元から始めても結果は変わりません。必要なのは `git` と `gh` 2.87 以降（最初に一度 `gh auth login`）、手順 2・3 のための、[CONTRIBUTING.md](./CONTRIBUTING.md) が用意するツールチェーン、それに手順 7 のための `npm` で、`@spritestudio` scope に publish できるアカウントでログインしておきます。リポジトリ側では、GitHub Pages を有効にしてソースを GitHub Actions にし、`github-pages` environment に `*-v*` のタグのルールを足しておく必要があります。どちらかが欠けると、Release を公開しても何もデプロイされません。どちらもリポジトリの admin が行う設定です。npm 側では、パッケージに、このリポジトリの `release.yml` を trusted publisher として登録し、stage を許可しておきます。npm はすでにあるパッケージにしか trusted publisher を設定できないので、パッケージの最初のバージョンは手作業で出します（手順 7）。macOS のライブラリは組織の Developer ID で署名して公証するので、リポジトリには、姉妹リポジトリが署名に使う組織の secret 6 つ（`APPLE_DEV_ID_APP_CERT`・`APPLE_DEV_ID_APP_CERT_PASS`・`APPLE_DEV_ID_APP_NAME`・`ASC_API_KEY_PASS`・`ASC_API_KEY_ID`・`ASC_API_ISSUER_ID`）が要ります。無ければリリースはビルドの前に止まります。コマンドは bash です。zsh では、`#` のコメントが引数として渡されないよう、先に `setopt interactive_comments` を実行します。Windows では Git Bash を使います。
+このリポジトリの Write ロールを持つ人なら誰でもリリースできます。リリースは `main` での **Release** ワークフローの実行 1 回なので、誰の手元から始めても結果は変わりません。必要なのは `git` と `gh` 2.87 以降（最初に一度 `gh auth login`）、手順 2・3・9 のための、[CONTRIBUTING.md](./CONTRIBUTING.md) が用意するツールチェーン、手順 7 のための `npm`（`@spritestudio` scope に publish できるアカウントでログインしておきます）、それに手順 9 のための crates.io のトークンです。トークンは、crates.io でクレートを所有する GitHub チーム `cri-middleware/spritestudio` のメンバーのものが要ります。リポジトリ側では、GitHub Pages を有効にしてソースを GitHub Actions にし、`github-pages` environment に `*-v*` のタグのルールを足しておく必要があります。どちらかが欠けると、Release を公開しても何もデプロイされません。どちらもリポジトリの admin が行う設定です。npm 側では、パッケージに、このリポジトリの `release.yml` を trusted publisher として登録し、stage を許可しておきます。npm はすでにあるパッケージにしか trusted publisher を設定できないので、パッケージの最初のバージョンは手作業で出します（手順 7）。macOS のライブラリは組織の Developer ID で署名して公証するので、リポジトリには、姉妹リポジトリが署名に使う組織の secret 6 つ（`APPLE_DEV_ID_APP_CERT`・`APPLE_DEV_ID_APP_CERT_PASS`・`APPLE_DEV_ID_APP_NAME`・`ASC_API_KEY_PASS`・`ASC_API_KEY_ID`・`ASC_API_ISSUER_ID`）が要ります。無ければリリースはビルドの前に止まります。コマンドは bash です。zsh では、`#` のコメントが引数として渡されないよう、先に `setopt interactive_comments` を実行します。Windows では Git Bash を使います。
 
-ここでリリースするのは Player 本体 — `ssplayer-wgpu` クレート、その C フェイス、npm パッケージ `@spritestudio/ssplayer-wgpu` — で、GitHub Release の zip とパッケージの tarball、[プレビューのシェル](./PREVIEW.md)として出し、その tarball を npm にも出します。このリポジトリのパッケージは独立にバージョンを持ち、リリースは設定するバージョンを `<package>@<version>` で指定します。Bevy アダプタ `ssplayer-bevy` は独自のバージョンを持ち、リリースの経路はまだありません。Player のバージョンは `Cargo.toml` の `[workspace.package] version` で、`ssplayer-wgpu` と `ssplayer-wgpu-ffi` がそれを継承し、`packages/ssplayer-wgpu/package.json` が npm に必要な写しを持ちます。`scripts/set-versions.mjs` がそのすべてを書き、`libs/ssplayer-wgpu/CHANGELOG.md` の `## [Unreleased]` のノートをそのバージョンの節に書き換えます。`scripts/release-version.sh` はバージョンを出力します（写しが食い違っている間は出力を拒否します）。各バージョンで何が変わったかは、この changelog にだけ書きます。Release が持つのは zip と tarball、プレビューのシェル、その changelog へのリンクです。コントリビューターのプルリクエストはバージョンも changelog の項目も持ちません。どちらもここで書きます。release ブランチはありません。`main` にあるものがそのまま出るので、`main` には出せるものだけを置きます。
+ここでリリースするのは Player 本体 — `ssplayer-wgpu` クレート、その C フェイス、npm パッケージ `@spritestudio/ssplayer-wgpu` — で、GitHub Release の zip とパッケージの tarball、[プレビューのシェル](./PREVIEW.md)として出し、その tarball を npm に、クレートを crates.io にも出します。このリポジトリのパッケージは独立にバージョンを持ち、リリースは設定するバージョンを `<package>@<version>` で指定します。Bevy アダプタ `ssplayer-bevy` は独自のバージョンを持ち、リリースの経路はまだありません。Player のバージョンは `Cargo.toml` の `[workspace.package] version` で、`ssplayer-wgpu` と `ssplayer-wgpu-ffi` がそれを継承し、`packages/ssplayer-wgpu/package.json` が npm に必要な写しを、`[workspace.dependencies]` の `ssplayer-wgpu` の項目が、それに依存するクレートが publish するときの写しを持ちます。`scripts/set-versions.mjs` がそのすべてを書き、`libs/ssplayer-wgpu/CHANGELOG.md` の `## [Unreleased]` のノートをそのバージョンの節に書き換えます。`scripts/release-version.sh` はバージョンを出力します（写しが食い違っている間は出力を拒否します）。各バージョンで何が変わったかは、この changelog にだけ書きます。Release が持つのは zip と tarball、プレビューのシェル、その changelog へのリンクです。コントリビューターのプルリクエストはバージョンも changelog の項目も持ちません。どちらもここで書きます。release ブランチはありません。`main` にあるものがそのまま出るので、`main` には出せるものだけを置きます。
 
 どのブロックも、新しいシェルで書かれたとおりに実行できます。必要なものは git と GitHub から求めます。手で設定する値は 1 つで、埋めるプレースホルダとして書いてあります。手順 4・5 と「リリースの取り消し」にあるその再実行の `<version>` で、手順 1 で決めたバージョン（`7.0.0-beta.2` など）を入れます。run の成果物を組み立てるブロックも、その run を `<run-id>` で受け取り、stage したバージョンに対して操作するブロックは、それを `<stage-id>` で受け取ります。埋めずに実行すると、その行は構文エラーで止まります。
 
-どのブロックもエージェントに実行させられます。手順 4 の検査の一覧は人が仕分けます。2 つの手順は人が判断します。ノートを `main` に入れる手順 2 のマージと、取り消せない公開を行う手順 8 です。2FA のコードを求められる手順 7 も人が行います。
+どのブロックもエージェントに実行させられます。手順 4 の検査の一覧は人が仕分けます。2 つの手順は人が判断します。ノートを `main` に入れる手順 2 のマージと、取り消せない公開を行う手順 8 です。2FA のコードを求められる手順 7 と、本人の crates.io のトークンでクレートを取り消せない形で公開する手順 9 も人が行います。
 
 ### 1. バージョンを決める
 
@@ -416,13 +435,32 @@ gh run watch "${RUN:?}" --exit-status
 
 終わったら、サイトを開いて確かめます。run が失敗しても Release は公開されたままで、サイトは元のまま残ります。原因がリポジトリの外の設定にあったなら、ブロックが見届けた run を `gh run rerun <run-id>` で再実行します。リポジトリ内の修正は、プルリクエストで `main` に入れてから `gh workflow run pages.yml --ref main` でデプロイします。
 
+### 9. クレートの公開
+
+**この手順は人が行います。** 本人の crates.io のトークンが要り、crates.io に出したバージョンは取り消せないためです（同じ番号は二度と使えません）。ブロックは最後に公開した `ssplayer-wgpu` の Release のタグを submodule ごとチェックアウトし、`ssplayer-wgpu` を公開します。crates.io の上のクレートは、submodule ではなく `[workspace.dependencies]` が指定する SDK のリリースに依存し、cargo はアップロードの前にそのリリースに対してビルドします。Player がそのリリースに無いものを使っていると、この手順は失敗します。そのリリースは先に crates.io に出ている必要があり、それは SDK のリリースが受け持ちます。トークンは crates.io の Account Settings → API Tokens で、スコープを `publish-update`、対象を `ssplayer-wgpu` に絞り、数日で切れる期限を付けて作ります。ブロックが終わったら同じ画面で失効させます。ブロックはトークンが貼り付けられるのを待ち、表示しないので、シェルの履歴にも残りません。
+
+```bash
+git fetch origin --tags
+tag=$(gh release list --json tagName,publishedAt,isDraft -q '[.[] | select(.isDraft | not) | select(.tagName | startswith("ssplayer-wgpu-v"))] | sort_by(.publishedAt) | last | .tagName // empty')
+git switch --detach "${tag:?}" && git submodule update --init SpriteStudio-SDK &&
+  read -rs CARGO_REGISTRY_TOKEN && export CARGO_REGISTRY_TOKEN="${CARGO_REGISTRY_TOKEN:?}" &&   # トークンを貼り付ける
+  cargo publish -p ssplayer-wgpu --locked
+```
+
+クレートの最初のバージョンには、トークンにスコープ `publish-new` も要り、公開した人がただ 1 人の owner になります。その直後に、スコープ `change-owners` のトークンで、チームを下のブロックで owner に足します（チームのメンバーしか実行できません）。もう 1 人、人も `cargo owner --add` とその人の crates.io のログイン名で足します。チームは publish と yank はできても owner は変えられず、crates.io は owner に人が 1 人もいない状態を許さないためです。
+
+```bash
+read -rs CARGO_REGISTRY_TOKEN && export CARGO_REGISTRY_TOKEN="${CARGO_REGISTRY_TOKEN:?}" &&   # トークンを貼り付ける
+  cargo owner --add github:cri-middleware:spritestudio ssplayer-wgpu
+```
+
 ## 古い系統へのパッチ
 
 修正は最新のリリースにだけ出します（SECURITY.md）。依頼を受けてパッケージの古い版を直すとき（7.1.0 の後の `ssplayer-wgpu` 7.0.2 など）は、`main` が新しい系統を持っているので、その版のタグから切った `maint/` ブランチから出します。`release.yml` は `maint/` ブランチからも `main` と同じように動き、版のコミットはそのブランチへ push します。`set-versions.mjs` はブランチ自身の版と比べるので、パッチは版の後退になりません。Release がすでにあるパッケージは飛ばすので、タグと下書きができるのは直したパッケージだけです。
 
 1. **ブランチ。** 最初のブロックで、その系統の最新の正式版のタグから `maint/` ブランチを切ります。修正をコミットするか cherry-pick し、パッケージの CHANGELOG.md の `## [Unreleased]` にノートを書きます。
 2. **リリース。** 2 つめのブロックで、手順 5 と同じようにブランチからリリースを実行します。npm には `latest-X.Y` で stage されます。npm の `latest` がより新しい正式版なので、`scripts/npm-dist-tag.sh` がそれを選び、素の `npm install` では最新の版が入り続けます。承認は手順 7 のとおりです。
-3. **公開。** `scripts/release-channel.sh` がこの Release を `old` と判定し、`pages.yml` は何もデプロイしません。公開は Releases ページではなく最後のブロックで行います。ページの既定のままだと Latest になるためです。
+3. **公開。** `scripts/release-channel.sh` がこの Release を `old` と判定し、`pages.yml` は何もデプロイしません。公開は Releases ページではなく最後のブロックで行います。ページの既定のままだと Latest になるためです。続けて手順 9 のブロックでクレートを公開します。ブロックはこの Release を最後に公開したものとして見つけます。crates.io でのクレートの既定のバージョンは新しい系統のままです。
 4. **main へは戻さない。** `main` にも要る修正なら cherry-pick します。最後のブロックがブランチを消します。
 
 ```bash
@@ -449,7 +487,7 @@ gh release edit "${TAG:?}" --draft=false --latest=false &&
 
 ## リリースの取り消し
 
-**npm で公開されたバージョンは恒久的です。** 承認したものも手作業で publish したものも、取り下げられず、新しいバージョンで置き換えるしかありません。公開した Release も同じで、ホストはそのタグでアセットを取得しています。どちらかの後に見つかった不具合は、新しいパッチバージョンで直します。stage しただけのバージョンはまだ公開されておらず、`npm stage reject <stage-id>` で取り下げられます（人が 2FA で行います）。それより前なら次のとおりです。
+**npm で公開されたバージョンは恒久的です。** 承認したものも手作業で publish したものも、取り下げられず、新しいバージョンで置き換えるしかありません。公開した Release も同じで、ホストはそのタグでアセットを取得しています。crates.io のバージョンも同じで、できるのは yank だけです。スコープ `yank` のトークンで `cargo yank --version <version> ssplayer-wgpu` を実行すると、新しい lockfile はそのバージョンを選ばなくなり、すでに選んでいる lockfile はそのまま使えます。いずれかの後に見つかった不具合は、新しいパッチバージョンで直します。stage しただけのバージョンはまだ公開されておらず、`npm stage reject <stage-id>` で取り下げられます（人が 2FA で行います）。それより前なら次のとおりです。
 
 *   コミットが `main` に届く前に失敗した run は、原因を `main` で直してから、同じバージョンで実行し直します。**Re-run** ボタンは古いコミットを再生するので、その push は拒否されます。
 
