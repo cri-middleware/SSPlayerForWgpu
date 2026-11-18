@@ -34,7 +34,13 @@
 
 ### Rust
 
-クレートを git 依存として追加します。submodule のチェックアウトは cargo が行うので、他のツールは要りません:
+クレートを crates.io から追加します:
+
+```bash
+cargo add ssplayer-wgpu
+```
+
+まだリリースしていない修正を使うときは、代わりにこのリポジトリへの git 依存にします。submodule のチェックアウトは cargo が行うので、他のツールは要りません:
 
 ```toml
 [dependencies]
@@ -44,9 +50,8 @@ ssplayer-wgpu = { git = "https://github.com/cri-middleware/SSPlayerForWgpu" }
 **Bevy** アプリの中で使う場合は、代わりにアダプタへ依存してください。プレイヤーを引き込んだ上で、キャラクターを Bevy 自身の 2D 描画に組み込むための 3 つのコンポーネント
 (`SsPlayer` / `SsTransform` / `SsPlayback`) を追加します:
 
-```toml
-[dependencies]
-ssplayer-bevy = { git = "https://github.com/cri-middleware/SSPlayerForWgpu" }
+```bash
+cargo add ssplayer-bevy
 ```
 
 対象とする Bevy のラインは一度に 1 本だけです（どのラインかは[アダプタの README](./libs/ssplayer-bevy)

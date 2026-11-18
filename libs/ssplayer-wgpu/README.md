@@ -16,12 +16,10 @@ pages are `docs/start/rust.md` and `docs/reference/rust.md`.
 
 ## Install
 
-Rust 1.100 or newer, and an app on the **30** line of wgpu. Add the crate as a git dependency; cargo
-checks out the `SpriteStudio-SDK` submodule for you:
+Rust 1.100 or newer, and an app on the **30** line of wgpu:
 
-```toml
-[dependencies]
-ssplayer-wgpu = { git = "https://github.com/cri-middleware/SSPlayerForWgpu" }
+```bash
+cargo add ssplayer-wgpu
 ```
 
 ## First frame

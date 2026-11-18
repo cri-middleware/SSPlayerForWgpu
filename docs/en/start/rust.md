@@ -20,7 +20,14 @@ this for you.
 
 ## Install
 
-Add the crate as a git dependency; cargo checks out the `SpriteStudio-SDK` submodule for you:
+Add the crate from crates.io:
+
+```bash
+cargo add ssplayer-wgpu
+```
+
+To build a fix that is not released yet, make it a git dependency on this repository instead; cargo
+checks out the `SpriteStudio-SDK` submodule for you:
 
 ```toml
 [dependencies]

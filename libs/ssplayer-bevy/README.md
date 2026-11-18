@@ -18,9 +18,8 @@ pages are `docs/start/bevy.md` and `docs/reference/bevy.md`.
 line is a compile error rather than a runtime surprise
 ([why](https://cri-middleware.github.io/SSPlayerForWgpu/start/bevy/#supported-bevy)).
 
-```toml
-[dependencies]
-ssplayer-bevy = { git = "https://github.com/cri-middleware/SSPlayerForWgpu" }
+```sh
+cargo add ssplayer-bevy
 ```
 
 ## First frame

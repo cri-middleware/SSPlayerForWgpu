@@ -18,7 +18,13 @@ title: Rust ではじめる
 
 ## 導入 { #install }
 
-クレートを git 依存として追加します。`SpriteStudio-SDK` サブモジュールは cargo が取得します：
+クレートを crates.io から追加します：
+
+```bash
+cargo add ssplayer-wgpu
+```
+
+まだリリースしていない修正を使うときは、代わりにこのリポジトリへの git 依存にします。`SpriteStudio-SDK` サブモジュールは cargo が取得します：
 
 ```toml
 [dependencies]

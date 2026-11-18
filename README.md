@@ -41,8 +41,14 @@ device-loss recovery) is the same path further in, in the [documentation](./docs
 
 ### Rust
 
-Add the crate as a git dependency. Cargo checks out the submodule for you, and no other tooling is
-needed:
+Add the crate from crates.io:
+
+```bash
+cargo add ssplayer-wgpu
+```
+
+To build a fix that is not released yet, make it a git dependency on this repository instead. Cargo
+checks out the submodule for you, and no other tooling is needed:
 
 ```toml
 [dependencies]
@@ -52,9 +58,8 @@ ssplayer-wgpu = { git = "https://github.com/cri-middleware/SSPlayerForWgpu" }
 Inside a **Bevy** app, depend on the adapter instead — it pulls the player in and adds the three
 components (`SsPlayer` / `SsTransform` / `SsPlayback`) that draw a character as part of Bevy's own 2D rendering:
 
-```toml
-[dependencies]
-ssplayer-bevy = { git = "https://github.com/cri-middleware/SSPlayerForWgpu" }
+```bash
+cargo add ssplayer-bevy
 ```
 
 It tracks one Bevy line at a time — named in [its README](./libs/ssplayer-bevy) — because Bevy
