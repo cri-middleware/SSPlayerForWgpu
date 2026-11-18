@@ -16,10 +16,11 @@ members = [
 exclude = ["SpriteStudio-SDK"]
 
 # `version` is the player's: `ssplayer-wgpu` and `ssplayer-wgpu-ffi` inherit it,
-# packages/ssplayer-wgpu/package.json carries the copy npm needs, and
-# scripts/release-version.sh refuses to print it while that copy disagrees. The
-# release tag is `ssplayer-wgpu-v` followed by it, and scripts/set-versions.mjs is
-# what changes it. Every other crate declares its own.
+# packages/ssplayer-wgpu/package.json carries the copy npm needs, the
+# `ssplayer-wgpu` entry of [workspace.dependencies] the copy a crate that depends
+# on it publishes with, and scripts/release-version.sh refuses to print it while
+# either copy disagrees. The release tag is `ssplayer-wgpu-v` followed by it, and
+# scripts/set-versions.mjs is what changes it. Every other crate declares its own.
 #
 # The player carries the SDK family line, which is what `ssab` and `ssruntime`
 # resolve to. The prerelease word is the maturity signal and is not cosmetic: beta
@@ -36,16 +37,20 @@ homepage = "https://www.webtech.co.jp/eng/spritestudio/"
 description = "SpriteStudio Player for wgpu: renders SpriteStudio animations (.ssab) with wgpu."
 
 [workspace.dependencies]
-# The SDK is a git submodule rather than a released crate: this player links the
-# runtime's Rust API directly (not the C-API the other Players use), so it has to
-# track unreleased .ssab schema changes. `git submodule update --init` first.
+# The SDK crates build from the git submodule: this player links the runtime's
+# Rust API directly (not the C-API the other Players use), so it has to track
+# unreleased .ssab schema changes. `git submodule update --init` first.
+# `version` is what a published crate asks crates.io for instead, as cargo drops
+# `path` on publish, and cargo refuses to build when the submodule's crates do not
+# match it. Publishing builds against crates.io, so a release can use only what
+# the SDK there already has.
 # No `std`, deliberately: the feature swaps ssruntime's float maths from the
 # `libm` crate to the platform's, and every other Player ships the no_std build.
 # Leaving it on would make this the one Player whose playback arithmetic can
 # differ.
-ssruntime = { path = "SpriteStudio-SDK/libs/ssruntime" }
-ssab = { path = "SpriteStudio-SDK/libs/ssab", default-features = false }
-ssplayer-wgpu = { path = "libs/ssplayer-wgpu" }
+ssruntime = { version = "7.0.0-beta.1", path = "SpriteStudio-SDK/libs/ssruntime" }
+ssab = { version = "7.0.0-beta.1", path = "SpriteStudio-SDK/libs/ssab", default-features = false }
+ssplayer-wgpu = { version = "7.0.0-beta.1", path = "libs/ssplayer-wgpu" }
 
 # The engine an adapter crate targets, pinned here beside `wgpu` because the two
 # constraints are one: `bevy_render` 0.20 requires wgpu ^30, so a Bevy bump
