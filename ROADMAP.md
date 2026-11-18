@@ -117,7 +117,7 @@ the constraints a change most often breaks are in [CONTRIBUTING.md](./CONTRIBUTI
       playhead at N placements, and that face stays here: it is GPU instancing of
       one evaluation's geometry and needs nothing of the runtime. N members at N
       points of one animation is the SDK's
-      [Animation Instancing](https://github.com/cri-middleware/SpriteStudio-SDK/blob/HEAD/ROADMAP.md#phase-3-feature-expansion-post-release),
+      [Animation Instancing](https://github.com/cri-middleware/SpriteStudio-SDK/blob/HEAD/ROADMAP.md#phase-3-feature-expansion),
       one evaluation context driving many instances. Waits for: that item.
 
 ## Deliberate non-goals
@@ -132,7 +132,7 @@ the constraints a change most often breaks are in [CONTRIBUTING.md](./CONTRIBUTI
   tool's preview beside its output. `SSScene::update` fuses the timeline
   advance with the geometry build, so handing one player to two scenes plays it at
   double speed, and splitting the two here would build half of the SDK's
-  [Animation Instancing](https://github.com/cri-middleware/SpriteStudio-SDK/blob/HEAD/ROADMAP.md#phase-3-feature-expansion-post-release)
+  [Animation Instancing](https://github.com/cri-middleware/SpriteStudio-SDK/blob/HEAD/ROADMAP.md#phase-3-feature-expansion)
   — one evaluation driving many instances — a second time. Two players over one
   `.ssab` is what serves it meanwhile: `SSPack` is three `Arc`s, the renderer
   uploads an atlas once, and two trees fed the same `dt` stay identical down to
