@@ -22,6 +22,14 @@ Rust 1.100 or newer, and an app on the **30** line of wgpu:
 cargo add ssplayer-wgpu
 ```
 
+To use changes that are not released yet, depend on the repository over git instead; cargo checks
+out the `SpriteStudio-SDK` submodule for you:
+
+```toml
+[dependencies]
+ssplayer-wgpu = { git = "https://github.com/cri-middleware/SSPlayerForWgpu" }
+```
+
 ## First frame
 
 ```rust

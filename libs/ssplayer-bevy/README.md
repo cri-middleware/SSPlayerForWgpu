@@ -22,6 +22,13 @@ line is a compile error rather than a runtime surprise
 cargo add ssplayer-bevy
 ```
 
+To use changes that are not released yet, depend on the repository over git instead:
+
+```toml
+[dependencies]
+ssplayer-bevy = { git = "https://github.com/cri-middleware/SSPlayerForWgpu" }
+```
+
 ## First frame
 
 ```rust

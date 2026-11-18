@@ -40,7 +40,7 @@
 cargo add ssplayer-wgpu
 ```
 
-まだリリースしていない修正を使うときは、代わりにこのリポジトリへの git 依存にします。submodule のチェックアウトは cargo が行うので、他のツールは要りません:
+まだリリースしていない変更を使うときは、代わりにこのリポジトリへの git 依存にします。submodule のチェックアウトは cargo が行うので、他のツールは要りません:
 
 ```toml
 [dependencies]
@@ -52,6 +52,13 @@ ssplayer-wgpu = { git = "https://github.com/cri-middleware/SSPlayerForWgpu" }
 
 ```bash
 cargo add ssplayer-bevy
+```
+
+まだリリースしていない変更を使うときは、git 依存にします:
+
+```toml
+[dependencies]
+ssplayer-bevy = { git = "https://github.com/cri-middleware/SSPlayerForWgpu" }
 ```
 
 対象とする Bevy のラインは一度に 1 本だけです（どのラインかは[アダプタの README](./libs/ssplayer-bevy)

@@ -47,7 +47,7 @@ Add the crate from crates.io:
 cargo add ssplayer-wgpu
 ```
 
-To build a fix that is not released yet, make it a git dependency on this repository instead. Cargo
+To use changes that are not released yet, make it a git dependency on this repository instead. Cargo
 checks out the submodule for you, and no other tooling is needed:
 
 ```toml
@@ -60,6 +60,13 @@ components (`SsPlayer` / `SsTransform` / `SsPlayback`) that draw a character as 
 
 ```bash
 cargo add ssplayer-bevy
+```
+
+or, for changes that are not released yet, as a git dependency:
+
+```toml
+[dependencies]
+ssplayer-bevy = { git = "https://github.com/cri-middleware/SSPlayerForWgpu" }
 ```
 
 It tracks one Bevy line at a time — named in [its README](./libs/ssplayer-bevy) — because Bevy

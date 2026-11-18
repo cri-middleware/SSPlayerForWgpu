@@ -24,7 +24,7 @@ title: Rust ではじめる
 cargo add ssplayer-wgpu
 ```
 
-まだリリースしていない修正を使うときは、代わりにこのリポジトリへの git 依存にします。`SpriteStudio-SDK` サブモジュールは cargo が取得します：
+まだリリースしていない変更を使うときは、代わりにこのリポジトリへの git 依存にします。`SpriteStudio-SDK` サブモジュールは cargo が取得します：
 
 ```toml
 [dependencies]

@@ -72,12 +72,12 @@ Windows のゲームも、macOS のアプリも、4 本の移植版ではなく�
 
 ## 📦 成果物
 
-ライブラリは 1 つ、パッケージは 4 つ。Rust のクレートは crates.io、C ライブラリは各 [`ssplayer-wgpu` の Release](https://github.com/cri-middleware/SSPlayerForWgpu/releases?q=ssplayer-wgpu&expanded=true) に付いた zip、Web のパッケージは npm にあります。
+ライブラリは 1 つ、パッケージは 4 つ。Rust のクレートは crates.io（まだリリースしていない変更はこのリポジトリへの git 依存）、C ライブラリは各 [`ssplayer-wgpu` の Release](https://github.com/cri-middleware/SSPlayerForWgpu/releases?q=ssplayer-wgpu&expanded=true) に付いた zip、Web のパッケージは npm にあります。
 
 | Face | 配布形態 |
 |---|---|
-| Rust | crates.io の `ssplayer-wgpu` クレート |
-| Bevy | crates.io の `ssplayer-bevy` クレート |
+| Rust | crates.io の `ssplayer-wgpu` クレート、または git 依存 |
+| Bevy | crates.io の `ssplayer-bevy` クレート、または git 依存 |
 | C / C++ | `ssplayer-wgpu-windows-x86_64.zip` と `ssplayer-wgpu-macos-universal.zip`（`include/` `lib/` `README.md` `docs/`（このドキュメントの英語版） `LICENSE.md` `LICENSE.ja.md` `THIRD_PARTY_NOTICES.md`） |
 | Web | npm の `@spritestudio/ssplayer-wgpu` |
 
