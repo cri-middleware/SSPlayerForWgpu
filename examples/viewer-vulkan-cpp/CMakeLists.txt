@@ -28,7 +28,9 @@ endif()
 get_filename_component(REPO_ROOT "${CMAKE_CURRENT_SOURCE_DIR}/../.." ABSOLUTE)
 
 # Match cargo's profile to CMake's, since that decides the target/ subdirectory.
-set(CARGO_ARGS "$<$<NOT:$<CONFIG:Debug>>:--release>")
+# The profile is named in both branches: a generator expression that evaluates
+# to nothing still reaches cargo as an empty argument.
+set(CARGO_ARGS "--profile=$<IF:$<CONFIG:Debug>,dev,release>")
 set(SS_LIB_DIR "${REPO_ROOT}/target/$<IF:$<CONFIG:Debug>,debug,release>")
 set(SS_LIB "${SS_LIB_DIR}/libssplayer_wgpu.so")
 set(SS_INCLUDE_DIR "${REPO_ROOT}/libs/ssplayer-wgpu-ffi/include")
