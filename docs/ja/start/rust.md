@@ -22,6 +22,7 @@ title: Rust ではじめる
 
 ```bash
 cargo add ssplayer-wgpu
+cargo add wgpu@30              # アプリ自身の wgpu。Player と同じ系統
 ```
 
 まだリリースしていない変更を使うときは、代わりにこのリポジトリへの git 依存にします。`SpriteStudio-SDK` サブモジュールは cargo が取得します：
@@ -55,7 +56,7 @@ ssplayer-wgpu = { path = "third_party/SSPlayerForWgpu/libs/ssplayer-wgpu" }
 サンプルが読み込む `.ssab` は事前にコンバートしたものです。`.sspj` からの作り方は[アセットの準備](./assets.md)にあり、公式のサンプルデータなら自前のプロジェクトは要りません。
 
 ```rust
-use ssplayer_wgpu::{MaskBackend, SSPlayer, SSRenderer, SSScene, SceneConfig};
+use ssplayer_wgpu::{MaskBackend, Placement, SSPlayer, SSRenderer, SSScene, SceneConfig};
 
 // デバイススコープ。パイプライン・サンプラー・アトラステクスチャ。
 let mut renderer = SSRenderer::new(&device);
@@ -72,8 +73,11 @@ scene.set_viewport(&queue, width as f32, height as f32, /* y_down */ false);
 let mut player = SSPlayer::new();
 player.load("assets/overall/Basic.ssab")?;   // パック・アトラス・兄弟パックを 1 呼び出しで
 player.set_animation("anime_1")?;            // 選択と再生開始は別
+player.fit_into(width as f32, height as f32, &Placement::default());   // キャンバス全体を表示に収める
 player.play();
 ```
+
+`fit_into` はアニメーションのキャンバス全体を表示に収めます。リサイズのたびにもう一度呼びます。呼ばなければ Player は作ったときの大きさで描きます。キャラクターを自分で配置するゲームなら、そちらが望む形です。[ボックスへのフィット](../guide/placement.md)を参照してください。
 
 `load` は GPU に一切触りません。借用モデルではフレームが始まるまで何も貸し出されないため、読み込まれたデータは最初の `update` で GPU へ渡ります。[ロードとアセット](../guide/loading.md)を参照。
 

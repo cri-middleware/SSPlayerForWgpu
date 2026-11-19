@@ -24,6 +24,7 @@ Add the crate from crates.io:
 
 ```bash
 cargo add ssplayer-wgpu
+cargo add wgpu@30              # your app's own wgpu, on the player's line
 ```
 
 To use changes that are not released yet, make it a git dependency on this repository instead; cargo
@@ -66,7 +67,7 @@ The samples load a `.ssab` converted ahead of time: [Preparing assets](./assets.
 make one from a `.sspj`, and the official sample data needs no project of your own.
 
 ```rust
-use ssplayer_wgpu::{MaskBackend, SSPlayer, SSRenderer, SSScene, SceneConfig};
+use ssplayer_wgpu::{MaskBackend, Placement, SSPlayer, SSRenderer, SSScene, SceneConfig};
 
 // Device-scoped. Pipelines, sampler, atlas textures.
 let mut renderer = SSRenderer::new(&device);
@@ -83,8 +84,13 @@ scene.set_viewport(&queue, width as f32, height as f32, /* y_down */ false);
 let mut player = SSPlayer::new();
 player.load("assets/overall/Basic.ssab")?;   // pack + atlases + sibling packs, in one call
 player.set_animation("anime_1")?;            // selecting is separate from starting
+player.fit_into(width as f32, height as f32, &Placement::default());   // the whole canvas in view
 player.play();
 ```
+
+`fit_into` puts the animation's whole canvas in the view, and is called again on a resize. Without it
+the player draws at authored scale, which is what a game that places its characters itself wants; see
+[Fitting into a box](../guide/placement.md).
 
 `load` touches no GPU state — the borrow model lends none until the frame starts, so what it read
 waits and reaches the GPU on the first `update`. See [Loading and assets](../guide/loading.md).

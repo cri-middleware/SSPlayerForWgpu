@@ -84,6 +84,7 @@ const surface = ctx.createSurface(canvas);    // one per canvas — projection +
 const a = surface.createPlayer();
 await a.load('/assets/Basic.ssab');           // pack + atlases + sibling packs, one call
 a.setAnimation(a.animationNames()[0]);        // selecting and starting are separate calls
+a.fitInto(canvas.width, canvas.height);       // the whole canvas in view
 a.play();
 
 const b = surface.createPlayer();
@@ -102,6 +103,10 @@ const loop = (now) => {
 };
 requestAnimationFrame(loop);
 ```
+
+`fitInto` puts the first character's whole canvas in the view, and is called again after a
+`surface.resize`; the second keeps its own `setTransform`. Without a fit the player draws at authored
+scale; see [Fitting into a box](../guide/placement.md).
 
 **The `load` family and `setCellmapTextureFromBytes` are the only asynchronous parts of the player API.** It fetches the pack, its
 atlases from both texture tables, and transitively the sibling `.ssab` files its instance parts play

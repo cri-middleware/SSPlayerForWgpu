@@ -108,7 +108,10 @@ shortest working reference — one drives Metal on macOS, one DX12 on Windows, o
 each is self-contained enough to copy out whole. Inside this repository they build the library
 themselves: their CMake runs `cargo build -p ssplayer-wgpu-ffi` and links what it leaves in
 `target/<profile>/`, with the header from `libs/ssplayer-wgpu-ffi/include/`. A viewer copied out
-points those two paths at `bin/` instead.
+drops that cargo step and points the two paths at what you have instead — `bin/libs/<platform>/<arch>/`
+and `bin/include/` from `scripts/build.sh`, or `lib/` and `include/` from a Release zip. The macOS
+shared library is named `@rpath/libssplayer_wgpu.dylib`, so give the executable an rpath to the folder
+that holds it (`BUILD_RPATH` in CMake).
 
 ### Browser (WebGPU)
 
@@ -158,6 +161,7 @@ scene.set_viewport(&queue, width as f32, height as f32, /* y_down */ false);
 let mut player = SSPlayer::new();
 player.load("assets/overall/Basic.ssab")?;   // any converted .ssab: pack, atlases and sibling packs, in one call
 player.set_animation("anime_1")?;
+player.fit_into(width as f32, height as f32, &Placement::default());   // the whole canvas in view
 player.play();
 
 scene.update(&mut renderer, &device, &queue, delta_secs, &mut [&mut player]);

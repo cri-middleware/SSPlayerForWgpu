@@ -72,6 +72,7 @@ const surface = ctx.createSurface(canvas);    // キャンバスに 1 つ — �
 const a = surface.createPlayer();
 await a.load('/assets/Basic.ssab');           // パック・アトラス・兄弟パックを 1 呼び出しで
 a.setAnimation(a.animationNames()[0]);        // 選択と再生開始は別
+a.fitInto(canvas.width, canvas.height);       // キャンバス全体を表示に収める
 a.play();
 
 const b = surface.createPlayer();
@@ -90,6 +91,8 @@ const loop = (now) => {
 };
 requestAnimationFrame(loop);
 ```
+
+`fitInto` は 1 体目のキャンバス全体を表示に収めます。`surface.resize` の後にもう一度呼びます。2 体目は自分の `setTransform` のままです。フィットしなければ Player は作ったときの大きさで描きます。[ボックスへのフィット](../guide/placement.md)を参照してください。
 
 **プレイヤー API で非同期なのは `load` 系と `setCellmapTextureFromBytes` だけです。** パック本体、両方のテクスチャテーブルにあるアトラス、そしてインスタンスパーツが参照する兄弟 `.ssab` まで取得します。届かなかったものは例外ではなく `missingAssets()` から返ります。`setAnimation()` と再生制御はすべて同期です。
 

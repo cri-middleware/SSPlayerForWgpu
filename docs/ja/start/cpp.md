@@ -77,7 +77,9 @@ cargo rustc -p ssplayer-wgpu-ffi --release --crate-type staticlib -- --print nat
 macOS ではこう返ります：`-lSystem -framework QuartzCore -framework CoreGraphics -liconv -framework Metal -framework Foundation -framework CoreFoundation -lobjc`（出力の残りはこれらの繰り返しです）。これに自分のウィンドウコードが必要とするもの（`-framework Cocoa`）を足します。Windows では `opengl32.lib kernel32.lib ntdll.lib userenv.lib ws2_32.lib dbghelp.lib /defaultlib:msvcrt` が返るので、リリースの `ssplayer_wgpu.lib` と一緒にリンクします。macOS の CMake なら（`SSPLAYER_DIR` は、リリースの zip を展開したフォルダです）：
 
 ```cmake
-add_executable(myapp src/main.cpp)
+cmake_minimum_required(VERSION 3.20)
+project(myapp LANGUAGES OBJCXX)               # ウィンドウのコードは AppKit なので Objective-C++
+add_executable(myapp src/main.mm)
 target_include_directories(myapp PRIVATE "${SSPLAYER_DIR}/include")
 target_link_libraries(myapp PRIVATE
     "${SSPLAYER_DIR}/lib/libssplayer_wgpu.a"
@@ -137,6 +139,9 @@ int main(void) {
         fprintf(stderr, "%s\n", ss_last_error());
     }
     ss_player_set_animation(player, "anime_1");
+    ss_placement_t placement;
+    ss_placement_default(&placement);       /* contain・中央。ゼロ初期化はしない */
+    ss_player_fit_into(player, (float)width, (float)height, &placement, NULL);   /* キャンバス全体を表示に収める */
     ss_player_play(player);
 
     /* ... 毎フレーム、この順で： */
@@ -145,12 +150,15 @@ int main(void) {
 
     /* ... リサイズ時（描画ピクセル）： */
     ss_scene_resize(scene, width, height);
+    ss_player_fit_into(player, (float)width, (float)height, &placement, NULL);
 
     /* ... 終了時。シーンを壊すとそのプレイヤーも壊れます。 */
     ss_scene_destroy(scene);
     return 0;
 }
 ```
+
+`ss_player_fit_into` はアニメーションのキャンバス全体をウィンドウに収めます。リサイズのたびにもう一度呼びます。呼ばなければ Player は作ったときの大きさで描きます。キャラクターを自分で配置するゲームなら、そちらが望む形です。[ボックスへのフィット](../guide/placement.md)を参照してください。
 
 例は C99 です。C++20 より前の C++（MSVC の既定は C++14）には指示付き初期化子が無いので、構造体をゼロで初期化して（`ss_scene_desc_t desc{};`）、フィールドを 1 つずつ設定してください。
 
