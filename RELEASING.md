@@ -6,7 +6,7 @@ Maintainers only. Contributors do not run any of this — see [CONTRIBUTING.md](
 
 Anyone with the Write role on this repository can cut a release: it is one run of the **Release** workflow on `main`, so nothing depends on whose machine starts it. You need `git` and `gh` 2.87 or later (run `gh auth login` once), for steps 2, 3 and 9, the toolchain [CONTRIBUTING.md](./CONTRIBUTING.md) sets up, for step 7, `npm` signed in to an account that can publish to the `@spritestudio` scope, and for step 9, a crates.io token of a member of the `cri-middleware/spritestudio` GitHub team, the team that owns the crate there. The repository needs GitHub Pages enabled with GitHub Actions as its source, and a `*-v*` tag rule on its `github-pages` environment, or publishing a Release deploys nothing; both are settings a repository admin makes. The package on npm needs a trusted publisher for this repository's `release.yml`, allowed to stage. npm sets one up only for a package it already has, so the package's first version goes out by hand (step 7). The macOS library is signed with the organisation's Developer ID and notarized, so the repository needs the six organisation secrets the sibling repositories sign with: `APPLE_DEV_ID_APP_CERT`, `APPLE_DEV_ID_APP_CERT_PASS`, `APPLE_DEV_ID_APP_NAME`, `ASC_API_KEY_PASS`, `ASC_API_KEY_ID` and `ASC_API_ISSUER_ID`. Without them a release stops before it builds. The commands are bash: in zsh, run `setopt interactive_comments` first, so that the `#` comments are not taken as arguments; on Windows, use Git Bash.
 
-This releases the player — the `ssplayer-wgpu` crate, its C face and the npm package `@spritestudio/ssplayer-wgpu` — as zips, the package's tarball and the [preview shell](./PREVIEW.md) on a GitHub Release, that tarball on npm, and the crate on crates.io. The packages here are versioned independently, and a release names the version it sets, as `<package>@<version>`; the Bevy adapter `ssplayer-bevy` has a version of its own and no release route yet. The player's version is `[workspace.package] version` in `Cargo.toml`, which `ssplayer-wgpu` and `ssplayer-wgpu-ffi` inherit, with the copy npm needs in `packages/ssplayer-wgpu/package.json` and the one a crate depending on it publishes with in the `ssplayer-wgpu` entry of `[workspace.dependencies]`. `scripts/set-versions.mjs` writes all of them, and turns the `## [Unreleased]` notes in `libs/ssplayer-wgpu/CHANGELOG.md` into that version's section; `scripts/release-version.sh` prints the version and refuses while the copies disagree. What each version gained is written in that changelog and nowhere else: a Release carries the zips, the tarball, the preview shell and a link to it. A contributor's pull request carries no version and no changelog entry — both are written here. There is no release branch: what `main` holds is what goes out, so `main` holds only what can ship.
+This releases the player — the `ssplayer-wgpu` crate, its C face and the npm package `@spritestudio/ssplayer-wgpu` — as zips, the package's tarball and the [preview shell](./PREVIEW.md) on a GitHub Release, that tarball on npm, and the crate on crates.io. The packages here are versioned independently, and a release names the version it sets, as `<package>@<version>`; the Bevy adapter `ssplayer-bevy` has a version of its own and is released on its own, under [Releasing the Bevy adapter](#releasing-the-bevy-adapter). The player's version is `[workspace.package] version` in `Cargo.toml`, which `ssplayer-wgpu` and `ssplayer-wgpu-ffi` inherit, with the copy npm needs in `packages/ssplayer-wgpu/package.json` and the one a crate depending on it publishes with in the `ssplayer-wgpu` entry of `[workspace.dependencies]`. `scripts/set-versions.mjs` writes all of them, and turns the `## [Unreleased]` notes in `libs/ssplayer-wgpu/CHANGELOG.md` into that version's section; `scripts/release-version.sh` prints the version and refuses while the copies disagree. What each version gained is written in that changelog and nowhere else: a Release carries the zips, the tarball, the preview shell and a link to it. A contributor's pull request carries no version and no changelog entry — both are written here. There is no release branch: what `main` holds is what goes out, so `main` holds only what can ship.
 
 Every block runs as written in a new shell: it works out what it needs from git and GitHub. One value is set by hand, written as a placeholder to fill in: `<version>`, the version from step 1, as in `7.0.0-beta.2`, in steps 4 and 5 and their retry under [Undoing a release](#undoing-a-release). The block that assembles a run's artifacts takes the run as `<run-id>` the same way, and a block that acts on a staged version takes it as `<stage-id>`. Left as it is, a placeholder stops its line with a syntax error.
 
@@ -187,6 +187,54 @@ read -rs CARGO_REGISTRY_TOKEN && export CARGO_REGISTRY_TOKEN="${CARGO_REGISTRY_T
   cargo owner --add github:cri-middleware:spritestudio ssplayer-wgpu
 ```
 
+## Releasing the Bevy adapter
+
+`ssplayer-bevy` is released as a crate on crates.io and nothing more: it has no zip, no npm package and no GitHub Release, so `release.yml` does not release it, and refuses it in `versions`. Its version is `version` in `libs/ssplayer-bevy/Cargo.toml`, apart from the player's, and its notes are in `libs/ssplayer-bevy/CHANGELOG.md`. A release is a pull request that sets the version, an `ssplayer-bevy-v<version>` tag on the commit that merges it, and the crate published from that tag. On crates.io the adapter depends on the version the `ssplayer-wgpu` entry of `[workspace.dependencies]` names, and cargo builds it against that version before uploading, so when the adapter needs what a newer player has, release the player first, through step 9. The blocks that take `<version>` take the adapter's version, as in `7.0.0-beta.2`. An agent can run every block; the merge in step 2 and the publish in step 4 are a person's, as steps 2 and 9 of the player's release are.
+
+1. **Set the version.** The first block makes the branch. Write what the adapter gained under `## [Unreleased]` in `libs/ssplayer-bevy/CHANGELOG.md`, then run the second, which sets the version in the manifest and in `Cargo.lock`, dates the notes, and opens the pull request. `set-versions.mjs` refuses a version lower than the current one, and a changelog with nothing under `## [Unreleased]`.
+
+   ```bash
+   git fetch origin && git switch -c release-ssplayer-bevy origin/main
+   # write under ## [Unreleased] in libs/ssplayer-bevy/CHANGELOG.md
+   ```
+
+   ```bash
+   VERSION=<version>                                 # the adapter's version
+   node scripts/set-versions.mjs "ssplayer-bevy@${VERSION:?}" &&
+     git commit -m "chore(release): ssplayer-bevy@$VERSION" -- libs/ssplayer-bevy/Cargo.toml Cargo.lock libs/ssplayer-bevy/CHANGELOG.md &&
+     git push -u origin release-ssplayer-bevy &&
+     gh pr create -B main --fill
+   ```
+
+2. **A person runs the merge**: choose **Create a merge commit** on the pull request's page, or run
+
+   ```bash
+   gh pr merge release-ssplayer-bevy --merge --delete-branch
+   ```
+
+3. **Tag it.** The block finds the commit that merged the pull request, checks that it carries the version, tags it and pushes the tag. A tag starts no workflow.
+
+   ```bash
+   VERSION=<version>                                 # the adapter's version
+   git fetch origin &&
+     SHA=$(gh pr list --head release-ssplayer-bevy --state merged -L 1 --json mergeCommit -q '.[0].mergeCommit.oid') &&
+     git show "${SHA:?}:libs/ssplayer-bevy/Cargo.toml" | grep -qx "version = \"${VERSION:?}\"" &&
+     git tag -a "ssplayer-bevy-v$VERSION" -m "ssplayer-bevy-v$VERSION" "$SHA" &&
+     git push origin "refs/tags/ssplayer-bevy-v$VERSION"
+   ```
+
+4. **A person publishes the crate**, as in step 9: a version on crates.io is permanent, and the step takes a crates.io token of their own. Make it with the `publish-update` scope, limited to `ssplayer-bevy` and set to expire within days, and revoke it once the block is done. A fault found after it is fixed by a new version; `cargo yank --version <version> ssplayer-bevy`, with a token that has the `yank` scope, stops new lockfiles from resolving to the faulty one.
+
+   ```bash
+   VERSION=<version>                                 # the adapter's version
+   git fetch origin --tags &&
+     git switch --detach "ssplayer-bevy-v${VERSION:?}" && git submodule update --init SpriteStudio-SDK &&
+     read -rs CARGO_REGISTRY_TOKEN && export CARGO_REGISTRY_TOKEN="${CARGO_REGISTRY_TOKEN:?}" &&   # paste the token
+     cargo publish -p ssplayer-bevy --locked
+   ```
+
+The [documentation site](https://cri-middleware.github.io/SSPlayerForWgpu/) documents the adapter too, and none of this deploys it. When the adapter's pages changed, deploy them from the tag with `gh workflow run pages.yml --ref ssplayer-bevy-v<version>`.
+
 ## Patching an earlier line
 
 Fixes go to the latest release (SECURITY.md). When one has to reach an earlier version of a package on request, as `ssplayer-wgpu` 7.0.2 after 7.1.0, `main` carries the newer line, so it is released from a `maint/` branch cut from that version's tag. `release.yml` runs from a `maint/` branch as it does from `main`, and pushes the version commit back to that branch. `set-versions.mjs` compares with the branch's own version, so the patch is no step backwards, and a package whose Release already exists is skipped, so only the patched one is tagged and drafted.
@@ -273,7 +321,7 @@ git checkout "${TAG:?}" &&
 
 このリポジトリの Write ロールを持つ人なら誰でもリリースできます。リリースは `main` での **Release** ワークフローの実行 1 回なので、誰の手元から始めても結果は変わりません。必要なのは `git` と `gh` 2.87 以降（最初に一度 `gh auth login`）、手順 2・3・9 のための、[CONTRIBUTING.md](./CONTRIBUTING.md) が用意するツールチェーン、手順 7 のための `npm`（`@spritestudio` scope に publish できるアカウントでログインしておきます）、それに手順 9 のための crates.io のトークンです。トークンは、crates.io でクレートを所有する GitHub チーム `cri-middleware/spritestudio` のメンバーのものが要ります。リポジトリ側では、GitHub Pages を有効にしてソースを GitHub Actions にし、`github-pages` environment に `*-v*` のタグのルールを足しておく必要があります。どちらかが欠けると、Release を公開しても何もデプロイされません。どちらもリポジトリの admin が行う設定です。npm 側では、パッケージに、このリポジトリの `release.yml` を trusted publisher として登録し、stage を許可しておきます。npm はすでにあるパッケージにしか trusted publisher を設定できないので、パッケージの最初のバージョンは手作業で出します（手順 7）。macOS のライブラリは組織の Developer ID で署名して公証するので、リポジトリには、姉妹リポジトリが署名に使う組織の secret 6 つ（`APPLE_DEV_ID_APP_CERT`・`APPLE_DEV_ID_APP_CERT_PASS`・`APPLE_DEV_ID_APP_NAME`・`ASC_API_KEY_PASS`・`ASC_API_KEY_ID`・`ASC_API_ISSUER_ID`）が要ります。無ければリリースはビルドの前に止まります。コマンドは bash です。zsh では、`#` のコメントが引数として渡されないよう、先に `setopt interactive_comments` を実行します。Windows では Git Bash を使います。
 
-ここでリリースするのは Player 本体 — `ssplayer-wgpu` クレート、その C フェイス、npm パッケージ `@spritestudio/ssplayer-wgpu` — で、GitHub Release の zip とパッケージの tarball、[プレビューのシェル](./PREVIEW.md)として出し、その tarball を npm に、クレートを crates.io にも出します。このリポジトリのパッケージは独立にバージョンを持ち、リリースは設定するバージョンを `<package>@<version>` で指定します。Bevy アダプタ `ssplayer-bevy` は独自のバージョンを持ち、リリースの経路はまだありません。Player のバージョンは `Cargo.toml` の `[workspace.package] version` で、`ssplayer-wgpu` と `ssplayer-wgpu-ffi` がそれを継承し、`packages/ssplayer-wgpu/package.json` が npm に必要な写しを、`[workspace.dependencies]` の `ssplayer-wgpu` の項目が、それに依存するクレートが publish するときの写しを持ちます。`scripts/set-versions.mjs` がそのすべてを書き、`libs/ssplayer-wgpu/CHANGELOG.md` の `## [Unreleased]` のノートをそのバージョンの節に書き換えます。`scripts/release-version.sh` はバージョンを出力します（写しが食い違っている間は出力を拒否します）。各バージョンで何が変わったかは、この changelog にだけ書きます。Release が持つのは zip と tarball、プレビューのシェル、その changelog へのリンクです。コントリビューターのプルリクエストはバージョンも changelog の項目も持ちません。どちらもここで書きます。release ブランチはありません。`main` にあるものがそのまま出るので、`main` には出せるものだけを置きます。
+ここでリリースするのは Player 本体 — `ssplayer-wgpu` クレート、その C フェイス、npm パッケージ `@spritestudio/ssplayer-wgpu` — で、GitHub Release の zip とパッケージの tarball、[プレビューのシェル](./PREVIEW.md)として出し、その tarball を npm に、クレートを crates.io にも出します。このリポジトリのパッケージは独立にバージョンを持ち、リリースは設定するバージョンを `<package>@<version>` で指定します。Bevy アダプタ `ssplayer-bevy` は独自のバージョンを持ち、「Bevy アダプタのリリース」の手順で別にリリースします。Player のバージョンは `Cargo.toml` の `[workspace.package] version` で、`ssplayer-wgpu` と `ssplayer-wgpu-ffi` がそれを継承し、`packages/ssplayer-wgpu/package.json` が npm に必要な写しを、`[workspace.dependencies]` の `ssplayer-wgpu` の項目が、それに依存するクレートが publish するときの写しを持ちます。`scripts/set-versions.mjs` がそのすべてを書き、`libs/ssplayer-wgpu/CHANGELOG.md` の `## [Unreleased]` のノートをそのバージョンの節に書き換えます。`scripts/release-version.sh` はバージョンを出力します（写しが食い違っている間は出力を拒否します）。各バージョンで何が変わったかは、この changelog にだけ書きます。Release が持つのは zip と tarball、プレビューのシェル、その changelog へのリンクです。コントリビューターのプルリクエストはバージョンも changelog の項目も持ちません。どちらもここで書きます。release ブランチはありません。`main` にあるものがそのまま出るので、`main` には出せるものだけを置きます。
 
 どのブロックも、新しいシェルで書かれたとおりに実行できます。必要なものは git と GitHub から求めます。手で設定する値は 1 つで、埋めるプレースホルダとして書いてあります。手順 4・5 と「リリースの取り消し」にあるその再実行の `<version>` で、手順 1 で決めたバージョン（`7.0.0-beta.2` など）を入れます。run の成果物を組み立てるブロックも、その run を `<run-id>` で受け取り、stage したバージョンに対して操作するブロックは、それを `<stage-id>` で受け取ります。埋めずに実行すると、その行は構文エラーで止まります。
 
@@ -453,6 +501,54 @@ git switch --detach "${tag:?}" && git submodule update --init SpriteStudio-SDK &
 read -rs CARGO_REGISTRY_TOKEN && export CARGO_REGISTRY_TOKEN="${CARGO_REGISTRY_TOKEN:?}" &&   # トークンを貼り付ける
   cargo owner --add github:cri-middleware:spritestudio ssplayer-wgpu
 ```
+
+## Bevy アダプタのリリース
+
+`ssplayer-bevy` は crates.io のクレートとしてだけリリースします。zip も npm パッケージも GitHub Release も無いので、`release.yml` はリリースせず、`versions` に指定すると拒否します。バージョンは `libs/ssplayer-bevy/Cargo.toml` の `version` で Player のものとは別に持ち、ノートは `libs/ssplayer-bevy/CHANGELOG.md` に書きます。リリースは、バージョンを設定するプルリクエスト、それをマージしたコミットに付ける `ssplayer-bevy-v<version>` のタグ、そのタグから公開するクレートの 3 つです。crates.io の上のアダプタは、`[workspace.dependencies]` の `ssplayer-wgpu` の項目が指定するバージョンに依存し、cargo はアップロードの前にそのバージョンに対してビルドします。アダプタが新しい Player にしか無いものを使うときは、先に Player を手順 9 までリリースします。`<version>` を受け取るブロックには、アダプタのバージョン（`7.0.0-beta.2` など）を入れます。どのブロックもエージェントに実行させられます。手順 2 のマージと手順 4 の公開は、Player のリリースの手順 2・9 と同じく人が行います。
+
+1. **バージョンを設定する。** 1 つ目のブロックがブランチを作ります。アダプタが得たものを `libs/ssplayer-bevy/CHANGELOG.md` の `## [Unreleased]` の下に書いてから 2 つ目を実行すると、マニフェストと `Cargo.lock` のバージョンを設定し、ノートに日付を付けて、プルリクエストを作ります。`set-versions.mjs` は、今より低いバージョンと、`## [Unreleased]` の下に何も無い changelog を拒否します。
+
+   ```bash
+   git fetch origin && git switch -c release-ssplayer-bevy origin/main
+   # libs/ssplayer-bevy/CHANGELOG.md の ## [Unreleased] の下に書く
+   ```
+
+   ```bash
+   VERSION=<version>                                 # アダプタのバージョン
+   node scripts/set-versions.mjs "ssplayer-bevy@${VERSION:?}" &&
+     git commit -m "chore(release): ssplayer-bevy@$VERSION" -- libs/ssplayer-bevy/Cargo.toml Cargo.lock libs/ssplayer-bevy/CHANGELOG.md &&
+     git push -u origin release-ssplayer-bevy &&
+     gh pr create -B main --fill
+   ```
+
+2. **マージは人が行います。** プルリクエストのページで **Create a merge commit** を選ぶか、次を実行します。
+
+   ```bash
+   gh pr merge release-ssplayer-bevy --merge --delete-branch
+   ```
+
+3. **タグを付ける。** ブロックはプルリクエストをマージしたコミットを探し、そのバージョンを持つことを確かめてからタグを付けて push します。タグで動くワークフローはありません。
+
+   ```bash
+   VERSION=<version>                                 # アダプタのバージョン
+   git fetch origin &&
+     SHA=$(gh pr list --head release-ssplayer-bevy --state merged -L 1 --json mergeCommit -q '.[0].mergeCommit.oid') &&
+     git show "${SHA:?}:libs/ssplayer-bevy/Cargo.toml" | grep -qx "version = \"${VERSION:?}\"" &&
+     git tag -a "ssplayer-bevy-v$VERSION" -m "ssplayer-bevy-v$VERSION" "$SHA" &&
+     git push origin "refs/tags/ssplayer-bevy-v$VERSION"
+   ```
+
+4. **クレートの公開は人が行います**（手順 9 と同じ）。crates.io に出したバージョンは取り消せず、本人の crates.io のトークンが要るためです。トークンはスコープを `publish-update`、対象を `ssplayer-bevy` に絞り、数日で切れる期限を付けて作り、ブロックが終わったら失効させます。公開の後に見つかった不具合は新しいバージョンで直します。スコープ `yank` のトークンで `cargo yank --version <version> ssplayer-bevy` を実行すると、新しく作られる lockfile はそのバージョンを選ばなくなります。
+
+   ```bash
+   VERSION=<version>                                 # アダプタのバージョン
+   git fetch origin --tags &&
+     git switch --detach "ssplayer-bevy-v${VERSION:?}" && git submodule update --init SpriteStudio-SDK &&
+     read -rs CARGO_REGISTRY_TOKEN && export CARGO_REGISTRY_TOKEN="${CARGO_REGISTRY_TOKEN:?}" &&   # トークンを貼り付ける
+     cargo publish -p ssplayer-bevy --locked
+   ```
+
+[ドキュメントサイト](https://cri-middleware.github.io/SSPlayerForWgpu/)はアダプタも扱いますが、この手順ではデプロイされません。アダプタのページが変わったときは、`gh workflow run pages.yml --ref ssplayer-bevy-v<version>` でタグからデプロイします。
 
 ## 古い系統へのパッチ
 

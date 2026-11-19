@@ -3,7 +3,8 @@ name: Release
 # version; everything after that is this workflow's, and the same ref with the
 # same inputs always produces the same result:
 #
-#   versions     `<package>@<version>` (today `ssplayer-wgpu@X.Y.Z`).
+#   versions     `<package>@<version>` (today `ssplayer-wgpu@X.Y.Z`; the Bevy
+#                adapter is released by hand, and this refuses it).
 #                scripts/set-versions.mjs writes it in every job, so each one
 #                builds the same tree, and turns the package's `## [Unreleased]`
 #                notes into that version's CHANGELOG.md section. The package job
@@ -91,12 +92,23 @@ jobs:
         with:
           persist-credentials: false
 
+      # set-versions.mjs also sets ssplayer-bevy, which this workflow does not
+      # release: it would leave the player's version as it is and release that
+      # again. Every later job needs this one, so refusing here is enough.
       - name: Set the versions
         if: inputs.versions != ''
         env:
           VERSIONS: ${{ inputs.versions }}
         # shellcheck disable=SC2086
-        run: node scripts/set-versions.mjs $VERSIONS
+        run: |
+          set -euo pipefail
+          for v in $VERSIONS; do
+            case "$v" in
+              ssplayer-wgpu@*) ;;
+              *) echo "::error::this workflow releases ssplayer-wgpu only, not '${v%@*}' (RELEASING.md)"; exit 1 ;;
+            esac
+          done
+          node scripts/set-versions.mjs $VERSIONS
 
       - name: Check the changelog
         run: |
