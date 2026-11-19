@@ -63,7 +63,7 @@ git switch main && git pull --ff-only && git submodule update --init &&
 
 A dry run builds every platform with the version applied and checks the result, and commits, tags, releases and stages nothing. It signs and notarizes the macOS library as the release will, so a secret that has expired fails here first; without the secrets it leaves the library ad-hoc signed and says so in a warning. Its zips, tarball and preview shell stay on the run (`ssplayer-wgpu-release-dist`); the block downloads them into `qa/<run ID>`, and fails when the run did.
 
-The block's last command looks for that warning and must print nothing, because the release in step 5 requires the signature and stops instead. If it prints anything, no change on `main` fixes it: the organization's signing secrets are not reaching this repository. An organization owner decides which repositories they reach, and on GitHub Free they cannot reach a private one. Run the block again once they do.
+The block's last command looks for that warning and must print nothing, because the release in step 5 requires the signature and stops instead. If it prints anything, no change on `main` fixes it: the organization's signing secrets are not reaching this repository. An organization owner decides which repositories they reach. Run the block again once they do.
 
 ```bash
 VERSION=<version>                                 # the version from step 1
@@ -378,7 +378,7 @@ git switch main && git pull --ff-only && git submodule update --init &&
 
 dry run は、バージョンを適用して全プラットフォームをビルドし、結果を検査します。コミットもタグも Release も作らず、npm への stage もしません。macOS のライブラリはリリースと同じように署名・公証するので、期限の切れた secret はここで先に失敗します。secret が無ければ、ライブラリを ad-hoc 署名のまま残し、警告でそう伝えます。zip と tarball、プレビューのシェルは run に残ります（`ssplayer-wgpu-release-dist`）。ブロックはそれを `qa/<run ID>` にダウンロードし、run が失敗していればブロックも失敗します。
 
-ブロックの最後のコマンドはその警告を探すもので、何も出力されてはいけません。手順 5 のリリースは署名を必須にしていて、そこで止まることになるためです。何か出力されたら、`main` をどう変えても直りません。組織の署名用の secret がこのリポジトリに届いていません。どのリポジトリに届けるかは組織のオーナーが決めますが、GitHub Free では private のリポジトリには届けられません。届くようになったら、このブロックをもう一度実行します。
+ブロックの最後のコマンドはその警告を探すもので、何も出力されてはいけません。手順 5 のリリースは署名を必須にしていて、そこで止まることになるためです。何か出力されたら、`main` をどう変えても直りません。組織の署名用の secret がこのリポジトリに届いていません。どのリポジトリに届けるかは組織のオーナーが決めます。届くようになったら、このブロックをもう一度実行します。
 
 ```bash
 VERSION=<version>                                 # 手順 1 で決めたバージョン
