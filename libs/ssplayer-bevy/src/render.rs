@@ -299,7 +299,10 @@ pub(crate) fn sync_players(mut state: Option<ResMut<SsRenderState>>, extracted: 
             slot.loop_count = Some(playback.loop_count);
             slot.player.set_loop_count(playback.loop_count);
         }
-        if slot.section != Some(playback.animation_section) {
+        // A section is frame numbers of the animation it is set on, so it waits
+        // for one: before the pack has loaded there is nothing to give it to,
+        // and setting the animation clears `slot.section` to send it then.
+        if slot.player.current_animation().is_some() && slot.section != Some(playback.animation_section) {
             // Recorded refused or not, so a refused section is reported once
             // rather than sent again every frame.
             slot.section = Some(playback.animation_section);
