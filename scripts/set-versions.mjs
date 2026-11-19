@@ -12,15 +12,18 @@
 //                   Cargo.lock; packages/ssplayer-wgpu/package.json; the
 //                   version the CDN samples in examples/cdn pin; and the
 //                   player's own line in THIRD_PARTY_NOTICES.md.
+//   ssplayer-bevy   libs/ssplayer-bevy/Cargo.toml's [package] version and its
+//                   entry in Cargo.lock. The adapter is versioned on its own and
+//                   released by hand, not by release.yml, which refuses it
+//                   (RELEASING.md, "Releasing the Bevy adapter").
 //
 // It also turns the `## [Unreleased]` notes in the package's CHANGELOG.md into
 // `## [<version>] - <date>` under a fresh, empty `## [Unreleased]`: the changelog
 // is where the notes are, and a Release only links it.
 //
-// ssplayer-bevy is versioned on its own and has no release route yet, so it is
-// not one of them. release.yml runs this with its `versions` input in every job,
-// so each one builds the same tree; scripts/release-version.sh then prints the
-// result. Every argument is checked before any file is written, and a version
+// release.yml runs this with its `versions` input in every job, so each one
+// builds the same tree; scripts/release-version.sh then prints the result.
+// Every argument is checked before any file is written, and a version
 // may not go backwards: one published by mistake can never be withdrawn. A
 // version the changelog already has a heading for is released, and nothing under
 // `## [Unreleased]` leaves a release with no notes. Naming the version a package
@@ -129,6 +132,16 @@ const PACKAGES = {
       ['THIRD_PARTY_NOTICES.md', noticesEntry],
     ],
     changelog: 'libs/ssplayer-wgpu/CHANGELOG.md',
+  },
+  'ssplayer-bevy': {
+    current: () => /^\s*version\s*=\s*"([^"]*)"/m.exec(
+      readFileSync(join(ROOT, 'libs/ssplayer-bevy/Cargo.toml'), 'utf8').split(/^\s*\[package\]\s*$/m)[1] ?? '',
+    )?.[1] ?? '',
+    files: [
+      ['libs/ssplayer-bevy/Cargo.toml', tomlSection('package')],
+      ['Cargo.lock', lockEntries(['ssplayer-bevy'])],
+    ],
+    changelog: 'libs/ssplayer-bevy/CHANGELOG.md',
   },
 };
 
