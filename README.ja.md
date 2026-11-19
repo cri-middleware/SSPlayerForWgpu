@@ -86,7 +86,7 @@ bin/THIRD_PARTY_NOTICES.md                               # 謝辞に載せるべ
 bin/libs/<platform>/<arch>/libssplayer_wgpu.{a,dylib,so} # Windows では .lib/.dll
 ```
 
-ビルド設定をこの 2 つのディレクトリに向けてください。[`examples/`](#-サンプル) 以下の C++ ビューアが、動く実例としては最短です。macOS では Metal、Windows では DX12、Linux では Vulkan を駆動し、それぞれ丸ごとコピーして持ち出せる程度に自己完結しています。このリポジトリの中では、ビューアはライブラリを自分でビルドします。CMake が `cargo build -p ssplayer-wgpu-ffi` を実行し、`target/<profile>/` にできたものをリンクし、ヘッダは `libs/ssplayer-wgpu-ffi/include/` から読みます。持ち出したビューアでは、この 2 つのパスを `bin/` に向け直してください。
+ビルド設定をこの 2 つのディレクトリに向けてください。[`examples/`](#-サンプル) 以下の C++ ビューアが、動く実例としては最短です。macOS では Metal、Windows では DX12、Linux では Vulkan を駆動し、それぞれ丸ごとコピーして持ち出せる程度に自己完結しています。このリポジトリの中では、ビューアはライブラリを自分でビルドします。CMake が `cargo build -p ssplayer-wgpu-ffi` を実行し、`target/<profile>/` にできたものをリンクし、ヘッダは `libs/ssplayer-wgpu-ffi/include/` から読みます。持ち出したビューアでは、この cargo の手順を外し、2 つのパスを手元にあるものへ向け直します。`scripts/build.sh` なら `bin/libs/<platform>/<arch>/` と `bin/include/`、リリースの zip なら `lib/` と `include/` です。macOS の共有ライブラリの名前は `@rpath/libssplayer_wgpu.dylib` なので、実行ファイルにそのフォルダへの rpath を付けます（CMake なら `BUILD_RPATH`）。
 
 ### ブラウザ (WebGPU)
 
@@ -129,6 +129,7 @@ scene.set_viewport(&queue, width as f32, height as f32, /* y_down */ false);
 let mut player = SSPlayer::new();
 player.load("assets/overall/Basic.ssab")?;   // 変換済みの任意の .ssab。パック・アトラス・兄弟パックを 1 呼び出しで
 player.set_animation("anime_1")?;
+player.fit_into(width as f32, height as f32, &Placement::default());   // キャンバス全体を表示に収める
 player.play();
 
 scene.update(&mut renderer, &device, &queue, delta_secs, &mut [&mut player]);

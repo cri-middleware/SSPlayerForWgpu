@@ -99,7 +99,9 @@ which you link beside the release's `ssplayer_wgpu.lib`. A CMake project on macO
 `SSPLAYER_DIR` is the folder you unzipped the release into:
 
 ```cmake
-add_executable(myapp src/main.cpp)
+cmake_minimum_required(VERSION 3.20)
+project(myapp LANGUAGES OBJCXX)               # the window code is AppKit, so Objective-C++
+add_executable(myapp src/main.mm)
 target_include_directories(myapp PRIVATE "${SSPLAYER_DIR}/include")
 target_link_libraries(myapp PRIVATE
     "${SSPLAYER_DIR}/lib/libssplayer_wgpu.a"
@@ -162,6 +164,9 @@ int main(void) {
         fprintf(stderr, "%s\n", ss_last_error());
     }
     ss_player_set_animation(player, "anime_1");
+    ss_placement_t placement;
+    ss_placement_default(&placement);       // contain, centred; never zero-initialise it
+    ss_player_fit_into(player, (float)width, (float)height, &placement, NULL);   // the whole canvas in view
     ss_player_play(player);
 
     // ... every frame, in this order:
@@ -170,12 +175,17 @@ int main(void) {
 
     // ... on a window resize (drawable pixels):
     ss_scene_resize(scene, width, height);
+    ss_player_fit_into(player, (float)width, (float)height, &placement, NULL);
 
     // ... at the end. Destroying the scene destroys its players.
     ss_scene_destroy(scene);
     return 0;
 }
 ```
+
+`ss_player_fit_into` puts the animation's whole canvas in the window, and is called again on a resize.
+Without it the player draws at authored scale, which is what a game that places its characters itself
+wants; see [Fitting into a box](../guide/placement.md).
 
 The example is C99. C++ before C++20 — MSVC's default is C++14 — has no designated initializers:
 zero the struct (`ss_scene_desc_t desc{};`) and set its fields one by one.

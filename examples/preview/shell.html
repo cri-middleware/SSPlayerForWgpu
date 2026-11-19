@@ -389,7 +389,7 @@ function unreadable(url) {
   overlay(
     `<strong>Cannot read ${escapeHtml(fileName(url))}</strong>` +
     '<span>This page reads files by path only in a Chrome started with <code>--allow-file-access-from-files</code>, ' +
-    'which is how an editor\'s Preview button opens it. Opened any other way, drop the <code>.ssab</code> here ' +
+    'as a tool that opens it by path starts it. Opened any other way, drop the <code>.ssab</code> here ' +
     'with its <code>.png</code> atlases and sibling <code>.ssab</code>, or the folder that holds them.</span>');
 }
 
@@ -602,7 +602,7 @@ $('licenses').addEventListener('click', () => {
   new ResizeObserver(() => fitCanvas()).observe(stage);
   fitCanvas();
 
-  // A host's Preview button names the `.ssab` in the URL. Otherwise the pack
+  // A tool that opens the page by path names the `.ssab` in the URL. Otherwise the pack
   // the generator inlined, if any, and everything it depends on — sibling packs
   // and atlases alike — in the second hole, keyed by the path the pack names.
   const inlined = bytes($('ssab').textContent);

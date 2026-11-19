@@ -24,10 +24,11 @@ resolving a single `wgpu`.
 ## Install
 
 ```bash
-cargo add ssplayer-bevy
+cargo add bevy@0.20 ssplayer-bevy
 ```
 
-It pulls `ssplayer-wgpu` in; you do not depend on both. To use changes that are not released yet,
+The app below uses Bevy itself, so a new project adds it too; an app that already has Bevy 0.20 adds
+`ssplayer-bevy` alone. It pulls `ssplayer-wgpu` in; you do not depend on both. To use changes that are not released yet,
 make it a git dependency on this repository (`ssplayer-bevy = { git = "https://github.com/cri-middleware/SSPlayerForWgpu" }`). To vendor the source instead, point at
 `libs/ssplayer-bevy` inside a checkout of this repository and run
 `git submodule update --init --recursive` there. If your own project is a Cargo workspace and the

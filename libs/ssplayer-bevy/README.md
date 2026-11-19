@@ -19,8 +19,11 @@ line is a compile error rather than a runtime surprise
 ([why](https://cri-middleware.github.io/SSPlayerForWgpu/start/bevy/#supported-bevy)).
 
 ```sh
-cargo add ssplayer-bevy
+cargo add bevy@0.20 ssplayer-bevy
 ```
+
+A new project adds Bevy too, since the app uses it directly; one that already has Bevy 0.20 adds
+`ssplayer-bevy` alone.
 
 To use changes that are not released yet, depend on the repository over git instead:
 
