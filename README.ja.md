@@ -24,8 +24,8 @@
 - [**制約と適用範囲**](./docs/ja/limitations.md) — 現在描けるもの、ホスト側に委ねているもの
 - [**SS6Player for CPP からの移行**](./docs/ja/migration/from-ss6-cpp.md)
 - [**ROADMAP**](./ROADMAP.md) — 予定しているもの、意図的に見送ったもの
-- [**AI アシスタント向け**](https://cri-middleware.github.io/SSPlayerForWgpu/ja/llms.txt) — このドキュメントを Markdown で提供します。`llms.txt` はページの目次、`llms-full.txt` は全ページを 1 ファイルにまとめたものです。npm パッケージは同じページを `docs/` に、Agent Skill として `skills/` にも持っています（[skill の入れ方](https://cri-middleware.github.io/SpriteStudio-Docs/ja/ai/)）
-- [**SpriteStudio Docs（ポータル）**](https://cri-middleware.github.io/SpriteStudio-Docs/ja/) — SDK と全公式 Player の入口
+- [**AI アシスタント向け**](https://cri-middleware.github.io/SSPlayerForWgpu/ja/llms.txt) — このドキュメントを Markdown で提供します。`llms.txt` はページの目次、`llms-full.txt` は全ページを 1 ファイルにまとめたものです。npm パッケージは同じページを `docs/` に、Agent Skill として `skills/` にも持っています（[skill の入れ方](https://cri-middleware.github.io/SpriteStudio-Docs/ja/ai/docs/)）
+- [**SpriteStudio Docs（ポータル）**](https://cri-middleware.github.io/SpriteStudio-Docs/ja/) — SDK と全公式 Player の入口。コーディングアシスタントに SpriteStudio を教える[プラグイン](https://cri-middleware.github.io/SpriteStudio-Docs/ja/ai/)もあります
 
 ## 📦 インストール
 
