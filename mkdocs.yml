@@ -24,6 +24,54 @@ extra:
       link: https://x.com/spritestudio
       name: SpriteStudio on X
 
+plugins:
+  - search
+  - redirects
+  - llmstxt:
+      preprocess: docs/llmstxt-preprocess.py
+      full_output: llms-full.txt
+      markdown_description: |
+        One library with a face per host. Guide pages show code per face, in blocks labelled Rust, C, JavaScript and Bevy. The generated Rust API is rustdoc HTML for `ssplayer-wgpu` and `ssplayer-bevy` under `api/` at the site root; it is not part of this file.
+      sections:
+        Get started:
+          - index.md: "Choosing a face (Rust, Bevy, C / C++ or JavaScript in the browser) and its start page, what ships where (crates.io, release zips, npm), the WebGPU demo, and that conversion to `.ssab` happens ahead of time."
+          - start/rust.md: "For an app that owns its `wgpu::Device` (winit, egui, Slint, your own renderer): the `wgpu` version to match, installing from crates.io, git or a vendored path, setting up `SSRenderer`, `SSScene` and `SSPlayer`, the per-frame `update`, `encode_offscreen` and `draw`, and the render-pass rules (colour format, stencil, MSAA off, non-sRGB target)."
+          - start/bevy.md: "For an app on Bevy's own renderer, with no wgpu code: the supported Bevy line, installing `ssplayer-bevy`, a whole app with `SsPlayer`, `SsTransform` and `SsPlayback`, where the `.ssab` goes under `assets/`, the camera's `CompositingSpace::Srgb` and `Msaa::Off`, restarting and pausing, reading `SsEventMessage`, and opting in to device-loss recovery."
+          - start/cpp.md: "A static library and one header (`ssplayer_wgpu.h`) that builds its own device on your window: what a release zip holds, building from source, linker flags and CMake, `ss_window_handle_t` for Win32, AppKit, a Metal layer, Xlib and Wayland, a whole program (`ss_scene_create`, `ss_scene_update`, `ss_scene_render`), error codes, and the sample viewers."
+          - start/web.md: "For JavaScript / TypeScript in the browser: the WebGPU browser requirements, `npm i @spritestudio/ssplayer-wgpu`, one character with the `<ss-player-webgpu>` element, many characters with `sharedContext`, `createSurface` and `surface.frame`, `setWasmUrl` for the wasm binary, and `restoreSharedDevice` after device loss."
+          - start/assets.md: "Producing the `.ssab` that every face plays: converting a `.sspj` with SSConverterGUI or `ssconverter-cli`, reference versus embedded export, where each face resolves files from, and what one `load` pulls in (atlases, TextureChange targets, sibling packs)."
+        Guide:
+          - guide/concepts.md: "The model behind every face: device, target and character scopes and what each face names them (`SSRenderer`, `ss_scene_t`, `SsContextWeb`), the frame in Rust, C, JavaScript and Bevy, a matrix of what each face can do, and why selecting and starting an animation are two calls."
+          - guide/playback.md: "`play`, `pause`, `resume` and `stop`, and why `play()` rewinds and cannot lift a pause; speed, direction and ping-pong, loop count, playing a section, what survives `set_animation`, reading the frame and the `just_started`, `just_looped` and `just_finished` edges, sub-frame and frame skip."
+          - guide/placement.md: "`fit_into` / `fitInto` for putting an animation inside a panel or card: `contain`, `cover` and `none`, `align`, `frame`, `offset`, `scale` and flips, the authored canvas as the box, when to call it again, and that clipping overflow is the host's job. Not wired into Bevy."
+          - guide/crowds.md: "One character drawn at many placements with `set_crowd` (`ss_player_set_crowd`, `setCrowd`, `SsCrowd`): the `CrowdMember` fields, the member limit, what members share, and how overlapping members draw."
+          - guide/loading.md: "The one-call `load`: what it fetches (the pack, both texture tables, sibling packs), paths resolved against the `.ssab`, `missing_assets` rather than errors, registering bytes with `load_ssab`, supplying textures yourself, `load_with` and `AssetLoader` for a `.pck` or APK, and the browser `read` hook for dropped folders."
+          - guide/events.md: "Reading user data, signal and audio events after an update, events from every skipped frame, when `events()` is empty (culled, paused, no animation set), when to play audio, the fields of a user-data event, signal parameters, and the start, loop and finish edges (DOM events on the element, Bevy messages)."
+          - guide/part-overrides.md: "Changing what a part draws without touching the `.ssab`: visibility (with cascade), cell and colour overrides with blend op and priority, whole-character `set_alpha`, `set_tint` and group alpha, reading `part_transform`, why skinned mesh parts cannot be followed, and pinning a DOM marker to a part. On Bevy only alpha, tint and group alpha."
+          - guide/texture-replacement.md: "Swapping a whole cell map's atlas at runtime for costume, palette and expression changes: listing the replaceable names, `set_cellmap_texture` and restoring the original, TextureChange targets, the same-size same-layout rule, and how it differs from `set_part_cell_override`. On every face, Bevy through `SsCellmapTextures`."
+          - guide/motion-blending.md: "Layering and crossfading animations on one character: the track stack and its `Mix` and `Additive` blend modes, `crossfade` and `fade_track`, mixing several animations by weight on one track, `TrackSync`, per-track speed and loop count, scrubbing a track with `set_track_frame`, and the limits. Rust examples; the other faces are on their reference pages."
+          - guide/masks.md: "Choosing how mask parts clip: stencil (Rust, C, JavaScript) or coverage bitmap (Rust, Bevy), `SceneConfig` and `MaskBackend`, `enable_mask` on C, why `encode_offscreen` must share the pass's `CommandEncoder`, stacking characters in one pass, and the cap on mask writers."
+          - guide/device-loss.md: "Recovering from a lost GPU device without reloading a `.ssab`: rebuilding the renderer, then scenes, then players (`restore_device`, `restore_textures`), each face's route (`ss_scene_restore_device`, `restoreSharedDevice`, Bevy's `RenderErrorHandler` opt-in), what cannot be recovered, and how to test it."
+          - guide/performance.md: "What a character costs and the frame counters on Rust, C and JavaScript (`scene.stats()`: `draw_calls`, `uploaded_bytes`, `coverage_layers`, `group_layers`, `gpu_pass_time_ns`), why a scene with nothing moving keeps its last frame, and what costs the most (coverage masks, group alpha, many atlases, off-screen characters and `set_culled`)."
+        API reference:
+          - reference/rust.md: "The map of the Rust API and the way to its rustdoc: the public re-exports, `SSRenderer`, `SSScene` and `SSPlayer` with their key calls, modules, the `embedded`, `web` and `ffi` features, when `SSPlayer::load` is available (`load_with` elsewhere), errors, and how `ssplayer-wgpu` and `ssplayer-bevy` are versioned."
+          - reference/c.md: "Every entry point of `ssplayer_wgpu.h`, grouped: conventions (return codes, threads, null handles, strings), scene and player lifetime, the frame, loading, transport, events, placement, part overrides, texture replacement, and the track calls such as `ss_player_set_track_animation` and `ss_player_crossfade` for motion blending."
+          - reference/js.md: "The JavaScript API by class: module functions (`sharedContext`, `restoreSharedDevice`, `setWasmUrl`), `SsContextWeb`, `SsSurfaceWeb` and `SsPlayerWeb` (loading, transport, placement, overrides, events, texture replacement, motion blending), and the `<ss-player-webgpu>` attributes in short."
+          - reference/web-component.md: "`<ss-player-webgpu>` in full: registering it, the attributes and which change on a live element, how the character fits, why `autoplay` is opt-in, `loadSrc`, the DOM events (`animationstarted`, `userdata`, `signal`), layout and resolution, `pause-when-hidden`, device loss, errors, and when to use the API instead."
+          - reference/bevy.md: "The Bevy adapter's whole surface: `SsPlayerPlugin`, the components (`SsPlayer`, `SsTransform`, `SsPlayback`, `SsCellmapTextures`, `SsCrowd`), the state components, the `SsSceneSettings` resource, messages (`SsEventMessage`, `SsPlay`, `SsSeek`, `SsTrackCommand`), where the work runs, and what the adapter does not do yet."
+        wgpu hosts:
+          - wgpu/borrow-model.md: "For a Rust app that owns the device, or an engine adapter author: the host owns `Device` and `Queue` and lends them per frame, device, target and character scopes, what the render pass must be (colour format, MSAA, stencil, non-sRGB), the `update`, `encode_offscreen`, `draw` order and `update_with`, several targets on one device, and why there is no vertex buffer."
+          - wgpu/engines.md: "Writing an engine adapter: why adapters are separate crates, the repository-wide `wgpu` pin (Bevy and Slint), the checklist an adapter follows, the Bevy case study, using Slint, egui or your own renderer, and why a device cannot be shared through the C ABI."
+        Limitations & Scope:
+          - limitations.md: "What does not work or works differently: the C face's own device, the `wgpu` pin, MSAA and sRGB, one `update` per character, WebGPU only, blend modes drawn as a neighbour (`Div2`, `Overlay2`, `Mulalpha`, `Mul2`, `Screen2`), part-by-part alpha, crowds, integration shaders, and audio as cues only."
+        Migration:
+          - migration/from-ss6-cpp.md: "What changes when moving to Rust or the C API: `.ssfb2` to `.ssab`, `SystemBootUp` to the borrow model, one-call loading, a table from `AnimationPlay`, `CallBackUserData` and `HideSet` to their equivalents, a whole program before and after, and what SS6 had that is missing (sequencer, per-part flip, effect seed, label-named sections)."
+        For Player & SDK Developers:
+          - development/build.md: "Building every face from one checkout: the SDK submodule and `deploy-examples.sh`, build and test commands per face, the blind spots plain builds miss (web, TypeScript layer, C face), building this docs site, the checks CI runs, golden dumps and performance measurement, using a changed player from Rust, C / C++ or npm, and checking on real hosts."
+          - development/architecture.md: "The layers over `ssruntime` and `ssab`, `SSRenderer`, `SSScene` and `SSPlayer`, the faces, and the reasons that span files (borrowing, packs without GPU textures, no CPU vertex work, the mask backends, loader order, the WebGL port)."
+        License:
+          - license.md: "The BSD 3-Clause licence of `ssplayer-wgpu`, `ssplayer-bevy` and the npm package, where the full text and the third-party notices are, and that SpriteStudio and its animation data are under their own terms."
+
 nav:
   - 🏠 Home: index.md
   - 🚀 Get started:
