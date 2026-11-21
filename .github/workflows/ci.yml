@@ -17,6 +17,8 @@ on:
       - '**/*.md'
       - '.gitignore'
       - 'LICENSE*'
+      - 'docs/requirements.txt'
+      - 'overrides/**'
   # Writes the main caches that PRs restore from, since PRs do not save (see
   # save-if on each Rust cache step). Weekly is enough: when Cargo.lock differs,
   # rust-cache still restores the newest cache built by the same toolchain, so a
