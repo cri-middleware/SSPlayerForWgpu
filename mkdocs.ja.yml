@@ -24,6 +24,54 @@ extra:
       link: https://x.com/spritestudio
       name: X の SpriteStudio
 
+plugins:
+  - search
+  - redirects
+  - llmstxt:
+      preprocess: docs/llmstxt-preprocess.py
+      full_output: llms-full.txt
+      markdown_description: |
+        1 つのライブラリにホストごとの Face があります。ガイドのコードは Face ごとに、Rust・C・JavaScript・Bevy のラベルを付けたブロックで示します。生成された Rust API は `ssplayer-wgpu` と `ssplayer-bevy` の rustdoc（HTML）で、サイトのルート直下の `api/` にあり、このファイルには含まれません。
+      sections:
+        はじめる:
+          - index.md: "Face の選び方（Rust・Bevy・C / C++・ブラウザの JavaScript）と各スタートページ、成果物の配布先（crates.io・リリースの zip・npm）、WebGPU デモ、`.ssab` への変換は事前に行うこと。"
+          - start/rust.md: "`wgpu::Device` を自分で持つ Rust アプリ向け（winit、egui、Slint、自作レンダラー）。合わせるべき `wgpu` のバージョン、crates.io・git・ソースの取り込みでの導入、`SSRenderer`・`SSScene`・`SSPlayer` のセットアップ、フレームごとの `update`・`encode_offscreen`・`draw`、レンダーパスの規則（カラーフォーマット、ステンシル、MSAA オフ、非 sRGB ターゲット）。"
+          - start/bevy.md: "Bevy 自身のレンダラーで動かすアプリ向け（wgpu のコードは不要）。対応する Bevy の系統、`ssplayer-bevy` の導入、`SsPlayer`・`SsTransform`・`SsPlayback` を使ったアプリ全体、`.ssab` を `assets/` のどこに置くか、カメラの `CompositingSpace::Srgb` と `Msaa::Off`、再開と一時停止、`SsEventMessage` の読み取り、デバイスロストからの復帰を有効にする手順。"
+          - start/cpp.md: "静的ライブラリ 1 本とヘッダ 1 枚（`ssplayer_wgpu.h`）を使う C / C++ 向け。デバイスはあなたのウィンドウ上にライブラリが自分で作ります。リリースの zip の中身、ソースからのビルド、リンクのフラグと CMake、Win32・AppKit・Metal レイヤー・Xlib・Wayland ごとの `ss_window_handle_t`、プログラム全体（`ss_scene_create`・`ss_scene_update`・`ss_scene_render`）、エラーコード、サンプルのビューア。"
+          - start/web.md: "WebGPU を使うブラウザ向けの JavaScript / TypeScript。ブラウザの要件、`npm i @spritestudio/ssplayer-wgpu`、`<ss-player-webgpu>` 要素で 1 体を表示する方法、`sharedContext`・`createSurface`・`surface.frame` で複数体を表示する方法、wasm バイナリの場所を指す `setWasmUrl`、デバイスロスト後の `restoreSharedDevice`。"
+          - start/assets.md: "すべての Face が再生する `.ssab` の作り方。SSConverterGUI または `ssconverter-cli` による `.sspj` の変換、参照モードと埋め込みモードの書き出し、Face ごとのファイルの解決元、1 回の `load` が取り込むもの（アトラス、TextureChange のターゲット、兄弟パック）。"
+        ガイド:
+          - guide/concepts.md: "どの Face にも通じるモデル。デバイス・ターゲット・キャラクターのスコープと、Face ごとの呼び名（`SSRenderer`・`ss_scene_t`・`SsContextWeb`）、Rust・C・JavaScript・Bevy でのフレームの回し方、Face ごとにできることの一覧表、アニメーションの選択と開始が 2 つの呼び出しに分かれている理由。"
+          - guide/playback.md: "`play`・`pause`・`resume`・`stop` と、`play()` が巻き戻すので一時停止の解除に使えない理由。速度・方向・ピンポン、ループ回数、再生区間、`set_animation` をまたいで残る設定、現在フレームの取得と `just_started`・`just_looped`・`just_finished` のエッジ、サブフレームとフレームスキップ。"
+          - guide/placement.md: "`fit_into` / `fitInto` で、アニメーションをパネルやカードの中に収める方法。`contain`・`cover`・`none`、`align`、`frame`、`offset`、`scale`、反転、ボックスとして使われるオーサリング時のキャンバス、再計算が要る場面、はみ出しの切り抜きはホスト側の仕事であること。Bevy には組み込まれていません。"
+          - guide/crowds.md: "1 体のキャラクターを複数の配置に描く `set_crowd`（`ss_player_set_crowd`・`setCrowd`・`SsCrowd`）。`CrowdMember` のフィールド、メンバー数の上限、メンバーが共有するもの、重なったメンバーの描画の挙動。"
+          - guide/loading.md: "1 回の `load` で完結するロード。取得するもの（パック、両方のテクスチャテーブル、兄弟パック）、`.ssab` 基準のパス解決、エラーではなく `missing_assets` で返すこと、`load_ssab` でのバイト列の登録、テクスチャの自前供給、`.pck` や APK から読むための `load_with` と `AssetLoader`、ドロップしたフォルダを読むブラウザの `read` フック。"
+          - guide/events.md: "更新後に読むユーザーデータ・シグナル・オーディオのイベント、跨いだフレームも含む全フレームのイベント、`events()` が空になる場合（カリング中、一時停止中、アニメーション未設定）、オーディオを鳴らす条件、ユーザーデータの各フィールド、シグナルのパラメータ、開始・ループ・完了のエッジ（要素の DOM イベント、Bevy のメッセージ）。"
+          - guide/part-overrides.md: "`.ssab` に触れずにパーツの描画を変える方法。表示・非表示（カスケード付き）、セルと色のオーバーライド（ブレンド演算と優先度）、キャラクター全体の `set_alpha`・`set_tint` と group alpha、`part_transform` の取得、スキニングメッシュのパーツを追従できない理由、パーツに DOM マーカーを追従させる方法。Bevy で使えるのはアルファ、tint、group alpha だけです。"
+          - guide/texture-replacement.md: "着せ替え・パレット変更・表情差分のために、セルマップのアトラスをまるごと実行時に差し替える方法。差し替えられる名前の列挙、`set_cellmap_texture` と元に戻す手順、TextureChange のターゲット、同じサイズ・同じレイアウトという条件、`set_part_cell_override` との違い。Bevy を含む全 Face で使え、Bevy は `SsCellmapTextures` です。"
+          - guide/motion-blending.md: "1 体のキャラクターにアニメーションを重ねる・クロスフェードする方法。トラックのスタックと `Mix`・`Additive` のブレンドモード、`crossfade` と `fade_track`、1 つのトラックで複数のアニメーションを weight で混ぜる方法、`TrackSync`、トラックごとの速度とループ回数、`set_track_frame` でのトラックのスクラブ、制限。例は Rust で、ほかの Face はそれぞれのリファレンスにあります。"
+          - guide/masks.md: "マスクパーツをどの方式で切り抜くかの選び方、ステンシル（Rust・C・JavaScript）かカバレッジビットマップ（Rust・Bevy）。`SceneConfig` と `MaskBackend`、C の `enable_mask`、`encode_offscreen` をレンダーパスと同じ `CommandEncoder` に載せる理由、1 パスに複数のキャラクターを積む場合、マスクライタの上限。"
+          - guide/device-loss.md: "`.ssab` を読み直さずに GPU デバイスのロストから復帰する方法。レンダラー、シーン、プレイヤーの順に作り直す手順（`restore_device`・`restore_textures`）、Face ごとの経路（`ss_scene_restore_device`・`restoreSharedDevice`、Bevy の `RenderErrorHandler` を自分で入れる手順）、復帰できないもの、テスト方法。"
+          - guide/performance.md: "キャラクター 1 体のコストと、Rust・C・JavaScript のフレームカウンタ（`scene.stats()` の `draw_calls`・`uploaded_bytes`・`coverage_layers`・`group_layers`・`gpu_pass_time_ns`）、何も動かないシーンが前のフレームをそのまま使う理由、最もコストが高いもの（カバレッジマスク、group alpha、多数のアトラス、画面外のキャラクターと `set_culled`）。"
+        API リファレンス:
+          - reference/rust.md: "Rust API の地図と rustdoc への入口。公開される再エクスポート、`SSRenderer`・`SSScene`・`SSPlayer` と主な呼び出し、モジュール、`embedded`・`web`・`ffi` の各フィーチャ、`SSPlayer::load` が使える条件（それ以外は `load_with`）、エラー、`ssplayer-wgpu` と `ssplayer-bevy` のバージョニング。"
+          - reference/c.md: "`ssplayer_wgpu.h` のすべてのエントリポイントを用途別にまとめたもの。規約（戻り値、スレッド、null ハンドル、文字列）、シーンとプレイヤーの寿命、フレーム、ロード、再生制御、イベント、配置、パーツのオーバーライド、テクスチャ差し替え、モーションブレンディングの `ss_player_set_track_animation` や `ss_player_crossfade` など。"
+          - reference/js.md: "JavaScript API をクラスごとにまとめたもの。モジュール関数（`sharedContext`・`restoreSharedDevice`・`setWasmUrl`）、`SsContextWeb`、`SsSurfaceWeb`、`SsPlayerWeb`（ロード、再生制御、配置、オーバーライド、イベント、テクスチャ差し替え、モーションブレンディング）、`<ss-player-webgpu>` の属性の要約。"
+          - reference/web-component.md: "`<ss-player-webgpu>` の全仕様。登録のしかた、属性と置いた後に書き換えられるもの、キャラクターを要素に合わせる方法、`autoplay` が opt-in な理由、`loadSrc`、DOM イベント（`animationstarted`・`userdata`・`signal`）、レイアウトと解像度、`pause-when-hidden`、デバイスロスト、エラー、API を直接使うべき場面。"
+          - reference/bevy.md: "Bevy アダプタの公開面のすべて。`SsPlayerPlugin`、コンポーネント（`SsPlayer`・`SsTransform`・`SsPlayback`・`SsCellmapTextures`・`SsCrowd`）、状態コンポーネント、リソース `SsSceneSettings`、メッセージ（`SsEventMessage`・`SsPlay`・`SsSeek`・`SsTrackCommand`）、処理が走る場所、アダプタがまだ対応していないこと。"
+        wgpu ホスト:
+          - wgpu/borrow-model.md: "`wgpu::Device` を持つ Rust アプリと、エンジンアダプタを書く人向け。ホストが `Device` と `Queue` を持ち、フレームごとに貸し出すこと、デバイス・ターゲット・キャラクターのスコープ、レンダーパスに求められること（カラーフォーマット、MSAA、ステンシル、非 sRGB）、`update`・`encode_offscreen`・`draw` の順序と `update_with`、1 デバイスに複数ターゲット、頂点バッファが無い理由。"
+          - wgpu/engines.md: "エンジンアダプタを書くときの指針。アダプタを別クレートにする理由、リポジトリ全体の `wgpu` 固定（Bevy と Slint）、アダプタが従うチェックリスト、Bevy の事例、Slint・egui・自作レンダラーで使う場合、C ABI 越しにデバイスを共有できない理由。"
+        制約と適用範囲:
+          - limitations.md: "動かないもの、扱いが違うものの一覧。C Face が自分で持つデバイス、`wgpu` の固定、MSAA と sRGB、キャラクターごとに 1 フレーム 1 回の `update`、WebGPU のみ、近いモードで描かれるブレンド（`Div2`・`Overlay2`・`Mulalpha`・`Mul2`・`Screen2`）、パーツごとに掛かるアルファ、群衆、統合シェーダ、合図でしかないオーディオ。"
+        マイグレーション:
+          - migration/from-ss6-cpp.md: "Rust または C API へ移るときに変わること。`.ssfb2` から `.ssab` へ、`SystemBootUp` から借用モデルへ、1 回の呼び出しで済むロード、`AnimationPlay`・`CallBackUserData`・`HideSet` などの対応表、移行前後のプログラム全体、SS6 にあって無いもの（シーケンサー、パーツ単位の反転、エフェクトのシード、ラベル指定の再生区間）。"
+        Player・SDK 開発者向けガイド:
+          - development/build.md: "1 つのチェックアウトから全 Face をビルドする手順。SDK サブモジュールと `deploy-examples.sh`、Face ごとのビルドとテストのコマンド、通常のビルドでは見落とす箇所（Web、TypeScript 層、C Face）、このドキュメントサイトのビルド、CI が走らせるチェック、ゴールデンダンプと性能の測定、変更したプレイヤーを Rust・C / C++・npm で使う方法、実機での確認。"
+          - development/architecture.md: "`ssruntime` と `ssab` の上のレイヤー、`SSRenderer`・`SSScene`・`SSPlayer`、各 Face、ファイルをまたぐ設計理由（借用、GPU テクスチャを持たないパック、CPU での頂点処理が無いこと、マスクのバックエンド、ローダーの順序、WebGL 版からの移植）。"
+        ライセンス:
+          - license.md: "`ssplayer-wgpu`・`ssplayer-bevy`・npm パッケージの BSD 3-Clause ライセンス、全文とサードパーティの告知の置き場所、SpriteStudio とそのアニメーションデータは別の条件の下にあること。"
+
 nav:
   - 🏠 ホーム: index.md
   - 🚀 はじめる:

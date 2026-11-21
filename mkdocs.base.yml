@@ -50,23 +50,6 @@ theme:
     - content.action.copy
     - content.tabs.link
 
-plugins:
-  - search
-  - redirects
-  - llmstxt:
-      preprocess: docs/llmstxt-preprocess.py
-      full_output: llms-full.txt
-      markdown_description: |
-        wgpu player with one library behind several faces: Rust (`start/rust`), Bevy
-        (`start/bevy`), C / C++ (`start/cpp`) and the browser (`start/web`); `start/assets`
-        prepares the `.ssab`. `guide/` explains behaviour shared by all faces, and `reference/`
-        is the API reference per face. The generated Rust API is rustdoc HTML for `ssplayer-wgpu`
-        and `ssplayer-bevy` under `api/` at the site root; it is not part of this file, and
-        `reference/rust` is only its entry point. `limitations` lists what is not supported.
-      sections:
-        Docs:
-          - "*.md"
-
 markdown_extensions:
   - toc:
       permalink: true
