@@ -48,8 +48,9 @@ later) through [SSConverterGUI](https://github.com/cri-middleware/SSConverterGUI
 
 - [Documentation](https://cri-middleware.github.io/SSPlayerForWgpu/) — and the same pages for this
   version, as Markdown, in this package's `docs/` (start at `docs/README.md`), readable offline,
-  and in `skills/ssplayer-wgpu/` as an Agent Skill, which pnpm 12.11 or later links into your
-  coding agent's skills directory after `pnpm approve @spritestudio/ssplayer-wgpu`.
+  and in `skills/ssplayer-wgpu/` as an Agent Skill;
+  [Docs for Your Assistant](https://cri-middleware.github.io/SpriteStudio-Docs/ai/docs/#-as-an-agent-skill)
+  says how your package manager links it into your coding agent's skills directory.
 - [Repository](https://github.com/cri-middleware/SSPlayerForWgpu) — the Rust library, plus native
   C/C++ viewers for Metal, DX12 and Vulkan built on the same core.
 - [Issues](https://github.com/cri-middleware/SSPlayerForWgpu/issues)
