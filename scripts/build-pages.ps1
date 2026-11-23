@@ -223,15 +223,18 @@ try {
         Write-Host "${APP}: api=no -- site/api is not part of this build"
     }
 
-    # Puts a fixed "Powered by" box, linking to the docs and the repository, into
-    # every *.html directly in $Dir, ahead of the last </body>. $Root is the path
-    # from those pages to the site root.
+    # Puts a fixed "Powered by" box, linking to the docs (English and Japanese) and
+    # the repository, into every *.html directly in $Dir, ahead of the last </body>.
+    # $Root is the path from those pages to the site root.
     function Add-DemoLinks {
         param([string] $Dir, [string] $Root)
         if (!(Test-Path -LiteralPath $Dir -PathType Container)) { return }
         $a = 'target="_blank" rel="noopener" style="color:#fff"'
+        # The Japanese link text is character references: Windows PowerShell 5.1 reads a
+        # script with no BOM as ANSI.
         $links = '<div id="ss-demo-links" style="position:fixed;left:12px;bottom:12px;z-index:2147483647;padding:4px 10px;border-radius:6px;background:rgba(0,0,0,.65);color:#fff;font:12px/1.6 system-ui,sans-serif">' +
             "Powered by SpriteStudio Player for wgpu &middot; <a href=`"$Root`" $a>Docs</a>" +
+            " &middot; <a href=`"${Root}ja/`" lang=`"ja`" $a>&#12489;&#12461;&#12517;&#12513;&#12531;&#12488;</a>" +
             " &middot; <a href=`"https://github.com/cri-middleware/SSPlayerForWgpu`" $a>GitHub</a></div>"
         foreach ($page in Get-ChildItem -LiteralPath $Dir -Filter '*.html' -File) {
             $text = [IO.File]::ReadAllText($page.FullName)
