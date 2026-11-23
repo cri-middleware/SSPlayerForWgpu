@@ -1,6 +1,6 @@
 # 🦀 SpriteStudio Player for wgpu
 
-Play **[SpriteStudio](https://www.webtech.co.jp/spritestudio/)** animations (`.ssab`)
+Play **[SpriteStudio](https://www.webtech.co.jp/eng/spritestudio/)** animations (`.ssab`)
 through [wgpu](https://wgpu.rs/) — one renderer, one set of shaders, and four ways to call it.
 Your artist rigs the motion in a dedicated editor; you load the file and press play. No video
 files, no re-authoring, no engine lock-in.
@@ -19,6 +19,7 @@ ports of it.
     Japanese only, but the downloads themselves are language-neutral.
     [Ringo](https://www.webtech.co.jp/help/ja/spritestudio7/download/sample/#ringo) is a good character sample, and
     [Particle](https://www.webtech.co.jp/help/ja/spritestudio7/download/sample/#Perticle_sample) is a good one if you want effects.
+    To make your own, you use SpriteStudio itself — see [its site](https://www.webtech.co.jp/eng/spritestudio/).
 
 ## 🚀 Start here
 

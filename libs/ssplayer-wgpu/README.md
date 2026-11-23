@@ -1,7 +1,8 @@
 # ssplayer-wgpu
 
-A [wgpu](https://wgpu.rs/) renderer for [SpriteStudio](https://www.webtech.co.jp/spritestudio/)
-animations (`.ssab`).
+A [wgpu](https://wgpu.rs/) renderer for [SpriteStudio](https://www.webtech.co.jp/eng/spritestudio/)
+animations (`.ssab`). SpriteStudio is a 2D animation tool: an artist adds bones, mesh deformation
+and effects to their own illustrations, and this crate plays the result.
 
 This is first and foremost a **Rust** player: a clean Rust API over the
 SpriteStudio runtime, with WebGPU (wasm-bindgen) and C/C++ (cbindgen) as thin
@@ -61,6 +62,12 @@ scene.update(&mut renderer, &device, &queue, delta_secs, &mut [&mut player]);
 // … then record draws into a render pass the host opened.
 scene.draw(&renderer, &mut rpass);
 ```
+
+The `.ssab` comes from a SpriteStudio project through
+[SSConverterGUI](https://github.com/cri-middleware/SSConverterGUI) or the SDK's `ssconverter-cli`. No
+`.sspj` of your own yet? SpriteStudio's [official sample data](https://www.webtech.co.jp/help/ja/spritestudio7/download/sample/) works as-is —
+the page is in Japanese, the downloads are not. To make your own, you use SpriteStudio itself — see
+[its site](https://www.webtech.co.jp/eng/spritestudio/).
 
 **Read next:** [Get started with Rust](https://cri-middleware.github.io/SSPlayerForWgpu/start/rust/) ·
 [Rust API reference](https://cri-middleware.github.io/SSPlayerForWgpu/reference/rust/) ·
