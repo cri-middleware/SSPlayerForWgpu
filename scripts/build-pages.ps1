@@ -223,6 +223,32 @@ try {
         Write-Host "${APP}: api=no -- site/api is not part of this build"
     }
 
+    # Puts a fixed "Powered by" box, linking to the docs and the repository, into
+    # every *.html directly in $Dir, ahead of the last </body>. $Root is the path
+    # from those pages to the site root.
+    function Add-DemoLinks {
+        param([string] $Dir, [string] $Root)
+        if (!(Test-Path -LiteralPath $Dir -PathType Container)) { return }
+        $a = 'target="_blank" rel="noopener" style="color:#fff"'
+        $links = '<div id="ss-demo-links" style="position:fixed;left:12px;bottom:12px;z-index:2147483647;padding:4px 10px;border-radius:6px;background:rgba(0,0,0,.65);color:#fff;font:12px/1.6 system-ui,sans-serif">' +
+            "Powered by SpriteStudio Player for wgpu &middot; <a href=`"$Root`" $a>Docs</a>" +
+            " &middot; <a href=`"https://github.com/cri-middleware/SSPlayerForWgpu`" $a>GitHub</a></div>"
+        foreach ($page in Get-ChildItem -LiteralPath $Dir -Filter '*.html' -File) {
+            $text = [IO.File]::ReadAllText($page.FullName)
+            if ($text.Contains('id="ss-demo-links"')) { continue }
+            $at = $text.LastIndexOf('</body>', [StringComparison]::OrdinalIgnoreCase)
+            if ($at -ge 0) {
+                $text = $text.Insert($at, $links)
+            } else {
+                if ($text.Length -gt 0 -and !$text.EndsWith("`n")) { $text += "`n" }
+                $text += $links
+            }
+            if (!$text.EndsWith("`n")) { $text += "`n" }
+            [IO.File]::WriteAllText($page.FullName, $text)
+        }
+        Write-Host "   links to the docs and the repository -> site/$($Dir.Substring($SITE_DIR.Length).TrimStart('/', '\'))/*.html"
+    }
+
     # --- demo -------------------------------------------------------------
     # examples/web is a static page that imports the built npm package from
     # ./ssplayer-wgpu/ and its animation data from ./assets/ and ./assets_emb/,
@@ -255,6 +281,7 @@ try {
             $path = Join-Path $DEMO_DIR $junk
             if (Test-Path $path) { Remove-Item -Force $path }
         }
+        Add-DemoLinks $DEMO_DIR "../"
     } else {
         Write-Host ""
         Write-Host "${APP}: demo=no -- site/demo is not part of this build"
