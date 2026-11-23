@@ -8,6 +8,10 @@ is the seam between it and Bevy's two worlds. It lives in its own crate so the
 player never depends on an engine, and so this one can follow Bevy's release
 line without dragging the player along.
 
+▶️ **[Live demo](https://cri-middleware.github.io/SSPlayerForWgpu/demo/)** — what the player draws,
+running in your browser on WebGPU. It is `ssplayer-wgpu` on its own rather than inside Bevy; drop a
+folder holding your own `.ssab` onto the page to play it.
+
 The documentation is at <https://cri-middleware.github.io/SSPlayerForWgpu/>. The same pages for this
 version are in this crate's `docs/` as Markdown, readable offline: start at `docs/index.md`; the Bevy
 pages are `docs/start/bevy.md` and `docs/reference/bevy.md`.

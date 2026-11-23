@@ -10,6 +10,10 @@ Vulkan, DX12 and Metal. It never owns the device: the host lends its `Device`,
 `Queue` and render pass per frame, so the player rides along inside any wgpu
 application — your own app, egui, Bevy.
 
+▶️ **[Live demo](https://cri-middleware.github.io/SSPlayerForWgpu/demo/)** — this crate compiled to
+WebAssembly (its `web` feature), drawing through WebGPU in your browser, several characters on one
+canvas among them. Drop a folder holding your own `.ssab` onto the page to play it.
+
 The documentation is at <https://cri-middleware.github.io/SSPlayerForWgpu/>. The same pages for this
 version are in this crate's `docs/` as Markdown, readable offline: start at `docs/index.md`; the Rust
 pages are `docs/start/rust.md` and `docs/reference/rust.md`.
