@@ -1,7 +1,9 @@
 # @spritestudio/ssplayer-wgpu
 
-A **WebGPU** renderer for [SpriteStudio](https://www.webtech.co.jp/spritestudio/)
+A **WebGPU** renderer for [SpriteStudio](https://www.webtech.co.jp/eng/spritestudio/)
 animations (`.ssab`), compiled to WebAssembly from the Rust/[wgpu](https://wgpu.rs/) player.
+SpriteStudio is a 2D animation tool: an artist adds bones, mesh deformation and effects to their own
+illustrations, and this package plays the result.
 
 One `GPUDevice` per page, one surface (`SsSurfaceWeb`) per canvas, and **any number of characters drawn into one
 canvas in a single render pass** — putting ten characters on screen costs one device, one set of
@@ -42,7 +44,9 @@ defineSsPlayerWebGPUElement(); // registers <ss-player-webgpu>
 For many characters in one canvas, use the API the element wraps: `sharedContext()` for the page, a
 surface per canvas, a player per character. The `.ssab` comes from a SpriteStudio project (7.6 or
 later) through [SSConverterGUI](https://github.com/cri-middleware/SSConverterGUI) or the SDK's
-`ssconverter-cli`; reference and embedded exports both load.
+`ssconverter-cli`; reference and embedded exports both load. No `.sspj` of your own yet? SpriteStudio's
+[official sample data](https://www.webtech.co.jp/help/ja/spritestudio7/download/sample/) works as-is — the page is in Japanese, the downloads
+are not. To make your own, you use SpriteStudio itself — see [its site](https://www.webtech.co.jp/eng/spritestudio/).
 
 **Read next:** [Get started on the web](https://cri-middleware.github.io/SSPlayerForWgpu/start/web/) ·
 [`<ss-player-webgpu>`](https://cri-middleware.github.io/SSPlayerForWgpu/reference/web-component/) ·
@@ -58,7 +62,7 @@ later) through [SSConverterGUI](https://github.com/cri-middleware/SSConverterGUI
 - [Repository](https://github.com/cri-middleware/SSPlayerForWgpu) — the Rust library, plus native
   C/C++ viewers for Metal, DX12 and Vulkan built on the same core.
 - [Issues](https://github.com/cri-middleware/SSPlayerForWgpu/issues)
-- [SpriteStudio](https://www.webtech.co.jp/spritestudio/)
+- [SpriteStudio](https://www.webtech.co.jp/eng/spritestudio/)
 
 ## License
 

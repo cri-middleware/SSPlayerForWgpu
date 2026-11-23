@@ -6,7 +6,7 @@
 
 ▶️ **[Try the live WebGPU demo in your browser](https://cri-middleware.github.io/SSPlayerForWgpu/demo/)** — SpriteStudio animations rendered with WebGPU, with nothing to install.
 
-A high-performance player for **[SpriteStudio](https://www.webtech.co.jp/spritestudio/)**
+A high-performance player for **[SpriteStudio](https://www.webtech.co.jp/eng/spritestudio/)**
 animations (`.ssab`), built on [wgpu](https://wgpu.rs/). Animate the sprite art you already have
 (PNG / WebP) in a dedicated editor, then play the finished animation in your application — no video
 files, no re-authoring, no engine lock-in.
@@ -125,7 +125,7 @@ ssconverter-cli overall.sspj -o assets/overall
 covers picking one and putting it in a build pipeline. No `.sspj` of your own yet? SpriteStudio's
 [official sample data](https://www.webtech.co.jp/help/ja/spritestudio7/download/sample/) works as-is (the page is
 Japanese only; the downloads are language-neutral) — [Ringo](https://www.webtech.co.jp/help/ja/spritestudio7/download/sample/#ringo)
-is a good character — and feeds either tool above. The samples below, which need a checkout, run on
+is a good character — and feeds either tool above. To make your own, you use SpriteStudio itself — see [its site](https://www.webtech.co.jp/eng/spritestudio/). The samples below, which need a checkout, run on
 the SDK's own test animations.
 
 ## ⚡ Usage

@@ -100,7 +100,7 @@ JavaScript 側から読むべきガイドは [Web ではじめる](./docs/ja/sta
 ssconverter-cli overall.sspj -o assets/overall
 ```
 
-ツールの選び方とビルドパイプラインへの組み込み方は[単体ツールで変換する](https://cri-middleware.github.io/SpriteStudio-Docs/ja/overview/convert-with-a-standalone-tool/)にあります。自分の `.sspj` がまだ無い場合は、SpriteStudio の[公式サンプルデータ](https://www.webtech.co.jp/help/ja/spritestudio7/download/sample/)がそのまま使えます。キャラクターなら [Ringo](https://www.webtech.co.jp/help/ja/spritestudio7/download/sample/#ringo) が手頃で、上の 2 つのツールのどちらにもそのまま渡せます。チェックアウトが要る以下のサンプルは、SDK 自身のテストアニメーションで動きます。
+ツールの選び方とビルドパイプラインへの組み込み方は[単体ツールで変換する](https://cri-middleware.github.io/SpriteStudio-Docs/ja/overview/convert-with-a-standalone-tool/)にあります。自分の `.sspj` がまだ無い場合は、SpriteStudio の[公式サンプルデータ](https://www.webtech.co.jp/help/ja/spritestudio7/download/sample/)がそのまま使えます。キャラクターなら [Ringo](https://www.webtech.co.jp/help/ja/spritestudio7/download/sample/#ringo) が手頃で、上の 2 つのツールのどちらにもそのまま渡せます。自分のアニメーションを作るには SpriteStudio 本体を使います（[製品サイト](https://www.webtech.co.jp/spritestudio/)）。チェックアウトが要る以下のサンプルは、SDK 自身のテストアニメーションで動きます。
 
 ## ⚡ 使い方
 

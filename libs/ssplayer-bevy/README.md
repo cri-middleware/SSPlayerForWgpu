@@ -1,7 +1,8 @@
 # ssplayer-bevy
 
-SpriteStudio characters inside a [Bevy](https://bevy.org) app, drawn on the
-device Bevy already owns.
+[SpriteStudio](https://www.webtech.co.jp/eng/spritestudio/) characters inside a [Bevy](https://bevy.org) app, drawn on the
+device Bevy already owns. SpriteStudio is a 2D animation tool: an artist adds bones, mesh
+deformation and effects to their own illustrations, and this crate draws the result.
 
 An adapter, not a second player: the drawing is `ssplayer-wgpu`, and this crate
 is the seam between it and Bevy's two worlds. It lives in its own crate so the

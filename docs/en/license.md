@@ -20,5 +20,5 @@ in the repository, and a copy ships inside every release zip and npm package. A 
 application that links the crates itself should collect them the way it collects any other Rust
 dependency's notices (`cargo about` and `cargo license` both do this).
 
-[SpriteStudio](https://www.webtech.co.jp/spritestudio/) itself, and the animation data you
+[SpriteStudio](https://www.webtech.co.jp/eng/spritestudio/) itself, and the animation data you
 author with it, are covered by their own terms — not by this licence.

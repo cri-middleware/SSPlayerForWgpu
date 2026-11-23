@@ -1,7 +1,7 @@
 # @spritestudio/ssplayer-wgpu
 
 [SpriteStudio](https://www.webtech.co.jp/spritestudio/) のアニメーション（`.ssab`）を
-**WebGPU** で再生するレンダラです。Rust / [wgpu](https://wgpu.rs/) 実装のプレイヤーを WebAssembly にコンパイルしたものです。
+**WebGPU** で再生するレンダラです。Rust / [wgpu](https://wgpu.rs/) 実装のプレイヤーを WebAssembly にコンパイルしたものです。SpriteStudio は、手持ちのイラストにボーン・メッシュ・エフェクトを付けて動かす 2D アニメーションツールです。
 
 1ページに `GPUDevice` は1つ、1 canvas にサーフェス（`SsSurfaceWeb`）が1つ、そして **1枚の canvas に何体でも載り、
 1パスで合成されます** — 10体並べても device もパイプラインもアトラスのアップロードも1回きりです。
@@ -32,7 +32,7 @@ defineSsPlayerWebGPUElement(); // <ss-player-webgpu> を登録
 <ss-player-webgpu src="/assets/Basic.ssab" autoplay style="width:360px;height:360px"></ss-player-webgpu>
 ```
 
-1 枚の canvas に複数体を載せるには、要素の中身の API を使います（ページに `sharedContext()`、canvas ごとにサーフェス、キャラクターごとにプレイヤー）。`.ssab` は SpriteStudio（7.6 以上）のプロジェクトから [SSConverterGUI](https://github.com/cri-middleware/SSConverterGUI) か SDK の `ssconverter-cli` で作ります。参照出力も埋め込み出力も読み込めます。
+1 枚の canvas に複数体を載せるには、要素の中身の API を使います（ページに `sharedContext()`、canvas ごとにサーフェス、キャラクターごとにプレイヤー）。`.ssab` は SpriteStudio（7.6 以上）のプロジェクトから [SSConverterGUI](https://github.com/cri-middleware/SSConverterGUI) か SDK の `ssconverter-cli` で作ります。参照出力も埋め込み出力も読み込めます。自分の `.sspj` がまだ無ければ、SpriteStudio の[公式サンプルデータ](https://www.webtech.co.jp/help/ja/spritestudio7/download/sample/)がそのまま使えます。自分のアニメーションを作るには SpriteStudio 本体を使います（[製品サイト](https://www.webtech.co.jp/spritestudio/)）。
 
 **次に読む:** [Web ではじめる](https://cri-middleware.github.io/SSPlayerForWgpu/ja/start/web/) ·
 [`<ss-player-webgpu>`](https://cri-middleware.github.io/SSPlayerForWgpu/ja/reference/web-component/) ·
