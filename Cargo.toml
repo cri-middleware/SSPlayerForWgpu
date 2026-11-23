@@ -33,7 +33,7 @@ rust-version = "1.100"
 authors = ["CRI Middleware Co., Ltd."]
 license = "BSD-3-Clause"
 repository = "https://github.com/cri-middleware/SSPlayerForWgpu"
-homepage = "https://www.webtech.co.jp/eng/spritestudio/"
+homepage = "https://cri-middleware.github.io/SSPlayerForWgpu/"
 description = "SpriteStudio Player for wgpu: renders SpriteStudio animations (.ssab) with wgpu."
 
 [workspace.dependencies]
