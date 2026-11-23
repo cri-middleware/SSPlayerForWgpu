@@ -66,27 +66,7 @@ ssplayer-bevy = { git = "https://github.com/cri-middleware/SSPlayerForWgpu" }
 
 ### C と C++
 
-C Face は cdylib / staticlib と、生成されたヘッダです。各 [`ssplayer-wgpu` の Release](https://github.com/cri-middleware/SSPlayerForWgpu/releases?q=ssplayer-wgpu&expanded=true) の **Assets** に、静的ライブラリがプラットフォームごとの zip で付いています。`ssplayer-wgpu-windows-x86_64.zip`（MSVC、`/MD` ランタイム）と `ssplayer-wgpu-macos-universal.zip`（arm64 + x86_64。静的ライブラリの横に、署名・公証済みの共有ライブラリも入っています）で、どちらも `include/`・`lib/`・`LICENSE.md`・`LICENSE.ja.md`・`THIRD_PARTY_NOTICES.md` と、ドキュメントの Markdown（`README.md`・`docs/`）を含み、`SHA256SUMS` が添えてあります。リンクの方法と、静的ランタイム（`/MT`）向けのビルドは [C / C++ ではじめる](./docs/ja/start/cpp.md) にあります。
-
-Linux の場合や Windows の DLL が必要な場合は、チェックアウトからビルドします:
-
-```bash
-git clone --recursive https://github.com/cri-middleware/SSPlayerForWgpu.git
-cd SSPlayerForWgpu
-./scripts/build.sh          # Windows では scripts\build.ps1
-```
-
-これで C / C++ プロジェクトに必要なものが `bin/` に集まります:
-
-```
-bin/include/ssplayer_wgpu.h                              # C ヘッダ (cbindgen)
-bin/LICENSE.md
-bin/LICENSE.ja.md
-bin/THIRD_PARTY_NOTICES.md                               # 謝辞に載せるべきもの
-bin/libs/<platform>/<arch>/libssplayer_wgpu.{a,dylib,so} # Windows では .lib/.dll
-```
-
-ビルド設定をこの 2 つのディレクトリに向けてください。[`examples/`](#-サンプル) 以下の C++ ビューアが、動く実例としては最短です。macOS では Metal、Windows では DX12、Linux では Vulkan を駆動し、それぞれ丸ごとコピーして持ち出せる程度に自己完結しています。このリポジトリの中では、ビューアはライブラリを自分でビルドします。CMake が `cargo build -p ssplayer-wgpu-ffi` を実行し、`target/<profile>/` にできたものをリンクし、ヘッダは `libs/ssplayer-wgpu-ffi/include/` から読みます。持ち出したビューアでは、この cargo の手順を外し、2 つのパスを手元にあるものへ向け直します。`scripts/build.sh` なら `bin/libs/<platform>/<arch>/` と `bin/include/`、リリースの zip なら `lib/` と `include/` です。macOS の共有ライブラリの名前は `@rpath/libssplayer_wgpu.dylib` なので、実行ファイルにそのフォルダへの rpath を付けます（CMake なら `BUILD_RPATH`）。
+C Face は cdylib / staticlib と、生成されたヘッダです。各 [`ssplayer-wgpu` の Release](https://github.com/cri-middleware/SSPlayerForWgpu/releases?q=ssplayer-wgpu&expanded=true) の **Assets** に、静的ライブラリがプラットフォームごとの zip で付いています。`ssplayer-wgpu-windows-x86_64.zip`（MSVC、`/MD` ランタイム）と `ssplayer-wgpu-macos-universal.zip`（arm64 + x86_64。静的ライブラリの横に、署名・公証済みの共有ライブラリも入っています）で、どちらも `include/`・`lib/`・`LICENSE.md`・`LICENSE.ja.md`・`THIRD_PARTY_NOTICES.md` と、ドキュメントの Markdown（`README.md`・`docs/`）を含み、`SHA256SUMS` が添えてあります。リンクの方法、静的ランタイム（`/MT`）向けのビルド、チェックアウトからのビルド（Linux や Windows の DLL）は [C / C++ ではじめる](./docs/ja/start/cpp.md) にあります。[`examples/`](#-サンプル) 以下の C++ ビューアが、コピーして使える最短の実例です。
 
 ### ブラウザ (WebGPU)
 
@@ -114,11 +94,17 @@ JavaScript 側から読むべきガイドは [Web ではじめる](./docs/ja/sta
 ### その `.ssab` はどこから来るのか
 
 アニメーションは SpriteStudio（**7.6 以上**）で制作し、事前に変換します。このプレイヤーは実行時には何も変換せず、コンバータも同梱しません。デスクトップの
-[SSConverterGUI](https://github.com/cri-middleware/SSConverterGUI) か、SDK の `ssconverter-cli` を使ってください。ツールの選び方とビルドパイプラインへの組み込み方は[単体ツールで変換する](https://cri-middleware.github.io/SpriteStudio-Docs/ja/overview/convert-with-a-standalone-tool/)にあります。自分の `.sspj` がまだ無い場合は、SpriteStudio の[公式サンプルデータ](https://www.webtech.co.jp/help/ja/spritestudio7/download/sample/)がそのまま使えます。キャラクターなら [Ringo](https://www.webtech.co.jp/help/ja/spritestudio7/download/sample/#ringo) が手頃で、上の 2 つのツールのどちらにもそのまま渡せます。チェックアウトが要る以下のサンプルは、SDK 自身のテストアニメーションで動きます。
+[SSConverterGUI](https://github.com/cri-middleware/SSConverterGUI) か、`ssconverter-cli` を使ってください。`ssconverter-cli` は [SpriteStudio-SDK の Release](https://github.com/cri-middleware/SpriteStudio-SDK/releases) の **Assets** にある OS ごとの zip で、プロジェクトを 1 つのコマンドで `.ssab` のフォルダに変換します。
+
+```bash
+ssconverter-cli overall.sspj -o assets/overall
+```
+
+ツールの選び方とビルドパイプラインへの組み込み方は[単体ツールで変換する](https://cri-middleware.github.io/SpriteStudio-Docs/ja/overview/convert-with-a-standalone-tool/)にあります。自分の `.sspj` がまだ無い場合は、SpriteStudio の[公式サンプルデータ](https://www.webtech.co.jp/help/ja/spritestudio7/download/sample/)がそのまま使えます。キャラクターなら [Ringo](https://www.webtech.co.jp/help/ja/spritestudio7/download/sample/#ringo) が手頃で、上の 2 つのツールのどちらにもそのまま渡せます。チェックアウトが要る以下のサンプルは、SDK 自身のテストアニメーションで動きます。
 
 ## ⚡ 使い方
 
-デバイスごとに `SSRenderer` を 1 つ、レンダーターゲットごとに `SSScene` を 1 つ、そこへ任意個数の
+Rust では、デバイスごとに `SSRenderer` を 1 つ、レンダーターゲットごとに `SSScene` を 1 つ、そこへ任意個数の
 `SSPlayer` を 1 パスで描画します:
 
 ```rust
@@ -138,9 +124,6 @@ scene.draw(&renderer, &mut rpass);           // ホストが開いたパスへ
 
 API の全体 — 3 つのスコープ、ロード、トランスポート、パーツ単位の上書き、イベント、モーションブレンディング、デバイスロストからの復帰 — は [Rust API リファレンス](./docs/ja/reference/rust.md)と、そこからリンクしたガイドにあります。
 C と JavaScript の Face は名前が違うだけで同じ形をしており、以下の各サンプルがそれぞれの環境について自分で説明しています。
-
-**1 体のキャラクターに複数のアニメーションを重ねられます。** トラックのスタックがセットアップポーズへ順に畳み込まれます。`set_animation` がトラック 0 を決めて構造を担い、その上に `set_track_animation` /
-`set_track_alpha` / `set_track_blend` でオーバーレイを重ねます（下に歩き、上に照準）。`crossfade` を使えばカットなしで別のアニメーションへ移れます。どの Face からも使えます。C・JavaScript の Face では名前が違うだけで、Bevy アダプタでは `SsTrackCommand` メッセージで操作します（トラック 0 は、`transition_ms` を設定して `SsPlayer::animation` を替えるとクロスフェードします）。モデルと各 API は[モーションブレンディング](./docs/ja/guide/motion-blending.md)にあります。
 
 **次に読む:** [はじめる](./docs/ja/start/rust.md)（[Bevy](./docs/ja/start/bevy.md)・[C / C++](./docs/ja/start/cpp.md)・[ブラウザ](./docs/ja/start/web.md)） · [再生](./docs/ja/guide/playback.md) · [制約と適用範囲](./docs/ja/limitations.md)
 

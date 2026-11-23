@@ -9,7 +9,14 @@ authored in SpriteStudio **7.6 or later**.
 | Tool | Use it for |
 |---|---|
 | [SSConverterGUI](https://github.com/cri-middleware/SSConverterGUI) | a desktop drag-and-drop conversion, no toolchain |
-| `ssconverter-cli` (in the SDK) | a build pipeline, CI, a watch loop |
+| `ssconverter-cli` — the zip for your OS from a [SpriteStudio-SDK Release](https://github.com/cri-middleware/SpriteStudio-SDK/releases)'s **Assets** | a build pipeline, CI, a watch loop |
+
+With `ssconverter-cli` on your `PATH`, one command converts a project into a folder of `.ssab` files
+and the images they name:
+
+```bash
+ssconverter-cli overall.sspj -o assets/overall
+```
 
 !!! tip "No `.sspj` of your own yet?"
     The [official SpriteStudio sample data](https://www.webtech.co.jp/help/ja/spritestudio7/download/sample/) works as-is

@@ -7,7 +7,13 @@
 | ツール | 用途 |
 |---|---|
 | [SSConverterGUI](https://github.com/cri-middleware/SSConverterGUI) | デスクトップでドラッグ＆ドロップ。ツールチェイン不要 |
-| `ssconverter-cli`（SDK 同梱） | ビルドパイプライン、CI、watch ループ |
+| `ssconverter-cli` —— [SpriteStudio-SDK の Release](https://github.com/cri-middleware/SpriteStudio-SDK/releases) の **Assets** にある OS ごとの zip | ビルドパイプライン、CI、watch ループ |
+
+`ssconverter-cli` を `PATH` に置けば、1 つのコマンドでプロジェクトを `.ssab` と、それが参照する画像のフォルダに変換できます。
+
+```bash
+ssconverter-cli overall.sspj -o assets/overall
+```
 
 !!! tip "手元に `.sspj` がまだ無いときは"
     [SpriteStudio 公式のサンプルデータ](https://www.webtech.co.jp/help/ja/spritestudio7/download/sample/)がそのまま使えます。キャラクターなら [Ringo](https://www.webtech.co.jp/help/ja/spritestudio7/download/sample/#ringo)、エフェクトを含むものなら[パーティクル](https://www.webtech.co.jp/help/ja/spritestudio7/download/sample/#Perticle_sample) が手頃です。ダウンロードした `.sspj` は、上のどちらのツールにもそのまま渡せます。

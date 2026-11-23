@@ -130,14 +130,7 @@ let draw_calls = scene.draw(&renderer, &mut rpass);
 
 ## サンプルを動かす
 
-```bash
-git clone --recursive https://github.com/cri-middleware/SSPlayerForWgpu.git
-cd SSPlayerForWgpu
-./scripts/deploy-examples.sh          # SDK のテストプロジェクトを assets/ に変換
-cargo run -p ssplayer-wgpu-hello
-```
-
-[`examples/hello`](https://github.com/cri-middleware/SSPlayerForWgpu/blob/main/examples/hello/src/main.rs) は、このページの手順をそのまま 1 つのプログラムにしたものです。winit のウィンドウにキャラクターを 1 体、ウィンドウに収めて表示します。ほかの機能 — パック切り替え、描画順、マスクバックエンド、パーツオーバーライド、モーションブレンディング、統計表示 — を触るときは `cargo run -p ssplayer-wgpu-viewer` を使ってください。
+[`examples/hello`](https://github.com/cri-middleware/SSPlayerForWgpu/blob/main/examples/hello/src/main.rs) は、このページの手順をそのまま 1 つのプログラムにしたものです。winit のウィンドウにキャラクターを 1 体、ウィンドウに収めて表示します。ほかの機能 — パック切り替え、描画順、マスクバックエンド、パーツオーバーライド、モーションブレンディング、統計表示 — を触るときはネイティブのビューアを使ってください。どちらもこのリポジトリのチェックアウトから動かします。手順は[ビルドガイド](../development/build.md)にあります。
 
 ## 次に読む
 

@@ -11,13 +11,8 @@ ports of it.
 
 !!! tip "Try it in your browser"
     <a href="./demo/" target="_blank" rel="noreferrer">▶️ Open the WebGPU demo</a>, published beside
-    these pages. Nothing to install; it needs a WebGPU-capable browser. Four pages: the API in both its
-    shapes, the <a href="./demo/element.html" target="_blank" rel="noreferrer">custom element</a> on
-    its own, <a href="./demo/multi.html" target="_blank" rel="noreferrer">a page full of them</a> —
-    overlapping other content, on one `GPUDevice` — and
-    <a href="./demo/part-follow.html" target="_blank" rel="noreferrer">a marker following a part</a>,
-    its pose read back by the host every frame. Drop a folder of your own `.ssab` on the first one and
-    it plays them, atlases and sibling packs included.
+    these pages. Nothing to install; it needs a WebGPU-capable browser. Drop a folder of your own
+    `.ssab` on its first page and it plays them, atlases and sibling packs included.
 
 !!! tip "No SpriteStudio data of your own yet?"
     The [official sample data](https://www.webtech.co.jp/help/ja/spritestudio7/download/sample/) works as-is — that page is
@@ -89,20 +84,6 @@ Two more things are published beside this text rather than inside it: the
 `ssplayer_wgpu` and `ssplayer_bevy`) and the
 <a href="./demo/" target="_blank" rel="noreferrer">WebGPU demo</a>. Both are in the navigation as
 well: the rustdoc under API reference, the demo under Get started.
-
-## 📦 What ships
-
-One library, four packages. The Rust crates are on crates.io (and a git dependency on this repository for changes not released yet), the C library
-is a zip on each
-[`ssplayer-wgpu` Release](https://github.com/cri-middleware/SSPlayerForWgpu/releases?q=ssplayer-wgpu&expanded=true),
-and the web package is on npm.
-
-| Face | Ships as |
-|---|---|
-| Rust | the `ssplayer-wgpu` crate on crates.io, or a git dependency |
-| Bevy | the `ssplayer-bevy` crate on crates.io, or a git dependency |
-| C / C++ | `ssplayer-wgpu-windows-x86_64.zip` and `ssplayer-wgpu-macos-universal.zip` — `include/`, `lib/`, `README.md`, `docs/` (these pages, in English), `LICENSE.md`, `LICENSE.ja.md`, `THIRD_PARTY_NOTICES.md` |
-| Web | `@spritestudio/ssplayer-wgpu` on npm |
 
 ## 🗺️ From editor to screen
 
