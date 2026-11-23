@@ -148,17 +148,11 @@ On resize, recreate your own attachments and call `set_viewport` again.
 
 ## Run the sample
 
-```bash
-git clone --recursive https://github.com/cri-middleware/SSPlayerForWgpu.git
-cd SSPlayerForWgpu
-./scripts/deploy-examples.sh          # converts the SDK's test projects into assets/
-cargo run -p ssplayer-wgpu-hello
-```
-
 [`examples/hello`](https://github.com/cri-middleware/SSPlayerForWgpu/blob/main/examples/hello/src/main.rs)
 is this page as one program: a winit window and one character, fitted into the window. When you
 want the rest of the surface — pack switching, draw order, mask backends, per-part overrides,
-motion blending, live stats — `cargo run -p ssplayer-wgpu-viewer` exercises all of it.
+motion blending, live stats — the native viewer exercises all of it. Both run from a checkout of
+this repository; the [Build Guide](../development/build.md) has the steps.
 
 ## Next
 

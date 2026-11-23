@@ -82,36 +82,9 @@ carries the static library as one zip per platform under **Assets** —
 (arm64 + x86_64, with the shared library beside the static one, signed and notarized) — each
 holding `include/`, `lib/`, `LICENSE.md`, `LICENSE.ja.md`, `THIRD_PARTY_NOTICES.md`, and the
 documentation as Markdown (`README.md`, `docs/`), with `SHA256SUMS` beside them.
-[Get started with C / C++](./docs/en/start/cpp.md) covers linking it, and building for the static
-runtime (`/MT`).
-
-On Linux, or for the Windows DLL, build it from a checkout:
-
-```bash
-git clone --recursive https://github.com/cri-middleware/SSPlayerForWgpu.git
-cd SSPlayerForWgpu
-./scripts/build.sh          # scripts\build.ps1 on Windows
-```
-
-That collects everything a C or C++ project needs into `bin/`:
-
-```
-bin/include/ssplayer_wgpu.h                              # the C header (cbindgen)
-bin/LICENSE.md
-bin/LICENSE.ja.md
-bin/THIRD_PARTY_NOTICES.md                               # what to carry into your acknowledgements
-bin/libs/<platform>/<arch>/libssplayer_wgpu.{a,dylib,so} # .lib/.dll on Windows
-```
-
-Point your build at those two directories. The C++ viewers under [`examples/`](#-samples) are the
-shortest working reference — one drives Metal on macOS, one DX12 on Windows, one Vulkan on Linux, and
-each is self-contained enough to copy out whole. Inside this repository they build the library
-themselves: their CMake runs `cargo build -p ssplayer-wgpu-ffi` and links what it leaves in
-`target/<profile>/`, with the header from `libs/ssplayer-wgpu-ffi/include/`. A viewer copied out
-drops that cargo step and points the two paths at what you have instead — `bin/libs/<platform>/<arch>/`
-and `bin/include/` from `scripts/build.sh`, or `lib/` and `include/` from a Release zip. The macOS
-shared library is named `@rpath/libssplayer_wgpu.dylib`, so give the executable an rpath to the folder
-that holds it (`BUILD_RPATH` in CMake).
+[Get started with C / C++](./docs/en/start/cpp.md) covers linking it, building for the static
+runtime (`/MT`), and building from a checkout — on Linux, or for the Windows DLL — and the C++
+viewers under [`examples/`](#-samples) are the shortest working reference to copy from.
 
 ### Browser (WebGPU)
 
@@ -140,7 +113,14 @@ Building it from this repository is covered in the [Build Guide](./docs/en/devel
 
 Animations are authored in SpriteStudio — **7.6 or later** — and converted ahead of time; this player
 converts nothing at runtime and bundles no converter. Use the desktop
-[SSConverterGUI](https://github.com/cri-middleware/SSConverterGUI), or the SDK's `ssconverter-cli`;
+[SSConverterGUI](https://github.com/cri-middleware/SSConverterGUI), or `ssconverter-cli` — the zip for
+your OS from a [SpriteStudio-SDK Release](https://github.com/cri-middleware/SpriteStudio-SDK/releases)'s
+**Assets** — which converts a project into a folder of `.ssab` files in one command:
+
+```bash
+ssconverter-cli overall.sspj -o assets/overall
+```
+
 [Converting with a standalone tool](https://cri-middleware.github.io/SpriteStudio-Docs/overview/convert-with-a-standalone-tool/)
 covers picking one and putting it in a build pipeline. No `.sspj` of your own yet? SpriteStudio's
 [official sample data](https://www.webtech.co.jp/help/ja/spritestudio7/download/sample/) works as-is (the page is
@@ -150,8 +130,8 @@ the SDK's own test animations.
 
 ## ⚡ Usage
 
-One `SSRenderer` per device, one `SSScene` per render target, and any number of `SSPlayer`s drawn into
-it in one pass:
+In Rust: one `SSRenderer` per device, one `SSScene` per render target, and any number of `SSPlayer`s
+drawn into it in one pass:
 
 ```rust
 let mut renderer = SSRenderer::new(&device);
@@ -172,14 +152,6 @@ The full API — the three scopes, loading, transport, per-part overrides, event
 device-loss recovery — is in the [Rust API reference](./docs/en/reference/rust.md) and the guides it
 links to. The C and JavaScript faces are
 the same shape under different names, and each sample below documents its own.
-
-**Several animations on one character.** A stack of tracks folds onto the setup pose: `set_animation`
-establishes track 0 and carries the structure, and `set_track_animation` / `set_track_alpha` /
-`set_track_blend` lay overlays above it — a walk underneath, an aim on top — with `crossfade` moving
-between two without a cut. Every face has it: the C and JavaScript faces under their own names, and
-the Bevy adapter through the `SsTrackCommand` message, with track 0 crossfading when
-`SsPlayer::animation` changes under a `transition_ms`. The model and the calls are in
-[Motion blending](./docs/en/guide/motion-blending.md).
 
 **Read next:** [Get started](./docs/en/start/rust.md) — or [Bevy](./docs/en/start/bevy.md), [C / C++](./docs/en/start/cpp.md), [the browser](./docs/en/start/web.md) · [Playback](./docs/en/guide/playback.md) · [Limitations & Scope](./docs/en/limitations.md)
 

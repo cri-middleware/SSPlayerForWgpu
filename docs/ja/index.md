@@ -7,7 +7,7 @@ wgpu は **WebGPU / Vulkan / DirectX 12 / Metal** を 1 つの API の裏に置�
 Windows のゲームも、macOS のアプリも、4 本の移植版ではなく同じライブラリ 1 本で賄えるのはそのためです。
 
 !!! tip "ブラウザで試す"
-    <a href="../demo/" target="_blank" rel="noreferrer">▶️ WebGPU デモを開く</a> — このドキュメントと一緒に公開しています。インストール不要で、WebGPU 対応ブラウザがあれば動きます。ページは 4 つ：API の 2 つの形、<a href="../demo/element.html" target="_blank" rel="noreferrer">カスタム要素</a>単体、<a href="../demo/multi.html" target="_blank" rel="noreferrer">それを 1 ページに並べたもの</a>（他の要素と重ねても `GPUDevice` は 1 つ）、そして<a href="../demo/part-follow.html" target="_blank" rel="noreferrer">選んだパーツにマーカーを追従させるもの</a>（姿勢はホストが毎フレーム読み出す）。最初のページには手元の `.ssab` を含むフォルダをドロップでき、アトラスや兄弟パックも含めて再生します。
+    <a href="../demo/" target="_blank" rel="noreferrer">▶️ WebGPU デモを開く</a> — このドキュメントと一緒に公開しています。インストール不要で、WebGPU 対応ブラウザがあれば動きます。最初のページには手元の `.ssab` を含むフォルダをドロップでき、アトラスや兄弟パックも含めて再生します。
 
 !!! tip "SpriteStudio のデータが手元に無くても始められます"
     [公式のサンプルデータ](https://www.webtech.co.jp/help/ja/spritestudio7/download/sample/)がそのまま使えます。キャラクターなら
@@ -69,17 +69,6 @@ Windows のゲームも、macOS のアプリも、4 本の移植版ではなく�
 | **[Player・SDK 開発者向けガイド](./development/build.md)** | ライブラリの全 Face を手元でビルドする手順、変更したプレイヤーをホストで使う方法、プレイヤーの構成 |
 
 本文とは別に、<a href="../api/" target="_blank" rel="noreferrer">Rust API リファレンス</a>（`ssplayer_wgpu` と `ssplayer_bevy` の rustdoc）と <a href="../demo/" target="_blank" rel="noreferrer">WebGPU デモ</a>が同じサイト上に公開されています。ナビゲーションからも辿れます（rustdoc は API リファレンス、デモははじめるの下）。
-
-## 📦 成果物
-
-ライブラリは 1 つ、パッケージは 4 つ。Rust のクレートは crates.io（まだリリースしていない変更はこのリポジトリへの git 依存）、C ライブラリは各 [`ssplayer-wgpu` の Release](https://github.com/cri-middleware/SSPlayerForWgpu/releases?q=ssplayer-wgpu&expanded=true) に付いた zip、Web のパッケージは npm にあります。
-
-| Face | 配布形態 |
-|---|---|
-| Rust | crates.io の `ssplayer-wgpu` クレート、または git 依存 |
-| Bevy | crates.io の `ssplayer-bevy` クレート、または git 依存 |
-| C / C++ | `ssplayer-wgpu-windows-x86_64.zip` と `ssplayer-wgpu-macos-universal.zip`（`include/` `lib/` `README.md` `docs/`（このドキュメントの英語版） `LICENSE.md` `LICENSE.ja.md` `THIRD_PARTY_NOTICES.md`） |
-| Web | npm の `@spritestudio/ssplayer-wgpu` |
 
 ## 🗺️ エディタから画面まで
 

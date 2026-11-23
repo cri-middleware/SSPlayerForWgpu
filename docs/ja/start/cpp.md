@@ -56,7 +56,7 @@ title: C / C++ ではじめる
     | `target/release/` | `libssplayer_wgpu.a` **と** `libssplayer_wgpu.dylib` / `.so`。MSVC では `ssplayer_wgpu.lib` / `ssplayer_wgpu.dll` / インポートライブラリ `ssplayer_wgpu.dll.lib` |
     | `libs/ssplayer-wgpu-ffi/include/ssplayer_wgpu.h` | このビルドで再生成されたヘッダ |
 
-    `./scripts/build.sh`（Windows では `build.ps1`）も同じことをしつつ、結果を `bin/` に収集します（`bin/include/`、`bin/libs/<platform>/<arch>/`）。これはリリース zip の元になるレイアウトです。
+    `./scripts/build.sh`（Windows では `build.ps1`）も同じことをしつつ、結果を `bin/` に収集します（`bin/include/`、`bin/libs/<platform>/<arch>/`、ライセンスのファイルと謝辞に載せる `THIRD_PARTY_NOTICES.md`）。これはリリース zip の元になるレイアウトです。
     macOS で 2 スライスのライブラリが欲しい場合は `arch=universal` を付けます。
 
     静的 C ランタイム（`/MT`）でビルドする Windows のホストに向けては、ライブラリも同じランタイムでビルドします。
@@ -90,6 +90,8 @@ target_link_libraries(myapp PRIVATE
 リポジトリ内の 3 つのサンプルビューアは「ソースから」の経路を取り、動的ライブラリをリンクしているため上記は不要です。その形は
 [`examples/viewer-metal-cpp/CMakeLists.txt`](https://github.com/cri-middleware/SSPlayerForWgpu/blob/main/examples/viewer-metal-cpp/CMakeLists.txt)
 を参照してください。
+
+ビューア（macOS では Metal、Windows では DX12、Linux では Vulkan）は、それぞれ丸ごとコピーして持ち出せる程度に自己完結しています。このリポジトリの中では、CMake が `cargo build -p ssplayer-wgpu-ffi` を実行し、`target/<profile>/` にできたものをリンクし、ヘッダは `libs/ssplayer-wgpu-ffi/include/` から読みます。持ち出したビューアでは、この cargo の手順を外し、2 つのパスを手元にあるものへ向け直します。`scripts/build.sh` なら `bin/libs/<platform>/<arch>/` と `bin/include/`、リリースの zip なら `lib/` と `include/` です。macOS の共有ライブラリの名前は `@rpath/libssplayer_wgpu.dylib` なので、実行ファイルにそのフォルダへの rpath を付けます（CMake なら `BUILD_RPATH`）。
 
 ## ウィンドウの指定
 

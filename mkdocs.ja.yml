@@ -34,7 +34,7 @@ plugins:
         1 つのライブラリにホストごとの Face があります。ガイドのコードは Face ごとに、Rust・C・JavaScript・Bevy のラベルを付けたブロックで示します。生成された Rust API は `ssplayer-wgpu` と `ssplayer-bevy` の rustdoc（HTML）で、サイトのルート直下の `api/` にあり、このファイルには含まれません。
       sections:
         はじめる:
-          - index.md: "Face の選び方（Rust・Bevy・C / C++・ブラウザの JavaScript）と各スタートページ、成果物の配布先（crates.io・リリースの zip・npm）、WebGPU デモ、`.ssab` への変換は事前に行うこと。"
+          - index.md: "Face の選び方（Rust・Bevy・C / C++・ブラウザの JavaScript）と各スタートページ、ドキュメントの構成、WebGPU デモ、`.ssab` への変換は事前に行うこと。"
           - start/rust.md: "`wgpu::Device` を自分で持つ Rust アプリ向け（winit、egui、Slint、自作レンダラー）。合わせるべき `wgpu` のバージョン、crates.io・git・ソースの取り込みでの導入、`SSRenderer`・`SSScene`・`SSPlayer` のセットアップ、フレームごとの `update`・`encode_offscreen`・`draw`、レンダーパスの規則（カラーフォーマット、ステンシル、MSAA オフ、非 sRGB ターゲット）。"
           - start/bevy.md: "Bevy 自身のレンダラーで動かすアプリ向け（wgpu のコードは不要）。対応する Bevy の系統、`ssplayer-bevy` の導入、`SsPlayer`・`SsTransform`・`SsPlayback` を使ったアプリ全体、`.ssab` を `assets/` のどこに置くか、カメラの `CompositingSpace::Srgb` と `Msaa::Off`、再開と一時停止、`SsEventMessage` の読み取り、デバイスロストからの復帰を有効にする手順。"
           - start/cpp.md: "静的ライブラリ 1 本とヘッダ 1 枚（`ssplayer_wgpu.h`）を使う C / C++ 向け。デバイスはあなたのウィンドウ上にライブラリが自分で作ります。リリースの zip の中身、ソースからのビルド、リンクのフラグと CMake、Win32・AppKit・Metal レイヤー・Xlib・Wayland ごとの `ss_window_handle_t`、プログラム全体（`ss_scene_create`・`ss_scene_update`・`ss_scene_render`）、エラーコード、サンプルのビューア。"
