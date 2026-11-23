@@ -7,6 +7,10 @@ One `GPUDevice` per page, one surface (`SsSurfaceWeb`) per canvas, and **any num
 canvas in a single render pass** — putting ten characters on screen costs one device, one set of
 pipelines and one atlas upload.
 
+▶️ **[Live demo](https://cri-middleware.github.io/SSPlayerForWgpu/demo/)** — this package running
+in your browser: the `<ss-player-webgpu>` element, and several characters on one canvas. Drop a
+folder holding your own `.ssab` onto the page to play it.
+
 日本語版は [README.ja.md](./README.ja.md)。
 
 ## Install

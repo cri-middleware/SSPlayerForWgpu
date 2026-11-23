@@ -6,6 +6,8 @@
 1ページに `GPUDevice` は1つ、1 canvas にサーフェス（`SsSurfaceWeb`）が1つ、そして **1枚の canvas に何体でも載り、
 1パスで合成されます** — 10体並べても device もパイプラインもアトラスのアップロードも1回きりです。
 
+▶️ **[ライブデモ](https://cri-middleware.github.io/SSPlayerForWgpu/demo/)** — このパッケージがブラウザで動きます。`<ss-player-webgpu>` 要素と、1 枚の canvas に複数体を載せる例があります。手元の `.ssab` は、それを含むフォルダをページにドロップすると再生できます。
+
 English version: [README.md](./README.md)
 
 ## インストール
