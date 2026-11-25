@@ -9,9 +9,11 @@ One `GPUDevice` per page, one surface (`SsSurfaceWeb`) per canvas, and **any num
 canvas in a single render pass** — putting ten characters on screen costs one device, one set of
 pipelines and one atlas upload.
 
-▶️ **[Live demo](https://cri-middleware.github.io/SSPlayerForWgpu/demo/)** — this package running
-in your browser: the `<ss-player-webgpu>` element, and several characters on one canvas. Drop a
-folder holding your own `.ssab` onto the page to play it.
+- 📖 **[Documentation](https://cri-middleware.github.io/SSPlayerForWgpu/)** — getting started on the web, the guide, and the JavaScript and
+  `<ss-player-webgpu>` references
+- ▶️ **[Live demo](https://cri-middleware.github.io/SSPlayerForWgpu/demo/)** — this package running in your browser: the `<ss-player-webgpu>`
+  element, and several characters on one canvas. Drop a folder holding your own `.ssab` onto the
+  page to play it
 
 日本語版は [README.ja.md](./README.ja.md)。
 
@@ -46,7 +48,7 @@ surface per canvas, a player per character. The `.ssab` comes from a SpriteStudi
 later) through [SSConverterGUI](https://github.com/cri-middleware/SSConverterGUI) or the SDK's
 `ssconverter-cli`; reference and embedded exports both load. No `.sspj` of your own yet? SpriteStudio's
 [official sample data](https://www.webtech.co.jp/help/ja/spritestudio7/download/sample/) works as-is — the page is in Japanese, the downloads
-are not. To make your own, you use SpriteStudio itself — see [its site](https://www.webtech.co.jp/eng/spritestudio/).
+are not. [Ringo](https://www.webtech.co.jp/help/ja/spritestudio7/download/sample/#ringo) is a good character to start with. To make your own, you use SpriteStudio itself — see [its site](https://www.webtech.co.jp/eng/spritestudio/).
 
 **Read next:** [Get started on the web](https://cri-middleware.github.io/SSPlayerForWgpu/start/web/) ·
 [`<ss-player-webgpu>`](https://cri-middleware.github.io/SSPlayerForWgpu/reference/web-component/) ·

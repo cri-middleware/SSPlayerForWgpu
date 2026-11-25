@@ -20,7 +20,7 @@
     "zero-dependency"
   ],
   "author": "CRI Middleware Co., Ltd.",
-  "homepage": "https://github.com/cri-middleware/SSPlayerForWgpu/tree/main/packages/ssplayer-wgpu#readme",
+  "homepage": "https://cri-middleware.github.io/SSPlayerForWgpu/",
   "repository": {
     "type": "git",
     "url": "git+https://github.com/cri-middleware/SSPlayerForWgpu.git",
