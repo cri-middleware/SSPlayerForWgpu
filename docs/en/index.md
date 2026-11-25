@@ -70,6 +70,22 @@ own, and you never need the other three.
 Whichever you pick, you also need a `.ssab` — see [Preparing assets](./start/assets.md). Nothing of
 your own is required to try the player first: every sample runs on the SDK's own test animations.
 
+## ✨ What it does
+
+- **Blend animations instead of cutting.** A walk underneath, an aim overlay on top, a one-shot
+  reaction crossfading in: several animations on one character at once
+  ([Motion blending](./guide/motion-blending.md)).
+- **Hooks into your game logic.** The markers the animator put on the timeline — user data,
+  signals, sound — reach you as the playhead crosses them ([Events and user data](./guide/events.md)).
+- **Change a character at runtime, without re-exporting.** Hide a part, swap its cell, tint it, or
+  ask where it is to hang a health bar off a bone ([Part overrides](./guide/part-overrides.md)); swap
+  a whole atlas for a costume or a palette ([Texture replacement](./guide/texture-replacement.md)).
+- **A crowd for close to one character's CPU cost.** One character drawn at many placements shares
+  one playhead, one evaluation and one upload of its geometry ([Crowds](./guide/crowds.md)).
+- **In a game world or in a box.** Characters draw at the size the artist made them, or fit a panel,
+  a card or a preview pane your layout decided ([Fitting into a box](./guide/placement.md)). Masks
+  clip through a stencil, or without one where the pass has none, as in Bevy ([Masks](./guide/masks.md)).
+
 ## 🧭 How these docs are laid out
 
 | Section | Who reads it |
