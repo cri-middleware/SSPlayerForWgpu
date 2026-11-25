@@ -76,7 +76,7 @@ surprise.
 ### C and C++
 
 The C face is a cdylib / staticlib plus a generated header. Each
-[`ssplayer-wgpu` Release](https://github.com/cri-middleware/SSPlayerForWgpu/releases?q=ssplayer-wgpu&expanded=true)
+[`ssplayer-wgpu` Release](https://github.com/cri-middleware/SSPlayerForWgpu/releases?expanded=true)
 carries the static library as one zip per platform under **Assets** —
 `ssplayer-wgpu-windows-x86_64.zip` (MSVC, `/MD` runtime) and `ssplayer-wgpu-macos-universal.zip`
 (arm64 + x86_64, with the shared library beside the static one, signed and notarized) — each

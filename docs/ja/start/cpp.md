@@ -30,7 +30,7 @@ title: C / C++ ではじめる
 
 === "リリース版"
 
-    各 [`ssplayer-wgpu` の Release](https://github.com/cri-middleware/SSPlayerForWgpu/releases?q=ssplayer-wgpu&expanded=true) の **Assets** に、プラットフォームごとの zip（`include/` `lib/` `LICENSE.md` `LICENSE.ja.md` `THIRD_PARTY_NOTICES.md` `README.md` `docs/`）が付いています：
+    各 [`ssplayer-wgpu` の Release](https://github.com/cri-middleware/SSPlayerForWgpu/releases?expanded=true) の **Assets** に、プラットフォームごとの zip（`include/` `lib/` `LICENSE.md` `LICENSE.ja.md` `THIRD_PARTY_NOTICES.md` `README.md` `docs/`）が付いています：
 
     | zip | 対象 |
     |---|---|

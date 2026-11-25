@@ -66,7 +66,7 @@ ssplayer-bevy = { git = "https://github.com/cri-middleware/SSPlayerForWgpu" }
 
 ### C と C++
 
-C Face は cdylib / staticlib と、生成されたヘッダです。各 [`ssplayer-wgpu` の Release](https://github.com/cri-middleware/SSPlayerForWgpu/releases?q=ssplayer-wgpu&expanded=true) の **Assets** に、静的ライブラリがプラットフォームごとの zip で付いています。`ssplayer-wgpu-windows-x86_64.zip`（MSVC、`/MD` ランタイム）と `ssplayer-wgpu-macos-universal.zip`（arm64 + x86_64。静的ライブラリの横に、署名・公証済みの共有ライブラリも入っています）で、どちらも `include/`・`lib/`・`LICENSE.md`・`LICENSE.ja.md`・`THIRD_PARTY_NOTICES.md` と、ドキュメントの Markdown（`README.md`・`docs/`）を含み、`SHA256SUMS` が添えてあります。リンクの方法、静的ランタイム（`/MT`）向けのビルド、チェックアウトからのビルド（Linux や Windows の DLL）は [C / C++ ではじめる](./docs/ja/start/cpp.md) にあります。[`examples/`](#-サンプル) 以下の C++ ビューアが、コピーして使える最短の実例です。
+C Face は cdylib / staticlib と、生成されたヘッダです。各 [`ssplayer-wgpu` の Release](https://github.com/cri-middleware/SSPlayerForWgpu/releases?expanded=true) の **Assets** に、静的ライブラリがプラットフォームごとの zip で付いています。`ssplayer-wgpu-windows-x86_64.zip`（MSVC、`/MD` ランタイム）と `ssplayer-wgpu-macos-universal.zip`（arm64 + x86_64。静的ライブラリの横に、署名・公証済みの共有ライブラリも入っています）で、どちらも `include/`・`lib/`・`LICENSE.md`・`LICENSE.ja.md`・`THIRD_PARTY_NOTICES.md` と、ドキュメントの Markdown（`README.md`・`docs/`）を含み、`SHA256SUMS` が添えてあります。リンクの方法、静的ランタイム（`/MT`）向けのビルド、チェックアウトからのビルド（Linux や Windows の DLL）は [C / C++ ではじめる](./docs/ja/start/cpp.md) にあります。[`examples/`](#-サンプル) 以下の C++ ビューアが、コピーして使える最短の実例です。
 
 ### ブラウザ (WebGPU)
 

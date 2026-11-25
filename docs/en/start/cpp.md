@@ -34,7 +34,7 @@ functions a frame; it renders through **DirectX 12 on Windows, Metal on macOS an
 
 === "Released"
 
-    Each [`ssplayer-wgpu` Release](https://github.com/cri-middleware/SSPlayerForWgpu/releases?q=ssplayer-wgpu&expanded=true)
+    Each [`ssplayer-wgpu` Release](https://github.com/cri-middleware/SSPlayerForWgpu/releases?expanded=true)
     carries one zip per platform under **Assets**, each holding `include/`, `lib/`, `LICENSE.md`,
     `LICENSE.ja.md`, `THIRD_PARTY_NOTICES.md`, `README.md` and `docs/`:
 
