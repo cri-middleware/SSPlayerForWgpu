@@ -1,7 +1,7 @@
 {
   "name": "@spritestudio/ssplayer-wgpu",
   "version": "7.0.0-beta.1",
-  "description": "SpriteStudio Player for wgpu in the browser: plays SpriteStudio animations (.ssab) on WebGPU, as an <ss-player-webgpu> element or many characters per canvas.",
+  "description": "SpriteStudio Player for wgpu in the browser: plays SpriteStudio animations (.ssab) on WebGPU, as an <ss-player-webgpu> element or many characters per canvas. SpriteStudio is a 2D animation tool: an artist adds bones, mesh deformation and effects to their own illustrations.",
   "keywords": [
     "spritestudio",
     "spritestudio7",

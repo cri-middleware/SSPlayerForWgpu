@@ -34,7 +34,7 @@ authors = ["CRI Middleware Co., Ltd."]
 license = "BSD-3-Clause"
 repository = "https://github.com/cri-middleware/SSPlayerForWgpu"
 homepage = "https://cri-middleware.github.io/SSPlayerForWgpu/"
-description = "SpriteStudio Player for wgpu: renders SpriteStudio animations (.ssab) with wgpu."
+description = "SpriteStudio Player for wgpu: renders SpriteStudio animations (.ssab) with wgpu. SpriteStudio is a 2D animation tool: an artist adds bones, mesh deformation and effects to their own illustrations."
 
 [workspace.dependencies]
 # The SDK crates build from the git submodule: this player links the runtime's
