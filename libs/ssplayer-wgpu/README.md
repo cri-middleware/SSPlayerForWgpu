@@ -66,7 +66,7 @@ scene.draw(&renderer, &mut rpass);
 The `.ssab` comes from a SpriteStudio project through
 [SSConverterGUI](https://github.com/cri-middleware/SSConverterGUI) or the SDK's `ssconverter-cli`. No
 `.sspj` of your own yet? SpriteStudio's [official sample data](https://www.webtech.co.jp/help/ja/spritestudio7/download/sample/) works as-is —
-the page is in Japanese, the downloads are not. [Ringo](https://www.webtech.co.jp/help/ja/spritestudio7/download/sample/#ringo) is a good character to start
+the page is in Japanese, the downloads are not. [Ringo](https://www.webtech.co.jp/spritestudio/ss6user/download/OPTPiX_SpriteStudio_Ringo_Sample_20220121.zip) is a good character to start
 with. To make your own, you use SpriteStudio itself — see [its site](https://www.webtech.co.jp/eng/spritestudio/).
 
 **Read next:** [Get started with Rust](https://cri-middleware.github.io/SSPlayerForWgpu/start/rust/) ·

@@ -124,7 +124,7 @@ ssconverter-cli overall.sspj -o assets/overall
 [Converting with a standalone tool](https://cri-middleware.github.io/SpriteStudio-Docs/overview/convert-with-a-standalone-tool/)
 covers picking one and putting it in a build pipeline. No `.sspj` of your own yet? SpriteStudio's
 [official sample data](https://www.webtech.co.jp/help/ja/spritestudio7/download/sample/) works as-is (the page is
-Japanese only; the downloads are language-neutral) — [Ringo](https://www.webtech.co.jp/help/ja/spritestudio7/download/sample/#ringo)
+Japanese only; the downloads are language-neutral) — [Ringo](https://www.webtech.co.jp/spritestudio/ss6user/download/OPTPiX_SpriteStudio_Ringo_Sample_20220121.zip)
 is a good character — and feeds either tool above. To make your own, you use SpriteStudio itself — see [its site](https://www.webtech.co.jp/eng/spritestudio/). The samples below, which need a checkout, run on
 the SDK's own test animations.
 
