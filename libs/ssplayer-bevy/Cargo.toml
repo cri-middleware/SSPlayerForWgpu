@@ -9,7 +9,7 @@ authors.workspace = true
 license.workspace = true
 repository.workspace = true
 homepage.workspace = true
-description = "Bevy adapter for SpriteStudio Player for wgpu: spawns a SpriteStudio animation (.ssab) as an entity in a Bevy app."
+description = "Bevy adapter for SpriteStudio Player for wgpu: spawns a SpriteStudio animation (.ssab) as an entity in a Bevy app. SpriteStudio is a 2D animation tool: an artist adds bones, mesh deformation and effects to their own illustrations."
 keywords = ["spritestudio", "animation", "gamedev", "bevy", "2d"]
 categories = ["game-development", "graphics", "rendering"]
 
